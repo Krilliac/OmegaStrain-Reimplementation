@@ -55,6 +55,13 @@ dynamic allocation, then enforces the edge-depth limit during iterative traversa
 counted arithmetic, numerical fields, reference ranges, topology, containment, triangle ownership,
 and exact leaf extents.
 
+`GameDataService::LoadLevelSpatial` resolves the manifest's normalized DATA.HOG source, any nested
+container chain, and each cell HOG before requiring exactly one COL member. It returns one owned
+mesh per manifest cell and composes cumulative input/item/output limits plus a reusable semantic
+decoder scratch peak. HOG input/copy/parser workspace remains independently bounded by archive byte
+caps and fixed parser safety limits. Archive/source depth and spatial edge depth compose; the default
+maximum of nine admits the observed eight-edge COL maximum beneath one cell-HOG edge.
+
 ## Aggregate native validation
 
 `build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc` independently
@@ -75,3 +82,9 @@ decodes all 7,036 spans with zero semantic errors and reports only aggregate val
 Synthetic regressions cover both supported versions, direct and node roots, empty normalization,
 input ownership, opaque-field immunity, malformed numerics/references/topology, and exact/one-below
 resource budgets.
+
+`build/msvc/Debug/omega_tool.exe level-spatial-verify-tree private/extracted-disc` additionally
+drives the complete content-service path for all 18 levels and 5,351 manifest cells. It reports
+5,351 meshes, 20,203 canonical nodes, 93,356 leaves, 889,640 vertices, 1,239,980 triangles and leaf
+references, 2,137 normalized empty meshes, and zero errors. `tools/probe_native_levels.py` verifies
+the same 18/18 level and 5,351/5,351 manifest/spatial cardinality through native startup.

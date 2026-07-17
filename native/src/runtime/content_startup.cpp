@@ -58,6 +58,17 @@ std::expected<ContentStartupState, ContentStartupError> StartContent(
     }
     state.level_manifest = std::move(*loaded);
 
+    auto spatial = state.game_data->LoadLevelSpatial(*state.level_manifest);
+    if (!spatial)
+    {
+        return std::unexpected(ContentStartupError{
+            .code = ContentStartupErrorCode::GameData,
+            .message = spatial.error().message,
+            .game_data_error = std::move(spatial.error()),
+        });
+    }
+    state.level_spatial = std::move(*spatial);
+
     auto built_image = BuildManifestDebugImage(*state.level_manifest);
     if (!built_image)
     {

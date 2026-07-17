@@ -2,11 +2,18 @@
 
 #include "omega/archive/hog_archive.h"
 #include "omega/asset/source_locator.h"
+#include "omega/retail/col_spatial_mesh_decoder.h"
 #include "omega/retail/pop_level_manifest_decoder.h"
 #include "omega/vfs/virtual_file_system.h"
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <span>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -25,6 +32,260 @@ constexpr std::size_t kMaximumLevelCodeBytes = 32;
         .message = std::move(message),
         .decode_error = std::nullopt,
     };
+}
+
+[[nodiscard]] asset::DecodeError AssetError(
+    const asset::DecodeErrorCode code, std::string message)
+{
+    return asset::DecodeError{
+        .code = code,
+        .byte_offset = std::nullopt,
+        .message = std::move(message),
+    };
+}
+
+[[nodiscard]] GameDataError DecodeFailure(
+    std::string context, asset::DecodeError decode_error)
+{
+    context += ": ";
+    context += decode_error.message;
+    return GameDataError{
+        .code = GameDataErrorCode::DecodeFailed,
+        .message = std::move(context),
+        .decode_error = std::move(decode_error),
+    };
+}
+
+[[nodiscard]] bool Add(
+    const std::uint64_t left, const std::uint64_t right, std::uint64_t& result) noexcept
+{
+    if (right > std::numeric_limits<std::uint64_t>::max() - left)
+        return false;
+    result = left + right;
+    return true;
+}
+
+[[nodiscard]] bool Multiply(
+    const std::uint64_t left, const std::uint64_t right, std::uint64_t& result) noexcept
+{
+    if (left != 0 && right > std::numeric_limits<std::uint64_t>::max() / left)
+        return false;
+    result = left * right;
+    return true;
+}
+
+[[nodiscard]] std::uint32_t ReadU32(
+    const std::span<const std::byte> bytes, const std::size_t offset) noexcept
+{
+    return std::to_integer<std::uint32_t>(bytes[offset]) |
+           (std::to_integer<std::uint32_t>(bytes[offset + 1U]) << 8U) |
+           (std::to_integer<std::uint32_t>(bytes[offset + 2U]) << 16U) |
+           (std::to_integer<std::uint32_t>(bytes[offset + 3U]) << 24U);
+}
+
+class LevelDecodeBudget final
+{
+public:
+    [[nodiscard]] static asset::DecodeResult<LevelDecodeBudget> Create(
+        const asset::LevelManifestIR& manifest, const asset::DecodeLimits limits)
+    {
+        std::uint64_t initial_items = 0;
+        if (!Add(manifest.terrain_cells.size(), manifest.data_hog_source.hog_entries.size(),
+                initial_items) ||
+            initial_items > limits.maximum_items)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "level cells and source chain exceed the shared item limit"));
+
+        std::uint64_t cell_storage = 0;
+        std::uint64_t minimum_output = 0;
+        if (!Multiply(manifest.terrain_cells.size(), sizeof(asset::SpatialMeshIR), cell_storage) ||
+            !Add(sizeof(asset::LevelSpatialIR), cell_storage, minimum_output))
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "level spatial result size overflows"));
+        if (minimum_output > limits.maximum_output_bytes)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "level spatial result exceeds the shared output limit"));
+
+        const std::uint64_t cell_depth = manifest.terrain_cells.empty() ? 0U : 1U;
+        std::uint64_t required_archive_depth = 0;
+        if (!Add(manifest.data_hog_source.hog_entries.size(), cell_depth,
+                required_archive_depth) ||
+            required_archive_depth > limits.maximum_nesting_depth)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "level archive chain exceeds the shared nesting-depth limit"));
+
+        return LevelDecodeBudget(limits, initial_items);
+    }
+
+    [[nodiscard]] asset::DecodeResult<void> ConsumeInput(
+        const std::uint64_t bytes, const std::string_view description)
+    {
+        if (bytes > remaining_input_bytes_)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                std::string(description) + " exceeds the shared input limit"));
+        remaining_input_bytes_ -= bytes;
+        return {};
+    }
+
+    [[nodiscard]] asset::DecodeResult<void> ConsumeItems(
+        const std::uint64_t items, const std::string_view description)
+    {
+        if (items > remaining_items_)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                std::string(description) + " exceeds the shared item limit"));
+        remaining_items_ -= items;
+        return {};
+    }
+
+    [[nodiscard]] asset::DecodeLimits ChildLimits(const std::uint32_t archive_depth) const noexcept
+    {
+        asset::DecodeLimits child = limits_;
+        child.maximum_input_bytes = remaining_input_bytes_;
+        child.maximum_output_bytes = remaining_output_bytes_;
+        child.maximum_items = remaining_items_;
+        child.maximum_nesting_depth = archive_depth > limits_.maximum_nesting_depth
+            ? 0
+            : limits_.maximum_nesting_depth - archive_depth;
+        return child;
+    }
+
+    [[nodiscard]] asset::DecodeResult<void> CommitMesh(
+        const asset::SpatialMeshIR& mesh, const std::uint64_t input_bytes)
+    {
+        std::uint64_t item_count = mesh.root ? mesh.nodes.size() : 1U;
+        if (!Add(item_count, mesh.leaves.size(), item_count) ||
+            !Add(item_count, mesh.vertices.size(), item_count) ||
+            !Add(item_count, mesh.triangles.size(), item_count) ||
+            !Add(item_count, mesh.leaf_triangle_references.size(), item_count))
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "decoded level mesh item count overflows"));
+
+        std::uint64_t output_bytes = sizeof(asset::SpatialMeshIR);
+        constexpr std::array<std::uint64_t, 5> element_bytes{
+            sizeof(asset::SpatialNodeIR), sizeof(asset::SpatialLeafIR),
+            sizeof(asset::Float3IR), sizeof(asset::SpatialTriangleIR), sizeof(std::uint32_t)};
+        const std::array<std::uint64_t, 5> counts{mesh.nodes.size(), mesh.leaves.size(),
+            mesh.vertices.size(), mesh.triangles.size(), mesh.leaf_triangle_references.size()};
+        for (std::size_t index = 0; index < counts.size(); ++index)
+        {
+            std::uint64_t bytes = 0;
+            if (!Multiply(counts[index], element_bytes[index], bytes) ||
+                !Add(output_bytes, bytes, output_bytes))
+                return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                    "decoded level mesh output size overflows"));
+        }
+
+        if (input_bytes > remaining_input_bytes_ || item_count > remaining_items_ ||
+            output_bytes > remaining_output_bytes_)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "decoded mesh exceeded its shared operation budget"));
+        remaining_input_bytes_ -= input_bytes;
+        remaining_items_ -= item_count;
+        remaining_output_bytes_ -= output_bytes;
+        return {};
+    }
+
+private:
+    LevelDecodeBudget(const asset::DecodeLimits limits, const std::uint64_t initial_items)
+        : limits_(limits), remaining_input_bytes_(limits.maximum_input_bytes),
+          remaining_output_bytes_(limits.maximum_output_bytes - sizeof(asset::LevelSpatialIR)),
+          remaining_items_(limits.maximum_items - initial_items)
+    {
+    }
+
+    asset::DecodeLimits limits_;
+    std::uint64_t remaining_input_bytes_ = 0;
+    std::uint64_t remaining_output_bytes_ = 0;
+    std::uint64_t remaining_items_ = 0;
+};
+
+[[nodiscard]] asset::DecodeResult<void> PreflightArchiveDirectory(
+    const std::span<const std::byte> bytes, LevelDecodeBudget& budget,
+    const std::string_view description)
+{
+    // HOG parsing owns one directory entry per header count. Debit that count before the parser
+    // reserves its vectors; malformed short headers are left to the archive parser to classify.
+    if (bytes.size() < 0x14U + sizeof(std::uint32_t))
+        return {};
+    return budget.ConsumeItems(ReadU32(bytes, 4U), description);
+}
+
+using ArchiveDirectory = std::unordered_map<std::string, const archive::HogEntry*>;
+
+[[nodiscard]] asset::DecodeResult<std::string> NormalizeArchiveName(
+    const std::string_view name, const asset::DecodeLimits limits)
+{
+    if (name.size() > limits.maximum_string_bytes)
+        return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+            "archive name exceeds the decoder string limit"));
+    auto normalized = vfs::NormalizeGamePath(name);
+    if (!normalized)
+        return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+            "archive contains an unsafe name"));
+    if (normalized->size() > limits.maximum_string_bytes)
+        return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+            "normalized archive name exceeds the decoder string limit"));
+    return std::move(*normalized);
+}
+
+[[nodiscard]] asset::DecodeResult<ArchiveDirectory> BuildArchiveDirectory(
+    const archive::HogArchive& archive, const asset::DecodeLimits limits)
+{
+    ArchiveDirectory directory;
+    directory.reserve(archive.entries().size());
+    for (const auto& entry : archive.entries())
+    {
+        auto normalized = NormalizeArchiveName(entry.name, limits);
+        if (!normalized)
+            return std::unexpected(normalized.error());
+        if (!directory.emplace(std::move(*normalized), &entry).second)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::DuplicateReference,
+                "archive contains duplicate normalized names"));
+    }
+    return directory;
+}
+
+[[nodiscard]] asset::DecodeResult<const archive::HogEntry*> FindArchiveEntry(
+    const ArchiveDirectory& directory, const std::string_view name,
+    const asset::DecodeLimits limits)
+{
+    auto normalized = NormalizeArchiveName(name, limits);
+    if (!normalized)
+        return std::unexpected(normalized.error());
+    const auto match = directory.find(*normalized);
+    if (match == directory.end())
+        return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+            "manifest archive reference does not resolve"));
+    return match->second;
+}
+
+[[nodiscard]] asset::DecodeResult<const archive::HogEntry*> FindUniqueCol(
+    const ArchiveDirectory& directory)
+{
+    const archive::HogEntry* match = nullptr;
+    for (const auto& [name, entry] : directory)
+    {
+        if (!name.ends_with(".COL"))
+            continue;
+        if (match != nullptr)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::DuplicateReference,
+                "cell archive contains more than one COL member"));
+        match = entry;
+    }
+    if (match == nullptr)
+        return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+            "cell archive contains no COL member"));
+    return match;
+}
+
+[[nodiscard]] asset::DecodeResult<void> ValidateNestedArchiveSize(
+    const std::span<const std::byte> bytes, const std::uint64_t maximum_bytes,
+    const std::string_view description)
+{
+    if (bytes.size() > maximum_bytes)
+        return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+            std::string(description) + " exceeds the configured nested-HOG byte limit"));
+    return {};
 }
 
 [[nodiscard]] std::string_view TrimAsciiWhitespace(std::string_view value) noexcept
@@ -177,7 +438,8 @@ std::expected<GameDataService, GameDataError> GameDataService::Open(
     GameDataServiceConfig config)
 {
     if (config.root.empty() || config.maximum_system_config_bytes == 0 ||
-        config.maximum_pop_bytes == 0 || config.maximum_data_hog_bytes == 0)
+        config.maximum_pop_bytes == 0 || config.maximum_data_hog_bytes == 0 ||
+        config.maximum_nested_hog_bytes == 0)
         return std::unexpected(Error(GameDataErrorCode::InvalidConfiguration,
             "game-data root and byte limits must be non-empty"));
 
@@ -270,5 +532,130 @@ std::expected<asset::LevelManifestIR, GameDataError> GameDataService::LoadLevelM
         });
     }
     return std::move(*manifest);
+}
+
+std::expected<asset::LevelSpatialIR, GameDataError> GameDataService::LoadLevelSpatial(
+    const asset::LevelManifestIR& manifest) const
+{
+    const asset::DecodeLimits limits = impl_->config.decode_limits;
+    auto budget_result = LevelDecodeBudget::Create(manifest, limits);
+    if (!budget_result)
+        return std::unexpected(DecodeFailure(
+            "unable to initialize level spatial decode", budget_result.error()));
+    LevelDecodeBudget budget = std::move(*budget_result);
+
+    auto source_path = NormalizeArchiveName(manifest.data_hog_source.game_path, limits);
+    if (!source_path)
+        return std::unexpected(DecodeFailure(
+            "invalid level archive source", source_path.error()));
+    auto source_bytes = impl_->files.Read(*source_path, impl_->config.maximum_data_hog_bytes);
+    if (!source_bytes)
+        return std::unexpected(Error(GameDataErrorCode::ReadFailed,
+            "unable to read level archive source: " + source_bytes.error()));
+    auto source_input = budget.ConsumeInput(source_bytes->size(), "level archive source");
+    if (!source_input)
+        return std::unexpected(DecodeFailure(
+            "unable to load level spatial data", source_input.error()));
+    auto source_items = PreflightArchiveDirectory(
+        *source_bytes, budget, "level archive directory");
+    if (!source_items)
+        return std::unexpected(DecodeFailure(
+            "unable to index level archive source", source_items.error()));
+
+    auto source_archive = archive::HogArchive::FromBytes(std::move(*source_bytes));
+    if (!source_archive)
+        return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+            "invalid level archive source: " + source_archive.error()));
+    auto source_directory = BuildArchiveDirectory(*source_archive, limits);
+    if (!source_directory)
+        return std::unexpected(DecodeFailure(
+            "unable to index level archive source", source_directory.error()));
+
+    for (const auto& component : manifest.data_hog_source.hog_entries)
+    {
+        auto entry = FindArchiveEntry(*source_directory, component, limits);
+        if (!entry)
+            return std::unexpected(DecodeFailure(
+                "unable to resolve nested level archive", entry.error()));
+        const auto nested_bytes = source_archive->payload(**entry);
+        auto nested_input = budget.ConsumeInput(nested_bytes.size(), "nested level archive");
+        if (!nested_input)
+            return std::unexpected(DecodeFailure(
+                "unable to load nested level archive", nested_input.error()));
+        auto nested_size = ValidateNestedArchiveSize(nested_bytes,
+            impl_->config.maximum_nested_hog_bytes, "nested level archive");
+        if (!nested_size)
+            return std::unexpected(DecodeFailure(
+                "unable to load nested level archive", nested_size.error()));
+        auto nested_items = PreflightArchiveDirectory(
+            nested_bytes, budget, "nested level archive directory");
+        if (!nested_items)
+            return std::unexpected(DecodeFailure(
+                "unable to index nested level archive", nested_items.error()));
+        auto nested = archive::HogArchive::FromSpan(
+            nested_bytes, impl_->config.maximum_nested_hog_bytes);
+        if (!nested)
+            return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+                "invalid nested level archive: " + nested.error()));
+        *source_archive = std::move(*nested);
+        source_directory = BuildArchiveDirectory(*source_archive, limits);
+        if (!source_directory)
+            return std::unexpected(DecodeFailure(
+                "unable to index nested level archive", source_directory.error()));
+    }
+
+    asset::LevelSpatialIR result;
+    result.terrain_cells.reserve(manifest.terrain_cells.size());
+    const std::uint32_t archive_depth = static_cast<std::uint32_t>(
+        manifest.data_hog_source.hog_entries.size() + 1U);
+    for (std::size_t cell_index = 0; cell_index < manifest.terrain_cells.size(); ++cell_index)
+    {
+        const auto& cell = manifest.terrain_cells[cell_index];
+        const std::string cell_context = "level cell " + std::to_string(cell_index);
+        auto cell_entry = FindArchiveEntry(*source_directory, cell.data_hog_entry, limits);
+        if (!cell_entry)
+            return std::unexpected(DecodeFailure(
+                "unable to resolve " + cell_context, cell_entry.error()));
+        const auto cell_bytes = source_archive->payload(**cell_entry);
+        auto cell_input = budget.ConsumeInput(cell_bytes.size(), "cell archive");
+        if (!cell_input)
+            return std::unexpected(DecodeFailure(
+                "unable to load " + cell_context, cell_input.error()));
+        auto cell_size = ValidateNestedArchiveSize(
+            cell_bytes, impl_->config.maximum_nested_hog_bytes, "cell archive");
+        if (!cell_size)
+            return std::unexpected(DecodeFailure(
+                "unable to load " + cell_context, cell_size.error()));
+        auto cell_items = PreflightArchiveDirectory(
+            cell_bytes, budget, "cell archive directory");
+        if (!cell_items)
+            return std::unexpected(DecodeFailure(
+                "unable to index " + cell_context, cell_items.error()));
+        auto cell_archive = archive::HogArchive::FromSpan(
+            cell_bytes, impl_->config.maximum_nested_hog_bytes);
+        if (!cell_archive)
+            return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+                "invalid " + cell_context + " archive: " + cell_archive.error()));
+        auto cell_directory = BuildArchiveDirectory(*cell_archive, limits);
+        if (!cell_directory)
+            return std::unexpected(DecodeFailure(
+                "unable to index " + cell_context, cell_directory.error()));
+        auto col_entry = FindUniqueCol(*cell_directory);
+        if (!col_entry)
+            return std::unexpected(DecodeFailure(
+                "unable to resolve " + cell_context + " spatial member", col_entry.error()));
+        const auto col_bytes = cell_archive->payload(**col_entry);
+        auto mesh = retail::DecodeColSpatialMesh(
+            col_bytes, budget.ChildLimits(archive_depth));
+        if (!mesh)
+            return std::unexpected(DecodeFailure(
+                "unable to decode " + cell_context + " spatial mesh", mesh.error()));
+        auto committed = budget.CommitMesh(*mesh, col_bytes.size());
+        if (!committed)
+            return std::unexpected(DecodeFailure(
+                "unable to commit " + cell_context + " spatial mesh", committed.error()));
+        result.terrain_cells.push_back(std::move(*mesh));
+    }
+    return result;
 }
 } // namespace omega::content

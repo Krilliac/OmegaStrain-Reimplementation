@@ -28,6 +28,9 @@ retail instruction blocks, or PS2 execution layer.
   5,351 records, including 4,144 with nonzero alignment bytes that are safely skipped.
 - The native host validates an owner-supplied NTSC-U data root, loads MINSK as 299 canonical
   manifest cells, and renders a deterministic synthetic coverage grid through SDL_GPU/D3D12.
+- The native content service resolves all 5,351 manifest cells across all 18 levels into 5,351
+  owned spatial meshes with zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices,
+  1,239,980 triangles/references, and 2,137 normalized empty meshes.
 
 ## Quick start
 
@@ -74,6 +77,7 @@ ctest --preset msvc-debug
 .\build\msvc\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe level-spatial-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --probe-only
 .\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
@@ -83,8 +87,9 @@ python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\priv
 
 `openomega` is the pure-native SDL3/SDL_GPU host shell. `--frames=N` is an automated smoke mode
 that opens the modern GPU backend, renders exactly `N` frames, and exits without user input.
-`--probe-only` validates the retail root and selected level without opening a window. The current
-MINSK view is a synthetic manifest-coverage grid, not reconstructed world geometry.
+`--probe-only` validates the retail root and selected level, then loads matching owned manifest and
+spatial-mesh state without opening a window. The current MINSK view is still a synthetic
+manifest-coverage grid, not reconstructed world geometry.
 
 Architecture and completion criteria are versioned in
 [`docs/02-Runtime-Architecture.md`](docs/02-Runtime-Architecture.md) and

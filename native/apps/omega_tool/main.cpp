@@ -37,6 +37,7 @@ void PrintUsage()
               << "  omega_tool hog-verify-nested-tree <root>\n"
               << "  omega_tool pop-verify-tree <root>\n"
               << "  omega_tool level-manifest-verify-tree <root>\n"
+              << "  omega_tool level-spatial-verify-tree <root>\n"
               << "  omega_tool asset-metadata-verify-tree <root>\n";
 }
 
@@ -371,6 +372,8 @@ int main(const int argc, char** argv)
         return omega::tool::PopVerifyTree(argv[2]);
     if (command == "level-manifest-verify-tree")
         return omega::tool::LevelManifestVerifyTree(argv[2]);
+    if (command == "level-spatial-verify-tree")
+        return omega::tool::LevelSpatialVerifyTree(argv[2]);
     if (command == "asset-metadata-verify-tree")
         return omega::tool::AssetMetadataVerifyTree(argv[2]);
 

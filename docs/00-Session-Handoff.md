@@ -43,6 +43,11 @@ shipping dependencies or execution mechanisms.
 11. Added owner-supplied data-root validation and native named-level startup. A headless MINSK
     probe loads 299 canonical manifest cells; the SDL_GPU/D3D12 path renders their explicitly
     synthetic coverage grid for 120 frames and exits without a lingering process.
+12. Routed every manifest cell through `GameDataService` into owned neutral spatial meshes under a
+    shared level-operation budget. Native verification covers all 18 levels and 5,351 cells with
+    zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices, 1,239,980 triangles and
+    references, and 2,137 normalized empty meshes. Headless startup independently reports matching
+    manifest/spatial cardinality for all 18 levels.
 
 ## Disc observations
 
@@ -64,14 +69,12 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Route manifest cell HOGs through `GameDataService` into the new owned COL spatial-mesh IR with a
-   shared level-operation decode budget.
-2. Implement the proven TDX block/palette/storage-plane contract. Preserve source alpha and keep
+1. Implement the proven TDX block/palette/storage-plane contract. Preserve source alpha and keep
    RGBA expansion as a separate policy until it has an independent visual checksum.
-3. Trace VUM material and render geometry after collision and texture storage have typed IR.
-4. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
-5. Add bounded SKM/SKL/SKA descriptors before actor, skeleton, or animation semantics.
-6. Capture PS Rewired network behavior separately before designing any replacement service.
+2. Trace VUM material and render geometry after collision and texture storage have typed IR.
+3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
+4. Add bounded SKM/SKL/SKA descriptors before actor, skeleton, or animation semantics.
+5. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools
 

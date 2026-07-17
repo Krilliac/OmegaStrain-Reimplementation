@@ -202,7 +202,8 @@ int PopLevelManifestDecoderFailureCount()
         "one byte below the complete scratch budget fails closed");
 
     auto maximum_depth_source = MakeSource();
-    maximum_depth_source.hog_entries.assign(7, "NESTED.HOG");
+    maximum_depth_source.hog_entries.assign(
+        omega::asset::DecodeLimits{}.maximum_nesting_depth - 1U, "NESTED.HOG");
     Check(omega::retail::DecodePopLevelManifest(
               MakePop(), MakeEntries(), maximum_depth_source)
               .has_value(),
