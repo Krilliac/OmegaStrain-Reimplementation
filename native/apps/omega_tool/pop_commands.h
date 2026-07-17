@@ -5,4 +5,5 @@
 namespace omega::tool
 {
 [[nodiscard]] int PopVerifyTree(const std::filesystem::path& root);
+[[nodiscard]] int LevelManifestVerifyTree(const std::filesystem::path& root);
 } // namespace omega::tool

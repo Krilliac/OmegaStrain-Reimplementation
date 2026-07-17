@@ -34,7 +34,8 @@ void PrintUsage()
               << "  omega_tool hog-info <archive>\n"
               << "  omega_tool hog-verify-tree <root>\n"
               << "  omega_tool hog-verify-nested-tree <root>\n"
-              << "  omega_tool pop-verify-tree <root>\n";
+              << "  omega_tool pop-verify-tree <root>\n"
+              << "  omega_tool level-manifest-verify-tree <root>\n";
 }
 
 [[nodiscard]] std::optional<std::uint64_t> CheckedAdd(
@@ -366,6 +367,8 @@ int main(const int argc, char** argv)
         return HogVerifyNestedTree(argv[2]);
     if (command == "pop-verify-tree")
         return omega::tool::PopVerifyTree(argv[2]);
+    if (command == "level-manifest-verify-tree")
+        return omega::tool::LevelManifestVerifyTree(argv[2]);
 
     PrintUsage();
     return 64;

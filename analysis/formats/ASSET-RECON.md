@@ -64,6 +64,12 @@ Across all 18 level POPs, the same terrain parser accepts 5,351 records. Every t
 matching `DATA.HOG` member, while the HOG directories contain 44 additional cell members. This
 cross-level result makes the MINSK relationship much stronger than a one-file guess.
 
+The first canonical native asset value is therefore a `LevelManifestIR`, not guessed geometry.
+Its stateless retail adapter resolves each POP terrain record to an owned `DATA.HOG` source
+entry while storing the common archive locator once and preserving the two uninterpreted numeric
+fields. Geometry, placement, visibility, and transforms remain absent until their later sections
+are independently established.
+
 The only standalone `.MAP` on the disc is 1,138 bytes of ASCII whose contents
 resemble a character-code mapping rather than geometry. Current evidence points
 to the POP plus nested COL/VUM chain as the world/map geometry path.

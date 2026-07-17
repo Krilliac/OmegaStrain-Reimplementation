@@ -30,6 +30,17 @@ target_include_directories(omega_core
 
 target_compile_features(omega_core PUBLIC cxx_std_23)
 
+add_library(omega_assets INTERFACE)
+target_include_directories(omega_assets INTERFACE native/include)
+target_compile_features(omega_assets INTERFACE cxx_std_23)
+
+add_library(omega_retail_formats STATIC
+    native/src/retail/pop_level_manifest_decoder.cpp
+)
+target_include_directories(omega_retail_formats PUBLIC native/include)
+target_link_libraries(omega_retail_formats PUBLIC omega_assets omega_core)
+target_compile_features(omega_retail_formats PUBLIC cxx_std_23)
+
 if(MSVC)
     target_compile_options(omega_core PRIVATE
         /W4
@@ -43,11 +54,24 @@ else()
     target_compile_options(omega_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
+if(MSVC)
+    target_compile_options(omega_retail_formats PRIVATE
+        /W4
+        /WX
+        /permissive-
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /utf-8
+    )
+else()
+    target_compile_options(omega_retail_formats PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 add_executable(omega_tool
     native/apps/omega_tool/main.cpp
     native/apps/omega_tool/pop_commands.cpp
 )
-target_link_libraries(omega_tool PRIVATE omega_core)
+target_link_libraries(omega_tool PRIVATE omega_core omega_retail_formats)
 
 if(MSVC)
     target_compile_options(omega_tool PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
@@ -89,10 +113,11 @@ include(CTest)
 if(BUILD_TESTING)
     add_executable(omega_core_tests
         native/tests/hog_archive_tests.cpp
+        native/tests/pop_level_manifest_decoder_tests.cpp
         native/tests/pop_terrain_index_tests.cpp
         native/tests/virtual_file_system_tests.cpp
     )
-    target_link_libraries(omega_core_tests PRIVATE omega_core)
+    target_link_libraries(omega_core_tests PRIVATE omega_core omega_retail_formats)
     if(MSVC)
         target_compile_options(omega_core_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
     else()
@@ -107,10 +132,13 @@ if(BUILD_TESTING)
         COMMAND omega_tool hog-verify-nested-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_pop_tree
         COMMAND omega_tool pop-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_rejects_empty_level_manifest_tree
+        COMMAND omega_tool level-manifest-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     set_tests_properties(
         omega_tool_rejects_empty_hog_tree
         omega_tool_rejects_empty_nested_hog_tree
         omega_tool_rejects_empty_pop_tree
+        omega_tool_rejects_empty_level_manifest_tree
         PROPERTIES WILL_FAIL TRUE
     )
 endif()

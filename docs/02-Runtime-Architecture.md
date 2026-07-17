@@ -73,6 +73,18 @@ retail format decoders -> assets/core
 Platform backends and retail decoders are leaves. Core and simulation never include PCSX2,
 Windows, GPU API, or proprietary-format implementation headers.
 
+The initial native build targets express the same direction:
+
+- `omega_core`: HOG indexing, VFS, and generic bounded infrastructure;
+- `omega_assets`: canonical owned IR values and decode contracts; and
+- `omega_retail_formats`: stateless POP and later COL/VUM/TDX adapters that may depend on the
+  first two targets.
+
+Tools may link retail adapters. Renderer and simulation targets must consume canonical assets and
+must not include retail-format headers. A source-include dependency check will turn this convention
+into a CI enforcement boundary as more targets appear. The existing terrain-prefix parser remains
+in `omega_core` temporarily; new semantic adapters enter through `omega_retail_formats`.
+
 The runtime contains no MIPS execution path. This boundary is permanent and documented in
 `docs/adr/0001-pure-native-runtime.md`.
 
