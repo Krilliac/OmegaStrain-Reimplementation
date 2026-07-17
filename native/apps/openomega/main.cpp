@@ -1,153 +1,99 @@
-#include <SDL3/SDL.h>
+#include "sdl_gpu_host.h"
 
-#include <charconv>
+#include "omega/runtime/content_startup.h"
+#include "omega/runtime/launch_options.h"
+
+#include <cstddef>
 #include <cstdlib>
 #include <iostream>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace
 {
-class SdlLifetime final
+void PrintContentError(const omega::runtime::ContentStartupError& error)
 {
-public:
-    SdlLifetime() = default;
-    ~SdlLifetime() { SDL_Quit(); }
-    SdlLifetime(const SdlLifetime&) = delete;
-    SdlLifetime& operator=(const SdlLifetime&) = delete;
-};
-
-[[nodiscard]] int ParseFrameLimit(const int argc, char** argv)
-{
-    constexpr std::string_view prefix = "--frames=";
-    for (int index = 1; index < argc; ++index)
-    {
-        const std::string_view argument(argv[index]);
-        if (!argument.starts_with(prefix))
-            continue;
-        int value = -1;
-        const auto result = std::from_chars(argument.data() + prefix.size(),
-            argument.data() + argument.size(), value);
-        if (result.ec == std::errc{} && result.ptr == argument.data() + argument.size() && value >= 0)
-            return value;
-        return -2;
-    }
-    return -1;
-}
-
-[[nodiscard]] int Fail(const std::string_view operation)
-{
-    std::cerr << operation << ": " << SDL_GetError() << '\n';
-    return EXIT_FAILURE;
+    std::cerr << "content startup [";
+    if (error.game_data_error)
+        std::cerr << omega::content::GameDataErrorCodeName(error.game_data_error->code);
+    else
+        std::cerr << omega::runtime::ContentStartupErrorCodeName(error.code);
+    std::cerr << "]: " << error.message << '\n';
 }
 } // namespace
 
 int main(const int argc, char** argv)
 {
-    const int frame_limit = ParseFrameLimit(argc, argv);
-    if (frame_limit == -2)
+    std::vector<std::string_view> arguments;
+    arguments.reserve(argc > 1 ? static_cast<std::size_t>(argc - 1) : 0U);
+    for (int index = 1; index < argc; ++index)
+        arguments.emplace_back(argv[index]);
+
+    auto options = omega::runtime::ParseLaunchOptions(arguments);
+    if (!options)
     {
-        std::cerr << "--frames requires a non-negative integer\n";
+        std::cerr << options.error() << '\n' << omega::runtime::LaunchUsage();
         return EXIT_FAILURE;
     }
+    if (options->show_help)
+    {
+        std::cout << omega::runtime::LaunchUsage();
+        return EXIT_SUCCESS;
+    }
 
-    SDL_SetAppMetadata("OpenOmega", "0.1.0", "io.github.krilliac.openomega");
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO))
-        return Fail("SDL_Init");
-    const SdlLifetime sdl_lifetime;
+    auto startup = omega::runtime::StartContent(*options);
+    if (!startup)
+    {
+        PrintContentError(startup.error());
+        return EXIT_FAILURE;
+    }
+    auto content = std::move(*startup);
+    if (content.game_data)
+    {
+        std::cout << "OpenOmega content: build="
+                  << omega::content::RetailBuildName(content.game_data->identity().build)
+                  << " executable=" << content.game_data->identity().boot_executable << '\n';
 
-    SDL_Window* window = SDL_CreateWindow(
-        "OpenOmega - native runtime", 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-    if (window == nullptr)
-        return Fail("SDL_CreateWindow");
+        if (content.level_manifest)
+        {
+            std::cout << "OpenOmega level: code=" << *options->level_code
+                      << " terrain_cells=" << content.level_manifest->terrain_cells.size()
+                      << " view=synthetic-manifest-grid\n";
+        }
+    }
+
+    if (options->probe_only || options->frame_limit == 0)
+    {
+        std::cout << "OpenOmega native shell: rendered_frames=0\n";
+        return EXIT_SUCCESS;
+    }
 
 #if defined(OMEGA_GPU_DEBUG)
     constexpr bool debug_device = true;
 #else
     constexpr bool debug_device = false;
 #endif
-    constexpr SDL_GPUShaderFormat shader_formats = static_cast<SDL_GPUShaderFormat>(
-        SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL);
-    SDL_GPUDevice* device = SDL_CreateGPUDevice(shader_formats, debug_device, nullptr);
-    if (device == nullptr)
+    auto host = omega::app::SdlGpuHost::Create(
+        content.debug_image ? &*content.debug_image : nullptr, debug_device);
+    if (!host)
     {
-        SDL_DestroyWindow(window);
-        return Fail("SDL_CreateGPUDevice");
+        std::cerr << host.error() << '\n';
+        return EXIT_FAILURE;
     }
-    if (!SDL_ClaimWindowForGPUDevice(device, window))
+    std::cout << "OpenOmega native shell: GPU driver=" << host->driver_name() << '\n';
+
+    auto run = host->Run(options->frame_limit);
+    if (!run)
     {
-        SDL_DestroyGPUDevice(device);
-        SDL_DestroyWindow(window);
-        return Fail("SDL_ClaimWindowForGPUDevice");
+        std::cerr << "runtime loop: " << run.error() << '\n';
+        return EXIT_FAILURE;
     }
-
-    const char* driver = SDL_GetGPUDeviceDriver(device);
-    std::cout << "OpenOmega native shell: GPU driver=" << (driver != nullptr ? driver : "unknown") << '\n';
-
-    bool running = true;
-    int rendered_frames = 0;
-    while (running && (frame_limit < 0 || rendered_frames < frame_limit))
+    std::cout << "OpenOmega native shell: rendered_frames=" << run->rendered_frames << '\n';
+    if (options->frame_limit >= 0 && run->rendered_frames != options->frame_limit)
     {
-        SDL_Event event{};
-        while (SDL_PollEvent(&event))
-        {
-            if (event.type == SDL_EVENT_QUIT)
-                running = false;
-        }
-        if (!running)
-            break;
-
-        SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(device);
-        if (commands == nullptr)
-        {
-            running = false;
-            break;
-        }
-
-        SDL_GPUTexture* swapchain = nullptr;
-        std::uint32_t width = 0;
-        std::uint32_t height = 0;
-        if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, window, &swapchain, &width, &height))
-        {
-            SDL_CancelGPUCommandBuffer(commands);
-            running = false;
-            break;
-        }
-
-        if (swapchain != nullptr)
-        {
-            const float pulse = static_cast<float>((rendered_frames % 240) / 239.0);
-            SDL_GPUColorTargetInfo target{};
-            target.texture = swapchain;
-            target.clear_color = SDL_FColor{0.025F + pulse * 0.025F, 0.035F, 0.065F + pulse * 0.04F, 1.0F};
-            target.load_op = SDL_GPU_LOADOP_CLEAR;
-            target.store_op = SDL_GPU_STOREOP_STORE;
-
-            SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
-            if (pass == nullptr)
-            {
-                SDL_CancelGPUCommandBuffer(commands);
-                running = false;
-                break;
-            }
-            SDL_EndGPURenderPass(pass);
-        }
-
-        if (!SDL_SubmitGPUCommandBuffer(commands))
-        {
-            running = false;
-            break;
-        }
-        ++rendered_frames;
+        std::cerr << "runtime loop ended before the requested frame limit\n";
+        return EXIT_FAILURE;
     }
-
-    if (!running && (frame_limit < 0 || rendered_frames < frame_limit) && SDL_GetError()[0] != '\0')
-        std::cerr << "runtime loop: " << SDL_GetError() << '\n';
-
-    SDL_WaitForGPUIdle(device);
-    SDL_ReleaseWindowFromGPUDevice(device, window);
-    SDL_DestroyGPUDevice(device);
-    SDL_DestroyWindow(window);
-
-    std::cout << "OpenOmega native shell: rendered_frames=" << rendered_frames << '\n';
-    return running || rendered_frames == frame_limit ? EXIT_SUCCESS : EXIT_FAILURE;
+    return EXIT_SUCCESS;
 }

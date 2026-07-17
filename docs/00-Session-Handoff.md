@@ -40,8 +40,9 @@ shipping dependencies or execution mechanisms.
 10. Built a pure-native HOG/VFS layer that validates all 6,677 nested spans, resolves all 5,351
     POP terrain references across 18 level manifests, and passively validates all 29,320
     COL/VUM/TDX asset spans with zero errors.
-11. Dogfooded a bounded ELF32 little-endian MIPS container intake in ReSymbol for offline research;
-    no disassembler, interpreter, translator, or PS2 instruction representation enters runtime.
+11. Added owner-supplied data-root validation and native named-level startup. A headless MINSK
+    probe loads 299 canonical manifest cells; the SDL_GPU/D3D12 path renders their explicitly
+    synthetic coverage grid for 120 frames and exits without a lingering process.
 
 ## Disc observations
 
@@ -63,13 +64,14 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Trace the executable's VUM and texture consumers offline to turn passive descriptors into
-   independently implementable scene contracts.
-2. Decode material/geometry and texture storage behind synthetic malformed-input tests; preserve
-   the permanent ban on shipping VU/VIF or other PS2 instruction representations.
-3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
-4. Add bounded SKM/SKL/SKA descriptors before actor, skeleton, or animation semantics.
-5. Capture PS Rewired network behavior separately before designing any replacement service.
+1. Implement the corpus-proven COL collision/spatial mesh as owned native vertices, triangles,
+   nodes, and leaves, omitting still-unknown primitive words and trailing payload.
+2. Implement the proven TDX block/palette/storage-plane contract. Preserve source alpha and keep
+   RGBA expansion as a separate policy until it has an independent visual checksum.
+3. Trace VUM material and render geometry after collision and texture storage have typed IR.
+4. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
+5. Add bounded SKM/SKL/SKA descriptors before actor, skeleton, or animation semantics.
+6. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools
 
@@ -77,7 +79,6 @@ shipping dependencies or execution mechanisms.
 - IDA 9.1 with MIPS processor support (private local installation).
 - Ghidra 12.1.2 (private local installation).
 - radare2 (private local installation).
-- ReSymbol release tools (private local build).
 
 ## Safety rules
 

@@ -26,11 +26,20 @@ COL/VUM/TDX descriptors are implemented; semantic scene decoders remain incomple
 
 ## M2: Native shell
 
+Status: in progress. The SDL_GPU shell, strict launch parser, owner-supplied NTSC-U data-root
+validation, headless probe, named-level manifest load, and synthetic debug view are implemented.
+Logging/configuration services, jobs, real input handling, audio output, and a frame scheduler
+remain incomplete.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.
 
 ## M3: First level scene
+
+Status: in progress. Native `--level=MINSK` selection and canonical manifest loading are complete;
+the current grid is diagnostic only. Geometry, textures, materials, cameras, placements, and
+visibility remain incomplete.
 
 - Decode and render MINSK geometry, textures, materials, cameras, and static objects.
 - Match coordinate system, transforms, visibility, and representative frames against PCSX2.

@@ -78,6 +78,9 @@ int VirtualFileSystemFailureCount();
 int PopTerrainIndexFailureCount();
 int PopLevelManifestDecoderFailureCount();
 int ContainerDescriptorFailureCount();
+int GameDataServiceFailureCount();
+int LaunchOptionsFailureCount();
+int ManifestDebugImageFailureCount();
 
 int main()
 {
@@ -289,6 +292,9 @@ int main()
     failures += PopTerrainIndexFailureCount();
     failures += PopLevelManifestDecoderFailureCount();
     failures += ContainerDescriptorFailureCount();
+    failures += GameDataServiceFailureCount();
+    failures += LaunchOptionsFailureCount();
+    failures += ManifestDebugImageFailureCount();
     if (failures == 0)
         std::cout << "omega_core_tests: all checks passed\n";
     return failures == 0 ? 0 : 1;

@@ -5,7 +5,7 @@
 ```text
 OmegaApp [game thread, sole lifetime owner]
 |- PlatformService [main thread]
-|- VirtualFileSystem [any thread after mount freeze]
+|- GameDataService [owns frozen VirtualFileSystem]
 |- JobService [worker pool owner]
 |- AssetService [game thread API; worker decode]
 |- RenderService [render thread]
@@ -21,6 +21,10 @@ OmegaApp [game thread, sole lifetime owner]
 Services never own the app or one another. Dependencies are constructor references whose
 lifetime is guaranteed by the app. Long-lived asset references are typed generation handles,
 not raw pointers or `shared_ptr` ownership graphs.
+
+`GameDataService` is the implemented startup boundary. It owns its VFS, freezes mounts during
+`Open()`, and returns only canonical owned IR. Future `AssetService` code receives a non-owning
+reference; neither service owns the other.
 
 ## Components and services
 
@@ -47,6 +51,8 @@ queues.
 
 - `VirtualFileSystem` mounts physical directories, ISO views, and HOG archives behind
   normalized case-insensitive game paths.
+- `GameDataService` validates the owner-supplied NTSC-U root from bounded `SYSTEM.CNF` metadata,
+  owns the frozen VFS, and maps named levels into canonical manifest values.
 - `AssetService` maps paths to typed handles, performs async decode, and publishes immutable
   CPU assets before render/audio upload.
 - `ScriptService` executes only project-owned native logic or declarative mission data. Retail
@@ -59,15 +65,17 @@ queues.
 
 Research builds may hot-reload decoded assets, internal scripts, and mission compatibility
 tables at frame boundaries. Platform, renderer, audio device, and network transport are
-non-hot-reloadable initially. No vtable pointer crosses a reloadable boundary.
+non-hot-reloadable initially. The validated retail-data root and its frozen mount table are also
+non-hot-reloadable. No vtable pointer crosses a reloadable boundary.
 
 ## Dependency direction
 
 ```text
-apps -> gameplay -> simulation -> core
-               \-> assets -> vfs -> core
+apps -> runtime -> content -> retail formats -> assets/core
+                       \-> vfs -> core
+gameplay -> simulation -> core
+        \-> assets -> vfs -> core
 renderer/audio/platform -> core
-retail format decoders -> assets/core
 ```
 
 Platform backends and retail decoders are leaves. Core and simulation never include PCSX2,
@@ -76,9 +84,13 @@ Windows, GPU API, or proprietary-format implementation headers.
 The initial native build targets express the same direction:
 
 - `omega_core`: HOG indexing, VFS, and generic bounded infrastructure;
-- `omega_assets`: canonical owned IR values and decode contracts; and
+- `omega_assets`: canonical owned IR values and decode contracts;
 - `omega_retail_formats`: stateless POP and later COL/VUM/TDX adapters that may depend on the
-  first two targets.
+  first two targets;
+- `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
+  orchestration; and
+- `omega_runtime`: launch options and renderer-neutral diagnostic scene values consumed by the
+  SDL host.
 
 The initial COL/VUM/TDX adapters are passive scalar descriptors. They validate only proven
 container arithmetic and never expose VU/VIF instructions, palette guesses, or decoded pixels.
@@ -87,6 +99,9 @@ Tools may link retail adapters. Renderer and simulation targets must consume can
 must not include retail-format headers. A source-include dependency check will turn this convention
 into a CI enforcement boundary as more targets appear. The existing terrain-prefix parser remains
 in `omega_core` temporarily; new semantic adapters enter through `omega_retail_formats`.
+
+The initial synthetic manifest grid consumes only `LevelManifestIR`. Its tile positions are not
+retail world coordinates and are never claimed as decoded geometry.
 
 The runtime contains no MIPS execution path. This boundary is permanent and documented in
 `docs/adr/0001-pure-native-runtime.md`.
