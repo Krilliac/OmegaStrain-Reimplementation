@@ -1,6 +1,7 @@
 #include "asset_commands.h"
 
 #include "omega/archive/hog_archive.h"
+#include "omega/retail/col_spatial_mesh_decoder.h"
 #include "omega/retail/container_descriptors.h"
 
 #include <algorithm>
@@ -58,6 +59,21 @@ struct ExtentStats
     std::uint64_t exceeds_input = 0;
 };
 
+struct ColSemanticStats
+{
+    std::uint64_t version_3 = 0;
+    std::uint64_t version_5 = 0;
+    std::uint64_t source_nodes = 0;
+    std::uint64_t canonical_nodes = 0;
+    std::uint64_t leaves = 0;
+    std::uint64_t triangles = 0;
+    std::uint64_t vertices = 0;
+    std::uint64_t triangle_references = 0;
+    std::uint64_t empty_meshes = 0;
+    std::uint64_t direct_leaf_roots = 0;
+    std::uint32_t maximum_edge_depth = 0;
+};
+
 struct VerificationStats
 {
     std::uint64_t filesystem_entries = 0;
@@ -77,6 +93,7 @@ struct VerificationStats
     ExtentStats col_extents;
     ExtentStats vum_extents;
     ExtentStats tdx_extents;
+    ColSemanticStats col_semantic;
     bool stopped_at_safety_limit = false;
 };
 
@@ -136,6 +153,73 @@ void StopAtSafetyLimit(VerificationStats& stats, const std::string_view message)
     ++stats.safety_errors;
     stats.stopped_at_safety_limit = true;
     std::cerr << message << '\n';
+}
+
+[[nodiscard]] bool AddSemanticCounter(std::uint64_t& target, const std::uint64_t amount,
+    VerificationStats& stats, const std::string_view description)
+{
+    auto result = CheckedAdd(target, amount, description);
+    if (!result)
+    {
+        StopAtSafetyLimit(stats, result.error());
+        return false;
+    }
+    target = *result;
+    return true;
+}
+
+[[nodiscard]] std::uint32_t MaximumEdgeDepth(const asset::SpatialMeshIR& mesh)
+{
+    if (!mesh.root)
+        return 0;
+    using Pending = std::pair<asset::SpatialElementRefIR, std::uint32_t>;
+    std::vector<Pending> pending;
+    pending.reserve(mesh.nodes.size() + mesh.leaves.size());
+    pending.emplace_back(*mesh.root, 0);
+    std::uint32_t maximum = 0;
+    while (!pending.empty())
+    {
+        const auto [current, depth] = pending.back();
+        pending.pop_back();
+        maximum = std::max(maximum, depth);
+        if (current.kind != asset::SpatialElementKind::Node)
+            continue;
+        for (const auto& child : mesh.nodes[current.index].children)
+        {
+            if (child)
+                pending.emplace_back(*child, depth + 1U);
+        }
+    }
+    return maximum;
+}
+
+[[nodiscard]] bool RecordColSemantics(const retail::ColContainerDescriptor& descriptor,
+    const asset::SpatialMeshIR& mesh, VerificationStats& stats)
+{
+    auto& semantic = stats.col_semantic;
+    if (descriptor.format_version == 3)
+        ++semantic.version_3;
+    else
+        ++semantic.version_5;
+    const bool counters_fit =
+        AddSemanticCounter(semantic.source_nodes, descriptor.observed_record_counts[0], stats,
+            "COL source-node count") &&
+        AddSemanticCounter(
+            semantic.canonical_nodes, mesh.nodes.size(), stats, "COL canonical-node count") &&
+        AddSemanticCounter(semantic.leaves, mesh.leaves.size(), stats, "COL leaf count") &&
+        AddSemanticCounter(
+            semantic.triangles, mesh.triangles.size(), stats, "COL triangle count") &&
+        AddSemanticCounter(semantic.vertices, mesh.vertices.size(), stats, "COL vertex count") &&
+        AddSemanticCounter(semantic.triangle_references, mesh.leaf_triangle_references.size(),
+            stats, "COL triangle-reference count");
+    if (!counters_fit)
+        return false;
+    if (!mesh.root)
+        ++semantic.empty_meshes;
+    else if (mesh.root->kind == asset::SpatialElementKind::Leaf)
+        ++semantic.direct_leaf_roots;
+    semantic.maximum_edge_depth = std::max(semantic.maximum_edge_depth, MaximumEdgeDepth(mesh));
+    return true;
 }
 
 [[nodiscard]] bool AddIndexedEntries(
@@ -237,6 +321,15 @@ void InspectAssetRange(const std::filesystem::path& backing_path,
             PrintAssetError(backing_path, entry_name, descriptor.error().message);
             return;
         }
+        auto mesh = retail::DecodeColSpatialMesh(*bytes);
+        if (!mesh)
+        {
+            ++stats.col.errors;
+            PrintAssetError(backing_path, entry_name, mesh.error().message);
+            return;
+        }
+        if (!RecordColSemantics(*descriptor, *mesh, stats))
+            return;
         ++stats.col.valid;
         RecordExtent(stats.col_extents, descriptor->described_tables_extent.relation);
         return;
@@ -457,7 +550,11 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         "\"nested_hog_valid\":{},\"nested_hog_bytes\":{},\"indexed_entries\":{},"
         "\"asset_candidates\":{},\"asset_bytes\":{},"
         "\"col\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
-        "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{}}},"
+        "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{},"
+        "\"version_3\":{},\"version_5\":{},\"source_nodes\":{},"
+        "\"canonical_nodes\":{},\"leaves\":{},\"triangles\":{},\"vertices\":{},"
+        "\"triangle_references\":{},\"empty_meshes\":{},"
+        "\"direct_leaf_roots\":{},\"maximum_edge_depth\":{}}},"
         "\"vum\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
         "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{}}},"
         "\"tdx\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
@@ -467,11 +564,15 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         stats.asset_candidates, stats.asset_bytes,
         stats.col.candidates, stats.col.valid, stats.col.errors, stats.col_extents.exact,
         stats.col_extents.zero_padded_tail, stats.col_extents.nonzero_tail,
-        stats.col_extents.exceeds_input, stats.vum.candidates, stats.vum.valid,
-        stats.vum.errors, stats.vum_extents.exact, stats.vum_extents.zero_padded_tail,
-        stats.vum_extents.nonzero_tail, stats.vum_extents.exceeds_input,
-        stats.tdx.candidates, stats.tdx.valid, stats.tdx.errors, stats.tdx_extents.exact,
-        stats.tdx_extents.zero_padded_tail, stats.tdx_extents.nonzero_tail,
+        stats.col_extents.exceeds_input, stats.col_semantic.version_3, stats.col_semantic.version_5,
+        stats.col_semantic.source_nodes, stats.col_semantic.canonical_nodes,
+        stats.col_semantic.leaves, stats.col_semantic.triangles, stats.col_semantic.vertices,
+        stats.col_semantic.triangle_references, stats.col_semantic.empty_meshes,
+        stats.col_semantic.direct_leaf_roots, stats.col_semantic.maximum_edge_depth,
+        stats.vum.candidates, stats.vum.valid, stats.vum.errors, stats.vum_extents.exact,
+        stats.vum_extents.zero_padded_tail, stats.vum_extents.nonzero_tail,
+        stats.vum_extents.exceeds_input, stats.tdx.candidates, stats.tdx.valid, stats.tdx.errors,
+        stats.tdx_extents.exact, stats.tdx_extents.zero_padded_tail, stats.tdx_extents.nonzero_tail,
         stats.tdx_extents.exceeds_input, total_errors);
     if (stats.asset_candidates == 0)
         std::cerr << "no COL, VUM, or TDX assets were found\n";

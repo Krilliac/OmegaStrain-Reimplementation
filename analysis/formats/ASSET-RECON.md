@@ -166,11 +166,12 @@ initial ingestion. Field semantics and compatibility defaults still require impl
 ### COL and VUM geometry
 
 All 7,036 COL files begin `COL`; 7,033 use format byte 5 and three Tokyo map models use byte 3.
-The little-endian word at offset `0x08` is 48 in every file, and every span is 16-byte aligned.
-Four opaque count/endpoint pairs satisfy exact corpus-wide formulas with respective strides
-64, 48, 16, and 16 bytes. The endpoint at `0x2C` closes the described table region but is not a
-file-length field: every sample has additional nonzero data. `InspectColContainer` validates and
-publishes these ranges without naming their records or interpreting the remaining payload.
+The semantic contract is documented in `COL.md`. `DecodeColSpatialMesh` converts the confirmed
+node, leaf, triangle, vertex, and triangle-reference tables into fully owned canonical IR while
+omitting opaque primitive words and the nonzero trailing payload. The aggregate native pass decodes
+all 7,036 spans with zero errors: 23,913 source nodes normalize to 21,197 canonical nodes plus 2,716
+empty meshes, alongside 99,193 leaves, 1,327,714 triangles, and 949,762 vertices. The deepest
+observed tree is eight edges and 2,678 spans use a direct leaf root.
 
 All 7,036 VUM files begin `VUMS`. The word at offset `0x58` equals the directory span in 6,989
 files. Forty-seven files have additional nonzero data after that boundary, so this is a primary
@@ -180,8 +181,9 @@ is 16-byte aligned. `InspectVumContainer` preserves those boundaries and the opa
 `0x04` and `0x1C`. It does not decode, execute, or publish VU/VIF instructions. Material tables,
 vertex attributes, indices, and coordinate conversion remain later research.
 
-The native aggregate verifier independently accepts all 7,036 COL, 7,036 VUM, and 15,248 TDX
-spans with zero errors. Its extent totals exactly match this report: COL has 7,036 nonzero tails
+The native aggregate verifier independently accepts and semantically decodes all 7,036 COL spans,
+then passively accepts 7,036 VUM and 15,248 TDX spans, with zero errors. Its extent totals exactly
+match this report: COL has 7,036 nonzero tails
 after the described table region; VUM has 6,989 exact primary boundaries and 47 nonzero tails;
 TDX has 11,253 exact, 3,909 zero-tail, 24 nonzero-tail, and 62 exceeds-input size-word relations.
 
@@ -201,7 +203,7 @@ For the first visible MINSK scene, implement in this order:
 
 1. Span-aware nested HOG reading with verified zero-tail acceptance.
 2. POP `TER:` parsing and name-to-`DATA.HOG` resolution.
-3. COL/VUM headers, then VUM material and geometry packet decoding.
+3. Consume canonical COL spatial meshes, then decode VUM material and render-geometry packets.
 4. TDX version-5 texture upload, starting with 8-bit `0x13`, then 4-bit `0x14` plus CLUT/swizzle.
 5. POP visibility/placement sections needed to assemble and cull cells.
 6. SKM/SKL for characters and weapons.

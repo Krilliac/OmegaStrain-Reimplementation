@@ -14,13 +14,15 @@ Status: complete for the current NTSC-U research baseline.
 ## M1: Content mount and inspection
 
 Status: in progress. Top-level/nested HOG indexing, VFS mounting, script-container inspection,
-asset-family fingerprinting, the POP terrain prefix, the canonical level manifest, and passive
-COL/VUM/TDX descriptors are implemented; semantic scene decoders remain incomplete.
+asset-family fingerprinting, the POP terrain prefix, the canonical level manifest, a semantic COL
+spatial-mesh adapter, and passive VUM/TDX descriptors are implemented; other scene decoders remain
+incomplete.
 
 - Native HOG parser validated against all 273 top-level archives and 6,677 nested spans.
 - Virtual filesystem with physical-directory and HOG mounts.
-- Owned level-manifest IR plus allocation-free COL/VUM/TDX structural descriptors.
-- Native aggregate validation: 18/18 level manifests and 29,320/29,320 descriptor assets.
+- Owned level-manifest and spatial-mesh IR plus allocation-free COL/VUM/TDX structural descriptors.
+- Native aggregate validation: 18/18 level manifests, 7,036/7,036 semantic COL meshes, and all
+  29,320 structural descriptor assets.
 - Inspectors for ELF, scripts, textures, meshes, skeletons, animation, audio, and maps.
 - Synthetic malformed-input tests for every decoder.
 

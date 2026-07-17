@@ -85,15 +85,17 @@ The initial native build targets express the same direction:
 
 - `omega_core`: HOG indexing, VFS, and generic bounded infrastructure;
 - `omega_assets`: canonical owned IR values and decode contracts;
-- `omega_retail_formats`: stateless POP and later COL/VUM/TDX adapters that may depend on the
-  first two targets;
+- `omega_retail_formats`: stateless POP/COL and later VUM/TDX adapters that may depend on the first
+  two targets;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
   orchestration; and
 - `omega_runtime`: launch options and renderer-neutral diagnostic scene values consumed by the
   SDL host.
 
-The initial COL/VUM/TDX adapters are passive scalar descriptors. They validate only proven
-container arithmetic and never expose VU/VIF instructions, palette guesses, or decoded pixels.
+VUM/TDX currently have passive scalar descriptors. COL additionally has a bounded semantic adapter
+that returns neutral owned spatial-mesh IR: source coordinates and topology are preserved while
+winding, collision behavior, transforms, materials, opaque primitive words, and trailing payload
+remain unassigned. None of these adapters exposes VU/VIF instructions or decoded pixel guesses.
 
 Tools may link retail adapters. Renderer and simulation targets must consume canonical assets and
 must not include retail-format headers. A source-include dependency check will turn this convention

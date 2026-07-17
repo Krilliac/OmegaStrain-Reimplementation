@@ -38,8 +38,8 @@ shipping dependencies or execution mechanisms.
    archives: 32,351 entries, zero structural failures. A safe parser/extractor now lives at
    `tools/hog.py`.
 10. Built a pure-native HOG/VFS layer that validates all 6,677 nested spans, resolves all 5,351
-    POP terrain references across 18 level manifests, and passively validates all 29,320
-    COL/VUM/TDX asset spans with zero errors.
+    POP terrain references across 18 level manifests, semantically decodes all 7,036 COL spatial
+    meshes, and passively validates the remaining 22,284 VUM/TDX spans with zero errors.
 11. Added owner-supplied data-root validation and native named-level startup. A headless MINSK
     probe loads 299 canonical manifest cells; the SDL_GPU/D3D12 path renders their explicitly
     synthetic coverage grid for 120 frames and exits without a lingering process.
@@ -64,8 +64,8 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Implement the corpus-proven COL collision/spatial mesh as owned native vertices, triangles,
-   nodes, and leaves, omitting still-unknown primitive words and trailing payload.
+1. Route manifest cell HOGs through `GameDataService` into the new owned COL spatial-mesh IR with a
+   shared level-operation decode budget.
 2. Implement the proven TDX block/palette/storage-plane contract. Preserve source alpha and keep
    RGBA expansion as a separate policy until it has an independent visual checksum.
 3. Trace VUM material and render geometry after collision and texture storage have typed IR.
