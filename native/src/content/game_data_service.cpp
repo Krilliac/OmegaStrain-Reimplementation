@@ -225,7 +225,7 @@ using ArchiveDirectory = std::unordered_map<std::string, const archive::HogEntry
     if (normalized->size() > limits.maximum_string_bytes)
         return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
             "normalized archive name exceeds the decoder string limit"));
-    return normalized;
+    return std::move(*normalized);
 }
 
 [[nodiscard]] asset::DecodeResult<ArchiveDirectory> BuildArchiveDirectory(
