@@ -35,6 +35,7 @@ target_include_directories(omega_assets INTERFACE native/include)
 target_compile_features(omega_assets INTERFACE cxx_std_23)
 
 add_library(omega_retail_formats STATIC
+    native/src/retail/col_spatial_mesh_decoder.cpp
     native/src/retail/container_descriptors.cpp
     native/src/retail/pop_level_manifest_decoder.cpp
 )
@@ -157,6 +158,7 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     add_executable(omega_core_tests
+        native/tests/col_spatial_mesh_decoder_tests.cpp
         native/tests/container_descriptor_tests.cpp
         native/tests/game_data_service_tests.cpp
         native/tests/hog_archive_tests.cpp
