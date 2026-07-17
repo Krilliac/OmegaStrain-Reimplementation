@@ -2,6 +2,7 @@
 
 #include "omega/asset/decode.h"
 #include "omega/asset/level_ir.h"
+#include "omega/asset/level_spatial_ir.h"
 
 #include <cstdint>
 #include <expected>
@@ -53,6 +54,7 @@ struct GameDataServiceConfig
     std::uint64_t maximum_system_config_bytes = 4096;
     std::uint64_t maximum_pop_bytes = 64ULL * 1024ULL * 1024ULL;
     std::uint64_t maximum_data_hog_bytes = 64ULL * 1024ULL * 1024ULL;
+    std::uint64_t maximum_nested_hog_bytes = 64ULL * 1024ULL * 1024ULL;
     asset::DecodeLimits decode_limits;
 };
 
@@ -80,6 +82,12 @@ public:
     // never receives archive views or retail-format storage.
     [[nodiscard]] std::expected<asset::LevelManifestIR, GameDataError> LoadLevelManifest(
         std::string_view level_code) const;
+
+    // [any worker thread after Open(); thread-safe] Resolves the manifest's common archive and
+    // every cell HOG, then returns one owned neutral spatial mesh per terrain cell. Archive objects,
+    // retail offsets, and byte spans remain local to this call.
+    [[nodiscard]] std::expected<asset::LevelSpatialIR, GameDataError> LoadLevelSpatial(
+        const asset::LevelManifestIR& manifest) const;
 
 private:
     struct Impl;

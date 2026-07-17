@@ -116,7 +116,7 @@ add_executable(omega_tool
     native/apps/omega_tool/main.cpp
     native/apps/omega_tool/pop_commands.cpp
 )
-target_link_libraries(omega_tool PRIVATE omega_core omega_retail_formats)
+target_link_libraries(omega_tool PRIVATE omega_core omega_retail_formats omega_content)
 
 if(MSVC)
     target_compile_options(omega_tool PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
@@ -190,6 +190,8 @@ if(BUILD_TESTING)
         COMMAND omega_tool pop-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_level_manifest_tree
         COMMAND omega_tool level-manifest-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_rejects_empty_level_spatial_tree
+        COMMAND omega_tool level-spatial-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_asset_metadata_tree
         COMMAND omega_tool asset-metadata-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     set_tests_properties(
@@ -197,6 +199,7 @@ if(BUILD_TESTING)
         omega_tool_rejects_empty_nested_hog_tree
         omega_tool_rejects_empty_pop_tree
         omega_tool_rejects_empty_level_manifest_tree
+        omega_tool_rejects_empty_level_spatial_tree
         omega_tool_rejects_empty_asset_metadata_tree
         PROPERTIES WILL_FAIL TRUE
     )

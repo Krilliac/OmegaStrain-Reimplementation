@@ -2,6 +2,7 @@
 
 #include "omega/archive/hog_archive.h"
 #include "omega/asset/pop_terrain_index.h"
+#include "omega/content/game_data_service.h"
 #include "omega/retail/pop_level_manifest_decoder.h"
 
 #include <algorithm>
@@ -421,5 +422,311 @@ int LevelManifestVerifyTree(const std::filesystem::path& root)
     if (file_count == 0)
         std::cerr << "no POP files were found\n";
     return error_count == 0 && file_count != 0 ? 0 : 2;
+}
+
+namespace
+{
+struct LevelDiscovery
+{
+    std::vector<std::string> codes;
+    std::vector<std::string> errors;
+};
+
+struct LevelSpatialStats
+{
+    std::uint64_t valid_levels = 0;
+    std::uint64_t terrain_cells = 0;
+    std::uint64_t spatial_meshes = 0;
+    std::uint64_t nodes = 0;
+    std::uint64_t leaves = 0;
+    std::uint64_t vertices = 0;
+    std::uint64_t triangles = 0;
+    std::uint64_t triangle_references = 0;
+    std::uint64_t empty_meshes = 0;
+};
+
+[[nodiscard]] std::expected<std::string, std::string> NormalizeDiscoveredLevelCode(
+    const std::filesystem::path& directory)
+{
+    const std::string name = directory.filename().string();
+    if (name.empty() || name.size() > 32U)
+        return std::unexpected("invalid-level-code");
+
+    std::string normalized;
+    normalized.reserve(name.size());
+    for (const unsigned char value : name)
+    {
+        const bool is_upper = value >= static_cast<unsigned char>('A') &&
+                              value <= static_cast<unsigned char>('Z');
+        const bool is_lower = value >= static_cast<unsigned char>('a') &&
+                              value <= static_cast<unsigned char>('z');
+        const bool is_digit = value >= static_cast<unsigned char>('0') &&
+                              value <= static_cast<unsigned char>('9');
+        if (!is_upper && !is_lower && !is_digit)
+            return std::unexpected("invalid-level-code");
+        normalized.push_back(static_cast<char>(is_lower ? value - ('a' - 'A') : value));
+    }
+    return normalized;
+}
+
+[[nodiscard]] std::expected<bool, std::string> HasDataPop(
+    const std::filesystem::path& directory, std::uint64_t& remaining_sibling_entries)
+{
+    bool found = false;
+    std::uint64_t visited = 0;
+    std::error_code error;
+    std::filesystem::directory_iterator iterator(directory, error), end;
+    while (iterator != end && !error)
+    {
+        if (visited >= kMaximumSiblingEntriesPerDirectory)
+            return std::unexpected("directory-entry-limit");
+        if (remaining_sibling_entries == 0)
+            return std::unexpected("total-directory-entry-limit");
+        ++visited;
+        --remaining_sibling_entries;
+
+        if (EqualsAsciiCaseInsensitive(iterator->path().filename().string(), "DATA.POP"))
+        {
+            const auto status = iterator->symlink_status(error);
+            if (error)
+                break;
+            if (std::filesystem::is_symlink(status))
+                return std::unexpected("symbolic-link-data-pop");
+            if (!std::filesystem::is_regular_file(status))
+                return std::unexpected("non-file-data-pop");
+            if (found)
+                return std::unexpected("duplicate-data-pop");
+            found = true;
+        }
+        iterator.increment(error);
+    }
+    if (error)
+        return std::unexpected("directory-enumeration-failed");
+    return found;
+}
+
+[[nodiscard]] std::expected<LevelDiscovery, std::string> DiscoverLevelCodes(
+    const std::filesystem::path& root)
+{
+    std::error_code error;
+    const auto root_status = std::filesystem::symlink_status(root, error);
+    if (error || std::filesystem::is_symlink(root_status) ||
+        !std::filesystem::is_directory(root_status))
+        return std::unexpected("unsafe-or-unreadable-root");
+
+    std::optional<std::filesystem::path> game_data;
+    std::uint64_t root_entries = 0;
+    std::filesystem::directory_iterator root_iterator(root, error), end;
+    while (root_iterator != end && !error)
+    {
+        if (root_entries >= kMaximumSiblingEntriesPerDirectory)
+            return std::unexpected("root-entry-limit");
+        ++root_entries;
+        if (EqualsAsciiCaseInsensitive(
+                root_iterator->path().filename().string(), "GAMEDATA"))
+        {
+            const auto status = root_iterator->symlink_status(error);
+            if (error)
+                break;
+            if (std::filesystem::is_symlink(status) ||
+                !std::filesystem::is_directory(status))
+                return std::unexpected("unsafe-game-data-directory");
+            if (game_data)
+                return std::unexpected("duplicate-game-data-directory");
+            game_data = root_iterator->path();
+        }
+        root_iterator.increment(error);
+    }
+    if (error)
+        return std::unexpected("root-enumeration-failed");
+    if (!game_data)
+        return std::unexpected("missing-game-data-directory");
+
+    LevelDiscovery discovery;
+    std::unordered_set<std::string> seen_codes;
+    std::uint64_t game_data_entries = 0;
+    std::uint64_t remaining_sibling_entries = kMaximumSiblingEntriesTotal;
+    std::filesystem::directory_iterator level_iterator(*game_data, error);
+    while (level_iterator != end && !error)
+    {
+        if (game_data_entries >= kMaximumCachedLevelDirectories)
+            return std::unexpected("level-directory-limit");
+        ++game_data_entries;
+
+        const auto status = level_iterator->symlink_status(error);
+        if (error)
+            break;
+        if (!std::filesystem::is_symlink(status) &&
+            std::filesystem::is_directory(status))
+        {
+            auto has_pop = HasDataPop(level_iterator->path(), remaining_sibling_entries);
+            if (!has_pop)
+            {
+                auto code = NormalizeDiscoveredLevelCode(level_iterator->path());
+                discovery.errors.push_back(code
+                        ? "level " + *code + ": discover: " + has_pop.error()
+                        : "game-data: discover: " + has_pop.error());
+            }
+            else if (*has_pop)
+            {
+                auto code = NormalizeDiscoveredLevelCode(level_iterator->path());
+                if (!code)
+                {
+                    discovery.errors.emplace_back(
+                        "game-data: discover: invalid-level-code");
+                }
+                else if (!seen_codes.emplace(*code).second)
+                {
+                    discovery.errors.push_back(
+                        "level " + *code + ": discover: duplicate-level-code");
+                }
+                else
+                {
+                    discovery.codes.push_back(std::move(*code));
+                }
+            }
+        }
+        level_iterator.increment(error);
+    }
+    if (error)
+        return std::unexpected("level-directory-enumeration-failed");
+
+    std::ranges::sort(discovery.codes);
+    std::ranges::sort(discovery.errors);
+    return discovery;
+}
+
+[[nodiscard]] std::string_view DecodeErrorCodeName(
+    const asset::DecodeErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case asset::DecodeErrorCode::Truncated:
+        return "truncated";
+    case asset::DecodeErrorCode::Malformed:
+        return "malformed";
+    case asset::DecodeErrorCode::Overflow:
+        return "overflow";
+    case asset::DecodeErrorCode::LimitExceeded:
+        return "limit-exceeded";
+    case asset::DecodeErrorCode::UnsupportedVariant:
+        return "unsupported-variant";
+    case asset::DecodeErrorCode::InvalidReference:
+        return "invalid-reference";
+    case asset::DecodeErrorCode::DuplicateReference:
+        return "duplicate-reference";
+    }
+    return "unknown";
+}
+
+void PrintGameDataError(const std::string_view level, const std::string_view stage,
+    const content::GameDataError& error)
+{
+    if (!level.empty())
+        std::cerr << "level " << level << ": ";
+    else
+        std::cerr << "game-data: ";
+    std::cerr << stage << ": " << content::GameDataErrorCodeName(error.code);
+    if (error.decode_error)
+        std::cerr << ':' << DecodeErrorCodeName(error.decode_error->code);
+    std::cerr << '\n';
+}
+
+[[nodiscard]] bool RecordLevelSpatialStats(const asset::LevelManifestIR& manifest,
+    const asset::LevelSpatialIR& spatial, LevelSpatialStats& aggregate)
+{
+    LevelSpatialStats next = aggregate;
+    if (!Add(next.valid_levels, 1U) ||
+        !Add(next.terrain_cells, manifest.terrain_cells.size()) ||
+        !Add(next.spatial_meshes, spatial.terrain_cells.size()))
+        return false;
+
+    for (const auto& mesh : spatial.terrain_cells)
+    {
+        if (!Add(next.nodes, mesh.nodes.size()) ||
+            !Add(next.leaves, mesh.leaves.size()) ||
+            !Add(next.vertices, mesh.vertices.size()) ||
+            !Add(next.triangles, mesh.triangles.size()) ||
+            !Add(next.triangle_references, mesh.leaf_triangle_references.size()) ||
+            (!mesh.root && !Add(next.empty_meshes, 1U)))
+            return false;
+    }
+    aggregate = next;
+    return true;
+}
+} // namespace
+
+int LevelSpatialVerifyTree(const std::filesystem::path& root)
+{
+    auto discovery = DiscoverLevelCodes(root);
+    if (!discovery)
+    {
+        std::cerr << "game-data: discover: " << discovery.error() << '\n';
+        std::cout << "{\"levels\":0,\"valid\":0,\"errors\":1,"
+                     "\"terrain_cells\":0,\"spatial_meshes\":0,\"nodes\":0,"
+                     "\"leaves\":0,\"vertices\":0,\"triangles\":0,"
+                     "\"triangle_references\":0,\"empty_meshes\":0}\n";
+        return 1;
+    }
+
+    std::uint64_t error_count = discovery->errors.size();
+    for (const auto& discovery_error : discovery->errors)
+        std::cerr << discovery_error << '\n';
+
+    LevelSpatialStats stats;
+    auto service = content::GameDataService::Open(
+        content::GameDataServiceConfig{.root = root});
+    if (!service)
+    {
+        ++error_count;
+        PrintGameDataError({}, "open", service.error());
+    }
+    else
+    {
+        for (const auto& code : discovery->codes)
+        {
+            auto manifest = service->LoadLevelManifest(code);
+            if (!manifest)
+            {
+                ++error_count;
+                PrintGameDataError(code, "manifest", manifest.error());
+                continue;
+            }
+            auto spatial = service->LoadLevelSpatial(*manifest);
+            if (!spatial)
+            {
+                ++error_count;
+                PrintGameDataError(code, "spatial", spatial.error());
+                continue;
+            }
+            if (spatial->terrain_cells.size() != manifest->terrain_cells.size())
+            {
+                ++error_count;
+                std::cerr << "level " << code
+                          << ": spatial: terrain-cell-count-mismatch\n";
+                continue;
+            }
+            if (!RecordLevelSpatialStats(*manifest, *spatial, stats))
+            {
+                ++error_count;
+                std::cerr << "level " << code << ": aggregate: counter-overflow\n";
+                break;
+            }
+        }
+    }
+
+    std::cout << std::format(
+        "{{\"levels\":{},\"valid\":{},\"errors\":{},\"terrain_cells\":{},"
+        "\"spatial_meshes\":{},\"nodes\":{},\"leaves\":{},\"vertices\":{},"
+        "\"triangles\":{},\"triangle_references\":{},\"empty_meshes\":{}}}\n",
+        discovery->codes.size(), stats.valid_levels, error_count, stats.terrain_cells,
+        stats.spatial_meshes, stats.nodes, stats.leaves, stats.vertices, stats.triangles,
+        stats.triangle_references, stats.empty_meshes);
+    if (discovery->codes.empty())
+        std::cerr << "no level DATA.POP files were found\n";
+    return error_count == 0 && !discovery->codes.empty() &&
+            stats.valid_levels == discovery->codes.size()
+        ? 0
+        : 2;
 }
 } // namespace omega::tool

@@ -19,7 +19,9 @@ struct DecodeLimits
     std::uint64_t maximum_scratch_bytes = 256ULL * 1024ULL * 1024ULL;
     std::uint64_t maximum_items = 1ULL << 20U;
     std::uint32_t maximum_string_bytes = 4096;
-    std::uint32_t maximum_nesting_depth = 8;
+    // Combined container edges plus semantic tree edges, with each decoder root at depth zero.
+    // One cell HOG edge above the observed maximum eight-edge COL tree requires nine by default.
+    std::uint32_t maximum_nesting_depth = 9;
 };
 
 enum class DecodeErrorCode

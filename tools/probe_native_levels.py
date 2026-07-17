@@ -11,7 +11,9 @@ from pathlib import Path
 
 
 MAX_LEVEL_DIRECTORIES = 4096
-LEVEL_SUMMARY = re.compile(r"OpenOmega level: code=([A-Z0-9]+) terrain_cells=(\d+)\b")
+LEVEL_SUMMARY = re.compile(
+    r"OpenOmega level: code=([A-Z0-9]+) terrain_cells=(\d+) spatial_meshes=(\d+)\b"
+)
 
 
 def discover_levels(root: Path) -> list[str]:
@@ -56,6 +58,7 @@ def main() -> int:
 
     valid = 0
     terrain_cells = 0
+    spatial_meshes = 0
     errors: list[dict[str, object]] = []
     for level in levels:
         try:
@@ -76,7 +79,12 @@ def main() -> int:
             continue
 
         match = LEVEL_SUMMARY.search(completed.stdout)
-        if completed.returncode != 0 or match is None or match.group(1) != level.upper():
+        if (
+            completed.returncode != 0
+            or match is None
+            or match.group(1) != level.upper()
+            or match.group(2) != match.group(3)
+        ):
             errors.append(
                 {
                     "level": level,
@@ -87,6 +95,7 @@ def main() -> int:
             continue
         valid += 1
         terrain_cells += int(match.group(2))
+        spatial_meshes += int(match.group(3))
 
     print(
         json.dumps(
@@ -94,6 +103,7 @@ def main() -> int:
                 "levels": len(levels),
                 "valid": valid,
                 "terrain_cells": terrain_cells,
+                "spatial_meshes": spatial_meshes,
                 "errors": errors,
             },
             separators=(",", ":"),
