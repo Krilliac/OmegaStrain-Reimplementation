@@ -1,6 +1,8 @@
 name: Native runtime bug
 description: Report a reproducible bug without uploading proprietary data.
 title: "[Bug]: "
+labels:
+  - native-runtime
 body:
   - type: markdown
     attributes:

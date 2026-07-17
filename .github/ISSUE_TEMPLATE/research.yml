@@ -1,6 +1,9 @@
 name: Research finding
 description: Submit reproducible metadata or behavioral evidence without retail payloads.
 title: "[Research]: "
+labels:
+  - research
+  - clean-room-review
 body:
   - type: markdown
     attributes:

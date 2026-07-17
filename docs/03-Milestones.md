@@ -4,6 +4,8 @@ Each milestone ends with an executable regression, not only a research note.
 
 ## M0: Reproducible laboratory
 
+Status: complete for the current NTSC-U research baseline.
+
 - Current PCSX2 source build, isolated BIOS/disc data root, known game hash, boot log.
 - Proprietary-data ignore gate and clean-room method.
 - Evidence ledger, native CMake build, unit-test executable, and corpus-safe tooling.
@@ -11,7 +13,11 @@ Each milestone ends with an executable regression, not only a research note.
 
 ## M1: Content mount and inspection
 
-- Native HOG parser validated against all 273 archives.
+Status: in progress. Top-level/nested HOG indexing, VFS mounting, script-container inspection,
+asset-family fingerprinting, and the POP terrain prefix are validated; semantic scene decoders
+remain incomplete.
+
+- Native HOG parser validated against all 273 top-level archives and 6,677 nested spans.
 - Virtual filesystem with physical-directory and HOG mounts.
 - Inspectors for ELF, scripts, textures, meshes, skeletons, animation, audio, and maps.
 - Synthetic malformed-input tests for every decoder.

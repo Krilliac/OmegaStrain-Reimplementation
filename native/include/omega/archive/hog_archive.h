@@ -13,6 +13,12 @@ namespace omega::archive
 {
 inline constexpr std::uint64_t kDefaultMaximumArchiveLoadBytes = 512ULL * 1024ULL * 1024ULL;
 
+struct HogFileRange
+{
+    std::uint64_t offset = 0;
+    std::uint64_t size = 0;
+};
+
 struct HogHeader
 {
     std::uint32_t tag = 0;
@@ -37,31 +43,57 @@ public:
     [[nodiscard]] static std::expected<HogIndex, std::string> Open(
         const std::filesystem::path& path);
 
+    // [any thread] Indexes one independently bounded nested archive span without loading its
+    // payload. Entry offsets remain relative to the start of the nested span. Only an all-zero
+    // tail between logical_size() and archive_size() is accepted.
+    [[nodiscard]] static std::expected<HogIndex, std::string> OpenRange(
+        const std::filesystem::path& path,
+        HogFileRange range,
+        std::uint64_t maximum_bytes = kDefaultMaximumArchiveLoadBytes);
+
     // [any thread after publication; immutable]
     [[nodiscard]] const HogHeader& header() const noexcept { return header_; }
     [[nodiscard]] std::span<const HogEntry> entries() const noexcept { return entries_; }
     [[nodiscard]] std::uint64_t archive_size() const noexcept { return archive_size_; }
+    [[nodiscard]] std::uint64_t logical_size() const noexcept { return logical_size_; }
+    [[nodiscard]] std::uint64_t padding_size() const noexcept
+    {
+        return archive_size_ - logical_size_;
+    }
     [[nodiscard]] const HogEntry* find(std::string_view name) const noexcept;
 
 private:
     HogHeader header_;
     std::vector<HogEntry> entries_;
     std::uint64_t archive_size_ = 0;
+    std::uint64_t logical_size_ = 0;
 };
 
 class HogArchive final
 {
 public:
-    // [any thread] Produces an independent immutable archive object using a bounded read.
+    // [any thread] Produces an independent immutable top-level archive using a bounded read.
+    // The file must end exactly at the archive's terminal payload offset.
     [[nodiscard]] static std::expected<HogArchive, std::string> Open(
         const std::filesystem::path& path,
         std::uint64_t maximum_bytes = kDefaultMaximumArchiveLoadBytes);
 
-    // [any thread] Takes ownership of the supplied bytes and validates the complete directory.
-    // Nested HOG spans may contain all-zero sector padding after their logical end; non-zero
-    // trailing bytes are always rejected.
+    // [any thread] Reads and owns exactly one bounded nested archive range. Bytes outside the
+    // range are never read. Only an all-zero tail inside the range is accepted.
+    [[nodiscard]] static std::expected<HogArchive, std::string> OpenRange(
+        const std::filesystem::path& path,
+        HogFileRange range,
+        std::uint64_t maximum_bytes = kDefaultMaximumArchiveLoadBytes);
+
+    // [any thread] Takes ownership of a complete top-level archive. Trailing bytes are rejected.
     [[nodiscard]] static std::expected<HogArchive, std::string> FromBytes(
         std::vector<std::byte> bytes);
+
+    // [any thread] Copies and owns one caller-bounded nested archive span. An all-zero tail is
+    // accepted; non-zero trailing bytes are rejected.
+    [[nodiscard]] static std::expected<HogArchive, std::string> FromSpan(
+        std::span<const std::byte> bytes,
+        std::uint64_t maximum_bytes = kDefaultMaximumArchiveLoadBytes);
 
     // [any thread after publication; immutable]
     [[nodiscard]] const HogHeader& header() const noexcept { return header_; }
@@ -76,6 +108,16 @@ public:
     [[nodiscard]] const HogEntry* find(std::string_view name) const noexcept;
 
 private:
+    enum class TrailingDataPolicy
+    {
+        ExactEnd,
+        ZeroPadding,
+    };
+
+    [[nodiscard]] static std::expected<HogArchive, std::string> FromOwnedBytes(
+        std::vector<std::byte> bytes,
+        TrailingDataPolicy trailing_policy);
+
     HogHeader header_;
     std::vector<HogEntry> entries_;
     std::vector<std::byte> storage_;

@@ -19,6 +19,7 @@ option(OMEGA_BUILD_RUNTIME "Build the OpenOmega native host shell" ON)
 
 add_library(omega_core STATIC
     native/src/archive/hog_archive.cpp
+    native/src/asset/pop_terrain_index.cpp
     native/src/vfs/virtual_file_system.cpp
 )
 
@@ -44,6 +45,7 @@ endif()
 
 add_executable(omega_tool
     native/apps/omega_tool/main.cpp
+    native/apps/omega_tool/pop_commands.cpp
 )
 target_link_libraries(omega_tool PRIVATE omega_core)
 
@@ -87,6 +89,7 @@ include(CTest)
 if(BUILD_TESTING)
     add_executable(omega_core_tests
         native/tests/hog_archive_tests.cpp
+        native/tests/pop_terrain_index_tests.cpp
         native/tests/virtual_file_system_tests.cpp
     )
     target_link_libraries(omega_core_tests PRIVATE omega_core)
@@ -96,4 +99,18 @@ if(BUILD_TESTING)
         target_compile_options(omega_core_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
     add_test(NAME omega_core_tests COMMAND omega_core_tests)
+
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_rejects_empty_hog_tree
+        COMMAND omega_tool hog-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_rejects_empty_nested_hog_tree
+        COMMAND omega_tool hog-verify-nested-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_rejects_empty_pop_tree
+        COMMAND omega_tool pop-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    set_tests_properties(
+        omega_tool_rejects_empty_hog_tree
+        omega_tool_rejects_empty_nested_hog_tree
+        omega_tool_rejects_empty_pop_tree
+        PROPERTIES WILL_FAIL TRUE
+    )
 endif()
