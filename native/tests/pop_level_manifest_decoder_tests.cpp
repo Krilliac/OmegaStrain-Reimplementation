@@ -1,5 +1,7 @@
 #include "omega/retail/pop_level_manifest_decoder.h"
 
+#include "omega/asset/pop_terrain_index.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -170,6 +172,29 @@ int PopLevelManifestDecoderFailureCount()
                    MakePop(), exact_entries, exact_source, exact_output_limits),
         omega::asset::DecodeErrorCode::LimitExceeded,
         "one byte below the complete manifest budget fails closed");
+
+    auto exact_scratch_limits = omega::asset::DecodeLimits{};
+    const auto scratch_entries = MakeEntries();
+    constexpr std::uint64_t record_count = 2;
+    const std::uint64_t exact_scratch_bytes =
+        record_count * (sizeof(omega::asset::PopTerrainRecord) + 2U * sizeof(void*)) +
+        record_count * sizeof(const std::string*) +
+        scratch_entries.size() *
+            (sizeof(std::string) + sizeof(const omega::archive::HogEntry*) +
+                5U * sizeof(void*)) +
+        scratch_entries[0].name.size() + scratch_entries[1].name.size() +
+        exact_scratch_limits.maximum_string_bytes +
+        std::string_view("CELL_A.HOG").size() + std::string_view("cell_b.hog").size();
+    exact_scratch_limits.maximum_scratch_bytes = exact_scratch_bytes;
+    Check(omega::retail::DecodePopLevelManifest(
+              MakePop(), scratch_entries, MakeSource(), exact_scratch_limits)
+              .has_value(),
+        "exact parser, resolution, and directory scratch budget succeeds");
+    --exact_scratch_limits.maximum_scratch_bytes;
+    CheckError(omega::retail::DecodePopLevelManifest(
+                   MakePop(), scratch_entries, MakeSource(), exact_scratch_limits),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "one byte below the complete scratch budget fails closed");
 
     auto maximum_depth_source = MakeSource();
     maximum_depth_source.hog_entries.assign(7, "NESTED.HOG");
