@@ -79,6 +79,7 @@ int PopTerrainIndexFailureCount();
 int PopLevelManifestDecoderFailureCount();
 int ContainerDescriptorFailureCount();
 int ColSpatialMeshDecoderFailureCount();
+int TdxTextureStorageDecoderFailureCount();
 int GameDataServiceFailureCount();
 int LaunchOptionsFailureCount();
 int ManifestDebugImageFailureCount();
@@ -294,6 +295,7 @@ int main()
     failures += PopLevelManifestDecoderFailureCount();
     failures += ContainerDescriptorFailureCount();
     failures += ColSpatialMeshDecoderFailureCount();
+    failures += TdxTextureStorageDecoderFailureCount();
     failures += GameDataServiceFailureCount();
     failures += LaunchOptionsFailureCount();
     failures += ManifestDebugImageFailureCount();

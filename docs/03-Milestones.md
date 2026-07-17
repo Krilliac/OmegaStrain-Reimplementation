@@ -15,16 +15,19 @@ Status: complete for the current NTSC-U research baseline.
 
 Status: in progress. Top-level/nested HOG indexing, VFS mounting, script-container inspection,
 asset-family fingerprinting, the POP terrain prefix, the canonical level manifest, a semantic COL
-spatial-mesh adapter, shared-budget level-spatial orchestration, and passive VUM/TDX descriptors are
-implemented; other scene decoders remain incomplete.
+spatial-mesh adapter, shared-budget level-spatial orchestration, a semantic TDX storage adapter, and
+the passive VUM descriptor are implemented; other scene decoders remain incomplete.
 
 - Native HOG parser validated against all 273 top-level archives and 6,677 nested spans.
 - Virtual filesystem with physical-directory and HOG mounts.
-- Owned level-manifest and spatial-mesh IR plus allocation-free COL/VUM/TDX structural descriptors.
+- Owned level-manifest, spatial-mesh, and texture-storage IR plus allocation-free COL/VUM/TDX
+  structural descriptors.
 - Native aggregate validation: 18/18 level manifests, 7,036/7,036 semantic COL meshes, and all
   29,320 structural descriptor assets.
 - GameDataService aggregate validation: 5,351/5,351 manifest cells load as owned spatial meshes,
   and all 18 headless startup probes preserve manifest/spatial cardinality.
+- TDX aggregate validation: 15,248/15,248 textures normalize to 15,442 owned blocks and 17,960
+  primary planes, including 4,112 duplicate-proven implicit zero bytes, with zero errors.
 - Inspectors for ELF, scripts, textures, meshes, skeletons, animation, audio, and maps.
 - Synthetic malformed-input tests for every decoder.
 
@@ -42,9 +45,10 @@ remain incomplete.
 
 ## M3: First level scene
 
-Status: in progress. Native `--level=MINSK` selection, canonical manifest loading, and passive
-spatial-tree/triangle loading are complete; the current grid is diagnostic only. Render geometry,
-textures, materials, cameras, placements, transforms, and visibility remain incomplete.
+Status: in progress. Native `--level=MINSK` selection, canonical manifest/spatial loading, and
+renderer-neutral texture storage decoding are complete; the current grid is diagnostic only.
+VUM render geometry, display-ready texture expansion, materials, cameras, placements, transforms,
+and visibility remain incomplete.
 
 - Decode and render MINSK geometry, textures, materials, cameras, and static objects.
 - Match coordinate system, transforms, visibility, and representative frames against PCSX2.

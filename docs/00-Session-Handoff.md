@@ -39,7 +39,8 @@ shipping dependencies or execution mechanisms.
    `tools/hog.py`.
 10. Built a pure-native HOG/VFS layer that validates all 6,677 nested spans, resolves all 5,351
     POP terrain references across 18 level manifests, semantically decodes all 7,036 COL spatial
-    meshes, and passively validates the remaining 22,284 VUM/TDX spans with zero errors.
+    meshes and all 15,248 TDX storage assets, and passively validates 7,036 VUM spans with zero
+    errors.
 11. Added owner-supplied data-root validation and native named-level startup. A headless MINSK
     probe loads 299 canonical manifest cells; the SDL_GPU/D3D12 path renders their explicitly
     synthetic coverage grid for 120 frames and exits without a lingering process.
@@ -48,6 +49,11 @@ shipping dependencies or execution mechanisms.
     zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices, 1,239,980 triangles and
     references, and 2,137 normalized empty meshes. Headless startup independently reports matching
     manifest/spatial cardinality for all 18 levels.
+13. Corrected the TDX counted extent to `64 + block_count * block_stride` and added an owned
+    storage-plane adapter. It preserves source-order blocks, transfer planes, palette channel
+    bytes, and packed sample families without claiming display-ready pixels. Aggregate verification
+    covers 15,248 textures, 15,442 blocks, 17,960 primary planes, and 4,112 duplicate-proven
+    implicit zero bytes with zero errors.
 
 ## Disc observations
 
@@ -69,9 +75,9 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Implement the proven TDX block/palette/storage-plane contract. Preserve source alpha and keep
-   RGBA expansion as a separate policy until it has an independent visual checksum.
-2. Trace VUM material and render geometry after collision and texture storage have typed IR.
+1. Trace VUM material and render geometry now that collision and texture storage have typed IR.
+2. Validate TDX swizzle, nibble order, palette permutation, and channel expansion independently
+   before producing display-ready pixels or GPU uploads.
 3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
 4. Add bounded SKM/SKL/SKA descriptors before actor, skeleton, or animation semantics.
 5. Capture PS Rewired network behavior separately before designing any replacement service.

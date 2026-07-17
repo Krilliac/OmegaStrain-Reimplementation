@@ -92,11 +92,16 @@ it equals `max(2, width / 64)` for the 4/8-bit families and `max(1, width / 64)`
 families in every file. For 13,472 files, `storage_unit_word * 256` equals
 `width * height * bit_depth / 8`; this remains a correlation rather than a pixel-layout claim.
 
-The word at offset `0x38`, plus the 64-byte prefix, reaches either the exact asset end or a zero
-tail in 15,162 files. It exceeds the directory span in 62 files and is followed by additional
-nonzero data in 24. `InspectTdxContainer` reports all four relations but exposes a bounded primary
-region only for exact or zero-tail cases. It does not treat the word as a universal payload length.
-Palette layout, swizzle, mip/animation blocks, alpha, and pixel decoding remain unimplemented.
+The word at `0x22` is a block count and the word at `0x38` is the fixed block stride. The complete
+counted extent is `64 + block_count * block_stride`: 11,277 files are exact, 3,909 have an all-zero
+tail, and 62 end inside their final primary plane. The previous 24-file nonzero-tail class was an
+artifact of measuring only one stride in multi-block assets.
+
+The native storage adapter owns source-order blocks, transfer planes, and four-byte palette entries
+without assigning pixel-layout semantics. It normalizes the 62 short spans only under the narrow
+duplicate-proven all-zero suffix contract documented in `analysis/formats/TDX.md`. Swizzle, nibble
+order, palette permutation, block purpose, channel meaning, alpha conversion, and display-ready
+pixel expansion remain unimplemented.
 
 ### SKM mesh
 
@@ -182,10 +187,12 @@ is 16-byte aligned. `InspectVumContainer` preserves those boundaries and the opa
 vertex attributes, indices, and coordinate conversion remain later research.
 
 The native aggregate verifier independently accepts and semantically decodes all 7,036 COL spans,
-then passively accepts 7,036 VUM and 15,248 TDX spans, with zero errors. Its extent totals exactly
+passively accepts 7,036 VUM spans, and semantically decodes 15,248 TDX spans, with zero errors. Its
+extent totals exactly
 match this report: COL has 7,036 nonzero tails
 after the described table region; VUM has 6,989 exact primary boundaries and 47 nonzero tails;
-TDX has 11,253 exact, 3,909 zero-tail, 24 nonzero-tail, and 62 exceeds-input size-word relations.
+TDX has 11,277 exact, 3,909 zero-tail, zero nonzero-tail, and 62 duplicate-proven implicit-zero
+suffix relations after applying the full counted-block extent.
 
 ### Wrappers and compression check
 
@@ -204,7 +211,7 @@ For the first visible MINSK scene, implement in this order:
 1. Span-aware nested HOG reading with verified zero-tail acceptance.
 2. POP `TER:` parsing and name-to-`DATA.HOG` resolution.
 3. Consume canonical COL spatial meshes, then decode VUM material and render-geometry packets.
-4. TDX version-5 texture upload, starting with 8-bit `0x13`, then 4-bit `0x14` plus CLUT/swizzle.
+4. Consume canonical TDX storage through a separately validated pixel-expansion policy.
 5. POP visibility/placement sections needed to assemble and cull cells.
 6. SKM/SKL for characters and weapons.
 7. PAR effects, then VAG audio and LPD lip curves.

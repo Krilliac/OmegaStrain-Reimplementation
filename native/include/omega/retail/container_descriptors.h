@@ -63,12 +63,15 @@ struct TdxContainerDescriptor
     std::uint16_t observed_storage_format_code = 0;
     std::uint16_t observed_width_unit_word = 0;
     std::uint16_t observed_storage_unit_word = 0;
-    std::uint32_t observed_primary_size_word = 0;
+    std::uint16_t block_count = 0;
+    std::uint16_t primary_plane_count = 0;
+    std::uint16_t palette_plane_count = 0;
+    std::uint32_t block_stride = 0;
     bool storage_word_matches_area_bit_formula = false;
-    ObservedExtent primary_extent;
-    // Present only when the size field reaches the input end or an all-zero tail. Pixel, palette,
-    // swizzle, mip, animation, and alpha semantics remain deliberately uninterpreted.
-    std::optional<ObservedByteRange> bounded_primary_region;
+    ObservedExtent counted_blocks_extent;
+    // Present only when all counted fixed-stride blocks reach the input end or an all-zero tail.
+    // Pixel, palette, swizzle, mip, animation, and channel semantics remain uninterpreted here.
+    std::optional<ObservedByteRange> bounded_blocks_region;
 };
 
 // [any worker thread; reentrant] Passive, allocation-free structural inspectors. They retain no

@@ -282,17 +282,19 @@ asset::DecodeResult<TdxContainerDescriptor> InspectTdxContainer(
             return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
                 "TDX opaque layout signature is not supported", layout_word_offsets[index]));
     }
-    constexpr std::array<std::uint16_t, 9> observed_word_0x22_values{
+    constexpr std::array<std::uint16_t, 9> observed_block_counts{
         1, 2, 3, 4, 6, 8, 10, 11, 19};
-    const std::uint16_t word_0x22 = ReadU16(bytes, 34);
-    if (std::ranges::find(observed_word_0x22_values, word_0x22) ==
-        observed_word_0x22_values.end())
+    const std::uint16_t block_count = ReadU16(bytes, 34);
+    if (std::ranges::find(observed_block_counts, block_count) ==
+        observed_block_counts.end())
         return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-            "TDX opaque word at 0x22 is outside the observed family", 34));
-    const std::uint16_t word_0x24 = ReadU16(bytes, 36);
-    if (word_0x24 < 1 || word_0x24 > 4 || ReadU16(bytes, 52) != 128U * word_0x24)
+            "TDX block count is outside the observed family", 34));
+    const std::uint16_t primary_plane_count = ReadU16(bytes, 36);
+    if (primary_plane_count < 1 || primary_plane_count > 4 ||
+        ReadU16(bytes, 52) != 128U * primary_plane_count)
         return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-            "TDX opaque 0x24/0x34 word relation is not supported", 36));
+            "TDX primary-plane count and descriptor extent are not supported", 36));
+    const std::uint16_t palette_plane_count = ReadU16(bytes, 38);
     const std::uint16_t width_unit_word = ReadU16(bytes, 12);
     const std::uint16_t minimum_width_units = bits_per_pixel <= 8 ? 2 : 1;
     const std::uint16_t expected_width_units =
@@ -312,15 +314,23 @@ asset::DecodeResult<TdxContainerDescriptor> InspectTdxContainer(
     }
 
     const std::uint16_t storage_unit_word = ReadU16(bytes, 14);
-    const std::uint32_t primary_size_word = ReadU32(bytes, 56);
-    const std::uint64_t observed_total_bytes = kTdxHeaderBytes + primary_size_word;
+    const std::uint32_t block_stride = ReadU32(bytes, 56);
+    if (block_stride < 32U || block_stride % 16U != 0)
+        return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
+            "TDX block stride is outside the observed aligned family", 56));
+    std::uint64_t counted_block_bytes = 0;
+    std::uint64_t observed_total_bytes = 0;
+    if (!Multiply(block_count, block_stride, counted_block_bytes) ||
+        !Add(kTdxHeaderBytes, counted_block_bytes, observed_total_bytes))
+        return std::unexpected(Error(
+            asset::DecodeErrorCode::Overflow, "TDX counted block extent overflows", 56));
     const ObservedExtent extent = ClassifyExtent(bytes, observed_total_bytes);
     std::optional<ObservedByteRange> bounded_region;
     if (extent.relation == ObservedExtentRelation::Exact ||
         extent.relation == ObservedExtentRelation::ZeroPaddedTail)
         bounded_region = ObservedByteRange{
             .offset = kTdxHeaderBytes,
-            .size = primary_size_word,
+            .size = counted_block_bytes,
         };
 
     std::uint64_t area_units = 0;
@@ -338,11 +348,14 @@ asset::DecodeResult<TdxContainerDescriptor> InspectTdxContainer(
         .observed_storage_format_code = storage_format,
         .observed_width_unit_word = width_unit_word,
         .observed_storage_unit_word = storage_unit_word,
-        .observed_primary_size_word = primary_size_word,
+        .block_count = block_count,
+        .primary_plane_count = primary_plane_count,
+        .palette_plane_count = palette_plane_count,
+        .block_stride = block_stride,
         .storage_word_matches_area_bit_formula =
             area_bit_formula_valid && area_bits / 8U == observed_storage_bytes,
-        .primary_extent = extent,
-        .bounded_primary_region = bounded_region,
+        .counted_blocks_extent = extent,
+        .bounded_blocks_region = bounded_region,
     };
 }
 } // namespace omega::retail

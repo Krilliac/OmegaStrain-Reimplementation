@@ -244,31 +244,51 @@ int ContainerDescriptorFailureCount()
         Check(tdx->observed_width_unit_word == 2 &&
                   tdx->storage_word_matches_area_bit_formula,
             "TDX validates width units and reports the observed area/bit formula");
-        Check(tdx->primary_extent.relation == omega::retail::ObservedExtentRelation::Exact &&
-                  tdx->bounded_primary_region && tdx->bounded_primary_region->offset == 64 &&
-                  tdx->bounded_primary_region->size == 256,
-            "TDX exposes a bounded primary body only for a safe extent relation");
+        Check(tdx->block_count == 1 && tdx->primary_plane_count == 1 &&
+                  tdx->palette_plane_count == 1 && tdx->block_stride == 256,
+            "TDX publishes proven block and storage-plane cardinality");
+        Check(tdx->counted_blocks_extent.relation ==
+                      omega::retail::ObservedExtentRelation::Exact &&
+                  tdx->bounded_blocks_region && tdx->bounded_blocks_region->offset == 64 &&
+                  tdx->bounded_blocks_region->size == 256,
+            "TDX exposes its complete counted block region only for a safe extent relation");
     }
+    auto multi_block_tdx = MakeTdx();
+    WriteU16(multi_block_tdx, 34, 2);
+    multi_block_tdx.resize(576);
+    auto multi_block = omega::retail::InspectTdxContainer(multi_block_tdx);
+    Check(multi_block && multi_block->block_count == 2 &&
+              multi_block->counted_blocks_extent.relation ==
+                  omega::retail::ObservedExtentRelation::Exact &&
+              multi_block->bounded_blocks_region &&
+              multi_block->bounded_blocks_region->size == 512,
+        "TDX counted extent includes every fixed-stride block");
     auto padded_tdx = MakeTdx();
     padded_tdx.resize(336);
     auto padded = omega::retail::InspectTdxContainer(padded_tdx);
-    Check(padded && padded->primary_extent.relation ==
+    Check(padded && padded->counted_blocks_extent.relation ==
                         omega::retail::ObservedExtentRelation::ZeroPaddedTail &&
-              padded->bounded_primary_region.has_value(),
-        "TDX accepts an observed primary body followed only by zero padding");
+              padded->bounded_blocks_region.has_value(),
+        "TDX accepts a complete counted-block extent followed only by zero padding");
     padded_tdx.back() = std::byte{1};
     auto extra_tdx = omega::retail::InspectTdxContainer(padded_tdx);
-    Check(extra_tdx && extra_tdx->primary_extent.relation ==
+    Check(extra_tdx && extra_tdx->counted_blocks_extent.relation ==
                            omega::retail::ObservedExtentRelation::NonzeroTail &&
-              !extra_tdx->bounded_primary_region,
-        "TDX nonzero trailing data remains opaque and has no bounded body view");
-    auto exceeding_tdx = MakeTdx();
-    WriteU32(exceeding_tdx, 56, 512);
-    auto exceeding = omega::retail::InspectTdxContainer(exceeding_tdx);
-    Check(exceeding && exceeding->primary_extent.relation ==
+              !extra_tdx->bounded_blocks_region,
+        "TDX nonzero trailing data remains opaque and has no bounded counted-block view");
+    auto short_counted_blocks_tdx = MakeTdx();
+    WriteU32(short_counted_blocks_tdx, 56, 512);
+    auto short_counted_blocks = omega::retail::InspectTdxContainer(short_counted_blocks_tdx);
+    Check(short_counted_blocks && short_counted_blocks->counted_blocks_extent.relation ==
                           omega::retail::ObservedExtentRelation::ExceedsInput &&
-              !exceeding->bounded_primary_region,
-        "TDX accepts the observed size-word-exceeds-span family without exposing payload");
+              !short_counted_blocks->bounded_blocks_region,
+        "TDX accepts the observed counted-block-extent-exceeds-input family without "
+        "exposing payload");
+    auto unaligned_stride_tdx = MakeTdx();
+    WriteU32(unaligned_stride_tdx, 56, 255);
+    CheckError(omega::retail::InspectTdxContainer(unaligned_stride_tdx),
+        omega::asset::DecodeErrorCode::UnsupportedVariant,
+        "TDX rejects an unaligned block stride");
     for (std::size_t size = 0; size < 64U; ++size)
         CheckError(omega::retail::InspectTdxContainer(
                        std::span<const std::byte>(tdx_bytes.data(), size)),
