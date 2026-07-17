@@ -111,12 +111,19 @@ void RunVirtualFileSystemTests()
         std::ofstream output(padded_archive_path, std::ios::binary);
         output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     }
-    const auto loaded_padded = omega::archive::HogArchive::Open(
-        padded_archive_path, padded_archive_size);
+    const auto loaded_padded = omega::archive::HogArchive::OpenRange(
+        padded_archive_path,
+        omega::archive::HogFileRange{.offset = 0, .size = padded_archive_size},
+        padded_archive_size);
     Check(loaded_padded && loaded_padded->padding_size() == 12,
-        "bounded archive load accepts verified zero padding");
-    Check(!omega::archive::HogArchive::Open(padded_archive_path, padded_archive_size - 1),
-        "archive load rejects files above the caller limit");
+        "bounded nested archive range accepts verified zero padding");
+    Check(!omega::archive::HogArchive::OpenRange(
+              padded_archive_path,
+              omega::archive::HogFileRange{.offset = 0, .size = padded_archive_size},
+              padded_archive_size - 1),
+        "nested archive range rejects spans above the caller limit");
+    Check(!omega::archive::HogArchive::Open(padded_archive_path, padded_archive_size),
+        "top-level owned archive load remains strict about physical EOF");
     Check(!omega::archive::HogIndex::Open(padded_archive_path),
         "top-level streaming index remains strict about physical EOF");
 

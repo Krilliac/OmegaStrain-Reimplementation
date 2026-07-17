@@ -37,6 +37,8 @@ shipping dependencies or execution mechanisms.
 9. Reverse-engineered the common HOG directory structure and validated all 273 top-level
    archives: 32,351 entries, zero structural failures. A safe parser/extractor now lives at
    `tools/hog.py`.
+10. Built a pure-native HOG/VFS layer that validates all 6,677 nested spans and a passive POP
+    terrain-prefix parser that validates all 5,351 records across the 18 level files.
 
 ## Disc observations
 
@@ -58,11 +60,11 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Add recursive native validation for nested, sector-padded HOG spans.
-2. Decode the first useful scene slice (`DATA.POP`, `VUMS`, and TDX texture metadata) behind
-   synthetic malformed-input tests and private metadata-only corpus checks.
-3. Trace the executable's VUM and texture consumers offline to turn structural inferences into
+1. Trace the executable's VUM and texture consumers offline to turn structural inferences into
    independently implementable scene contracts.
+2. Decode VUM material/geometry packets and TDX texture storage behind synthetic malformed-input
+   tests and private metadata-only corpus checks.
+3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
 4. Implement ReSymbol's bounded ELF32 little-endian container intake in its own repository;
    keep R5900 disassembly separate from the native runtime.
 5. Capture PS Rewired network behavior separately before designing any replacement service.

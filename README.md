@@ -1,6 +1,9 @@
-# Syphon Filter: The Omega Strain reimplementation research
+# OpenOmega
 
-This workspace is the clean-room research starting point for a native reimplementation of
+[![Native CI](https://github.com/Krilliac/OmegaStrain-Reimplementation/actions/workflows/native-ci.yml/badge.svg)](https://github.com/Krilliac/OmegaStrain-Reimplementation/actions/workflows/native-ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+
+OpenOmega is a clean-room, pure-native compatibility reimplementation research project for
 *Syphon Filter: The Omega Strain* (NTSC-U, `SCUS-97264`). PCSX2 is used as a behavioral
 oracle and debugger; it is not intended to be a dependency of the eventual native runtime.
 The shipping runtime is pure modern-CPU native code: no MIPS interpreter, recompiler, translated
@@ -19,6 +22,10 @@ retail instruction blocks, or PS2 execution layer.
 - The disc is extracted under the ignored `private/extracted-disc/` tree.
 - All 273 top-level HOG archives validate against the documented directory layout: 32,351
   contained entries and zero structural errors.
+- The native range reader validates all 6,677 nested HOG spans: 501 exact and 6,176 with
+  verified all-zero sector tails.
+- The first native scene importer validates the terrain prefix of all 18 level POP files:
+  5,351 records, including 4,144 with nonzero alignment bytes that are safely skipped.
 
 ## Quick start
 
@@ -54,14 +61,16 @@ powershell -NoProfile -File .\scripts\launch-omega.ps1 -Debugger -GameArgs '-x -
 
 ## Native runtime build
 
-The first native slice is a dependency-free C++23 HOG reader and corpus verifier. Configure
-inside a VS2022 developer environment, then use the checked-in multi-config presets:
+The first native content slice is a bounded C++23 HOG/VFS/POP reader and corpus verifier.
+Configure inside a VS2022 developer environment, then use the checked-in multi-config presets:
 
 ```powershell
 cmake --preset msvc
 cmake --build --preset msvc-debug
 ctest --preset msvc-debug
 .\build\msvc\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\openomega.exe --frames=120
 ```
 
@@ -79,6 +88,7 @@ Architecture and completion criteria are versioned in
 - `tools/` — deterministic disc/ELF archaeology tools.
 - `analysis/` — generated, redistributable metadata and reports.
 - `analysis/formats/HOG.md` — validated HOG container layout and extraction notes.
+- `analysis/formats/POP.md` — validated terrain-prefix contract and native parser boundary.
 - `analysis/elf/loader-hints.md` — confirmed executable evidence and open loader questions.
 - `third_party/pcsx2/` — ignored official PCSX2 checkout and build.
 - `runtime/` — ignored isolated PCSX2 data/configuration and logs.
@@ -97,7 +107,8 @@ Bend Studio. See [`TRADEMARKS.md`](TRADEMARKS.md) and [`CONTRIBUTING.md`](CONTRI
 Original project code and documentation are licensed under Apache-2.0. That license does not
 grant rights to any retail game, firmware, asset, or third-party trademark.
 See [`docs/04-Legal-and-Takedown-Readiness.md`](docs/04-Legal-and-Takedown-Readiness.md) for the
-project's preventive controls and response process.
+project's preventive controls and response process. Dependency licenses are recorded in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 Official references: [PCSX2 source](https://github.com/PCSX2/pcsx2),
 [BIOS dumping](https://pcsx2.net/docs/setup/bios/), and

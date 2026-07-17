@@ -5,6 +5,8 @@
 This layout was inferred from the owner's NTSC-U `SCUS-97264` image and then checked against
 all 273 top-level `.HOG` files on that disc. The validator accepted all 273 archives, covering
 32,351 directory entries, with zero boundary, filename-count, or monotonic-offset failures.
+The span-aware pass also validates 6,677 embedded HOGs: 501 exact spans and 6,176 whose logical
+payload is followed only by zero sector padding.
 
 The deterministic evidence is in `hog-validation.json`; `tools/validate_hogs.py` regenerates
 it. `tools/hog.py` implements parsing and path-safe extraction.
@@ -22,7 +24,12 @@ All integer fields are little-endian unsigned 32-bit values.
 | `0x10` | `data_offset` | Absolute start of concatenated payload data. |
 
 At `offsets_offset` is an array of `count + 1` offsets relative to `data_offset`. Offset zero
-must be zero; offsets must be monotonic; the final offset lands exactly at end-of-file.
+must be zero; offsets must be monotonic; the final offset identifies the logical payload end.
+
+That final offset is the archive's logical end. A top-level HOG must end there exactly. An embedded
+HOG occupies a parent-directory span and may have an all-zero tail after the logical end; nonzero
+tail bytes are rejected. Native callers must use the explicit range/span API for that case so a
+padded top-level file is not accepted accidentally.
 
 Between `names_offset` and `data_offset` is a sequence of `count` NUL-terminated ASCII names,
 followed by alignment padding. Entry `i` occupies:
@@ -59,6 +66,9 @@ python -B .\tools\hog.py `
   .\private\extracted-disc\GAMEDATA\MINSK\SCRIPTS.HOG `
   --json .\analysis\formats\minsk-scripts-hog.json `
   --extract .\analysis\output\MINSK\SCRIPTS
+
+.\build\msvc\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
 ```
 
 Extraction refuses absolute paths, `.`/`..` components, empty components, and any destination
