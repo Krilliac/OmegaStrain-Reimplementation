@@ -99,6 +99,19 @@ int PopTerrainIndexFailureCount()
     Check(!omega::asset::PopTerrainIndex::Parse(excessive_count),
         "excessive record count is rejected before allocation");
 
+    const auto record_limited = omega::asset::PopTerrainIndex::Parse(complete,
+        omega::asset::PopTerrainParseLimits{.maximum_records = 1});
+    Check(!record_limited &&
+              record_limited.error().code ==
+                  omega::asset::PopTerrainParseErrorCode::LimitExceeded,
+        "caller record limit is typed and enforced before allocation");
+    const auto name_limited = omega::asset::PopTerrainIndex::Parse(complete,
+        omega::asset::PopTerrainParseLimits{.maximum_owned_name_bytes = 1});
+    Check(!name_limited &&
+              name_limited.error().code ==
+                  omega::asset::PopTerrainParseErrorCode::LimitExceeded,
+        "cumulative owned-name byte limit has a typed failure");
+
     auto empty_name = MakePop();
     empty_name[20] = std::byte{0};
     Check(!omega::asset::PopTerrainIndex::Parse(empty_name), "empty terrain name is rejected");

@@ -9,8 +9,6 @@ namespace omega::asset
 namespace
 {
 constexpr std::uint32_t kObservedHeaderWord = 70;
-constexpr std::uint32_t kMaximumTerrainRecords = 1U << 20U;
-constexpr std::size_t kMaximumTerrainNameLength = 4096;
 constexpr std::size_t kHeaderBytes = 12;
 constexpr std::size_t kFixedRecordBytes = 8;
 
@@ -33,32 +31,49 @@ constexpr std::size_t kFixedRecordBytes = 8;
            bytes[offset + 2] == static_cast<std::byte>(third) &&
            bytes[offset + 3] == static_cast<std::byte>(fourth);
 }
+
+[[nodiscard]] PopTerrainParseError Error(const PopTerrainParseErrorCode code,
+    std::string message, const std::optional<std::uint64_t> byte_offset = std::nullopt)
+{
+    return PopTerrainParseError{
+        .code = code,
+        .byte_offset = byte_offset,
+        .message = std::move(message),
+    };
+}
 } // namespace
 
-std::expected<PopTerrainIndex, std::string> PopTerrainIndex::Parse(
-    const std::span<const std::byte> bytes)
+std::expected<PopTerrainIndex, PopTerrainParseError> PopTerrainIndex::Parse(
+    const std::span<const std::byte> bytes, const PopTerrainParseLimits limits)
 {
     if (bytes.size() < kHeaderBytes + 4U)
-        return std::unexpected("POP is too small for the observed TER prefix and next section tag");
+        return std::unexpected(Error(PopTerrainParseErrorCode::Truncated,
+            "POP is too small for the observed TER prefix and next section tag", bytes.size()));
     if (ReadU32(bytes, 0) != kObservedHeaderWord)
-        return std::unexpected("POP does not use the observed leading header word");
+        return std::unexpected(Error(PopTerrainParseErrorCode::Malformed,
+            "POP does not use the observed leading header word", 0));
     if (!HasTag(bytes, 4, 'T', 'E', 'R', ':'))
-        return std::unexpected("POP does not begin with the observed TER section tag");
+        return std::unexpected(Error(PopTerrainParseErrorCode::Malformed,
+            "POP does not begin with the observed TER section tag", 4));
 
     const std::uint32_t count = ReadU32(bytes, 8);
-    if (count > kMaximumTerrainRecords)
-        return std::unexpected("POP terrain record count exceeds safety limit");
+    if (count > limits.maximum_records)
+        return std::unexpected(Error(PopTerrainParseErrorCode::LimitExceeded,
+            "POP terrain record count exceeds caller limit", 8));
     if (static_cast<std::uint64_t>(count) * (kFixedRecordBytes + 1U) >
         static_cast<std::uint64_t>(bytes.size() - kHeaderBytes))
-        return std::unexpected("POP cannot contain its declared minimum terrain records");
+        return std::unexpected(Error(PopTerrainParseErrorCode::Truncated,
+            "POP cannot contain its declared minimum terrain records", bytes.size()));
 
     PopTerrainIndex result;
     result.records_.reserve(count);
+    std::size_t owned_name_bytes = 0;
     std::size_t cursor = kHeaderBytes;
     for (std::uint32_t ordinal = 0; ordinal < count; ++ordinal)
     {
         if (cursor > bytes.size() || bytes.size() - cursor < kFixedRecordBytes)
-            return std::unexpected("POP terrain record header is truncated");
+            return std::unexpected(Error(PopTerrainParseErrorCode::Truncated,
+                "POP terrain record header is truncated", cursor));
         const std::uint32_t kind = ReadU32(bytes, cursor);
         const std::uint32_t index = ReadU32(bytes, cursor + 4U);
         cursor += kFixedRecordBytes;
@@ -68,25 +83,38 @@ std::expected<PopTerrainIndex, std::string> PopTerrainIndex::Parse(
         {
             const auto value = std::to_integer<unsigned char>(bytes[cursor]);
             if (value < 0x20U || value > 0x7EU)
-                return std::unexpected("POP terrain name contains non-printable ASCII");
-            if (cursor - name_start >= kMaximumTerrainNameLength)
-                return std::unexpected("POP terrain name exceeds safety limit");
+                return std::unexpected(Error(PopTerrainParseErrorCode::Malformed,
+                    "POP terrain name contains non-printable ASCII", cursor));
+            if (cursor - name_start >= limits.maximum_name_bytes)
+                return std::unexpected(Error(PopTerrainParseErrorCode::LimitExceeded,
+                    "POP terrain name exceeds caller byte limit", name_start));
             ++cursor;
         }
         if (cursor == bytes.size())
-            return std::unexpected("POP terrain name is not NUL-terminated");
+            return std::unexpected(Error(PopTerrainParseErrorCode::Truncated,
+                "POP terrain name is not NUL-terminated", cursor));
         if (cursor == name_start)
-            return std::unexpected("POP terrain name is empty");
+            return std::unexpected(Error(PopTerrainParseErrorCode::Malformed,
+                "POP terrain name is empty", name_start));
+
+        const std::size_t name_size = cursor - name_start;
+        if (owned_name_bytes > limits.maximum_owned_name_bytes ||
+            name_size > limits.maximum_owned_name_bytes - owned_name_bytes)
+            return std::unexpected(Error(PopTerrainParseErrorCode::LimitExceeded,
+                "POP terrain names exceed caller byte limit", name_start));
+        owned_name_bytes += name_size;
 
         const auto* first = reinterpret_cast<const char*>(bytes.data() + name_start);
-        std::string name(first, cursor - name_start);
+        std::string name(first, name_size);
         ++cursor;
 
         if (cursor > std::numeric_limits<std::size_t>::max() - 3U)
-            return std::unexpected("POP terrain name alignment overflows host size");
+            return std::unexpected(Error(PopTerrainParseErrorCode::Overflow,
+                "POP terrain name alignment overflows host size", cursor));
         const std::size_t aligned_cursor = (cursor + 3U) & ~std::size_t{3U};
         if (aligned_cursor > bytes.size())
-            return std::unexpected("POP terrain name alignment extends past input");
+            return std::unexpected(Error(PopTerrainParseErrorCode::Truncated,
+                "POP terrain name alignment extends past input", cursor));
         if (std::ranges::any_of(bytes.subspan(cursor, aligned_cursor - cursor),
                 [](const std::byte value) { return value != std::byte{0}; }))
             ++result.nonzero_alignment_record_count_;
@@ -99,8 +127,12 @@ std::expected<PopTerrainIndex, std::string> PopTerrainIndex::Parse(
         });
     }
 
+    if (cursor > bytes.size() || bytes.size() - cursor < 4U)
+        return std::unexpected(Error(PopTerrainParseErrorCode::Truncated,
+            "POP ends before the observed GOB section tag", cursor));
     if (!HasTag(bytes, cursor, 'G', 'O', 'B', ':'))
-        return std::unexpected("observed GOB section tag does not follow POP terrain records");
+        return std::unexpected(Error(PopTerrainParseErrorCode::Malformed,
+            "observed GOB section tag does not follow POP terrain records", cursor));
     result.next_section_offset_ = cursor;
     return result;
 }
