@@ -32,6 +32,20 @@ Never allowed in version control or releases:
 The implementation derives contracts from observed inputs/outputs and independently described
 data layouts. Every compatibility claim must identify evidence and a reproducible check.
 
+## Research-to-implementation information boundary
+
+Research reports expose only the narrow facts needed to implement a contract: inputs, outputs,
+state transitions, layouts, invariants, hashes, and reproducible observations. They do not expose
+retail instruction sequences, pseudocode, expression-level structure, or symbol dumps.
+
+Native implementation reviews cite an approved report or observable test, explain the independent
+design choice, and compare behavior rather than source structure. A contributor who inspected raw
+retail code must disclose that fact in the review record; before a public playable release, counsel
+should decide whether the affected subsystem needs a separately staffed implementation pass.
+
+This discipline reduces copying and provenance risk. It is not a claim that a formal two-team
+clean-room has occurred, and it is not a substitute for legal advice.
+
 ## Evidence states
 
 - **Confirmed:** reproduced by a deterministic tool, debugger trace, or behavioral comparison.
