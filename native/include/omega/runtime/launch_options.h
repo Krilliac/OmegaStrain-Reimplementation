@@ -1,0 +1,26 @@
+#pragma once
+
+#include <expected>
+#include <filesystem>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+
+namespace omega::runtime
+{
+struct LaunchOptions
+{
+    int frame_limit = -1;
+    std::optional<std::filesystem::path> data_root;
+    std::optional<std::string> level_code;
+    bool probe_only = false;
+    bool show_help = false;
+};
+
+// [any thread; reentrant] Parses arguments after argv[0]. No filesystem access occurs here.
+[[nodiscard]] std::expected<LaunchOptions, std::string> ParseLaunchOptions(
+    std::span<const std::string_view> arguments);
+
+[[nodiscard]] std::string_view LaunchUsage() noexcept;
+} // namespace omega::runtime

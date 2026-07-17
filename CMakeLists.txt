@@ -42,6 +42,22 @@ target_include_directories(omega_retail_formats PUBLIC native/include)
 target_link_libraries(omega_retail_formats PUBLIC omega_assets omega_core)
 target_compile_features(omega_retail_formats PUBLIC cxx_std_23)
 
+add_library(omega_content STATIC
+    native/src/content/game_data_service.cpp
+)
+target_include_directories(omega_content PUBLIC native/include)
+target_link_libraries(omega_content PUBLIC omega_assets PRIVATE omega_core omega_retail_formats)
+target_compile_features(omega_content PUBLIC cxx_std_23)
+
+add_library(omega_runtime STATIC
+    native/src/runtime/content_startup.cpp
+    native/src/runtime/launch_options.cpp
+    native/src/runtime/manifest_debug_image.cpp
+)
+target_include_directories(omega_runtime PUBLIC native/include)
+target_link_libraries(omega_runtime PUBLIC omega_assets omega_content)
+target_compile_features(omega_runtime PUBLIC cxx_std_23)
+
 if(MSVC)
     target_compile_options(omega_core PRIVATE
         /W4
@@ -53,6 +69,32 @@ if(MSVC)
     )
 else()
     target_compile_options(omega_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+if(MSVC)
+    target_compile_options(omega_runtime PRIVATE
+        /W4
+        /WX
+        /permissive-
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /utf-8
+    )
+else()
+    target_compile_options(omega_runtime PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+if(MSVC)
+    target_compile_options(omega_content PRIVATE
+        /W4
+        /WX
+        /permissive-
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /utf-8
+    )
+else()
+    target_compile_options(omega_content PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
 if(MSVC)
@@ -99,8 +141,9 @@ if(OMEGA_BUILD_RUNTIME)
 
     add_executable(openomega
         native/apps/openomega/main.cpp
+        native/apps/openomega/sdl_gpu_host.cpp
     )
-    target_link_libraries(openomega PRIVATE omega_core SDL3::SDL3)
+    target_link_libraries(openomega PRIVATE omega_runtime SDL3::SDL3)
     target_compile_definitions(openomega PRIVATE
         $<$<CONFIG:Debug>:OMEGA_GPU_DEBUG=1>
     )
@@ -115,12 +158,20 @@ include(CTest)
 if(BUILD_TESTING)
     add_executable(omega_core_tests
         native/tests/container_descriptor_tests.cpp
+        native/tests/game_data_service_tests.cpp
         native/tests/hog_archive_tests.cpp
+        native/tests/launch_options_tests.cpp
+        native/tests/manifest_debug_image_tests.cpp
         native/tests/pop_level_manifest_decoder_tests.cpp
         native/tests/pop_terrain_index_tests.cpp
         native/tests/virtual_file_system_tests.cpp
     )
-    target_link_libraries(omega_core_tests PRIVATE omega_core omega_retail_formats)
+    target_link_libraries(omega_core_tests PRIVATE
+        omega_core
+        omega_retail_formats
+        omega_content
+        omega_runtime
+    )
     if(MSVC)
         target_compile_options(omega_core_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
     else()

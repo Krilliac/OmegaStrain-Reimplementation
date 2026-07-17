@@ -26,6 +26,8 @@ retail instruction blocks, or PS2 execution layer.
   verified all-zero sector tails.
 - The first native scene importer validates the terrain prefix of all 18 level POP files:
   5,351 records, including 4,144 with nonzero alignment bytes that are safely skipped.
+- The native host validates an owner-supplied NTSC-U data root, loads MINSK as 299 canonical
+  manifest cells, and renders a deterministic synthetic coverage grid through SDL_GPU/D3D12.
 
 ## Quick start
 
@@ -61,8 +63,8 @@ powershell -NoProfile -File .\scripts\launch-omega.ps1 -Debugger -GameArgs '-x -
 
 ## Native runtime build
 
-The first native content slice is a bounded C++23 HOG/VFS/POP reader and corpus verifier.
-Configure inside a VS2022 developer environment, then use the checked-in multi-config presets:
+The native runtime is C++23 with bounded content intake and an SDL3/SDL_GPU host. Configure inside
+a VS2022 developer environment, then use the checked-in multi-config presets:
 
 ```powershell
 cmake --preset msvc
@@ -71,11 +73,18 @@ ctest --preset msvc-debug
 .\build\msvc\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --probe-only
+.\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
+python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\private\extracted-disc
 .\build\msvc\Debug\openomega.exe --frames=120
 ```
 
 `openomega` is the pure-native SDL3/SDL_GPU host shell. `--frames=N` is an automated smoke mode
 that opens the modern GPU backend, renders exactly `N` frames, and exits without user input.
+`--probe-only` validates the retail root and selected level without opening a window. The current
+MINSK view is a synthetic manifest-coverage grid, not reconstructed world geometry.
 
 Architecture and completion criteria are versioned in
 [`docs/02-Runtime-Architecture.md`](docs/02-Runtime-Architecture.md) and
