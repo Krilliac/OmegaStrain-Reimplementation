@@ -177,7 +177,10 @@ def fingerprint_tdx(file: BinaryIO, span: Span, stats: Aggregate) -> None:
     header = read_at(file, span.offset, 64)
     (version, flags, width, height, bit_depth, format_code,
      width_unit_word, storage_unit_word) = struct.unpack_from("<8H", header)
-    primary_size_word = struct.unpack_from("<I", header, 56)[0]
+    block_count = struct.unpack_from("<H", header, 0x22)[0]
+    primary_plane_count = struct.unpack_from("<H", header, 0x24)[0]
+    palette_plane_count = struct.unpack_from("<H", header, 0x26)[0]
+    block_stride = struct.unpack_from("<I", header, 0x38)[0]
     stats.count("version", version)
     stats.count("flags", flags)
     stats.count("bit_depth", bit_depth)
@@ -185,6 +188,10 @@ def fingerprint_tdx(file: BinaryIO, span: Span, stats: Aggregate) -> None:
     stats.count("bit_depth_format_pair", f"{bit_depth}/0x{format_code:02X}")
     stats.count("dimensions", f"{width}x{height}")
     stats.count("observed_width_unit_word", width_unit_word)
+    stats.count("block_count", block_count)
+    stats.count("primary_plane_count", primary_plane_count)
+    stats.count("palette_plane_count", palette_plane_count)
+    stats.observe("block_stride", block_stride)
     expected_width_units = max(2 if bit_depth <= 8 else 1, width // 64)
     if width_unit_word == expected_width_units:
         stats.add("width_unit_formula_match")
@@ -195,7 +202,8 @@ def fingerprint_tdx(file: BinaryIO, span: Span, stats: Aggregate) -> None:
     else:
         stats.count("storage_formula_mismatch_by_bit_depth", bit_depth)
     stats.record_span(
-        file, span.offset, span.size, 64 + primary_size_word, "observed_primary_size_span")
+        file, span.offset, span.size, 64 + block_count * block_stride,
+        "counted_block_span")
 
 
 def fingerprint_skm(file: BinaryIO, span: Span, stats: Aggregate) -> None:
@@ -670,7 +678,7 @@ def scan_disc(disc_root: Path, maximum_depth: int) -> dict[str, object]:
     pop, minsk = scan_pop_files(disc_root)
     minsk_container_summary(disc_root, minsk)
     output = {
-        "schema_version": 1,
+        "schema_version": 2,
         "scope": "aggregate structural fingerprints only; no proprietary payloads exported",
         "scan": scan.as_dict(),
         "top_level_hog_errors": top_level_errors,

@@ -94,10 +94,19 @@ The initial native build targets express the same direction:
 - `omega_runtime`: launch options and renderer-neutral diagnostic scene values consumed by the
   SDL host.
 
-VUM/TDX currently have passive scalar descriptors. COL additionally has a bounded semantic adapter
-that returns neutral owned spatial-mesh IR: source coordinates and topology are preserved while
-winding, collision behavior, transforms, materials, opaque primitive words, and trailing payload
-remain unassigned. None of these adapters exposes VU/VIF instructions or decoded pixel guesses.
+VUM currently has a passive scalar descriptor. COL has a bounded semantic adapter that returns
+neutral owned spatial-mesh IR: source coordinates and topology are preserved while winding,
+collision behavior, transforms, materials, opaque primitive words, and trailing payload remain
+unassigned. TDX has a separate bounded `TextureStorageIR` adapter that owns source-order blocks,
+transfer planes, and four-byte palette entries while leaving block purpose, mip meaning, channel
+order, alpha conversion, nibble order, palette permutation, swizzle, and GPU upload unassigned.
+None of these adapters exposes VU/VIF instructions or decoded pixel guesses.
+
+TDX storage decoding is flat and stateless. It debits input once, preflights exact owned vector and
+payload bytes, uses fixed local layout records, and retains no input span. Sixty-two single-plane
+assets use a narrowly allowlisted implicit-zero suffix normalization backed by complete duplicate
+twins; this diagnostic provenance is not part of renderer-neutral IR. Render code consumes only a
+future independently validated expansion result and never includes the retail decoder header.
 
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are

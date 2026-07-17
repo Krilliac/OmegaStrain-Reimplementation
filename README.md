@@ -31,6 +31,10 @@ retail instruction blocks, or PS2 execution layer.
 - The native content service resolves all 5,351 manifest cells across all 18 levels into 5,351
   owned spatial meshes with zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices,
   1,239,980 triangles/references, and 2,137 normalized empty meshes.
+- The native TDX adapter converts all 15,248 texture assets into owned renderer-neutral storage:
+  15,442 source-order blocks, 17,960 primary planes, 285,521,272 primary bytes, 15,190 palette
+  blocks, and zero errors. It normalizes 4,112 duplicate-proven implicit zero bytes without
+  guessing pixel or channel layout.
 
 ## Quick start
 
@@ -103,6 +107,7 @@ Architecture and completion criteria are versioned in
 - `analysis/` — generated, redistributable metadata and reports.
 - `analysis/formats/HOG.md` — validated HOG container layout and extraction notes.
 - `analysis/formats/POP.md` — validated terrain-prefix contract and native parser boundary.
+- `analysis/formats/TDX.md` — validated texture block, plane, palette, and zero-suffix contract.
 - `analysis/elf/loader-hints.md` — confirmed executable evidence and open loader questions.
 - `third_party/pcsx2/` — ignored official PCSX2 checkout and build.
 - `runtime/` — ignored isolated PCSX2 data/configuration and logs.

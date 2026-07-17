@@ -228,7 +228,29 @@
         "4/0x14": 9879,
         "8/0x13": 5172
       },
+      "block_count": {
+        "1": 15224,
+        "10": 14,
+        "11": 3,
+        "19": 1,
+        "2": 1,
+        "3": 2,
+        "4": 1,
+        "6": 1,
+        "8": 1
+      },
+      "block_stride_range": [
+        352,
+        525728
+      ],
       "count": 15248,
+      "counted_block_span_exact": 11277,
+      "counted_block_span_exceeds_span": 62,
+      "counted_block_span_padding_bytes_range": [
+        8,
+        1824
+      ],
+      "counted_block_span_zero_padded": 3909,
       "dimensions": {
         "1024x512": 401,
         "128x128": 2212,
@@ -264,20 +286,22 @@
         "0x13": 5172,
         "0x14": 9879
       },
-      "observed_primary_size_span_exact": 11253,
-      "observed_primary_size_span_exceeds_span": 62,
-      "observed_primary_size_span_nonzero_tail": 24,
-      "observed_primary_size_span_padding_bytes_range": [
-        8,
-        1824
-      ],
-      "observed_primary_size_span_zero_padded": 3909,
       "observed_width_unit_word": {
         "1": 188,
         "16": 401,
         "2": 14434,
         "4": 150,
         "8": 75
+      },
+      "palette_plane_count": {
+        "0": 197,
+        "1": 15051
+      },
+      "primary_plane_count": {
+        "1": 13921,
+        "2": 582,
+        "3": 299,
+        "4": 446
       },
       "span_bytes_range": [
         416,
@@ -540,7 +564,7 @@
     "top_level_hog_files": 273,
     "top_level_hog_valid": 273
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "scope": "aggregate structural fingerprints only; no proprietary payloads exported",
   "top_level_hog_errors": []
 }

@@ -3,6 +3,7 @@
 #include "omega/archive/hog_archive.h"
 #include "omega/retail/col_spatial_mesh_decoder.h"
 #include "omega/retail/container_descriptors.h"
+#include "omega/retail/tdx_texture_storage_decoder.h"
 
 #include <algorithm>
 #include <cctype>
@@ -74,6 +75,22 @@ struct ColSemanticStats
     std::uint32_t maximum_edge_depth = 0;
 };
 
+struct TdxSemanticStats
+{
+    std::uint64_t indexed_4 = 0;
+    std::uint64_t indexed_8 = 0;
+    std::uint64_t packed_24 = 0;
+    std::uint64_t packed_32 = 0;
+    std::uint64_t blocks = 0;
+    std::uint64_t primary_planes = 0;
+    std::uint64_t primary_bytes = 0;
+    std::uint64_t palette_blocks = 0;
+    std::uint64_t direct_blocks = 0;
+    std::uint64_t palette_entries = 0;
+    std::uint64_t implicit_zero_textures = 0;
+    std::uint64_t implicit_zero_bytes = 0;
+};
+
 struct VerificationStats
 {
     std::uint64_t filesystem_entries = 0;
@@ -94,6 +111,7 @@ struct VerificationStats
     ExtentStats vum_extents;
     ExtentStats tdx_extents;
     ColSemanticStats col_semantic;
+    TdxSemanticStats tdx_semantic;
     bool stopped_at_safety_limit = false;
 };
 
@@ -222,6 +240,64 @@ void StopAtSafetyLimit(VerificationStats& stats, const std::string_view message)
     return true;
 }
 
+[[nodiscard]] bool RecordTdxSemantics(const retail::TdxContainerDescriptor& descriptor,
+    const asset::TextureStorageIR& texture, VerificationStats& stats)
+{
+    auto& semantic = stats.tdx_semantic;
+    switch (texture.sample_encoding)
+    {
+    case asset::TextureSampleEncoding::Indexed4:
+        ++semantic.indexed_4;
+        break;
+    case asset::TextureSampleEncoding::Indexed8:
+        ++semantic.indexed_8;
+        break;
+    case asset::TextureSampleEncoding::Packed24:
+        ++semantic.packed_24;
+        break;
+    case asset::TextureSampleEncoding::Packed32:
+        ++semantic.packed_32;
+        break;
+    }
+    if (!AddSemanticCounter(
+            semantic.blocks, texture.blocks.size(), stats, "TDX storage block count"))
+        return false;
+    for (const auto& block : texture.blocks)
+    {
+        if (!AddSemanticCounter(semantic.primary_planes, block.planes.size(), stats,
+                "TDX primary storage-plane count"))
+            return false;
+        for (const auto& plane : block.planes)
+        {
+            if (!AddSemanticCounter(semantic.primary_bytes, plane.bytes.size(), stats,
+                    "TDX primary storage byte count"))
+                return false;
+        }
+        if (block.palette)
+        {
+            ++semantic.palette_blocks;
+            if (!AddSemanticCounter(semantic.palette_entries, block.palette->entries.size(), stats,
+                    "TDX palette-entry count"))
+                return false;
+        }
+        else
+        {
+            ++semantic.direct_blocks;
+        }
+    }
+    if (descriptor.counted_blocks_extent.relation ==
+        retail::ObservedExtentRelation::ExceedsInput)
+    {
+        ++semantic.implicit_zero_textures;
+        const std::uint64_t missing = descriptor.counted_blocks_extent.observed_bytes -
+                                      descriptor.counted_blocks_extent.input_bytes;
+        if (!AddSemanticCounter(semantic.implicit_zero_bytes, missing, stats,
+                "TDX implicit-zero byte count"))
+            return false;
+    }
+    return true;
+}
+
 [[nodiscard]] bool AddIndexedEntries(
     VerificationStats& stats, const std::uint64_t amount)
 {
@@ -286,13 +362,10 @@ void RecordExtent(ExtentStats& stats, const retail::ObservedExtentRelation relat
     }
 }
 
-void PrintAssetError(const std::filesystem::path& backing_path,
-    const std::string_view entry_name, const std::string_view message)
+void PrintAssetError(
+    const std::filesystem::path&, const std::string_view, const std::string_view)
 {
-    std::cerr << backing_path.generic_string();
-    if (!entry_name.empty())
-        std::cerr << "::" << entry_name;
-    std::cerr << ": " << message << '\n';
+    std::cerr << "asset verification error\n";
 }
 
 void InspectAssetRange(const std::filesystem::path& backing_path,
@@ -355,8 +428,17 @@ void InspectAssetRange(const std::filesystem::path& backing_path,
         PrintAssetError(backing_path, entry_name, descriptor.error().message);
         return;
     }
+    auto texture = retail::DecodeTdxTextureStorage(*bytes);
+    if (!texture)
+    {
+        ++stats.tdx.errors;
+        PrintAssetError(backing_path, entry_name, texture.error().message);
+        return;
+    }
+    if (!RecordTdxSemantics(*descriptor, *texture, stats))
+        return;
     ++stats.tdx.valid;
-    RecordExtent(stats.tdx_extents, descriptor->primary_extent.relation);
+    RecordExtent(stats.tdx_extents, descriptor->counted_blocks_extent.relation);
 }
 
 void RecordAssetOffsetError(const std::filesystem::path& backing_path,
@@ -558,7 +640,12 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         "\"vum\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
         "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{}}},"
         "\"tdx\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
-        "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{}}},\"errors\":{}}}\n",
+        "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{},"
+        "\"indexed_4\":{},\"indexed_8\":{},\"packed_24\":{},\"packed_32\":{},"
+        "\"blocks\":{},\"primary_planes\":{},\"primary_bytes\":{},"
+        "\"palette_blocks\":{},\"direct_blocks\":{},\"palette_entries\":{},"
+        "\"implicit_zero_textures\":{},\"implicit_zero_bytes\":{}}},"
+        "\"errors\":{}}}\n",
         stats.top_level_hogs, stats.top_level_hog_valid, stats.nested_hogs,
         stats.nested_hog_valid, stats.nested_hog_bytes, stats.indexed_entries,
         stats.asset_candidates, stats.asset_bytes,
@@ -573,7 +660,13 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         stats.vum_extents.zero_padded_tail, stats.vum_extents.nonzero_tail,
         stats.vum_extents.exceeds_input, stats.tdx.candidates, stats.tdx.valid, stats.tdx.errors,
         stats.tdx_extents.exact, stats.tdx_extents.zero_padded_tail, stats.tdx_extents.nonzero_tail,
-        stats.tdx_extents.exceeds_input, total_errors);
+        stats.tdx_extents.exceeds_input, stats.tdx_semantic.indexed_4,
+        stats.tdx_semantic.indexed_8, stats.tdx_semantic.packed_24,
+        stats.tdx_semantic.packed_32, stats.tdx_semantic.blocks,
+        stats.tdx_semantic.primary_planes, stats.tdx_semantic.primary_bytes,
+        stats.tdx_semantic.palette_blocks, stats.tdx_semantic.direct_blocks,
+        stats.tdx_semantic.palette_entries, stats.tdx_semantic.implicit_zero_textures,
+        stats.tdx_semantic.implicit_zero_bytes, total_errors);
     if (stats.asset_candidates == 0)
         std::cerr << "no COL, VUM, or TDX assets were found\n";
     return total_errors == 0 && stats.asset_candidates != 0 &&
