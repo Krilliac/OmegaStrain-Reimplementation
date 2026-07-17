@@ -35,6 +35,10 @@ retail instruction blocks, or PS2 execution layer.
   15,442 source-order blocks, 17,960 primary planes, 285,521,272 primary bytes, 15,190 palette
   blocks, and zero errors. It normalizes 4,112 duplicate-proven implicit zero bytes without
   guessing pixel or channel layout.
+- The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
+  source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
+  It validates 220,943 bounded metadata records without exposing render packets or console
+  instructions.
 
 ## Quick start
 
@@ -108,6 +112,7 @@ Architecture and completion criteria are versioned in
 - `analysis/formats/HOG.md` — validated HOG container layout and extraction notes.
 - `analysis/formats/POP.md` — validated terrain-prefix contract and native parser boundary.
 - `analysis/formats/TDX.md` — validated texture block, plane, palette, and zero-suffix contract.
+- `analysis/formats/VUM.md` — validated material catalog and render-payload boundary contract.
 - `analysis/elf/loader-hints.md` — confirmed executable evidence and open loader questions.
 - `third_party/pcsx2/` — ignored official PCSX2 checkout and build.
 - `runtime/` — ignored isolated PCSX2 data/configuration and logs.

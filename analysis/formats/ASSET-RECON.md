@@ -192,9 +192,7 @@ conversion remain later research.
 
 The native aggregate verifier independently accepts and semantically decodes all 7,036 COL spans,
 decodes the proven catalog layer of all 7,036 VUM spans, and semantically decodes 15,248 TDX spans,
-with zero errors. Its
-extent totals exactly
-match this report: COL has 7,036 nonzero tails
+with zero errors. Its extent totals exactly match this report: COL has 7,036 nonzero tails
 after the described table region; VUM has 6,989 exact primary boundaries and 47 nonzero tails;
 TDX has 11,277 exact, 3,909 zero-tail, zero nonzero-tail, and 62 duplicate-proven implicit-zero
 suffix relations after applying the full counted-block extent. Its canonical storage totals are

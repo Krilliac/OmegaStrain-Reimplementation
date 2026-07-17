@@ -39,8 +39,7 @@ shipping dependencies or execution mechanisms.
    `tools/hog.py`.
 10. Built a pure-native HOG/VFS layer that validates all 6,677 nested spans, resolves all 5,351
     POP terrain references across 18 level manifests, semantically decodes all 7,036 COL spatial
-    meshes and all 15,248 TDX storage assets, and passively validates 7,036 VUM spans with zero
-    errors.
+    meshes, all 15,248 TDX storage assets, and all 7,036 VUM material catalogs with zero errors.
 11. Added owner-supplied data-root validation and native named-level startup. A headless MINSK
     probe loads 299 canonical manifest cells; the SDL_GPU/D3D12 path renders their explicitly
     synthetic coverage grid for 120 frames and exits without a lingering process.
@@ -54,6 +53,11 @@ shipping dependencies or execution mechanisms.
     bytes, and packed sample families without claiming display-ready pixels. Aggregate verification
     covers 15,248 textures, 15,442 blocks, 17,960 primary planes, 285,521,272 owned primary bytes,
     and 4,112 duplicate-proven implicit zero bytes with zero errors.
+14. Added an owned VUM material catalog and bounded post-material metadata validator. Aggregate
+    verification covers 7,036 catalogs, 38,793 names, 38,899 materials, 42,631 dense name
+    references, and 220,943 validated-and-discarded P/Q/T metadata records with zero errors. Render
+    payload bodies, topology, vertex attributes, usage-code meaning, and material binding remain
+    unassigned.
 
 ## Disc observations
 
@@ -75,7 +79,8 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Trace VUM material and render geometry now that collision and texture storage have typed IR.
+1. Continue VUM render-payload research from the proven P/Q/T boundaries; establish positions,
+   topology, and material binding before adding render-mesh IR.
 2. Validate TDX swizzle, nibble order, palette permutation, and channel expansion independently
    before producing display-ready pixels or GPU uploads.
 3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.

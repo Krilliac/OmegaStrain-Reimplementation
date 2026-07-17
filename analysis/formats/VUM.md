@@ -117,6 +117,10 @@ sanitized counters, and never prints source paths or names:
 build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc
 ```
 
+The confirmed baseline is 7,036 catalogs, 38,793 owned names, 38,899 material records, 42,631
+dense name references, and zero errors. The same pass validates all 220,943 P/Q/T metadata records
+before discarding their opaque words and payload references.
+
 Synthetic regressions cover ownership, opaque-field immunity, nonzero trailing data, truncation,
 boundary order/alignment, count/extent contradictions, string grammar and limits, fixed-record
 magic/reserved bytes, dense name-reference families and bounds, P/Q/T metadata relationships, and
