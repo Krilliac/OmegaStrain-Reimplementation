@@ -63,3 +63,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CMake build failed: $LASTEXITCODE" }
           ctest --preset msvc-debug --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "CTest failed: $LASTEXITCODE" }
+
+      # Temporary verification bridge while the local Windows host is under memory pressure.
+      # Remove after the owned-data corpus run; no retail data enters CI.
+      - name: Upload native VUM verification executable
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: omega-vum-verification-${{ github.sha }}
+          path: build/msvc/Debug/omega_tool.exe
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
