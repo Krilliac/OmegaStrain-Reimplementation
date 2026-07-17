@@ -7,6 +7,11 @@ Describe the independently written change and the behavior or metadata it establ
 List tests, corpus checks, and evidence-ledger entries. Do not attach proprietary inputs or
 private research logs.
 
+## Research exposure
+
+State whether you inspected raw retail code or disassembly for the subsystem changed here. If so,
+identify the sanitized contract used and flag the change for independent provenance review.
+
 ## Clean-room checklist
 
 - [ ] I included no BIOS, disc image, retail executable/module, save state, key, extracted asset,

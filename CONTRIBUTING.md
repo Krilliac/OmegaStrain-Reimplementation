@@ -14,7 +14,8 @@ Do not commit, attach to issues, paste into discussions, or upload to CI:
 - Network credentials, personal packet captures, or service secrets.
 
 Hashes, sizes, addresses, aggregate counts, independently written format descriptions, and
-small synthetic fixtures are acceptable when they do not reconstruct copyrighted content.
+small synthetic fixtures constructed in test source are acceptable when they do not reconstruct
+copyrighted content. Committing a binary fixture requires an explicit public-tree policy review.
 
 ## Pure-native rule
 
@@ -60,4 +61,6 @@ Signed-off-by: Your Name <your-email@example.com>
 ```
 
 Add it with `git commit -s`. The sign-off certifies the provenance statements in `DCO.txt`; it
-is not a copyright assignment. Do not sign off on copied/decompiled retail material.
+is not a copyright assignment. Do not sign off on copied/decompiled retail material. GitHub's
+verified Dependabot update PRs are the sole automated exception; maintainers must still review the
+upstream revision, license, and exact dependency change.

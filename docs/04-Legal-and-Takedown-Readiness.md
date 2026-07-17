@@ -24,10 +24,12 @@ from a claim.
    never upload it to CI or telemetry.
 4. Preserve evidence states, tool commands, hashes, independent implementations, and behavioral
    comparisons in reviewable history.
-5. Use original branding (`OpenOmega`) for binaries and artwork. Use game/trademark names only to
+5. Keep research reports at the contract level and record any raw-code exposure in implementation
+   reviews; obtain counsel's advice on a separately staffed pass before a public playable release.
+6. Use original branding (`OpenOmega`) for binaries and artwork. Use game/trademark names only to
    identify compatibility and display the affiliation disclaimer.
-6. Run `python -B tools/check_public_tree.py` before every public push and in CI.
-7. Require DCO sign-off and review any contribution touching reverse-engineering metadata.
+7. Run `python -B tools/check_public_tree.py` before every public push and in CI.
+8. Require DCO sign-off and review any contribution touching reverse-engineering metadata.
 
 ## If GitHub receives a complaint
 
