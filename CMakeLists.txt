@@ -39,6 +39,7 @@ add_library(omega_retail_formats STATIC
     native/src/retail/container_descriptors.cpp
     native/src/retail/pop_level_manifest_decoder.cpp
     native/src/retail/tdx_texture_storage_decoder.cpp
+    native/src/retail/vum_material_catalog_decoder.cpp
 )
 target_include_directories(omega_retail_formats PUBLIC native/include)
 target_link_libraries(omega_retail_formats PUBLIC omega_assets omega_core)
@@ -169,6 +170,7 @@ if(BUILD_TESTING)
         native/tests/pop_terrain_index_tests.cpp
         native/tests/tdx_texture_storage_decoder_tests.cpp
         native/tests/virtual_file_system_tests.cpp
+        native/tests/vum_material_catalog_decoder_tests.cpp
     )
     target_link_libraries(omega_core_tests PRIVATE
         omega_core

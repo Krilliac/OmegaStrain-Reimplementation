@@ -4,6 +4,7 @@
 #include "omega/retail/col_spatial_mesh_decoder.h"
 #include "omega/retail/container_descriptors.h"
 #include "omega/retail/tdx_texture_storage_decoder.h"
+#include "omega/retail/vum_material_catalog_decoder.h"
 
 #include <algorithm>
 #include <cctype>
@@ -91,6 +92,13 @@ struct TdxSemanticStats
     std::uint64_t implicit_zero_bytes = 0;
 };
 
+struct VumSemanticStats
+{
+    std::uint64_t names = 0;
+    std::uint64_t materials = 0;
+    std::uint64_t name_references = 0;
+};
+
 struct VerificationStats
 {
     std::uint64_t filesystem_entries = 0;
@@ -111,6 +119,7 @@ struct VerificationStats
     ExtentStats vum_extents;
     ExtentStats tdx_extents;
     ColSemanticStats col_semantic;
+    VumSemanticStats vum_semantic;
     TdxSemanticStats tdx_semantic;
     bool stopped_at_safety_limit = false;
 };
@@ -298,6 +307,23 @@ void StopAtSafetyLimit(VerificationStats& stats, const std::string_view message)
     return true;
 }
 
+[[nodiscard]] bool RecordVumSemantics(
+    const asset::MaterialCatalogIR& catalog, VerificationStats& stats)
+{
+    if (!AddSemanticCounter(
+            stats.vum_semantic.names, catalog.names.size(), stats, "VUM catalog name count") ||
+        !AddSemanticCounter(stats.vum_semantic.materials, catalog.materials.size(), stats,
+            "VUM material-record count"))
+        return false;
+    for (const auto& material : catalog.materials)
+    {
+        if (!AddSemanticCounter(stats.vum_semantic.name_references, material.name_count, stats,
+                "VUM material name-reference count"))
+            return false;
+    }
+    return true;
+}
+
 [[nodiscard]] bool AddIndexedEntries(
     VerificationStats& stats, const std::uint64_t amount)
 {
@@ -416,6 +442,15 @@ void InspectAssetRange(const std::filesystem::path& backing_path,
             PrintAssetError(backing_path, entry_name, descriptor.error().message);
             return;
         }
+        auto catalog = retail::DecodeVumMaterialCatalog(*bytes);
+        if (!catalog)
+        {
+            ++stats.vum.errors;
+            PrintAssetError(backing_path, entry_name, catalog.error().message);
+            return;
+        }
+        if (!RecordVumSemantics(*catalog, stats))
+            return;
         ++stats.vum.valid;
         RecordExtent(stats.vum_extents, descriptor->primary_extent.relation);
         return;
@@ -638,7 +673,8 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         "\"triangle_references\":{},\"empty_meshes\":{},"
         "\"direct_leaf_roots\":{},\"maximum_edge_depth\":{}}},"
         "\"vum\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
-        "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{}}},"
+        "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{},"
+        "\"names\":{},\"materials\":{},\"name_references\":{}}},"
         "\"tdx\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
         "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{},"
         "\"indexed_4\":{},\"indexed_8\":{},\"packed_24\":{},\"packed_32\":{},"
@@ -658,7 +694,9 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         stats.col_semantic.direct_leaf_roots, stats.col_semantic.maximum_edge_depth,
         stats.vum.candidates, stats.vum.valid, stats.vum.errors, stats.vum_extents.exact,
         stats.vum_extents.zero_padded_tail, stats.vum_extents.nonzero_tail,
-        stats.vum_extents.exceeds_input, stats.tdx.candidates, stats.tdx.valid, stats.tdx.errors,
+        stats.vum_extents.exceeds_input, stats.vum_semantic.names,
+        stats.vum_semantic.materials, stats.vum_semantic.name_references,
+        stats.tdx.candidates, stats.tdx.valid, stats.tdx.errors,
         stats.tdx_extents.exact, stats.tdx_extents.zero_padded_tail, stats.tdx_extents.nonzero_tail,
         stats.tdx_extents.exceeds_input, stats.tdx_semantic.indexed_4,
         stats.tdx_semantic.indexed_8, stats.tdx_semantic.packed_24,
