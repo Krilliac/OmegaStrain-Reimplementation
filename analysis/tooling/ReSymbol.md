@@ -1,29 +1,80 @@
 # ReSymbol dogfood: Omega Strain ELF intake
 
-Verified on 2026-07-16 against the live ReSymbol integration worktree. This report contains only file identity and container metadata; it does not contain game bytes.
+Verified on 2026-07-17 against isolated local ReSymbol commits. This report contains only
+container identity, validation results, and workflow behavior. It contains no game bytes,
+decoded instructions, recovered strings, or executable code.
 
-## Live ReSymbol state
+## Result
 
-- Source worktree: private local ReSymbol checkout (machine path intentionally omitted)
-- Branch: `codex/integrate-resymbol`
-- HEAD: `574325ba6254a34695247a38e22f522ccbe2d1bb`
-- Upstream state at inspection: 46 commits ahead of `origin/codex/integrate-resymbol`
-- Git status at inspection: clean
-- Build/output root: private local target directory (machine path intentionally omitted)
-- CLI version: `resymbol 0.1.0-alpha.1`
-- CLI SHA-256: `4EF7BFE593A52EA93B51E94479282B6D5F1B41129D3F0F77E447BEF7A22B04E0`
+The bounded ELF32 intake slice now works end to end on the owned retail executable:
 
-The other Codex session was actively running this command while the inspection happened:
+- ReSymbol created an identity-bound `.resym` package in `--safe-mode`.
+- `resymbol inspect --binary` verified the package against the exact input.
+- JSON, Markdown, IDA Python, and Ghidra Java exports succeeded deterministically.
+- The base symbol graph is empty: no functions, globals, calls, thunks, strings, types, or
+  data references are claimed.
+- MAP and PDB exports rejected the ELF project with the documented PE/x86-64-only error.
+- Both rejected exports failed before creating their destination files.
+- A leak scan found no absolute local path, private-tree path, or retail filename in the
+  non-log artifacts.
 
-```text
-cargo test --workspace --locked --release -j 1
-```
+All packages, exports, and command logs remain under the ignored `analysis/output/` tree.
+Nothing derived from the owned executable was added to the public repository.
 
-No ReSymbol files, branches, commits, or build processes were changed by this Omega inspection.
+## ReSymbol change set
+
+The feature was developed in an isolated ReSymbol worktree so an active integration session
+and its staged changes were not disturbed:
+
+- `f126552a7e9656967d37c08a8877151b8106d176` — bounded ELF32 little-endian `ET_EXEC` /
+  `EM_MIPS` container intake.
+- `35116d7` — follow-up correction for a pre-existing Workbench capability-count fixture
+  exposed by the clean validation run.
+- Local validation branch: `codex/elf32-container-intake-validation`.
+
+These commits are local integration inputs at the time of this report. Publishing or merging
+them into ReSymbol is owned by the active ReSymbol integration session; Omega does not vendor
+or depend on an unpublished ReSymbol build.
+
+The feature adds:
+
+- checked ELF header, program-header, and section-header parsing with fixed collection limits;
+- sparse, non-empty `PT_LOAD` metadata without allocating virtual gaps;
+- explicit 32-bit virtual-range and file-range overflow rejection;
+- schema-14 ELF package semantics while retaining schema 1-13 readers;
+- the container-only architecture token `elf32-em-mips-le`;
+- empty deterministic graph projection to neutral export formats;
+- explicit MAP/PDB and PE-only Workbench gates; and
+- source-built synthetic tests with independently chosen values and no proprietary fixture.
+
+This is container intake only. It does not add a MIPS or R5900 decoder, disassembler,
+interpreter, recompiler, emulator, or execution path.
+
+## Validation
+
+Validation used MSVC through VS2022 `vcvars64.bat`, with `CC=cl`, `CXX=cl`, an isolated Cargo
+target directory, and one build job at a time:
+
+- `cargo fmt --all -- --check`: passed.
+- `git diff --check`: passed.
+- ELF analysis integration tests: 5 passed.
+- PE regression integration tests: 140 passed.
+- package, export, and application targets: passed.
+- CLI unit tests: 98 passed.
+- CLI inspect integration tests: 4 passed.
+- CLI patch integration tests: 6 passed.
+- optional managed and WASM drop-in tests: 2 ignored because their external artifacts were not
+  installed.
+- Workbench tests after the fixture correction: 112 passed.
+
+The clean `f126552` run first reproduced one unrelated baseline Workbench failure: the test
+passed `14` capabilities while its already-updated expected string asserted `17`. Blame and the
+feature diff confirmed the ELF change did not touch that assertion. Commit `35116d7` corrected
+the two stale fixture inputs, and the full Workbench binary then passed 112/112.
 
 ## Owned input identity
 
-Keep the original executable only in Omega's ignored private tree:
+The original executable remains only in Omega's ignored private tree:
 
 ```text
 <omega-root>\private\extracted-disc\SCUS_972.64
@@ -38,64 +89,47 @@ Keep the original executable only in Omega's ignored private tree:
 - Program headers: 5
 - Section headers: 11
 
-The non-private metadata source is `analysis/elf/SCUS_97264.metadata.json`.
+The public metadata mirror is `analysis/elf/SCUS_97264.metadata.json`.
 
-## Current CLI workflow and observed failure
+## Reproducible private workflow
 
-For supported inputs, ReSymbol's project artifact is a `.resym` package:
-
-```powershell
-resymbol analyze application.exe --output application.resym
-resymbol inspect application.resym --binary application.exe
-resymbol export application.resym --format json
-resymbol export application.resym --format markdown
-resymbol export application.resym --format ida-python
-resymbol export application.resym --format ghidra-java
-```
-
-The package records identity and analysis data, not the input executable bytes. Once ELF/MIPS
-intake exists, run from the Omega repository root and write the derived package only into the
-ignored output directory:
+Run only with a personally owned executable and keep the destination ignored:
 
 ```powershell
-resymbol --safe-mode analyze `
-  .\private\extracted-disc\SCUS_972.64 `
-  --output .\analysis\output\SCUS_97264.resym
+$resymbol = '<private-resymbol-build>\resymbol.exe'
+$input = '.\private\extracted-disc\SCUS_972.64'
+$out = '.\analysis\output\resymbol-elf'
+
+New-Item -ItemType Directory -Path $out | Out-Null
+
+& $resymbol --safe-mode analyze $input --output "$out\SCUS_97264.resym"
+& $resymbol inspect "$out\SCUS_97264.resym" --binary $input
+& $resymbol export "$out\SCUS_97264.resym" --format json --output "$out\symbols.json"
+& $resymbol export "$out\SCUS_97264.resym" --format markdown --output "$out\symbols.md"
+& $resymbol export "$out\SCUS_97264.resym" --format ida-python --output "$out\symbols.py"
+& $resymbol export "$out\SCUS_97264.resym" --format ghidra-java `
+  --output "$out\ReSymbolImport_OmegaElf.java"
 ```
 
-The current build exits 1 before creating a package:
+`--safe-mode` with no explicit plugin is deliberate: only the built-in bounded container
+analysis runs, and no third-party plugin receives the executable. ReSymbol's create-new policy
+also requires fresh output paths rather than overwriting existing artifacts.
 
-```text
-unsupported binary format (first bytes: 7f 45 4c 46 01 01 01 00)
-```
+## Artifact boundary
 
-This was tested with a unique temporary output path; no output file was created.
+The `.resym` package does not embed the executable. It records exact identity and derived ELF
+metadata, including the input hash and size, entry point, header records, load mappings, image
+extent, schema, and generator version. Neutral exports contain the identity gate and an empty
+symbol graph. They are still kept private because hashes and layout metadata fingerprint the
+proprietary input even though they do not reproduce its code or assets.
 
-## Concrete ReSymbol gap
+## Pure-native runtime boundary
 
-ReSymbol cannot currently create any project for this file:
+ReSymbol is an offline research tool, not part of OpenOmega. The OpenOmega runtime remains
+modern native C++ for x86-64 first, with ARM64 kept as a future portability target. It will not
+ship or execute PlayStation 2 instructions and will not embed PCSX2, a MIPS interpreter, a MIPS
+JIT, a static recompiler, an Emotion Engine runtime, or translated instruction blocks.
 
-1. `resymbol-analysis::analyze_bytes` recognizes only `MZ` and documents PE32+ x86-64 as the sole accepted format (`crates/resymbol-analysis/src/lib.rs`).
-2. `BinaryFormat` already includes `Elf`, but `BinaryAnalysis` has only the `Pe` variant (`crates/resymbol-core/src/symbols.rs` and `crates/resymbol-analysis/src/types.rs`).
-3. The CLI performs built-in base analysis before plugin discovery/execution (`crates/resymbol-cli/src/main.rs`), so a plugin cannot currently act as the "plugin-provided loader" anticipated by the `BinaryFormat` documentation.
-4. The workbench, static address-space model, linear preview, patch flow, and several exporters match exhaustively on PE and/or x86-64.
-5. ReSymbol's roadmap explicitly leaves ELF/Mach-O and additional architectures for a future milestone.
-
-The owned file also exposes an important modeling constraint: `EM_MIPS` does not by itself mean a generic MIPS32 decoder is sufficient. PlayStation 2 code targets the Emotion Engine/R5900 family. The first container slice should preserve this uncertainty and make no instruction claims until an R5900-aware decoder is selected and tested.
-
-## Smallest useful next action
-
-Implement a bounded, container-only ELF32 little-endian intake slice before attempting MIPS disassembly:
-
-1. Parse and validate ELF identity, `e_machine`, entry VA, flags, program headers, and section headers with checked arithmetic and fixed collection limits.
-2. Add a format-neutral ELF analysis variant and sparse load-segment address mapping. Ignore zero-sized `PT_LOAD` records when computing the image extent; do not allocate a buffer spanning virtual gaps.
-3. Represent this file with image base `0x00100000` and entry RVA `0x8`; preserve segment permissions exactly, including the main RWX load segment.
-4. Produce a `.resym` package with an empty deterministic symbol graph plus container evidence. Because this adds a new producer payload shape to the strict package contract, evaluate it as schema 14 rather than silently emitting a novel shape under schema 13.
-5. Add a synthetic, redistributable ELF32 little-endian `EM_MIPS` fixture to ReSymbol tests. Use `SCUS_972.64` only for local manual dogfooding, never as a fixture or committed input.
-6. Keep x64-only preview, PE patching, MAP, and PDB actions explicitly unavailable. JSON, Markdown, and eventually IDA/Ghidra projection are the first relevant outputs.
-
-That slice would make Omega project creation and address review possible without claiming MIPS decoding. An R5900 decoder and call/data-reference recovery should be a separate follow-up. These are reverse-engineering inputs only: the Omega native runtime remains pure modern x86-64/ARM64 code and does not ship or execute PS2 instructions.
-
-## Dogfood decision
-
-A ReSymbol feature is warranted. This is not an Omega configuration problem: a valid, small ELF reaches the intended bounded reader and is rejected at the format dispatcher. The safe handoff is this report plus the exact reproduction above. Do not patch the live ReSymbol integration worktree until its active owner finishes the 46-commit integration/test run.
+Any future R5900-aware decoding belongs in isolated offline research tooling. Its output may
+inform clean-room behavioral specifications, but original instructions and mechanically
+translated code are not runtime dependencies or public repository inputs.
