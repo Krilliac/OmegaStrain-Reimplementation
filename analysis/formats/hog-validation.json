@@ -1,0 +1,1672 @@
+{
+  "archive_count": 273,
+  "archives": [
+    {
+      "data_offset": 16384,
+      "entry_count": 570,
+      "path": "GAMEDATA/BELARUS1/DATA.HOG",
+      "tag": "0x403EA052"
+    },
+    {
+      "data_offset": 320,
+      "entry_count": 14,
+      "path": "GAMEDATA/BELARUS1/LOADING.HOG",
+      "tag": "0x3F3E7BAA"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/BELARUS1/MAPTEX.HOG",
+      "tag": "0x3FCFC4AB"
+    },
+    {
+      "data_offset": 64,
+      "entry_count": 2,
+      "path": "GAMEDATA/BELARUS1/MAPVUM.HOG",
+      "tag": "0x3FCFC4AA"
+    },
+    {
+      "data_offset": 624,
+      "entry_count": 27,
+      "path": "GAMEDATA/BELARUS1/NPCSKM.HOG",
+      "tag": "0x40342709"
+    },
+    {
+      "data_offset": 1104,
+      "entry_count": 45,
+      "path": "GAMEDATA/BELARUS1/NPCTEX.HOG",
+      "tag": "0x4034270A"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 30,
+      "path": "GAMEDATA/BELARUS1/OBJECTS.HOG",
+      "tag": "0x40510686"
+    },
+    {
+      "data_offset": 112,
+      "entry_count": 6,
+      "path": "GAMEDATA/BELARUS1/SCRIPTS.HOG",
+      "tag": "0x405119AF"
+    },
+    {
+      "data_offset": 272,
+      "entry_count": 10,
+      "path": "GAMEDATA/BELARUS1/SKL.HOG",
+      "tag": "0x403426EA"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/BELARUS1/SND.HOG",
+      "tag": "0x404E5551"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 247,
+      "path": "GAMEDATA/BELARUS1/SNDVAG.HOG",
+      "tag": "0x404E5556"
+    },
+    {
+      "data_offset": 8944,
+      "entry_count": 398,
+      "path": "GAMEDATA/BELARUS1/TEX.HOG",
+      "tag": "0x403EA069"
+    },
+    {
+      "data_offset": 384,
+      "entry_count": 22,
+      "path": "GAMEDATA/BELARUS1/WPN.HOG",
+      "tag": "0x4034272D"
+    },
+    {
+      "data_offset": 16384,
+      "entry_count": 591,
+      "path": "GAMEDATA/BELARUS2/DATA.HOG",
+      "tag": "0x40523EF4"
+    },
+    {
+      "data_offset": 320,
+      "entry_count": 14,
+      "path": "GAMEDATA/BELARUS2/LOADING.HOG",
+      "tag": "0x3F3E7BC4"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/BELARUS2/MAPTEX.HOG",
+      "tag": "0x3FDF524C"
+    },
+    {
+      "data_offset": 64,
+      "entry_count": 2,
+      "path": "GAMEDATA/BELARUS2/MAPVUM.HOG",
+      "tag": "0x3FDF524B"
+    },
+    {
+      "data_offset": 1536,
+      "entry_count": 65,
+      "path": "GAMEDATA/BELARUS2/NPCSKM.HOG",
+      "tag": "0x4034274E"
+    },
+    {
+      "data_offset": 1472,
+      "entry_count": 60,
+      "path": "GAMEDATA/BELARUS2/NPCTEX.HOG",
+      "tag": "0x4034274F"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 33,
+      "path": "GAMEDATA/BELARUS2/OBJECTS.HOG",
+      "tag": "0x40523F0D"
+    },
+    {
+      "data_offset": 116,
+      "entry_count": 6,
+      "path": "GAMEDATA/BELARUS2/SCRIPTS.HOG",
+      "tag": "0x40523F14"
+    },
+    {
+      "data_offset": 384,
+      "entry_count": 14,
+      "path": "GAMEDATA/BELARUS2/SKL.HOG",
+      "tag": "0x4034272F"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/BELARUS2/SND.HOG",
+      "tag": "0x4050C829"
+    },
+    {
+      "data_offset": 6144,
+      "entry_count": 307,
+      "path": "GAMEDATA/BELARUS2/SNDVAG.HOG",
+      "tag": "0x4050C82F"
+    },
+    {
+      "data_offset": 14688,
+      "entry_count": 636,
+      "path": "GAMEDATA/BELARUS2/TEX.HOG",
+      "tag": "0x40523EF9"
+    },
+    {
+      "data_offset": 416,
+      "entry_count": 24,
+      "path": "GAMEDATA/BELARUS2/WPN.HOG",
+      "tag": "0x40342776"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 142,
+      "path": "GAMEDATA/CHECHNYA/DATA.HOG",
+      "tag": "0x4022CB02"
+    },
+    {
+      "data_offset": 320,
+      "entry_count": 14,
+      "path": "GAMEDATA/CHECHNYA/LOADING.HOG",
+      "tag": "0x3F3E7E5B"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/CHECHNYA/MAPTEX.HOG",
+      "tag": "0x3F2ED353"
+    },
+    {
+      "data_offset": 48,
+      "entry_count": 1,
+      "path": "GAMEDATA/CHECHNYA/MAPVUM.HOG",
+      "tag": "0x3F2ED352"
+    },
+    {
+      "data_offset": 944,
+      "entry_count": 40,
+      "path": "GAMEDATA/CHECHNYA/NPCSKM.HOG",
+      "tag": "0x40342BA6"
+    },
+    {
+      "data_offset": 1424,
+      "entry_count": 58,
+      "path": "GAMEDATA/CHECHNYA/NPCTEX.HOG",
+      "tag": "0x40342BA7"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 6,
+      "path": "GAMEDATA/CHECHNYA/OBJECTS.HOG",
+      "tag": "0x40426E7C"
+    },
+    {
+      "data_offset": 128,
+      "entry_count": 7,
+      "path": "GAMEDATA/CHECHNYA/SCRIPTS.HOG",
+      "tag": "0x4053CB60"
+    },
+    {
+      "data_offset": 240,
+      "entry_count": 8,
+      "path": "GAMEDATA/CHECHNYA/SKL.HOG",
+      "tag": "0x40342B89"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/CHECHNYA/SND.HOG",
+      "tag": "0x404E5650"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 127,
+      "path": "GAMEDATA/CHECHNYA/SNDVAG.HOG",
+      "tag": "0x404E5655"
+    },
+    {
+      "data_offset": 3056,
+      "entry_count": 137,
+      "path": "GAMEDATA/CHECHNYA/TEX.HOG",
+      "tag": "0x4022CB0A"
+    },
+    {
+      "data_offset": 464,
+      "entry_count": 26,
+      "path": "GAMEDATA/CHECHNYA/WPN.HOG",
+      "tag": "0x40342BD4"
+    },
+    {
+      "data_offset": 128,
+      "entry_count": 6,
+      "path": "GAMEDATA/COMMON/FONTS.HOG",
+      "tag": "0x402836AA"
+    },
+    {
+      "data_offset": 272,
+      "entry_count": 14,
+      "path": "GAMEDATA/COMMON/IALOBBYN.HOG",
+      "tag": "0x3EBD878B"
+    },
+    {
+      "data_offset": 112,
+      "entry_count": 5,
+      "path": "GAMEDATA/COMMON/IAMAP.HOG",
+      "tag": "0x3FA443F4"
+    },
+    {
+      "data_offset": 528,
+      "entry_count": 27,
+      "path": "GAMEDATA/COMMON/IARCADEN.HOG",
+      "tag": "0x40281CFB"
+    },
+    {
+      "data_offset": 176,
+      "entry_count": 8,
+      "path": "GAMEDATA/COMMON/LOADING.HOG",
+      "tag": "0x3EB1AE50"
+    },
+    {
+      "data_offset": 36864,
+      "entry_count": 1466,
+      "path": "GAMEDATA/COMMON/MANSKM.HOG",
+      "tag": "0x404FE4F7"
+    },
+    {
+      "data_offset": 53248,
+      "entry_count": 2144,
+      "path": "GAMEDATA/COMMON/MANTEX.HOG",
+      "tag": "0x404FE52D"
+    },
+    {
+      "data_offset": 1024,
+      "entry_count": 43,
+      "path": "GAMEDATA/COMMON/MORPH.HOG",
+      "tag": "0x404FE450"
+    },
+    {
+      "data_offset": 512,
+      "entry_count": 18,
+      "path": "GAMEDATA/COMMON/MORPHTEX.HOG",
+      "tag": "0x404FE451"
+    },
+    {
+      "data_offset": 20480,
+      "entry_count": 870,
+      "path": "GAMEDATA/COMMON/PAR.HOG",
+      "tag": "0x403FECBA"
+    },
+    {
+      "data_offset": 68,
+      "entry_count": 3,
+      "path": "GAMEDATA/COMMON/SCRIPTS.HOG",
+      "tag": "0x404E2092"
+    },
+    {
+      "data_offset": 4784,
+      "entry_count": 157,
+      "path": "GAMEDATA/COMMON/SKA.HOG",
+      "tag": "0x40245D11"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 55,
+      "path": "GAMEDATA/COMMON/SKALEVEL.HOG",
+      "tag": "0x40245D20"
+    },
+    {
+      "data_offset": 56,
+      "entry_count": 2,
+      "path": "GAMEDATA/COMMON/SKAS.HOG",
+      "tag": "0x3E852B11"
+    },
+    {
+      "data_offset": 56,
+      "entry_count": 2,
+      "path": "GAMEDATA/COMMON/SKEL.HOG",
+      "tag": "0x3C730D33"
+    },
+    {
+      "data_offset": 6144,
+      "entry_count": 215,
+      "path": "GAMEDATA/COMMON/SKL.HOG",
+      "tag": "0x404FE454"
+    },
+    {
+      "data_offset": 592,
+      "entry_count": 31,
+      "path": "GAMEDATA/COMMON/SPECFX.HOG",
+      "tag": "0x3F98C0A4"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 210,
+      "path": "GAMEDATA/COMMON/WPNHOG.HOG",
+      "tag": "0x4043D6E9"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 121,
+      "path": "GAMEDATA/COMMON/WPNSKL.HOG",
+      "tag": "0x3F7A4242"
+    },
+    {
+      "data_offset": 112,
+      "entry_count": 4,
+      "path": "GAMEDATA/COMMON/ZEUSHELL.HOG",
+      "tag": "0x4019B091"
+    },
+    {
+      "data_offset": 8192,
+      "entry_count": 486,
+      "path": "GAMEDATA/FRONTEND/LANG/ENGLISH/ZEUS.HOG",
+      "tag": "0x40296C7B"
+    },
+    {
+      "data_offset": 13264,
+      "entry_count": 552,
+      "path": "GAMEDATA/FRONTEND/MANSKM.HOG",
+      "tag": "0x404FE4C6"
+    },
+    {
+      "data_offset": 26624,
+      "entry_count": 1047,
+      "path": "GAMEDATA/FRONTEND/MANTEX.HOG",
+      "tag": "0x404FE5D5"
+    },
+    {
+      "data_offset": 960,
+      "entry_count": 39,
+      "path": "GAMEDATA/FRONTEND/MORPH.HOG",
+      "tag": "0x404FE4ED"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 57,
+      "path": "GAMEDATA/FRONTEND/NTSC.HOG",
+      "tag": "0x404E5DB3"
+    },
+    {
+      "data_offset": 56,
+      "entry_count": 2,
+      "path": "GAMEDATA/FRONTEND/SKEL.HOG",
+      "tag": "0x3C730D33"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 3,
+      "path": "GAMEDATA/FRONTEND/SND.HOG",
+      "tag": "0x404E581D"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 66,
+      "path": "GAMEDATA/FRONTEND/SNDVAG.HOG",
+      "tag": "0x404E581F"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 102,
+      "path": "GAMEDATA/ITALY/DATA.HOG",
+      "tag": "0x40314388"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 14,
+      "path": "GAMEDATA/ITALY/LOADING.HOG",
+      "tag": "0x3F3E7AFD"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/ITALY/MAPTEX.HOG",
+      "tag": "0x3FFDF9E8"
+    },
+    {
+      "data_offset": 64,
+      "entry_count": 2,
+      "path": "GAMEDATA/ITALY/MAPVUM.HOG",
+      "tag": "0x3FFDF9E7"
+    },
+    {
+      "data_offset": 1040,
+      "entry_count": 44,
+      "path": "GAMEDATA/ITALY/NPCSKM.HOG",
+      "tag": "0x40342796"
+    },
+    {
+      "data_offset": 1584,
+      "entry_count": 65,
+      "path": "GAMEDATA/ITALY/NPCTEX.HOG",
+      "tag": "0x40342798"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 7,
+      "path": "GAMEDATA/ITALY/OBJECTS.HOG",
+      "tag": "0x40495F3D"
+    },
+    {
+      "data_offset": 96,
+      "entry_count": 6,
+      "path": "GAMEDATA/ITALY/SCRIPTS.HOG",
+      "tag": "0x4052A623"
+    },
+    {
+      "data_offset": 272,
+      "entry_count": 10,
+      "path": "GAMEDATA/ITALY/SKL.HOG",
+      "tag": "0x40342778"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/ITALY/SND.HOG",
+      "tag": "0x404E5625"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 117,
+      "path": "GAMEDATA/ITALY/SNDVAG.HOG",
+      "tag": "0x404E562A"
+    },
+    {
+      "data_offset": 2848,
+      "entry_count": 146,
+      "path": "GAMEDATA/ITALY/TEX.HOG",
+      "tag": "0x40314390"
+    },
+    {
+      "data_offset": 368,
+      "entry_count": 20,
+      "path": "GAMEDATA/ITALY/WPN.HOG",
+      "tag": "0x403427BB"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 139,
+      "path": "GAMEDATA/KYRGSTAN/DATA.HOG",
+      "tag": "0x40426801"
+    },
+    {
+      "data_offset": 320,
+      "entry_count": 14,
+      "path": "GAMEDATA/KYRGSTAN/LOADING.HOG",
+      "tag": "0x3F3E7C2E"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/KYRGSTAN/MAPTEX.HOG",
+      "tag": "0x3FFC7A9D"
+    },
+    {
+      "data_offset": 64,
+      "entry_count": 2,
+      "path": "GAMEDATA/KYRGSTAN/MAPVUM.HOG",
+      "tag": "0x3FFC7A9C"
+    },
+    {
+      "data_offset": 1248,
+      "entry_count": 53,
+      "path": "GAMEDATA/KYRGSTAN/NPCSKM.HOG",
+      "tag": "0x403FD818"
+    },
+    {
+      "data_offset": 2064,
+      "entry_count": 85,
+      "path": "GAMEDATA/KYRGSTAN/NPCTEX.HOG",
+      "tag": "0x403FD819"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 5,
+      "path": "GAMEDATA/KYRGSTAN/OBJECTS.HOG",
+      "tag": "0x40428A85"
+    },
+    {
+      "data_offset": 108,
+      "entry_count": 6,
+      "path": "GAMEDATA/KYRGSTAN/SCRIPTS.HOG",
+      "tag": "0x404CE281"
+    },
+    {
+      "data_offset": 336,
+      "entry_count": 14,
+      "path": "GAMEDATA/KYRGSTAN/SKL.HOG",
+      "tag": "0x403FD7F4"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/KYRGSTAN/SND.HOG",
+      "tag": "0x404E5639"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 210,
+      "path": "GAMEDATA/KYRGSTAN/SNDVAG.HOG",
+      "tag": "0x404E563D"
+    },
+    {
+      "data_offset": 2928,
+      "entry_count": 131,
+      "path": "GAMEDATA/KYRGSTAN/TEX.HOG",
+      "tag": "0x4042680E"
+    },
+    {
+      "data_offset": 368,
+      "entry_count": 20,
+      "path": "GAMEDATA/KYRGSTAN/WPN.HOG",
+      "tag": "0x403FD83D"
+    },
+    {
+      "data_offset": 10240,
+      "entry_count": 322,
+      "path": "GAMEDATA/LORELEI/DATA.HOG",
+      "tag": "0x4036B096"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 14,
+      "path": "GAMEDATA/LORELEI/LOADING.HOG",
+      "tag": "0x3F3E7EFD"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/LORELEI/MAPTEX.HOG",
+      "tag": "0x401AA949"
+    },
+    {
+      "data_offset": 96,
+      "entry_count": 4,
+      "path": "GAMEDATA/LORELEI/MAPVUM.HOG",
+      "tag": "0x401AA948"
+    },
+    {
+      "data_offset": 1104,
+      "entry_count": 47,
+      "path": "GAMEDATA/LORELEI/NPCSKM.HOG",
+      "tag": "0x40342820"
+    },
+    {
+      "data_offset": 992,
+      "entry_count": 40,
+      "path": "GAMEDATA/LORELEI/NPCTEX.HOG",
+      "tag": "0x40342821"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 41,
+      "path": "GAMEDATA/LORELEI/OBJECTS.HOG",
+      "tag": "0x404A6328"
+    },
+    {
+      "data_offset": 108,
+      "entry_count": 6,
+      "path": "GAMEDATA/LORELEI/SCRIPTS.HOG",
+      "tag": "0x404E64B2"
+    },
+    {
+      "data_offset": 320,
+      "entry_count": 11,
+      "path": "GAMEDATA/LORELEI/SKL.HOG",
+      "tag": "0x40342805"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/LORELEI/SND.HOG",
+      "tag": "0x404E55E0"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 153,
+      "path": "GAMEDATA/LORELEI/SNDVAG.HOG",
+      "tag": "0x404E55E4"
+    },
+    {
+      "data_offset": 4656,
+      "entry_count": 247,
+      "path": "GAMEDATA/LORELEI/TEX.HOG",
+      "tag": "0x4036B0A6"
+    },
+    {
+      "data_offset": 416,
+      "entry_count": 23,
+      "path": "GAMEDATA/LORELEI/WPN.HOG",
+      "tag": "0x40342847"
+    },
+    {
+      "data_offset": 10240,
+      "entry_count": 301,
+      "path": "GAMEDATA/MINSK/DATA.HOG",
+      "tag": "0x404E855C"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 14,
+      "path": "GAMEDATA/MINSK/LOADING.HOG",
+      "tag": "0x3F3E7E1D"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/MINSK/MAPTEX.HOG",
+      "tag": "0x3FDF5C09"
+    },
+    {
+      "data_offset": 128,
+      "entry_count": 5,
+      "path": "GAMEDATA/MINSK/MAPVUM.HOG",
+      "tag": "0x3FDF5C08"
+    },
+    {
+      "data_offset": 1728,
+      "entry_count": 73,
+      "path": "GAMEDATA/MINSK/NPCSKM.HOG",
+      "tag": "0x40342867"
+    },
+    {
+      "data_offset": 1776,
+      "entry_count": 73,
+      "path": "GAMEDATA/MINSK/NPCTEX.HOG",
+      "tag": "0x40342869"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 68,
+      "path": "GAMEDATA/MINSK/OBJECTS.HOG",
+      "tag": "0x404E856E"
+    },
+    {
+      "data_offset": 108,
+      "entry_count": 6,
+      "path": "GAMEDATA/MINSK/SCRIPTS.HOG",
+      "tag": "0x4052673D"
+    },
+    {
+      "data_offset": 608,
+      "entry_count": 23,
+      "path": "GAMEDATA/MINSK/SKL.HOG",
+      "tag": "0x40342849"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/MINSK/SND.HOG",
+      "tag": "0x404E55C5"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 184,
+      "path": "GAMEDATA/MINSK/SNDVAG.HOG",
+      "tag": "0x404E55CA"
+    },
+    {
+      "data_offset": 7648,
+      "entry_count": 376,
+      "path": "GAMEDATA/MINSK/TEX.HOG",
+      "tag": "0x404E8564"
+    },
+    {
+      "data_offset": 416,
+      "entry_count": 23,
+      "path": "GAMEDATA/MINSK/WPN.HOG",
+      "tag": "0x40342892"
+    },
+    {
+      "data_offset": 8192,
+      "entry_count": 259,
+      "path": "GAMEDATA/MNTNEGR1/DATA.HOG",
+      "tag": "0x40491DAE"
+    },
+    {
+      "data_offset": 320,
+      "entry_count": 14,
+      "path": "GAMEDATA/MNTNEGR1/LOADING.HOG",
+      "tag": "0x3F3E8178"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/MNTNEGR1/MAPTEX.HOG",
+      "tag": "0x3F3843CB"
+    },
+    {
+      "data_offset": 64,
+      "entry_count": 2,
+      "path": "GAMEDATA/MNTNEGR1/MAPVUM.HOG",
+      "tag": "0x3F3843CA"
+    },
+    {
+      "data_offset": 1280,
+      "entry_count": 54,
+      "path": "GAMEDATA/MNTNEGR1/NPCSKM.HOG",
+      "tag": "0x40465B0C"
+    },
+    {
+      "data_offset": 2240,
+      "entry_count": 92,
+      "path": "GAMEDATA/MNTNEGR1/NPCTEX.HOG",
+      "tag": "0x40465B0D"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 10,
+      "path": "GAMEDATA/MNTNEGR1/OBJECTS.HOG",
+      "tag": "0x404A6B4C"
+    },
+    {
+      "data_offset": 132,
+      "entry_count": 7,
+      "path": "GAMEDATA/MNTNEGR1/SCRIPTS.HOG",
+      "tag": "0x404A6B70"
+    },
+    {
+      "data_offset": 496,
+      "entry_count": 17,
+      "path": "GAMEDATA/MNTNEGR1/SKL.HOG",
+      "tag": "0x40465AE4"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/MNTNEGR1/SND.HOG",
+      "tag": "0x404E57D1"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 103,
+      "path": "GAMEDATA/MNTNEGR1/SNDVAG.HOG",
+      "tag": "0x404E57D6"
+    },
+    {
+      "data_offset": 7632,
+      "entry_count": 327,
+      "path": "GAMEDATA/MNTNEGR1/TEX.HOG",
+      "tag": "0x40491DC0"
+    },
+    {
+      "data_offset": 432,
+      "entry_count": 24,
+      "path": "GAMEDATA/MNTNEGR1/WPN.HOG",
+      "tag": "0x40465B39"
+    },
+    {
+      "data_offset": 26624,
+      "entry_count": 915,
+      "path": "GAMEDATA/MYANMAR/DATA.HOG",
+      "tag": "0x403B8DB4"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 14,
+      "path": "GAMEDATA/MYANMAR/LOADING.HOG",
+      "tag": "0x3F3E800D"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/MYANMAR/MAPTEX.HOG",
+      "tag": "0x3FDE6139"
+    },
+    {
+      "data_offset": 48,
+      "entry_count": 1,
+      "path": "GAMEDATA/MYANMAR/MAPVUM.HOG",
+      "tag": "0x3FDE6138"
+    },
+    {
+      "data_offset": 1136,
+      "entry_count": 48,
+      "path": "GAMEDATA/MYANMAR/NPCSKM.HOG",
+      "tag": "0x40465C76"
+    },
+    {
+      "data_offset": 1824,
+      "entry_count": 75,
+      "path": "GAMEDATA/MYANMAR/NPCTEX.HOG",
+      "tag": "0x40465C78"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 15,
+      "path": "GAMEDATA/MYANMAR/OBJECTS.HOG",
+      "tag": "0x4052385A"
+    },
+    {
+      "data_offset": 116,
+      "entry_count": 6,
+      "path": "GAMEDATA/MYANMAR/SCRIPTS.HOG",
+      "tag": "0x40556545"
+    },
+    {
+      "data_offset": 272,
+      "entry_count": 10,
+      "path": "GAMEDATA/MYANMAR/SKL.HOG",
+      "tag": "0x40465C58"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/MYANMAR/SND.HOG",
+      "tag": "0x404E5700"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 151,
+      "path": "GAMEDATA/MYANMAR/SNDVAG.HOG",
+      "tag": "0x404E5792"
+    },
+    {
+      "data_offset": 2432,
+      "entry_count": 131,
+      "path": "GAMEDATA/MYANMAR/TEX.HOG",
+      "tag": "0x403B8DBD"
+    },
+    {
+      "data_offset": 432,
+      "entry_count": 24,
+      "path": "GAMEDATA/MYANMAR/WPN.HOG",
+      "tag": "0x40465CA5"
+    },
+    {
+      "data_offset": 10240,
+      "entry_count": 350,
+      "path": "GAMEDATA/TOKYO/DATA.HOG",
+      "tag": "0x4053C56F"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 14,
+      "path": "GAMEDATA/TOKYO/LOADING.HOG",
+      "tag": "0x3F3E7FA3"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/TOKYO/MAPTEX.HOG",
+      "tag": "0x3EBAABAD"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 3,
+      "path": "GAMEDATA/TOKYO/MAPVUM.HOG",
+      "tag": "0x3EBAABAC"
+    },
+    {
+      "data_offset": 1680,
+      "entry_count": 71,
+      "path": "GAMEDATA/TOKYO/NPCSKM.HOG",
+      "tag": "0x404662D9"
+    },
+    {
+      "data_offset": 1856,
+      "entry_count": 76,
+      "path": "GAMEDATA/TOKYO/NPCTEX.HOG",
+      "tag": "0x404662DA"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 54,
+      "path": "GAMEDATA/TOKYO/OBJECTS.HOG",
+      "tag": "0x4053C57E"
+    },
+    {
+      "data_offset": 156,
+      "entry_count": 8,
+      "path": "GAMEDATA/TOKYO/SCRIPTS.HOG",
+      "tag": "0x4053C586"
+    },
+    {
+      "data_offset": 448,
+      "entry_count": 18,
+      "path": "GAMEDATA/TOKYO/SKL.HOG",
+      "tag": "0x404662B7"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/TOKYO/SND.HOG",
+      "tag": "0x404E5668"
+    },
+    {
+      "data_offset": 6144,
+      "entry_count": 258,
+      "path": "GAMEDATA/TOKYO/SNDVAG.HOG",
+      "tag": "0x404E566D"
+    },
+    {
+      "data_offset": 16672,
+      "entry_count": 728,
+      "path": "GAMEDATA/TOKYO/TEX.HOG",
+      "tag": "0x4053C573"
+    },
+    {
+      "data_offset": 448,
+      "entry_count": 26,
+      "path": "GAMEDATA/TOKYO/WPN.HOG",
+      "tag": "0x40466307"
+    },
+    {
+      "data_offset": 12288,
+      "entry_count": 376,
+      "path": "GAMEDATA/TORONTO1/DATA.HOG",
+      "tag": "0x404FBFEC"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 14,
+      "path": "GAMEDATA/TORONTO1/LOADING.HOG",
+      "tag": "0x3F9EDF71"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/TORONTO1/MAPTEX.HOG",
+      "tag": "0x3FDF51B1"
+    },
+    {
+      "data_offset": 64,
+      "entry_count": 2,
+      "path": "GAMEDATA/TORONTO1/MAPVUM.HOG",
+      "tag": "0x3FDF51B0"
+    },
+    {
+      "data_offset": 1392,
+      "entry_count": 59,
+      "path": "GAMEDATA/TORONTO1/NPCSKM.HOG",
+      "tag": "0x403429A0"
+    },
+    {
+      "data_offset": 1760,
+      "entry_count": 72,
+      "path": "GAMEDATA/TORONTO1/NPCTEX.HOG",
+      "tag": "0x403429A1"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 60,
+      "path": "GAMEDATA/TORONTO1/OBJECTS.HOG",
+      "tag": "0x404FC003"
+    },
+    {
+      "data_offset": 124,
+      "entry_count": 7,
+      "path": "GAMEDATA/TORONTO1/SCRIPTS.HOG",
+      "tag": "0x404FC00B"
+    },
+    {
+      "data_offset": 640,
+      "entry_count": 28,
+      "path": "GAMEDATA/TORONTO1/SKL.HOG",
+      "tag": "0x4034297E"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/TORONTO1/SND.HOG",
+      "tag": "0x404E550B"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 153,
+      "path": "GAMEDATA/TORONTO1/SNDVAG.HOG",
+      "tag": "0x404E550F"
+    },
+    {
+      "data_offset": 13056,
+      "entry_count": 640,
+      "path": "GAMEDATA/TORONTO1/TEX.HOG",
+      "tag": "0x404FBFF6"
+    },
+    {
+      "data_offset": 496,
+      "entry_count": 29,
+      "path": "GAMEDATA/TORONTO1/WPN.HOG",
+      "tag": "0x403429D2"
+    },
+    {
+      "data_offset": 10240,
+      "entry_count": 352,
+      "path": "GAMEDATA/TORONTO2/DATA.HOG",
+      "tag": "0x4053C2B6"
+    },
+    {
+      "data_offset": 320,
+      "entry_count": 14,
+      "path": "GAMEDATA/TORONTO2/LOADING.HOG",
+      "tag": "0x3F9EDF54"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/TORONTO2/MAPTEX.HOG",
+      "tag": "0x3FD50F5E"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 3,
+      "path": "GAMEDATA/TORONTO2/MAPVUM.HOG",
+      "tag": "0x3FD50F5D"
+    },
+    {
+      "data_offset": 1536,
+      "entry_count": 65,
+      "path": "GAMEDATA/TORONTO2/NPCSKM.HOG",
+      "tag": "0x403429F6"
+    },
+    {
+      "data_offset": 2208,
+      "entry_count": 91,
+      "path": "GAMEDATA/TORONTO2/NPCTEX.HOG",
+      "tag": "0x403429F8"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 39,
+      "path": "GAMEDATA/TORONTO2/OBJECTS.HOG",
+      "tag": "0x4053C2C3"
+    },
+    {
+      "data_offset": 96,
+      "entry_count": 5,
+      "path": "GAMEDATA/TORONTO2/SCRIPTS.HOG",
+      "tag": "0x4053C2C7"
+    },
+    {
+      "data_offset": 640,
+      "entry_count": 28,
+      "path": "GAMEDATA/TORONTO2/SKL.HOG",
+      "tag": "0x403429D4"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/TORONTO2/SND.HOG",
+      "tag": "0x404E551F"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 112,
+      "path": "GAMEDATA/TORONTO2/SNDVAG.HOG",
+      "tag": "0x404E5524"
+    },
+    {
+      "data_offset": 8640,
+      "entry_count": 419,
+      "path": "GAMEDATA/TORONTO2/TEX.HOG",
+      "tag": "0x4053C2B8"
+    },
+    {
+      "data_offset": 368,
+      "entry_count": 21,
+      "path": "GAMEDATA/TORONTO2/WPN.HOG",
+      "tag": "0x40342A20"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 123,
+      "path": "GAMEDATA/TORONTO3/DATA.HOG",
+      "tag": "0x4027D5BB"
+    },
+    {
+      "data_offset": 48,
+      "entry_count": 1,
+      "path": "GAMEDATA/TORONTO3/IDSKL.HOG",
+      "tag": "0x3F7A39B3"
+    },
+    {
+      "data_offset": 320,
+      "entry_count": 14,
+      "path": "GAMEDATA/TORONTO3/LOADING.HOG",
+      "tag": "0x3F9EDF38"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/TORONTO3/MAPTEX.HOG",
+      "tag": "0x3F19B130"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 3,
+      "path": "GAMEDATA/TORONTO3/MAPVUM.HOG",
+      "tag": "0x3F19B12F"
+    },
+    {
+      "data_offset": 992,
+      "entry_count": 42,
+      "path": "GAMEDATA/TORONTO3/NPCSKM.HOG",
+      "tag": "0x40342A43"
+    },
+    {
+      "data_offset": 1632,
+      "entry_count": 67,
+      "path": "GAMEDATA/TORONTO3/NPCTEX.HOG",
+      "tag": "0x40342A44"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 17,
+      "path": "GAMEDATA/TORONTO3/OBJECTS.HOG",
+      "tag": "0x4040157D"
+    },
+    {
+      "data_offset": 92,
+      "entry_count": 5,
+      "path": "GAMEDATA/TORONTO3/SCRIPTS.HOG",
+      "tag": "0x40529DBF"
+    },
+    {
+      "data_offset": 560,
+      "entry_count": 25,
+      "path": "GAMEDATA/TORONTO3/SKL.HOG",
+      "tag": "0x40342A22"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/TORONTO3/SND.HOG",
+      "tag": "0x404E5540"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 105,
+      "path": "GAMEDATA/TORONTO3/SNDVAG.HOG",
+      "tag": "0x404E5545"
+    },
+    {
+      "data_offset": 4048,
+      "entry_count": 210,
+      "path": "GAMEDATA/TORONTO3/TEX.HOG",
+      "tag": "0x4027D5C1"
+    },
+    {
+      "data_offset": 336,
+      "entry_count": 19,
+      "path": "GAMEDATA/TORONTO3/WPN.HOG",
+      "tag": "0x40342A68"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 54,
+      "path": "GAMEDATA/TRAINING/DATA.HOG",
+      "tag": "0x3FCB87D6"
+    },
+    {
+      "data_offset": 320,
+      "entry_count": 14,
+      "path": "GAMEDATA/TRAINING/LOADING.HOG",
+      "tag": "0x3FBA5653"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/TRAINING/MAPTEX.HOG",
+      "tag": "0x3F6F45A1"
+    },
+    {
+      "data_offset": 128,
+      "entry_count": 5,
+      "path": "GAMEDATA/TRAINING/MAPVUM.HOG",
+      "tag": "0x3F6F45A0"
+    },
+    {
+      "data_offset": 768,
+      "entry_count": 33,
+      "path": "GAMEDATA/TRAINING/NPCSKM.HOG",
+      "tag": "0x40342BEE"
+    },
+    {
+      "data_offset": 1328,
+      "entry_count": 54,
+      "path": "GAMEDATA/TRAINING/NPCTEX.HOG",
+      "tag": "0x40342BEF"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 8,
+      "path": "GAMEDATA/TRAINING/OBJECTS.HOG",
+      "tag": "0x403C0E2E"
+    },
+    {
+      "data_offset": 112,
+      "entry_count": 6,
+      "path": "GAMEDATA/TRAINING/SCRIPTS.HOG",
+      "tag": "0x40463B84"
+    },
+    {
+      "data_offset": 176,
+      "entry_count": 7,
+      "path": "GAMEDATA/TRAINING/SKL.HOG",
+      "tag": "0x40342BD6"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/TRAINING/SND.HOG",
+      "tag": "0x404E583E"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 135,
+      "path": "GAMEDATA/TRAINING/SNDVAG.HOG",
+      "tag": "0x404E5841"
+    },
+    {
+      "data_offset": 1024,
+      "entry_count": 33,
+      "path": "GAMEDATA/TRAINING/TEX.HOG",
+      "tag": "0x3FCB87D9"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 17,
+      "path": "GAMEDATA/TRAINING/WPN.HOG",
+      "tag": "0x40342C13"
+    },
+    {
+      "data_offset": 10240,
+      "entry_count": 327,
+      "path": "GAMEDATA/UKRAINE/DATA.HOG",
+      "tag": "0x4054E0F8"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 14,
+      "path": "GAMEDATA/UKRAINE/LOADING.HOG",
+      "tag": "0x3F3E81B9"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/UKRAINE/MAPTEX.HOG",
+      "tag": "0x3F7AF5E2"
+    },
+    {
+      "data_offset": 64,
+      "entry_count": 2,
+      "path": "GAMEDATA/UKRAINE/MAPVUM.HOG",
+      "tag": "0x3F7AF5E1"
+    },
+    {
+      "data_offset": 1488,
+      "entry_count": 63,
+      "path": "GAMEDATA/UKRAINE/NPCSKM.HOG",
+      "tag": "0x40437FDE"
+    },
+    {
+      "data_offset": 2096,
+      "entry_count": 86,
+      "path": "GAMEDATA/UKRAINE/NPCTEX.HOG",
+      "tag": "0x40437FE0"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 56,
+      "path": "GAMEDATA/UKRAINE/OBJECTS.HOG",
+      "tag": "0x4054E105"
+    },
+    {
+      "data_offset": 128,
+      "entry_count": 7,
+      "path": "GAMEDATA/UKRAINE/SCRIPTS.HOG",
+      "tag": "0x4054E10D"
+    },
+    {
+      "data_offset": 288,
+      "entry_count": 11,
+      "path": "GAMEDATA/UKRAINE/SKL.HOG",
+      "tag": "0x40437FBD"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/UKRAINE/SND.HOG",
+      "tag": "0x404E57B7"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 252,
+      "path": "GAMEDATA/UKRAINE/SNDVAG.HOG",
+      "tag": "0x404E57BB"
+    },
+    {
+      "data_offset": 13072,
+      "entry_count": 539,
+      "path": "GAMEDATA/UKRAINE/TEX.HOG",
+      "tag": "0x4054E0FB"
+    },
+    {
+      "data_offset": 464,
+      "entry_count": 27,
+      "path": "GAMEDATA/UKRAINE/WPN.HOG",
+      "tag": "0x4043800E"
+    },
+    {
+      "data_offset": 6144,
+      "entry_count": 202,
+      "path": "GAMEDATA/YEMEN1/DATA.HOG",
+      "tag": "0x4041338C"
+    },
+    {
+      "data_offset": 112,
+      "entry_count": 4,
+      "path": "GAMEDATA/YEMEN1/IDSKL.HOG",
+      "tag": "0x3F7A3A6A"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 14,
+      "path": "GAMEDATA/YEMEN1/LOADING.HOG",
+      "tag": "0x3F3E7CC4"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/YEMEN1/MAPTEX.HOG",
+      "tag": "0x3FB3CA7E"
+    },
+    {
+      "data_offset": 112,
+      "entry_count": 4,
+      "path": "GAMEDATA/YEMEN1/MAPVUM.HOG",
+      "tag": "0x3FB3CA7D"
+    },
+    {
+      "data_offset": 1568,
+      "entry_count": 66,
+      "path": "GAMEDATA/YEMEN1/NPCSKM.HOG",
+      "tag": "0x40465C1A"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 84,
+      "path": "GAMEDATA/YEMEN1/NPCTEX.HOG",
+      "tag": "0x40465C1C"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 26,
+      "path": "GAMEDATA/YEMEN1/OBJECTS.HOG",
+      "tag": "0x404F7D58"
+    },
+    {
+      "data_offset": 124,
+      "entry_count": 7,
+      "path": "GAMEDATA/YEMEN1/SCRIPTS.HOG",
+      "tag": "0x405111FD"
+    },
+    {
+      "data_offset": 1008,
+      "entry_count": 40,
+      "path": "GAMEDATA/YEMEN1/SKL.HOG",
+      "tag": "0x40465BF6"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/YEMEN1/SND.HOG",
+      "tag": "0x404E5590"
+    },
+    {
+      "data_offset": 6144,
+      "entry_count": 336,
+      "path": "GAMEDATA/YEMEN1/SNDVAG.HOG",
+      "tag": "0x404E5596"
+    },
+    {
+      "data_offset": 8080,
+      "entry_count": 349,
+      "path": "GAMEDATA/YEMEN1/TEX.HOG",
+      "tag": "0x404133A6"
+    },
+    {
+      "data_offset": 496,
+      "entry_count": 28,
+      "path": "GAMEDATA/YEMEN1/WPN.HOG",
+      "tag": "0x40465C4C"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 102,
+      "path": "GAMEDATA/YEMEN2/DATA.HOG",
+      "tag": "0x4046D280"
+    },
+    {
+      "data_offset": 48,
+      "entry_count": 1,
+      "path": "GAMEDATA/YEMEN2/IDSKL.HOG",
+      "tag": "0x3F7A3AC1"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 14,
+      "path": "GAMEDATA/YEMEN2/LOADING.HOG",
+      "tag": "0x3F3E7D8C"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/YEMEN2/MAPTEX.HOG",
+      "tag": "0x3FCFCED9"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/YEMEN2/MAPVUM.HOG",
+      "tag": "0x3FCFCED8"
+    },
+    {
+      "data_offset": 656,
+      "entry_count": 28,
+      "path": "GAMEDATA/YEMEN2/NPCSKM.HOG",
+      "tag": "0x403CE4F4"
+    },
+    {
+      "data_offset": 1232,
+      "entry_count": 50,
+      "path": "GAMEDATA/YEMEN2/NPCTEX.HOG",
+      "tag": "0x403CE4F5"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 20,
+      "path": "GAMEDATA/YEMEN2/OBJECTS.HOG",
+      "tag": "0x40511C53"
+    },
+    {
+      "data_offset": 164,
+      "entry_count": 9,
+      "path": "GAMEDATA/YEMEN2/SCRIPTS.HOG",
+      "tag": "0x405139F9"
+    },
+    {
+      "data_offset": 416,
+      "entry_count": 15,
+      "path": "GAMEDATA/YEMEN2/SKL.HOG",
+      "tag": "0x403CE4D3"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/YEMEN2/SND.HOG",
+      "tag": "0x404E55B3"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 141,
+      "path": "GAMEDATA/YEMEN2/SNDVAG.HOG",
+      "tag": "0x404E55B7"
+    },
+    {
+      "data_offset": 2720,
+      "entry_count": 125,
+      "path": "GAMEDATA/YEMEN2/TEX.HOG",
+      "tag": "0x4046D289"
+    },
+    {
+      "data_offset": 288,
+      "entry_count": 16,
+      "path": "GAMEDATA/YEMEN2/WPN.HOG",
+      "tag": "0x403CE518"
+    },
+    {
+      "data_offset": 6144,
+      "entry_count": 168,
+      "path": "GAMEDATA/ZURICH/DATA.HOG",
+      "tag": "0x4048EAA0"
+    },
+    {
+      "data_offset": 304,
+      "entry_count": 14,
+      "path": "GAMEDATA/ZURICH/LOADING.HOG",
+      "tag": "0x3F3E80CC"
+    },
+    {
+      "data_offset": 80,
+      "entry_count": 2,
+      "path": "GAMEDATA/ZURICH/MAPTEX.HOG",
+      "tag": "0x3F341C99"
+    },
+    {
+      "data_offset": 64,
+      "entry_count": 2,
+      "path": "GAMEDATA/ZURICH/MAPVUM.HOG",
+      "tag": "0x3F341C98"
+    },
+    {
+      "data_offset": 560,
+      "entry_count": 24,
+      "path": "GAMEDATA/ZURICH/NPCSKM.HOG",
+      "tag": "0x40342B57"
+    },
+    {
+      "data_offset": 672,
+      "entry_count": 27,
+      "path": "GAMEDATA/ZURICH/NPCTEX.HOG",
+      "tag": "0x40342B58"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 56,
+      "path": "GAMEDATA/ZURICH/OBJECTS.HOG",
+      "tag": "0x4042ACDA"
+    },
+    {
+      "data_offset": 108,
+      "entry_count": 6,
+      "path": "GAMEDATA/ZURICH/SCRIPTS.HOG",
+      "tag": "0x4048F08C"
+    },
+    {
+      "data_offset": 144,
+      "entry_count": 5,
+      "path": "GAMEDATA/ZURICH/SKL.HOG",
+      "tag": "0x40342B44"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 4,
+      "path": "GAMEDATA/ZURICH/SND.HOG",
+      "tag": "0x404E579F"
+    },
+    {
+      "data_offset": 4096,
+      "entry_count": 169,
+      "path": "GAMEDATA/ZURICH/SNDVAG.HOG",
+      "tag": "0x404E57A3"
+    },
+    {
+      "data_offset": 4224,
+      "entry_count": 193,
+      "path": "GAMEDATA/ZURICH/TEX.HOG",
+      "tag": "0x4048EAAC"
+    },
+    {
+      "data_offset": 480,
+      "entry_count": 27,
+      "path": "GAMEDATA/ZURICH/WPN.HOG",
+      "tag": "0x40342B87"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 85,
+      "path": "ZMEDIA/MUSIC.HOG",
+      "tag": "0x403EB178"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 2,
+      "path": "ZMEDIA/SND.HOG",
+      "tag": "0x402C6474"
+    },
+    {
+      "data_offset": 16384,
+      "entry_count": 931,
+      "path": "ZMEDIA/SNDVAG.HOG",
+      "tag": "0x404A47E9"
+    },
+    {
+      "data_offset": 22528,
+      "entry_count": 1323,
+      "path": "ZMEDIA/SNDVAGF.HOG",
+      "tag": "0x403EA713"
+    },
+    {
+      "data_offset": 22528,
+      "entry_count": 1301,
+      "path": "ZMEDIA/SNDVAGG.HOG",
+      "tag": "0x403EA79A"
+    },
+    {
+      "data_offset": 22528,
+      "entry_count": 1323,
+      "path": "ZMEDIA/SNDVAGI.HOG",
+      "tag": "0x403EA753"
+    },
+    {
+      "data_offset": 22528,
+      "entry_count": 1323,
+      "path": "ZMEDIA/SNDVAGS.HOG",
+      "tag": "0x403EA7E1"
+    },
+    {
+      "data_offset": 2048,
+      "entry_count": 96,
+      "path": "ZMEDIA/ZMOVIES.HOG",
+      "tag": "0x4054EBD4"
+    }
+  ],
+  "entry_extensions": {
+    ".bin": 12,
+    ".bnk": 77,
+    ".bon": 156,
+    ".fnt": 3,
+    ".gui": 21,
+    ".hog": 6677,
+    ".ie": 23,
+    ".lpd": 862,
+    ".par": 679,
+    ".prn": 1,
+    ".pss": 54,
+    ".scc": 1,
+    ".ska": 212,
+    ".skas": 2,
+    ".skel": 4,
+    ".skf": 26,
+    ".skl": 636,
+    ".skm": 2808,
+    ".so": 139,
+    ".sub": 42,
+    ".tdx": 11166,
+    ".vag": 8665,
+    ".vpk": 85
+  },
+  "error_count": 0,
+  "errors": [],
+  "total_entries": 32351,
+  "valid_count": 273
+}

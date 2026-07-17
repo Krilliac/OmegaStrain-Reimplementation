@@ -1,0 +1,80 @@
+# Session handoff
+
+## Objective
+
+Build a clean-room native reimplementation of *Syphon Filter: The Omega Strain*. Begin with
+a matching PS2 decompilation and observable behavioral tests, then replace platform-specific
+subsystems incrementally. PCSX2 is the reference laboratory, not a shipping dependency.
+
+## Verified game identity
+
+| Field | Value |
+| --- | --- |
+| Region/build | NTSC-U retail |
+| Boot executable | `SCUS_972.64` |
+| PCSX2 serial | `SCUS-97264` |
+| Game CRC | `D5605611` |
+| ELF size | 4,071,592 bytes |
+| ELF entry point | `0x00100008` |
+| ISO size | 3,457,744,896 bytes |
+| ISO SHA-256 | `A60A4B41FEA808335BAA3B887A377BB98063F6F169CA498EFEE49397FBA96130` |
+
+## Completed setup
+
+1. Pulled current official PCSX2 `master` at
+   `86d76bbf590566d9ea74d381eeff3acd9856503a`.
+2. Installed the official 2026-07-09 Windows dependency snapshot and current patches database.
+3. Built `Release AVX2` through VS2022/MSBuild with zero warnings and zero errors.
+4. Recovered the owner's existing USA BIOS, ISO, and two `SCUS-97264` save states from
+   OneDrive into the ignored `private/` tree.
+5. Initialized a separate PCSX2 data root under `runtime/data/PCSX2` and selected
+   `scph39001.bin`.
+6. Booted the game successfully through the newly compiled emulator. The log confirms BIOS
+   v1.60, `SCUS_972.64`, CRC `D5605611`, D3D12, VM initialization, and the entry point.
+7. Extracted the ISO9660 filesystem: 448 files, 36 directories, 3,455,648,408 bytes.
+8. Generated deterministic disc and ELF metadata under `analysis/`.
+9. Reverse-engineered the common HOG directory structure and validated all 273 top-level
+   archives: 32,351 entries, zero structural failures. A safe parser/extractor now lives at
+   `tools/hog.py`.
+
+## Disc observations
+
+- The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2
+  networking/USB IRX modules.
+- `GAMEDATA/` is organized by level (`BELARUS1`, `BELARUS2`, `CHECHNYA`, `ITALY`,
+  `KYRGSTAN`, `LORELEI`, `MINSK`, and others).
+- Repeated level payloads include `DATA.HOG`, `DATA.POP`, `OBJECTS.HOG`, `SCRIPTS.HOG`,
+  `TEX.HOG`, `MAPVUM.HOG`, `SND.HOG`, and `SNDVAG.HOG`.
+- `GAMEDATA/MINSK` exists in the retail image, making the reported `-x -lMINSK` direct-level
+  loader a high-priority executable-string and runtime-breakpoint target.
+- The ISO contains 28,672 bytes after the ISO9660 physical end. Preserve the original image
+  for LBA and tail analysis; the extracted tree is not a bit-perfect substitute.
+- HOG files begin with five little-endian 32-bit words, followed by `count + 1` payload
+  offsets, a NUL-delimited ASCII filename table, alignment padding, and concatenated payloads.
+  The first word varies and its checksum/tag semantics remain unknown.
+- `MINSK/SCRIPTS.HOG` contains six modules: `INIT.SO`, `MUSIC.SO`, `OBJECTIVES.SO`,
+  `PRAGUE.SO`, `UTILS.SO`, and `VOICE.SO`.
+
+## Next focused pass
+
+1. Import `SCUS_972.64` into Ghidra/IDA/ReSymbol as 32-bit little-endian MIPS ELF.
+2. Locate the argument parser and verify `-x` / `-lMINSK` statically and in PCSX2.
+3. Break on file-open/read paths while loading `MINSK`; record filenames, buffer ownership,
+   decompression boundaries, and archive offsets.
+4. Identify the HOG first-word algorithm and begin decoding the `.SO`, `.TDX`, `.SKM`, and
+   `.VAG` payload formats behind small golden tests.
+5. Capture PS Rewired network behavior separately before designing any replacement service.
+
+## Installed research tools
+
+- PCSX2 source/debug build under `third_party/pcsx2`.
+- IDA 9.1 with MIPS processor support under `D:\IDA Professional 9.1`.
+- Ghidra 12.1.2 under `D:\RE-Tools\ghidra\ghidra_12.1.2_PUBLIC`.
+- radare2 under `D:\RE-Tools\radare2`.
+- ReSymbol release tools under `D:\ReSymbol-build\resymbol-integration-target\release`.
+
+## Safety rules
+
+- Never commit anything under `private/`, `runtime/`, `third_party/`, or `downloads/`.
+- Publish no firmware, executable, archive, asset, save-state, or decrypted proprietary data.
+- Keep claims tied to hashes, logs, captures, and reproducible scripts.

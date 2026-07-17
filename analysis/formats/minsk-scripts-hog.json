@@ -1,0 +1,40 @@
+{
+  "count": 6,
+  "data_offset": 108,
+  "entries": [
+    {
+      "name": "INIT.SO",
+      "offset": 108,
+      "size": 84080
+    },
+    {
+      "name": "MUSIC.SO",
+      "offset": 84188,
+      "size": 57612
+    },
+    {
+      "name": "OBJECTIVES.SO",
+      "offset": 141800,
+      "size": 87332
+    },
+    {
+      "name": "PRAGUE.SO",
+      "offset": 229132,
+      "size": 279660
+    },
+    {
+      "name": "UTILS.SO",
+      "offset": 508792,
+      "size": 52312
+    },
+    {
+      "name": "VOICE.SO",
+      "offset": 561104,
+      "size": 79872
+    }
+  ],
+  "names_offset": 48,
+  "offsets_offset": 20,
+  "path": "private\\extracted-disc\\GAMEDATA\\MINSK\\SCRIPTS.HOG",
+  "tag": "0x4052673D"
+}

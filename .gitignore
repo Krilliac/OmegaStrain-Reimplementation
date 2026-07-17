@@ -1,0 +1,21 @@
+# User-owned proprietary inputs. Never commit or redistribute these.
+/private/
+/runtime/
+*.iso
+*.bin
+*.rom0
+*.rom1
+*.rom2
+*.erom
+*.nvm
+*.mec
+*.p2s
+
+# Generated analysis/build output.
+/analysis/output/
+/build/
+/logs/
+/downloads/
+
+# Third-party source/build trees are managed separately.
+/third_party/

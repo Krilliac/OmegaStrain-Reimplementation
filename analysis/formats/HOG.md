@@ -1,0 +1,65 @@
+# Omega Strain HOG container
+
+## Validation scope
+
+This layout was inferred from the owner's NTSC-U `SCUS-97264` image and then checked against
+all 273 top-level `.HOG` files on that disc. The validator accepted all 273 archives, covering
+32,351 directory entries, with zero boundary, filename-count, or monotonic-offset failures.
+
+The deterministic evidence is in `hog-validation.json`; `tools/validate_hogs.py` regenerates
+it. `tools/hog.py` implements parsing and path-safe extraction.
+
+## Layout
+
+All integer fields are little-endian unsigned 32-bit values.
+
+| File offset | Field | Meaning |
+| ---: | --- | --- |
+| `0x00` | `tag` | Varies by archive; checksum/tag algorithm is not yet identified. |
+| `0x04` | `count` | Number of directory entries. |
+| `0x08` | `offsets_offset` | Always `0x14` in the validated set. |
+| `0x0C` | `names_offset` | `offsets_offset + 4 * (count + 1)`. |
+| `0x10` | `data_offset` | Absolute start of concatenated payload data. |
+
+At `offsets_offset` is an array of `count + 1` offsets relative to `data_offset`. Offset zero
+must be zero; offsets must be monotonic; the final offset lands exactly at end-of-file.
+
+Between `names_offset` and `data_offset` is a sequence of `count` NUL-terminated ASCII names,
+followed by alignment padding. Entry `i` occupies:
+
+```text
+[data_offset + offsets[i], data_offset + offsets[i + 1])
+```
+
+The validator proves this directory interpretation across the current corpus. It does not yet
+prove what the first word means or the semantics of any embedded asset payload.
+
+## MINSK example
+
+`GAMEDATA/MINSK/SCRIPTS.HOG` is 640,976 bytes. Its header has tag `0x4052673D`, count 6,
+name table offset 48, and data offset 108.
+
+| Entry | Size (bytes) |
+| --- | ---: |
+| `INIT.SO` | 84,080 |
+| `MUSIC.SO` | 57,612 |
+| `OBJECTIVES.SO` | 87,332 |
+| `PRAGUE.SO` | 279,660 |
+| `UTILS.SO` | 52,312 |
+| `VOICE.SO` | 79,872 |
+
+## Reproduce
+
+```powershell
+python -B .\tools\validate_hogs.py `
+  .\private\extracted-disc `
+  .\analysis\formats\hog-validation.json
+
+python -B .\tools\hog.py `
+  .\private\extracted-disc\GAMEDATA\MINSK\SCRIPTS.HOG `
+  --json .\analysis\formats\minsk-scripts-hog.json `
+  --extract .\analysis\output\MINSK\SCRIPTS
+```
+
+Extraction refuses absolute paths, `.`/`..` components, empty components, and any destination
+that resolves outside the requested output root.

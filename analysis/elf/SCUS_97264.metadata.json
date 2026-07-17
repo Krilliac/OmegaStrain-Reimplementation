@@ -1,0 +1,63 @@
+{
+  "class": "ELF32",
+  "endianness": "little",
+  "entry": "0x00100008",
+  "flags": "0x20924000",
+  "machine": 8,
+  "machine_name": "MIPS",
+  "path": "SCUS_972.64",
+  "program_headers": [
+    {
+      "align": 16,
+      "filesz": 0,
+      "flags": 6,
+      "memsz": 0,
+      "offset": 224,
+      "paddr": 1048576,
+      "type": 1,
+      "vaddr": 1048576
+    },
+    {
+      "align": 128,
+      "filesz": 4070784,
+      "flags": 7,
+      "memsz": 4819328,
+      "offset": 256,
+      "paddr": 1048576,
+      "type": 1,
+      "vaddr": 1048576
+    },
+    {
+      "align": 16,
+      "filesz": 0,
+      "flags": 6,
+      "memsz": 0,
+      "offset": 4071040,
+      "paddr": 5867904,
+      "type": 1,
+      "vaddr": 5867904
+    },
+    {
+      "align": 128,
+      "filesz": 0,
+      "flags": 7,
+      "memsz": 1572864,
+      "offset": 4071040,
+      "paddr": 31883264,
+      "type": 1,
+      "vaddr": 31883264
+    },
+    {
+      "align": 16,
+      "filesz": 0,
+      "flags": 6,
+      "memsz": 0,
+      "offset": 4071040,
+      "paddr": 1879048192,
+      "type": 1,
+      "vaddr": 1879048192
+    }
+  ],
+  "section_count": 11,
+  "size": 4071592
+}
