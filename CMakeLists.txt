@@ -35,6 +35,7 @@ target_include_directories(omega_assets INTERFACE native/include)
 target_compile_features(omega_assets INTERFACE cxx_std_23)
 
 add_library(omega_retail_formats STATIC
+    native/src/retail/container_descriptors.cpp
     native/src/retail/pop_level_manifest_decoder.cpp
 )
 target_include_directories(omega_retail_formats PUBLIC native/include)
@@ -68,6 +69,7 @@ else()
 endif()
 
 add_executable(omega_tool
+    native/apps/omega_tool/asset_commands.cpp
     native/apps/omega_tool/main.cpp
     native/apps/omega_tool/pop_commands.cpp
 )
@@ -112,6 +114,7 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     add_executable(omega_core_tests
+        native/tests/container_descriptor_tests.cpp
         native/tests/hog_archive_tests.cpp
         native/tests/pop_level_manifest_decoder_tests.cpp
         native/tests/pop_terrain_index_tests.cpp
@@ -134,11 +137,14 @@ if(BUILD_TESTING)
         COMMAND omega_tool pop-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_level_manifest_tree
         COMMAND omega_tool level-manifest-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_rejects_empty_asset_metadata_tree
+        COMMAND omega_tool asset-metadata-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     set_tests_properties(
         omega_tool_rejects_empty_hog_tree
         omega_tool_rejects_empty_nested_hog_tree
         omega_tool_rejects_empty_pop_tree
         omega_tool_rejects_empty_level_manifest_tree
+        omega_tool_rejects_empty_asset_metadata_tree
         PROPERTIES WILL_FAIL TRUE
     )
 endif()

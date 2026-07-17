@@ -77,6 +77,7 @@ void Check(const bool condition, const std::string_view message)
 int VirtualFileSystemFailureCount();
 int PopTerrainIndexFailureCount();
 int PopLevelManifestDecoderFailureCount();
+int ContainerDescriptorFailureCount();
 
 int main()
 {
@@ -287,6 +288,7 @@ int main()
     failures += VirtualFileSystemFailureCount();
     failures += PopTerrainIndexFailureCount();
     failures += PopLevelManifestDecoderFailureCount();
+    failures += ContainerDescriptorFailureCount();
     if (failures == 0)
         std::cout << "omega_core_tests: all checks passed\n";
     return failures == 0 ? 0 : 1;

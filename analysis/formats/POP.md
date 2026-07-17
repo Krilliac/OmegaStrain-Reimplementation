@@ -48,7 +48,8 @@ prefix. Name resolution is confirmed; placement, visibility, and the meanings of
 `omega::retail::DecodePopLevelManifest` adds the first canonical level dependency layer:
 
 - accepts caller-owned POP bytes, the matching `DATA.HOG` directory, and an owned source locator;
-- normalizes VFS paths and resolves every terrain name case-insensitively;
+- normalizes VFS paths and resolves every terrain name case-insensitively by basename stem;
+- maps the observed POP `.VUM` reference spelling to the canonical matching `.HOG` member name;
 - rejects missing, unsafe, or duplicate normalized references;
 - applies cumulative input, item, nesting, string, logical-output, and transient-scratch limits
   before publishing output;
@@ -59,6 +60,9 @@ prefix. Name resolution is confirmed; placement, visibility, and the meanings of
 The decoder is a stateless worker-thread function. No returned span, pointer, or string view
 references the POP bytes or HOG directory supplied by the caller. The common `DATA.HOG` source is
 stored once on the manifest; each terrain cell stores only its canonical member name.
+
+The native corpus command resolves all 5,351 records across all 18 level manifests with zero
+missing, duplicate, unsafe, or malformed references.
 
 ## Reproduce
 

@@ -66,9 +66,10 @@ cross-level result makes the MINSK relationship much stronger than a one-file gu
 
 The first canonical native asset value is therefore a `LevelManifestIR`, not guessed geometry.
 Its stateless retail adapter resolves each POP terrain record to an owned `DATA.HOG` source
-entry while storing the common archive locator once and preserving the two uninterpreted numeric
-fields. Geometry, placement, visibility, and transforms remain absent until their later sections
-are independently established.
+entry by normalized basename stem: the POP uses `.VUM` references while `DATA.HOG` stores the
+matching `.HOG` containers. The IR stores the common archive locator once, publishes the canonical
+member name, and preserves the two uninterpreted numeric fields. Geometry, placement, visibility,
+and transforms remain absent until their later sections are independently established.
 
 The only standalone `.MAP` on the disc is 1,138 bytes of ASCII whose contents
 resemble a character-code mapping rather than geometry. Current evidence points
@@ -78,22 +79,24 @@ to the POP plus nested COL/VUM chain as the world/map geometry path.
 
 ### TDX texture
 
-The common 16-byte prefix is eight little-endian words:
+The common 16-byte prefix is eight little-endian words. Names below distinguish measured fields
+from still-unproven storage semantics:
 
 ```text
-u16 version, flags, width, height, bits_per_pixel, gs_psm, planes, storage_units
+u16 version, flags, width, height, bit_depth, format_code, width_unit_word, storage_unit_word
 ```
 
-All 15,248 files report version 5. The observed bit-depth/PSM pairs are 4/`0x14` (9,879),
-8/`0x13` (5,172), 24/`0x01` (68), and 32/`0x00` (129), matching the expected PS2 GS indexed and
-direct-color storage modes. For 13,472 files, `storage_units * 256` equals
-`width * height * bits_per_pixel / 8`.
+All 15,248 files report version 5. The observed bit-depth/format-code pairs are 4/`0x14` (9,879),
+8/`0x13` (5,172), 24/`0x01` (68), and 32/`0x00` (129). The word at `0x0C` is not a plane count:
+it equals `max(2, width / 64)` for the 4/8-bit families and `max(1, width / 64)` for the 24/32-bit
+families in every file. For 13,472 files, `storage_unit_word * 256` equals
+`width * height * bit_depth / 8`; this remains a correlation rather than a pixel-layout claim.
 
 The word at offset `0x38`, plus the 64-byte prefix, reaches either the exact asset end or a zero
 tail in 15,162 files. It exceeds the directory span in 62 files and is followed by additional
-nonzero data in 24. Treat it as a primary-block size field, not a universally authoritative file
-length. Palette layout, GS swizzle, mip/animation blocks, and the 86 exceptions still need a
-dedicated decoder.
+nonzero data in 24. `InspectTdxContainer` reports all four relations but exposes a bounded primary
+region only for exact or zero-tail cases. It does not treat the word as a universal payload length.
+Palette layout, swizzle, mip/animation blocks, alpha, and pixel decoding remain unimplemented.
 
 ### SKM mesh
 
@@ -164,14 +167,23 @@ initial ingestion. Field semantics and compatibility defaults still require impl
 
 All 7,036 COL files begin `COL`; 7,033 use format byte 5 and three Tokyo map models use byte 3.
 The little-endian word at offset `0x08` is 48 in every file, and every span is 16-byte aligned.
-The likely collision semantics are inferred from the extension and pairing, while the magic,
-version distribution, header size, and alignment are confirmed.
+Four opaque count/endpoint pairs satisfy exact corpus-wide formulas with respective strides
+64, 48, 16, and 16 bytes. The endpoint at `0x2C` closes the described table region but is not a
+file-length field: every sample has additional nonzero data. `InspectColContainer` validates and
+publishes these ranges without naming their records or interpreting the remaining payload.
 
 All 7,036 VUM files begin `VUMS`. The word at offset `0x58` equals the directory span in 6,989
 files. Forty-seven files have additional nonzero data after that boundary, so this is a primary
 section boundary rather than a universal file length. All 306 MINSK world/map VUMs are in the
-exact group. Material tables, VU packet boundaries, vertex attributes, indices, and coordinate
-conversion remain the critical first-scene reverse-engineering target.
+exact group. The three words at `0x50`, `0x54`, and `0x58` are ordered corpus-wide; only the last
+is 16-byte aligned. `InspectVumContainer` preserves those boundaries and the opaque words at
+`0x04` and `0x1C`. It does not decode, execute, or publish VU/VIF instructions. Material tables,
+vertex attributes, indices, and coordinate conversion remain later research.
+
+The native aggregate verifier independently accepts all 7,036 COL, 7,036 VUM, and 15,248 TDX
+spans with zero errors. Its extent totals exactly match this report: COL has 7,036 nonzero tails
+after the described table region; VUM has 6,989 exact primary boundaries and 47 nonzero tails;
+TDX has 11,253 exact, 3,909 zero-tail, 24 nonzero-tail, and 62 exceeds-input size-word relations.
 
 ### Wrappers and compression check
 
@@ -206,6 +218,8 @@ the offset-`0x58` boundary and material-table offsets.
 python -B .\tools\fingerprint_assets.py `
   .\private\extracted-disc `
   .\analysis\formats\asset-fingerprints.json
+
+.\build\msvc\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
 ```
 
 The JSON is deterministic for the same corpus and contains aggregate metadata only.
