@@ -51,6 +51,7 @@ struct GameDataError
 struct GameDataServiceConfig
 {
     std::filesystem::path root;
+    // Bound archive input/copy workspace independently from semantic DecodeLimits scratch.
     std::uint64_t maximum_system_config_bytes = 4096;
     std::uint64_t maximum_pop_bytes = 64ULL * 1024ULL * 1024ULL;
     std::uint64_t maximum_data_hog_bytes = 64ULL * 1024ULL * 1024ULL;

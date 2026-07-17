@@ -57,9 +57,10 @@ and exact leaf extents.
 
 `GameDataService::LoadLevelSpatial` resolves the manifest's normalized DATA.HOG source, any nested
 container chain, and each cell HOG before requiring exactly one COL member. It returns one owned
-mesh per manifest cell and debits all container/cell/COL work against a shared operation budget.
-Archive/source depth and spatial edge depth compose; the default maximum of nine admits the observed
-eight-edge COL maximum beneath one cell-HOG edge.
+mesh per manifest cell and composes cumulative input/item/output limits plus a reusable semantic
+decoder scratch peak. HOG input/copy/parser workspace remains independently bounded by archive byte
+caps and fixed parser safety limits. Archive/source depth and spatial edge depth compose; the default
+maximum of nine admits the observed eight-edge COL maximum beneath one cell-HOG edge.
 
 ## Aggregate native validation
 

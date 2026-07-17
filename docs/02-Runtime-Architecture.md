@@ -101,10 +101,12 @@ remain unassigned. None of these adapters exposes VU/VIF instructions or decoded
 
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
-cumulative, logical output includes every owned mesh/vector payload, scratch is a reusable peak,
-and nesting depth combines archive edges with COL tree edges. The default depth is nine: one cell
-HOG edge plus the corpus maximum eight-edge COL tree. The returned `LevelSpatialIR` has the same
-order and cardinality as `LevelManifestIR::terrain_cells`; provenance remains in the manifest.
+cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a
+reusable peak, and nesting depth combines archive edges with COL tree edges. HOG input/copy/parser
+workspace is bounded independently by configured archive byte caps and the parser's fixed
+directory/count/name limits. The default depth is nine: one cell HOG edge plus the corpus maximum
+eight-edge COL tree. The returned `LevelSpatialIR` has the same order and cardinality as
+`LevelManifestIR::terrain_cells`; provenance remains in the manifest.
 
 Tools may link retail adapters. Renderer and simulation targets must consume canonical assets and
 must not include retail-format headers. A source-include dependency check will turn this convention

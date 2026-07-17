@@ -15,7 +15,9 @@ struct DecodeLimits
     std::uint64_t maximum_input_bytes = 64ULL * 1024ULL * 1024ULL;
     // Logical owned result: value/vector/string objects plus their character or payload bytes.
     std::uint64_t maximum_output_bytes = 256ULL * 1024ULL * 1024ULL;
-    // Conservative decoder-owned transient storage, separate from caller-owned input and output.
+    // Conservative semantic-adapter transient storage, separate from input and output. Container
+    // readers/parsers bound their own storage independently (for example, GameDataService HOG byte
+    // caps plus the HOG parser's directory/count/name safety limits).
     std::uint64_t maximum_scratch_bytes = 256ULL * 1024ULL * 1024ULL;
     std::uint64_t maximum_items = 1ULL << 20U;
     std::uint32_t maximum_string_bytes = 4096;

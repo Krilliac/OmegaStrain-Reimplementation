@@ -569,11 +569,11 @@ int GameDataServiceFailureCount()
             limits = omega::asset::DecodeLimits{};
             limits.maximum_scratch_bytes = exact_scratch_bytes;
             Check(LoadSpatialWithLimits(root, *spatial_manifest, limits).has_value(),
-                "exact shared peak level-spatial scratch budget succeeds");
+                "exact peak semantic COL scratch budget succeeds through level loading");
             limits.maximum_scratch_bytes = exact_scratch_bytes - 1U;
             CheckDecodeError(LoadSpatialWithLimits(root, *spatial_manifest, limits),
                 omega::asset::DecodeErrorCode::LimitExceeded,
-                "one-below shared peak level-spatial scratch budget fails");
+                "one-below peak semantic COL scratch budget fails through level loading");
 
             limits = omega::asset::DecodeLimits{};
             limits.maximum_nesting_depth = 1;
