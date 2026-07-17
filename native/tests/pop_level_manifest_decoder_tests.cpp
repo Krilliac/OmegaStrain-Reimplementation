@@ -42,8 +42,8 @@ std::vector<std::byte> MakePop()
     AppendU32(bytes, 70);
     AppendText(bytes, "TER:");
     AppendU32(bytes, 2);
-    AppendRecord(bytes, 4, 10, "CELL_A.HOG");
-    AppendRecord(bytes, 9, 22, "cell_b.hog");
+    AppendRecord(bytes, 4, 10, "CELL_A.VUM");
+    AppendRecord(bytes, 9, 22, "cell_b.vum");
     AppendText(bytes, "GOB:");
     return bytes;
 }
@@ -128,6 +128,12 @@ int PopLevelManifestDecoderFailureCount()
     CheckError(omega::retail::DecodePopLevelManifest(MakePop(), duplicate_entries, MakeSource()),
         omega::asset::DecodeErrorCode::DuplicateReference,
         "case-insensitive duplicate DATA.HOG members are rejected");
+    auto duplicate_stems = MakeEntries();
+    duplicate_stems.push_back(
+        omega::archive::HogEntry{.name = "CELL_A.BIN", .offset = 448, .size = 64});
+    CheckError(omega::retail::DecodePopLevelManifest(MakePop(), duplicate_stems, MakeSource()),
+        omega::asset::DecodeErrorCode::DuplicateReference,
+        "cross-extension duplicate DATA.HOG reference stems are rejected");
 
     auto unsafe_source = MakeSource();
     unsafe_source.game_path = "../DATA.HOG";
@@ -180,11 +186,10 @@ int PopLevelManifestDecoderFailureCount()
         record_count * (sizeof(omega::asset::PopTerrainRecord) + 2U * sizeof(void*)) +
         record_count * sizeof(const std::string*) +
         scratch_entries.size() *
-            (sizeof(std::string) + sizeof(const omega::archive::HogEntry*) +
-                5U * sizeof(void*)) +
-        scratch_entries[0].name.size() + scratch_entries[1].name.size() +
-        exact_scratch_limits.maximum_string_bytes +
-        std::string_view("CELL_A.HOG").size() + std::string_view("cell_b.hog").size();
+            (2U * sizeof(std::string) + 5U * sizeof(void*)) +
+        2U * (scratch_entries[0].name.size() + scratch_entries[1].name.size()) +
+        2U * exact_scratch_limits.maximum_string_bytes +
+        std::string_view("CELL_A.VUM").size() + std::string_view("cell_b.vum").size();
     exact_scratch_limits.maximum_scratch_bytes = exact_scratch_bytes;
     Check(omega::retail::DecodePopLevelManifest(
               MakePop(), scratch_entries, MakeSource(), exact_scratch_limits)

@@ -80,6 +80,9 @@ The initial native build targets express the same direction:
 - `omega_retail_formats`: stateless POP and later COL/VUM/TDX adapters that may depend on the
   first two targets.
 
+The initial COL/VUM/TDX adapters are passive scalar descriptors. They validate only proven
+container arithmetic and never expose VU/VIF instructions, palette guesses, or decoded pixels.
+
 Tools may link retail adapters. Renderer and simulation targets must consume canonical assets and
 must not include retail-format headers. A source-include dependency check will turn this convention
 into a CI enforcement boundary as more targets appear. The existing terrain-prefix parser remains

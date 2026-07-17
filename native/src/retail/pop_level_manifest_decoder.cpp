@@ -7,6 +7,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -135,6 +136,19 @@ namespace
     return normalized;
 }
 
+[[nodiscard]] std::optional<std::string> ReferenceStem(
+    const std::string_view normalized_path)
+{
+    const std::size_t component_start = normalized_path.rfind('/') == std::string_view::npos
+        ? 0
+        : normalized_path.rfind('/') + 1U;
+    const std::size_t extension = normalized_path.rfind('.');
+    if (extension == std::string_view::npos || extension <= component_start ||
+        extension + 1U >= normalized_path.size())
+        return std::nullopt;
+    return std::string(normalized_path.substr(0, extension));
+}
+
 [[nodiscard]] asset::DecodeResult<std::uint64_t> PreflightScratch(
     const std::span<const archive::HogEntry> data_hog_entries,
     const std::uint64_t declared_records,
@@ -158,7 +172,7 @@ namespace
             "resolved reference table exceeds decoder scratch limit"));
 
     constexpr std::uint64_t map_overhead =
-        sizeof(std::string) + sizeof(const archive::HogEntry*) + 5U * sizeof(void*);
+        2U * sizeof(std::string) + 5U * sizeof(void*);
     std::uint64_t directory_objects = 0;
     if (!MultiplyWithinLimit(data_hog_entries.size(), map_overhead,
             limits.maximum_scratch_bytes, directory_objects) ||
@@ -170,14 +184,17 @@ namespace
         if (entry.name.size() > limits.maximum_string_bytes)
             return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
                 "DATA.HOG entry exceeds decoder string limit"));
-        if (!AddWithinLimit(scratch_bytes, entry.name.size(), limits.maximum_scratch_bytes))
+        if (!AddWithinLimit(scratch_bytes, entry.name.size(), limits.maximum_scratch_bytes) ||
+            !AddWithinLimit(scratch_bytes, entry.name.size(), limits.maximum_scratch_bytes))
             return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
-                "normalized DATA.HOG names exceed decoder scratch limit"));
+                "normalized DATA.HOG names and stems exceed decoder scratch limit"));
     }
     if (!AddWithinLimit(scratch_bytes, limits.maximum_string_bytes,
+            limits.maximum_scratch_bytes) ||
+        !AddWithinLimit(scratch_bytes, limits.maximum_string_bytes,
             limits.maximum_scratch_bytes))
         return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
-            "normalized lookup key exceeds decoder scratch limit"));
+            "normalized lookup path and stem exceed decoder scratch limit"));
     return limits.maximum_scratch_bytes - scratch_bytes;
 }
 } // namespace
@@ -235,7 +252,7 @@ asset::DecodeResult<asset::LevelManifestIR> DecodePopLevelManifest(
     if (!terrain)
         return std::unexpected(MapParseError(terrain.error()));
 
-    using EntryMap = std::unordered_map<std::string, const archive::HogEntry*>;
+    using EntryMap = std::unordered_map<std::string, std::string>;
     EntryMap entries;
     entries.reserve(data_hog_entries.size());
     for (const auto& entry : data_hog_entries)
@@ -244,10 +261,15 @@ asset::DecodeResult<asset::LevelManifestIR> DecodePopLevelManifest(
         if (!normalized)
             return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
                 "DATA.HOG contains an unsafe entry name"));
-        const bool inserted = entries.emplace(std::move(*normalized), &entry).second;
+        auto stem = ReferenceStem(*normalized);
+        if (!stem)
+            return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
+                "DATA.HOG entry has no usable reference stem"));
+        const bool inserted =
+            entries.emplace(std::move(*stem), std::move(*normalized)).second;
         if (!inserted)
             return std::unexpected(Error(asset::DecodeErrorCode::DuplicateReference,
-                "DATA.HOG contains duplicate normalized entry names"));
+                "DATA.HOG contains duplicate normalized reference stems"));
     }
 
     std::uint64_t record_objects = 0;
@@ -265,15 +287,19 @@ asset::DecodeResult<asset::LevelManifestIR> DecodePopLevelManifest(
         if (!normalized)
             return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
                 "POP terrain record contains an unsafe DATA.HOG reference"));
-        const auto match = entries.find(*normalized);
+        auto stem = ReferenceStem(*normalized);
+        if (!stem)
+            return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
+                "POP terrain record has no usable DATA.HOG reference stem"));
+        const auto match = entries.find(*stem);
         if (match == entries.end())
             return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
                 "POP terrain record does not resolve in DATA.HOG"));
-        if (!AddWithinLimit(logical_output_bytes, match->first.size(),
+        if (!AddWithinLimit(logical_output_bytes, match->second.size(),
                 limits.maximum_output_bytes))
             return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
                 "decoded level manifest strings exceed decoder output limit"));
-        resolved.push_back(&match->first);
+        resolved.push_back(&match->second);
     }
 
     asset::LevelManifestIR result{

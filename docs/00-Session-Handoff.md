@@ -37,8 +37,11 @@ shipping dependencies or execution mechanisms.
 9. Reverse-engineered the common HOG directory structure and validated all 273 top-level
    archives: 32,351 entries, zero structural failures. A safe parser/extractor now lives at
    `tools/hog.py`.
-10. Built a pure-native HOG/VFS layer that validates all 6,677 nested spans and a passive POP
-    terrain-prefix parser that validates all 5,351 records across the 18 level files.
+10. Built a pure-native HOG/VFS layer that validates all 6,677 nested spans, resolves all 5,351
+    POP terrain references across 18 level manifests, and passively validates all 29,320
+    COL/VUM/TDX asset spans with zero errors.
+11. Dogfooded a bounded ELF32 little-endian MIPS container intake in ReSymbol for offline research;
+    no disassembler, interpreter, translator, or PS2 instruction representation enters runtime.
 
 ## Disc observations
 
@@ -48,8 +51,8 @@ shipping dependencies or execution mechanisms.
   `KYRGSTAN`, `LORELEI`, `MINSK`, and others).
 - Repeated level payloads include `DATA.HOG`, `DATA.POP`, `OBJECTS.HOG`, `SCRIPTS.HOG`,
   `TEX.HOG`, `MAPVUM.HOG`, `SND.HOG`, and `SNDVAG.HOG`.
-- Static analysis confirms attached `-lMINSK` syntax and the MINSK table entry. The user-facing
-  meaning of `-x` and the resulting gameplay state remain open behavioral questions.
+- Static analysis confirms attached `-lMINSK` syntax and the MINSK table entry. The independent
+  `-x` startup mode changes splash and one construction path; it does not select the level.
 - The ISO contains 28,672 bytes after the ISO9660 physical end. Preserve the original image
   for LBA and tail analysis; the extracted tree is not a bit-perfect substitute.
 - HOG files begin with five little-endian 32-bit words, followed by `count + 1` payload
@@ -60,13 +63,12 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Trace the executable's VUM and texture consumers offline to turn structural inferences into
+1. Trace the executable's VUM and texture consumers offline to turn passive descriptors into
    independently implementable scene contracts.
-2. Decode VUM material/geometry packets and TDX texture storage behind synthetic malformed-input
-   tests and private metadata-only corpus checks.
+2. Decode material/geometry and texture storage behind synthetic malformed-input tests; preserve
+   the permanent ban on shipping VU/VIF or other PS2 instruction representations.
 3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
-4. Implement ReSymbol's bounded ELF32 little-endian container intake in its own repository;
-   keep R5900 disassembly separate from the native runtime.
+4. Add bounded SKM/SKL/SKA descriptors before actor, skeleton, or animation semantics.
 5. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools

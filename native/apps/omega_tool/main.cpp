@@ -1,5 +1,6 @@
 #include "omega/archive/hog_archive.h"
 
+#include "asset_commands.h"
 #include "pop_commands.h"
 
 #include <algorithm>
@@ -35,7 +36,8 @@ void PrintUsage()
               << "  omega_tool hog-verify-tree <root>\n"
               << "  omega_tool hog-verify-nested-tree <root>\n"
               << "  omega_tool pop-verify-tree <root>\n"
-              << "  omega_tool level-manifest-verify-tree <root>\n";
+              << "  omega_tool level-manifest-verify-tree <root>\n"
+              << "  omega_tool asset-metadata-verify-tree <root>\n";
 }
 
 [[nodiscard]] std::optional<std::uint64_t> CheckedAdd(
@@ -369,6 +371,8 @@ int main(const int argc, char** argv)
         return omega::tool::PopVerifyTree(argv[2]);
     if (command == "level-manifest-verify-tree")
         return omega::tool::LevelManifestVerifyTree(argv[2]);
+    if (command == "asset-metadata-verify-tree")
+        return omega::tool::AssetMetadataVerifyTree(argv[2]);
 
     PrintUsage();
     return 64;

@@ -11,13 +11,9 @@
     "col": {
       "col_prefix": 7036,
       "count": 7036,
-      "header_size_48": 7036,
-      "span_16_byte_aligned": 7036,
-      "span_bytes_range": [
-        128,
-        229680
-      ],
-      "variant_word": {
+      "counted_table_formulas_match": 7036,
+      "described_tables_span_nonzero_tail": 7036,
+      "first_count_word": {
         "0": 2678,
         "1": 3223,
         "10": 25,
@@ -115,6 +111,13 @@
         "95": 1,
         "96": 2
       },
+      "header_size_48": 7036,
+      "observed_table_ends_ordered_aligned_and_bounded": 7036,
+      "span_16_byte_aligned": 7036,
+      "span_bytes_range": [
+        128,
+        229680
+      ],
       "version_byte": {
         "3": 3,
         "5": 7033
@@ -213,13 +216,13 @@
       }
     },
     "tdx": {
-      "bits_per_pixel": {
+      "bit_depth": {
         "24": 68,
         "32": 129,
         "4": 9879,
         "8": 5172
       },
-      "bpp_psm_pair": {
+      "bit_depth_format_pair": {
         "24/0x01": 68,
         "32/0x00": 129,
         "4/0x14": 9879,
@@ -255,45 +258,46 @@
         "6": 75,
         "7": 2652
       },
-      "header_size_field_span_exact": 11253,
-      "header_size_field_span_exceeds_span": 62,
-      "header_size_field_span_nonzero_tail": 24,
-      "header_size_field_span_padding_bytes_range": [
+      "observed_format_code": {
+        "0x00": 129,
+        "0x01": 68,
+        "0x13": 5172,
+        "0x14": 9879
+      },
+      "observed_primary_size_span_exact": 11253,
+      "observed_primary_size_span_exceeds_span": 62,
+      "observed_primary_size_span_nonzero_tail": 24,
+      "observed_primary_size_span_padding_bytes_range": [
         8,
         1824
       ],
-      "header_size_field_span_zero_padded": 3909,
-      "planes": {
+      "observed_primary_size_span_zero_padded": 3909,
+      "observed_width_unit_word": {
         "1": 188,
         "16": 401,
         "2": 14434,
         "4": 150,
         "8": 75
       },
-      "ps2_gs_psm": {
-        "0x00": 129,
-        "0x01": 68,
-        "0x13": 5172,
-        "0x14": 9879
-      },
       "span_bytes_range": [
         416,
         526336
       ],
-      "storage_formula_match_by_bpp": {
+      "storage_formula_match_by_bit_depth": {
         "32": 129,
         "4": 8531,
         "8": 4812
       },
-      "storage_formula_mismatch_by_bpp": {
+      "storage_formula_mismatch_by_bit_depth": {
         "24": 68,
         "4": 1348,
         "8": 360
       },
-      "storage_units_match_uncompressed_texel_bytes": 13472,
+      "storage_word_matches_area_bit_formula": 13472,
       "version": {
         "5": 15248
-      }
+      },
+      "width_unit_formula_match": 15248
     },
     "vag": {
       "adpcm_data_16_byte_aligned": 8665,
@@ -335,8 +339,23 @@
     },
     "vum": {
       "count": 7036,
-      "header_size_field_span_exact": 6989,
-      "header_size_field_span_nonzero_tail": 47,
+      "observed_boundaries_ordered_aligned_and_bounded": 7036,
+      "observed_word_0x1c": {
+        "0": 6989,
+        "1": 12,
+        "10": 4,
+        "12": 2,
+        "14": 1,
+        "15": 1,
+        "2": 7,
+        "21": 2,
+        "3": 5,
+        "4": 8,
+        "5": 2,
+        "6": 3
+      },
+      "primary_boundary_span_exact": 6989,
+      "primary_boundary_span_nonzero_tail": 47,
       "span_16_byte_aligned": 7036,
       "span_bytes_range": [
         240,

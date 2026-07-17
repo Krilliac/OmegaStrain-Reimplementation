@@ -175,22 +175,27 @@ def fingerprint_tdx(file: BinaryIO, span: Span, stats: Aggregate) -> None:
         stats.add("short_header")
         return
     header = read_at(file, span.offset, 64)
-    version, flags, width, height, bpp, psm, planes, storage_units = struct.unpack_from("<8H", header)
-    payload_size = struct.unpack_from("<I", header, 56)[0]
+    (version, flags, width, height, bit_depth, format_code,
+     width_unit_word, storage_unit_word) = struct.unpack_from("<8H", header)
+    primary_size_word = struct.unpack_from("<I", header, 56)[0]
     stats.count("version", version)
     stats.count("flags", flags)
-    stats.count("bits_per_pixel", bpp)
-    stats.count("ps2_gs_psm", f"0x{psm:02X}")
-    stats.count("bpp_psm_pair", f"{bpp}/0x{psm:02X}")
+    stats.count("bit_depth", bit_depth)
+    stats.count("observed_format_code", f"0x{format_code:02X}")
+    stats.count("bit_depth_format_pair", f"{bit_depth}/0x{format_code:02X}")
     stats.count("dimensions", f"{width}x{height}")
-    stats.count("planes", planes)
-    expected_texel_bytes = width * height * bpp // 8
-    if expected_texel_bytes == storage_units * 256:
-        stats.add("storage_units_match_uncompressed_texel_bytes")
-        stats.count("storage_formula_match_by_bpp", bpp)
+    stats.count("observed_width_unit_word", width_unit_word)
+    expected_width_units = max(2 if bit_depth <= 8 else 1, width // 64)
+    if width_unit_word == expected_width_units:
+        stats.add("width_unit_formula_match")
+    area_bit_bytes = width * height * bit_depth // 8
+    if area_bit_bytes == storage_unit_word * 256:
+        stats.add("storage_word_matches_area_bit_formula")
+        stats.count("storage_formula_match_by_bit_depth", bit_depth)
     else:
-        stats.count("storage_formula_mismatch_by_bpp", bpp)
-    stats.record_span(file, span.offset, span.size, 64 + payload_size, "header_size_field_span")
+        stats.count("storage_formula_mismatch_by_bit_depth", bit_depth)
+    stats.record_span(
+        file, span.offset, span.size, 64 + primary_size_word, "observed_primary_size_span")
 
 
 def fingerprint_skm(file: BinaryIO, span: Span, stats: Aggregate) -> None:
@@ -348,9 +353,24 @@ def fingerprint_col(file: BinaryIO, span: Span, stats: Aggregate) -> None:
         stats.count("version_byte", header[3])
     else:
         stats.add("bad_magic")
-    stats.count("variant_word", struct.unpack_from("<I", header, 4)[0])
-    if struct.unpack_from("<I", header, 8)[0] == 48:
+    words = struct.unpack("<12I", header)
+    stats.count("first_count_word", words[1])
+    if words[2] == 48:
         stats.add("header_size_48")
+    counts = (words[1], words[3], words[5], words[7])
+    stored_ends = (words[4], words[6], words[8], words[9])
+    cursor = 48
+    computed_ends = []
+    for count, stride in zip(counts, (64, 48, 16, 16)):
+        cursor += count * stride
+        computed_ends.append(cursor)
+    if tuple(computed_ends) == stored_ends:
+        stats.add("counted_table_formulas_match")
+    all_ends = (*stored_ends, words[11])
+    if (all(left <= right for left, right in zip((48, *all_ends), all_ends)) and
+            all(value % 16 == 0 for value in all_ends) and all_ends[-1] <= span.size):
+        stats.add("observed_table_ends_ordered_aligned_and_bounded")
+    stats.record_span(file, span.offset, span.size, words[11], "described_tables_span")
     if span.size % 16 == 0:
         stats.add("span_16_byte_aligned")
 
@@ -367,8 +387,12 @@ def fingerprint_vum(file: BinaryIO, span: Span, stats: Aggregate) -> None:
     else:
         stats.add("bad_magic")
     stats.count("variant_word", struct.unpack_from("<I", header, 4)[0])
-    logical_size = struct.unpack_from("<I", header, 88)[0]
-    stats.record_span(file, span.offset, span.size, logical_size, "header_size_field_span")
+    stats.count("observed_word_0x1c", struct.unpack_from("<I", header, 28)[0])
+    boundaries = struct.unpack_from("<3I", header, 80)
+    if (92 <= boundaries[0] <= boundaries[1] <= boundaries[2] <= span.size and
+            boundaries[0] % 4 == 0 and boundaries[1] % 4 == 0 and boundaries[2] % 16 == 0):
+        stats.add("observed_boundaries_ordered_aligned_and_bounded")
+    stats.record_span(file, span.offset, span.size, boundaries[2], "primary_boundary_span")
     if span.size % 16 == 0:
         stats.add("span_16_byte_aligned")
 
