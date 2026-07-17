@@ -34,6 +34,14 @@ syntax**:
 - the loader subsequently constructs the logical path
   `GAMEDATA/<selected-level>/LOADING.HOG`, with a common-data fallback.
 
+The two options are independent. `-lMINSK` selects the level without consulting
+the flag set by `-x`. The latter selects an alternate startup-presentation path:
+its two splash-related readers choose a widget-backed splash implementation
+instead of the simpler timed splash, while its remaining direct reader changes
+one first-character construction decision during `DATA.HOG` parsing. This is
+enough to reject "level-load enable" and "skip intro" as descriptions of `-x`,
+but not enough to recover the developers' original name for the mode.
+
 This confirms argument and loader behavior, not the eventual gameplay result.
 No emulator was launched during this analysis, so reaching a playable Minsk
 state remains a separate behavioral check.
@@ -48,9 +56,10 @@ carrying over any PS2 code or execution model:
    evidence proves otherwise.
 3. Bound the selected level name to the reference buffer capacity of 128 bytes,
    including termination.
-4. Recognize `-x` as a distinct hidden startup-mode switch. Its exact user-facing
-   name should remain neutral until the three downstream flag consumers are
-   behaviorally characterized.
+4. Recognize `-x` as a distinct hidden alternate-startup switch. A neutral name
+   such as `alternate_startup_presentation` is appropriate; do not expose it as
+   "skip intro" or "direct level" because the static evidence contradicts those
+   stronger labels.
 5. Resolve level assets through platform-native path APIs using the logical path
    `GAMEDATA/<level>/LOADING.HOG`, then try
    `GAMEDATA/COMMON/LOADING.HOG` when the level-specific file is unavailable.
@@ -98,9 +107,57 @@ The handler begins at `0x0013D408`. It sets a group of startup flags, including
 bytes at `0x004FFBA0`, `0x004FFBB0`, and `0x004FFBB2`. The last flag has three
 identified readers at `0x00167EE8`, `0x001C1FB4`, and `0x002C7E00`.
 
-Those readers change initialization and level-loading branches, confirming that
-`-x` is active rather than an ignored option. Their high-level meaning is not
-yet sufficiently established to give the switch a stronger semantic name.
+The write to `0x004FFBB2` is deferred until the option loop has finished. An
+adjacent `LUI` plus load/store scan over every file-backed instruction finds the
+following direct accesses:
+
+| Access VA | Operation | Established role |
+| --- | --- | --- |
+| `0x0013D484` | byte store | Commits the mode after argument parsing. |
+| `0x00167EEC` | unsigned byte load | Selects the startup splash dispatch. |
+| `0x001C1FB8` | unsigned byte load | Changes the first character-record construction path. |
+| `0x002C7E04` | unsigned byte load | Guards the widget-backed splash implementation. |
+
+This direct-reference inventory is exhaustive for adjacent absolute
+load/store constructions in this executable. It does not claim that an
+indirect access through the containing global object is impossible.
+
+#### Splash behavior
+
+At `0x00167EF0`, a clear mode byte selects a timed splash call. A set mode byte
+first initializes the relevant GUI state and then enters the richer splash
+controller. The controller repeats the guard at `0x002C7E08`: when asked to
+enable the splash with the mode clear it falls back to the timed path; with the
+mode set it constructs the named splash widget, attaches its wake behavior, and
+uses the controller's normal enable/disable lifecycle.
+
+This makes "alternate widget-backed splash mode" a high-confidence behavioral
+description of the two presentation consumers. It does not establish why the
+original option letter was `x`.
+
+#### Character-loader behavior
+
+The third reader is inside the character-data parser reached from the
+`DATA.HOG` stage. It affects only the first record in that loop. When the mode
+is clear, a selector is forced nonzero. When the mode is set, the selector is
+preserved from a video/configuration byte at offset `0x250` of the startup game
+object. Only the zero case takes the alternate construction path, which supplies
+an existing fixed-size record to the character constructor; the other path
+supplies no such record.
+
+The record's original type and the developers' reason for coupling it to this
+mode remain unresolved. Calling it player customization, multiplayer state, or
+a platform mode would be speculation.
+
+#### Confidence and remaining uncertainty
+
+| Claim | Confidence | Basis |
+| --- | --- | --- |
+| `-x` is active and commits a persistent mode byte. | Confirmed | Handler store plus three direct readers. |
+| It selects widget-backed rather than timed splash behavior. | High | Both presentation branches, widget construction, and lifecycle calls agree. |
+| It is not required for `-l` level selection. | Confirmed | `-l` writes the level independently; the path-selection chain has no direct mode-byte read. |
+| It changes one first-character construction branch. | Confirmed | Direct control-flow trace in the `DATA.HOG` character parser. |
+| The original semantic name or intended end-user purpose. | Unresolved | No help entry, symbol, or diagnostic names the option. |
 
 ## `MINSK` reference enumeration
 
@@ -154,6 +211,64 @@ leading separator, and appended the ISO9660 version suffix. That transformation
 describes the original disc backend only and is deliberately excluded from the
 native contract above.
 
+### Localization precedes the loading archive
+
+The call at `0x0013542C` is more specific than a general game-data location
+change. It builds and loads the level's localized string database before probing
+`LOADING.HOG`. Logically, it resolves:
+
+`GAMEDATA/<selected-level>/STRINGS<locale-suffix>.DAT`
+
+The suffix comes from a seven-entry locale table selected by a global locale
+index. The loader releases the preceding string database when present, creates
+the localization object on first use, and then loads the newly constructed
+path. Native code should model this as an explicit localization-resource change,
+not as a process working-directory mutation.
+
+### Loading-archive probe, fallback, and registration
+
+The file-status routine at `0x0036DEF0` uses zero as success. At
+`0x00135474`, any nonzero status replaces the level-specific candidate with
+`GAMEDATA/COMMON/LOADING.HOG`; the common path is therefore a status-based
+fallback, not merely a string default.
+
+The selected path is handed to `0x00166430`, which probes it again. Only a zero
+status proceeds to archive registration at `0x003F96E0`, registry lookup at
+`0x003F9600`, and construction of the loading-screen resource at `0x002721B0`.
+The registry de-duplicates archives by case-insensitive logical path and returns
+the existing node when already mounted. A later stage removes matching archive
+nodes through the corresponding registry-removal path.
+
+### Main level-data archive
+
+The level-data stage beginning at `0x001C4190` constructs and registers:
+
+`GAMEDATA/<selected-level>/DATA.HOG`
+
+It then creates a reader over the registered archive, hands that reader through
+thirteen ordered parser calls, and destroys the reader after the final pass.
+The calls are distinct subsystem boundaries; their order is observable and must
+be retained in future native import tests even though the native implementation
+will not execute any retail code.
+
+The `-x` character-reader described above is reached inside one of these parser
+passes. It does not choose or mount `DATA.HOG` itself.
+
+### Weapon and character-asset archive order
+
+When the parsed level declares at least one weapon dependency, the subsequent
+weapon stage registers archives in this order:
+
+1. `GAMEDATA/<selected-level>/WPN.HOG`
+2. `GAMEDATA/COMMON/WPNHOG.HOG`
+3. `GAMEDATA/<selected-level>/NPCTEX.HOG`
+4. `GAMEDATA/<selected-level>/NPCSKM.HOG`
+
+The per-level archives are checked for a usable archive payload before being
+forwarded to their subsystem consumers. This is registration order, not VFS
+override policy; precedence still needs an independent behavioral test before
+the native VFS assigns duplicate-name priority.
+
 Other useful stage markers are `0x001C41B0`, which begins the level-data loading
 status stage, and `0x001457F8`, which begins level-specific weapon-data loading.
 
@@ -190,3 +305,17 @@ python -B tools\mips_static_refs.py `
 The helper reports virtual addresses and decoded instruction fields only. Its
 LUI-pair scan is intentionally simple, so every address used as evidence above
 was manually checked at the corresponding instruction boundary.
+
+The bounded startup/loader verifier reproduces the newer findings and fails
+closed unless the executable hash, direct mode-byte accesses, call targets,
+branch targets, parser order, and path-template fingerprints all match:
+
+```powershell
+python -B tools\trace_startup_loader.py `
+  private\extracted-disc\SCUS_972.64
+```
+
+Its JSON output uses only the input basename. It emits no executable bytes,
+decompiled source, retail string contents, or private parent path. The report
+was also independently checked against radare2 6.1.8 disassembly with instruction
+bytes hidden; PCSX2 was not launched.

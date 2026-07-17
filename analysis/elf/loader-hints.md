@@ -17,8 +17,17 @@
 The argument parser and file-resolution chain are now mapped in
 [`argument-loader.md`](argument-loader.md). Static analysis confirms that the parser recognizes
 `-x`, consumes an attached payload for `-l`, and carries `MINSK` into the level-specific
-`LOADING.HOG` lookup. This establishes syntax and loader intent, but not the eventual gameplay
-state.
+`LOADING.HOG` lookup. A second bounded trace establishes that `-x` is independent of level
+selection: it chooses an alternate widget-backed splash path and changes one first-character
+construction branch during `DATA.HOG` parsing. The original internal name remains unknown.
+
+The same trace now covers the level-localized strings load, status-based `LOADING.HOG` fallback,
+archive registration, the thirteen ordered `DATA.HOG` parser boundaries, and the later weapon and
+NPC archive registration order. Verify those metadata claims without launching the game:
+
+```powershell
+python -B tools\trace_startup_loader.py private\extracted-disc\SCUS_972.64
+```
 
 ## Optional reference-game experiment
 
