@@ -55,3 +55,16 @@ jobs:
           cmake --preset msvc
           cmake --build --preset msvc-debug
           ctest --preset msvc-debug
+
+      # Temporary verification bridge while the local Windows host is under memory pressure.
+      # Remove this step after the owned-data corpus run; no retail data enters CI.
+      - name: Upload native verification executables
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: omega-native-verification-${{ github.sha }}
+          path: |
+            build/msvc/Debug/omega_tool.exe
+            build/msvc/Debug/openomega.exe
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
