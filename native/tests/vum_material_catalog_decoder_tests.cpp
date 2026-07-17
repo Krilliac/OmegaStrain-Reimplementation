@@ -11,8 +11,8 @@
 
 namespace
 {
-constexpr std::uint32_t kNamesEnd = 136;
-constexpr std::uint32_t kMaterialsEnd = 320;
+constexpr std::uint32_t kNamesEnd = 132;
+constexpr std::uint32_t kMaterialsEnd = 316;
 constexpr std::uint32_t kPayloadA = 368;
 constexpr std::uint32_t kPayloadB = 384;
 constexpr std::uint32_t kPrimaryEnd = 432;

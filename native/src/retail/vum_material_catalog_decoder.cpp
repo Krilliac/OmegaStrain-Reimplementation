@@ -104,6 +104,12 @@ struct CatalogLayout
     return value > begin && value < end && value % alignment == 0;
 }
 
+[[nodiscard]] bool IsRecordStart(const std::uint32_t value, const std::uint32_t begin,
+    const std::uint32_t end, const std::uint32_t stride) noexcept
+{
+    return value >= begin && value < end && (value - begin) % stride == 0;
+}
+
 [[nodiscard]] MetadataRecordKind ClassifyMetadataRecord(
     const std::span<const std::byte> record, const std::uint32_t metadata_begin,
     const std::uint32_t metadata_end, const std::uint32_t payload_a,
@@ -111,7 +117,7 @@ struct CatalogLayout
 {
     const std::array<std::uint32_t, 4> words{
         ReadU32(record, 0), ReadU32(record, 4), ReadU32(record, 8), ReadU32(record, 12)};
-    if (InRangeAligned(words[2], metadata_begin, metadata_end, 16))
+    if (IsRecordStart(words[2], metadata_begin, metadata_end, 16))
         return MetadataRecordKind::T;
     if (InRangeAligned(words[1], payload_a, payload_b, 16) &&
         StrictlyInsideAligned(words[3], payload_b, primary_end, 4))
@@ -185,7 +191,7 @@ struct CatalogLayout
             inside_t_block = true;
             ++t_count;
             const std::uint32_t target = ReadU32(record, 8);
-            if (target <= record_offset || target % 16U != 0 ||
+            if (target <= record_offset ||
                 (target - materials_end) % kMetadataRecordBytes != 0)
                 return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
                     "VUM metadata T record does not target a forward record", record_offset + 8U));
