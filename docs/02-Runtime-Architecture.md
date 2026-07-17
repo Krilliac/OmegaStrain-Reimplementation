@@ -23,8 +23,10 @@ lifetime is guaranteed by the app. Long-lived asset references are typed generat
 not raw pointers or `shared_ptr` ownership graphs.
 
 `GameDataService` is the implemented startup boundary. It owns its VFS, freezes mounts during
-`Open()`, and returns only canonical owned IR. Future `AssetService` code receives a non-owning
-reference; neither service owns the other.
+`Open()`, and returns only canonical owned IR. It now resolves each manifest cell HOG and its unique
+COL member into one `SpatialMeshIR` in manifest order; HOG objects, byte spans, and retail offsets
+remain local to the call. Future `AssetService` code receives a non-owning reference; neither
+service owns the other.
 
 ## Components and services
 
@@ -52,7 +54,7 @@ queues.
 - `VirtualFileSystem` mounts physical directories, ISO views, and HOG archives behind
   normalized case-insensitive game paths.
 - `GameDataService` validates the owner-supplied NTSC-U root from bounded `SYSTEM.CNF` metadata,
-  owns the frozen VFS, and maps named levels into canonical manifest values.
+  owns the frozen VFS, and maps named levels into canonical manifest and spatial-mesh values.
 - `AssetService` maps paths to typed handles, performs async decode, and publishes immutable
   CPU assets before render/audio upload.
 - `ScriptService` executes only project-owned native logic or declarative mission data. Retail
@@ -97,13 +99,21 @@ that returns neutral owned spatial-mesh IR: source coordinates and topology are 
 winding, collision behavior, transforms, materials, opaque primitive words, and trailing payload
 remain unassigned. None of these adapters exposes VU/VIF instructions or decoded pixel guesses.
 
+`LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
+cell HOG, and every COL decoder under one operation budget. Input work and item counts are
+cumulative, logical output includes every owned mesh/vector payload, scratch is a reusable peak,
+and nesting depth combines archive edges with COL tree edges. The default depth is nine: one cell
+HOG edge plus the corpus maximum eight-edge COL tree. The returned `LevelSpatialIR` has the same
+order and cardinality as `LevelManifestIR::terrain_cells`; provenance remains in the manifest.
+
 Tools may link retail adapters. Renderer and simulation targets must consume canonical assets and
 must not include retail-format headers. A source-include dependency check will turn this convention
 into a CI enforcement boundary as more targets appear. The existing terrain-prefix parser remains
 in `omega_core` temporarily; new semantic adapters enter through `omega_retail_formats`.
 
-The initial synthetic manifest grid consumes only `LevelManifestIR`. Its tile positions are not
-retail world coordinates and are never claimed as decoded geometry.
+Startup owns both `LevelManifestIR` and `LevelSpatialIR`. The initial synthetic manifest grid still
+consumes only the manifest; its tile positions are not retail world coordinates and are never
+claimed as decoded geometry.
 
 The runtime contains no MIPS execution path. This boundary is permanent and documented in
 `docs/adr/0001-pure-native-runtime.md`.
