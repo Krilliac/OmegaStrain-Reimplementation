@@ -315,9 +315,9 @@ asset::DecodeResult<TdxContainerDescriptor> InspectTdxContainer(
 
     const std::uint16_t storage_unit_word = ReadU16(bytes, 14);
     const std::uint32_t block_stride = ReadU32(bytes, 56);
-    if (block_stride < 32U || block_stride % 16U != 0)
+    if (block_stride < 32U)
         return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-            "TDX block stride is outside the observed aligned family", 56));
+            "TDX block stride is shorter than its pointer header", 56));
     std::uint64_t counted_block_bytes = 0;
     std::uint64_t observed_total_bytes = 0;
     if (!Multiply(block_count, block_stride, counted_block_bytes) ||

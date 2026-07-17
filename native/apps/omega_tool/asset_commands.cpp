@@ -362,13 +362,10 @@ void RecordExtent(ExtentStats& stats, const retail::ObservedExtentRelation relat
     }
 }
 
-void PrintAssetError(const std::filesystem::path& backing_path,
-    const std::string_view entry_name, const std::string_view message)
+void PrintAssetError(
+    const std::filesystem::path&, const std::string_view, const std::string_view)
 {
-    std::cerr << backing_path.generic_string();
-    if (!entry_name.empty())
-        std::cerr << "::" << entry_name;
-    std::cerr << ": " << message << '\n';
+    std::cerr << "asset verification error\n";
 }
 
 void InspectAssetRange(const std::filesystem::path& backing_path,

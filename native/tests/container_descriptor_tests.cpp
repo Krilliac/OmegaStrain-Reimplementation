@@ -284,11 +284,19 @@ int ContainerDescriptorFailureCount()
               !short_counted_blocks->bounded_blocks_region,
         "TDX accepts the observed counted-block-extent-exceeds-input family without "
         "exposing payload");
-    auto unaligned_stride_tdx = MakeTdx();
-    WriteU32(unaligned_stride_tdx, 56, 255);
-    CheckError(omega::retail::InspectTdxContainer(unaligned_stride_tdx),
+    auto eight_aligned_stride_tdx = MakeTdx();
+    WriteU32(eight_aligned_stride_tdx, 56, 2376);
+    auto eight_aligned_stride =
+        omega::retail::InspectTdxContainer(eight_aligned_stride_tdx);
+    Check(eight_aligned_stride && eight_aligned_stride->block_stride == 2376 &&
+              eight_aligned_stride->counted_blocks_extent.relation ==
+                  omega::retail::ObservedExtentRelation::ExceedsInput,
+        "TDX accepts the observed eight-byte-aligned block stride family");
+    auto short_stride_tdx = MakeTdx();
+    WriteU32(short_stride_tdx, 56, 31);
+    CheckError(omega::retail::InspectTdxContainer(short_stride_tdx),
         omega::asset::DecodeErrorCode::UnsupportedVariant,
-        "TDX rejects an unaligned block stride");
+        "TDX rejects a block stride shorter than its pointer header");
     for (std::size_t size = 0; size < 64U; ++size)
         CheckError(omega::retail::InspectTdxContainer(
                        std::span<const std::byte>(tdx_bytes.data(), size)),

@@ -309,9 +309,6 @@ struct BlockLayout
         layout.primary_count > kMaximumPrimaryPlanes || layout.block_stride == 0)
         return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
             "TDX block or primary-plane count is zero or unsupported", 0x22));
-    if (layout.block_stride % 16U != 0)
-        return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-            "TDX block stride is outside the observed aligned family", 0x38));
     const std::uint16_t expected_secondary_count =
         static_cast<std::uint16_t>(layout.indexed ? 1U : 0U);
     if (layout.secondary_count != expected_secondary_count)

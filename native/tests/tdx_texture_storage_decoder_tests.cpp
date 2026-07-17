@@ -300,6 +300,26 @@ int TdxTextureStorageDecoderFailureCount()
               multi->blocks[1].planes[1].bytes[0] == std::byte{0xA1},
         "TDX block and plane source order is preserved without assigning frame or mip meaning");
 
+    auto eight_aligned_stride_bytes = MakeTdx(FixtureSpec{
+        .bits_per_pixel = 4,
+        .width = 32,
+        .height = 32,
+        .blocks = {{
+            PlaneSpec{0x00, 16, 8, 0x11},
+            PlaneSpec{0x14, 16, 16, 0x21},
+            PlaneSpec{0x14, 8, 8, 0x31},
+            PlaneSpec{0x14, 4, 4, 0x41},
+        }},
+    });
+    eight_aligned_stride_bytes.resize(eight_aligned_stride_bytes.size() + 8U, std::byte{0});
+    auto eight_aligned_stride =
+        omega::retail::DecodeTdxTextureStorage(eight_aligned_stride_bytes);
+    Check(ReadU32(eight_aligned_stride_bytes, 0x38) == 2376 && eight_aligned_stride &&
+              eight_aligned_stride->blocks.size() == 1 &&
+              eight_aligned_stride->blocks[0].planes.size() == 4 &&
+              eight_aligned_stride->blocks[0].planes[3].bytes.size() == 8,
+        "TDX decodes the observed eight-byte-aligned four-plane storage family");
+
     auto zero_tail_bytes = indexed8_bytes;
     zero_tail_bytes.resize(zero_tail_bytes.size() + 16U, std::byte{0});
     auto zero_tail = omega::retail::DecodeTdxTextureStorage(zero_tail_bytes);
