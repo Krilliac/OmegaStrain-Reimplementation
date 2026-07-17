@@ -52,8 +52,8 @@ shipping dependencies or execution mechanisms.
 13. Corrected the TDX counted extent to `64 + block_count * block_stride` and added an owned
     storage-plane adapter. It preserves source-order blocks, transfer planes, palette channel
     bytes, and packed sample families without claiming display-ready pixels. Aggregate verification
-    covers 15,248 textures, 15,442 blocks, 17,960 primary planes, and 4,112 duplicate-proven
-    implicit zero bytes with zero errors.
+    covers 15,248 textures, 15,442 blocks, 17,960 primary planes, 285,521,272 owned primary bytes,
+    and 4,112 duplicate-proven implicit zero bytes with zero errors.
 
 ## Disc observations
 

@@ -32,8 +32,9 @@ retail instruction blocks, or PS2 execution layer.
   owned spatial meshes with zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices,
   1,239,980 triangles/references, and 2,137 normalized empty meshes.
 - The native TDX adapter converts all 15,248 texture assets into owned renderer-neutral storage:
-  15,442 source-order blocks, 17,960 primary planes, 15,190 palette blocks, and zero errors. It
-  normalizes 4,112 duplicate-proven implicit zero bytes without guessing pixel or channel layout.
+  15,442 source-order blocks, 17,960 primary planes, 285,521,272 primary bytes, 15,190 palette
+  blocks, and zero errors. It normalizes 4,112 duplicate-proven implicit zero bytes without
+  guessing pixel or channel layout.
 
 ## Quick start
 

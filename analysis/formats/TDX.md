@@ -35,6 +35,8 @@ Every counted block has the same stride. The complete region is therefore
 `64 + block_count * block_stride`, not `64 + block_stride`. This correction makes 24 formerly
 opaque tails ordinary additional blocks. The physical corpus has 11,277 exact counted extents,
 3,909 all-zero tails, no nonzero tails, and 62 spans ending inside the last primary plane.
+Block stride is not uniformly 16-byte aligned: 23 occurrences use stride 2,376 and carry an
+eight-byte zero container tail.
 
 The sample families are 4-bit indexed (`0x14`), 8-bit indexed (`0x13`), packed 24-bit (`0x01`),
 and packed 32-bit (`0x00`). These header sample families are distinct from the transfer-element
@@ -93,7 +95,6 @@ sanitized counters:
 build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc
 ```
 
-The target semantic baseline is 15,248 textures, 15,442 blocks, 17,960 primary planes, 15,190
-palette blocks, 252 direct blocks, 1,510,240 palette entries, 62 implicit-zero textures, and 4,112
-implicit-zero bytes, with zero errors. Exact owned primary-byte totals are recorded after the native
-corpus run.
+The confirmed semantic baseline is 15,248 textures, 15,442 blocks, 17,960 primary planes,
+285,521,272 owned primary bytes, 15,190 palette blocks, 252 direct blocks, 1,510,240 palette entries,
+62 implicit-zero textures, and 4,112 implicit-zero bytes, with zero errors.

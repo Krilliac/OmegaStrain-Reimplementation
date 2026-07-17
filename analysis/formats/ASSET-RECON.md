@@ -192,7 +192,9 @@ extent totals exactly
 match this report: COL has 7,036 nonzero tails
 after the described table region; VUM has 6,989 exact primary boundaries and 47 nonzero tails;
 TDX has 11,277 exact, 3,909 zero-tail, zero nonzero-tail, and 62 duplicate-proven implicit-zero
-suffix relations after applying the full counted-block extent.
+suffix relations after applying the full counted-block extent. Its canonical storage totals are
+15,442 blocks, 17,960 primary planes, 285,521,272 owned primary bytes, 15,190 palette blocks, and
+1,510,240 source-order palette entries.
 
 ### Wrappers and compression check
 

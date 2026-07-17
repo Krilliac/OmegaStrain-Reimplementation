@@ -27,7 +27,8 @@ the passive VUM descriptor are implemented; other scene decoders remain incomple
 - GameDataService aggregate validation: 5,351/5,351 manifest cells load as owned spatial meshes,
   and all 18 headless startup probes preserve manifest/spatial cardinality.
 - TDX aggregate validation: 15,248/15,248 textures normalize to 15,442 owned blocks and 17,960
-  primary planes, including 4,112 duplicate-proven implicit zero bytes, with zero errors.
+  primary planes containing 285,521,272 owned bytes, including 4,112 duplicate-proven implicit
+  zero bytes, with zero errors.
 - Inspectors for ELF, scripts, textures, meshes, skeletons, animation, audio, and maps.
 - Synthetic malformed-input tests for every decoder.
 
