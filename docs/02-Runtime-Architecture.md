@@ -87,20 +87,28 @@ The initial native build targets express the same direction:
 
 - `omega_core`: HOG indexing, VFS, and generic bounded infrastructure;
 - `omega_assets`: canonical owned IR values and decode contracts;
-- `omega_retail_formats`: stateless POP/COL and later VUM/TDX adapters that may depend on the first
+- `omega_retail_formats`: stateless POP/COL/VUM/TDX adapters that may depend on the first
   two targets;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
   orchestration; and
 - `omega_runtime`: launch options and renderer-neutral diagnostic scene values consumed by the
   SDL host.
 
-VUM currently has a passive scalar descriptor. COL has a bounded semantic adapter that returns
-neutral owned spatial-mesh IR: source coordinates and topology are preserved while winding,
+VUM has a bounded semantic adapter that returns owned source-order names plus one-to-three dense
+name indices per material. It also validates the proven P/Q/T render-payload metadata grammar but
+discards retail offsets, opaque words, usage codes, and payload bodies. COL has a bounded semantic
+adapter that returns neutral owned spatial-mesh IR: source coordinates and topology are preserved
+while winding,
 collision behavior, transforms, materials, opaque primitive words, and trailing payload remain
 unassigned. TDX has a separate bounded `TextureStorageIR` adapter that owns source-order blocks,
 transfer planes, and four-byte palette entries while leaving block purpose, mip meaning, channel
 order, alpha conversion, nibble order, palette permutation, swizzle, and GPU upload unassigned.
 None of these adapters exposes VU/VIF instructions or decoded pixel guesses.
+
+VUM catalog decoding is stateless and needs no dynamic scratch. It debits the full span once,
+preflights exact owned strings/materials, counts names/materials/references/source metadata against
+the item budget, and validates relative R0 record addressing separately from absolute payload
+alignment. Render code will consume only a future independently proven render-mesh IR.
 
 TDX storage decoding is flat and stateless. It debits input once, preflights exact owned vector and
 payload bytes, uses fixed local layout records, and retains no input span. Sixty-two single-plane

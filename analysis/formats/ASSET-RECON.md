@@ -178,18 +178,21 @@ all 7,036 spans with zero errors: 23,913 source nodes normalize to 21,197 canoni
 empty meshes, alongside 99,193 leaves, 1,327,714 triangles, and 949,762 vertices. The deepest
 observed tree is eight edges and 2,678 spans use a direct leaf root.
 
-All 7,036 VUM files begin `VUMS`. The word at offset `0x58` equals the directory span in 6,989
-files. Forty-seven files have additional nonzero data after that boundary, so this is a primary
-section boundary rather than a universal file length. All 306 MINSK world/map VUMs are in the
-exact group. The three words at `0x50`, `0x54`, and `0x58` are ordered corpus-wide; only the last
-is 16-byte aligned. `InspectVumContainer` preserves those boundaries and the opaque words at
-`0x04` and `0x1C`. It does not decode, execute, or publish VU/VIF instructions. Material tables,
-vertex attributes, indices, and coordinate conversion remain later research.
+All 7,036 VUM files begin `VUMS`. The material/name contract is documented in `VUM.md`.
+`DecodeVumMaterialCatalog` owns the printable NUL-separated name table and the proven one-to-three
+dense, in-range name references from every fixed 92-byte `MTRL` record while omitting
+usage codes and render-payload words. The corpus contains 38,793 names, 38,899 material records,
+and 42,631 active references. The word at offset `0x58` equals the directory span in 6,989 files.
+Forty-seven files have additional nonzero data after that boundary, so this is a primary section
+boundary rather than a universal file length. All 306 MINSK world/map VUMs are in the exact group.
+The three words at `0x50`, `0x54`, and `0x58` are ordered corpus-wide; only the last is 16-byte
+aligned. Neither the inspector nor semantic adapter decodes, executes, or publishes MIPS/VU/VIF
+instructions. Vertex attributes, topology, material parameters, texture binding, and coordinate
+conversion remain later research.
 
 The native aggregate verifier independently accepts and semantically decodes all 7,036 COL spans,
-passively accepts 7,036 VUM spans, and semantically decodes 15,248 TDX spans, with zero errors. Its
-extent totals exactly
-match this report: COL has 7,036 nonzero tails
+decodes the proven catalog layer of all 7,036 VUM spans, and semantically decodes 15,248 TDX spans,
+with zero errors. Its extent totals exactly match this report: COL has 7,036 nonzero tails
 after the described table region; VUM has 6,989 exact primary boundaries and 47 nonzero tails;
 TDX has 11,277 exact, 3,909 zero-tail, zero nonzero-tail, and 62 duplicate-proven implicit-zero
 suffix relations after applying the full counted-block extent. Its canonical storage totals are
