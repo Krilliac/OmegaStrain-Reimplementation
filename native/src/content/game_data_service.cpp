@@ -205,7 +205,7 @@ private:
 {
     // HOG parsing owns one directory entry per header count. Debit that count before the parser
     // reserves its vectors; malformed short headers are left to the archive parser to classify.
-    if (bytes.size() < 8U)
+    if (bytes.size() < 0x14U + sizeof(std::uint32_t))
         return {};
     return budget.ConsumeItems(ReadU32(bytes, 4U), description);
 }

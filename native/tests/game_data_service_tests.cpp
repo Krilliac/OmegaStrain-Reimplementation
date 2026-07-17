@@ -482,8 +482,10 @@ int GameDataServiceFailureCount()
                 omega::asset::DecodeErrorCode::DuplicateReference,
                 "a cell archive with two COL members has a typed duplicate-reference error");
 
+            auto malformed_cell = spatial_fixture.cell_a;
+            WriteU32(malformed_cell, 0x08, 0x15);
             Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG",
-                      MakeSpatialDataHog(Bytes("not a HOG"), spatial_fixture.cell_b)),
+                      MakeSpatialDataHog(malformed_cell, spatial_fixture.cell_b)),
                 "malformed nested cell archive is written");
             CheckError(spatial_service->LoadLevelSpatial(*spatial_manifest),
                 omega::content::GameDataErrorCode::MalformedArchive,
