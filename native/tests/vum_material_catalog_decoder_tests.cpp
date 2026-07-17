@@ -242,8 +242,8 @@ int VumMaterialCatalogDecoderFailureCount()
     bad = bytes;
     WriteU32(bad, kMetadataQ + 4U, kPayloadA + 32U);
     CheckError(omega::retail::DecodeVumMaterialCatalog(bad),
-        omega::asset::DecodeErrorCode::UnsupportedVariant,
-        "VUM metadata rejects a Q partition that does not begin at payload A");
+        omega::asset::DecodeErrorCode::InvalidReference,
+        "VUM metadata rejects a T target whose Q partition no longer starts at payload A");
     bad = bytes;
     WriteU32(bad, kMetadataP, kPayloadB);
     CheckError(omega::retail::DecodeVumMaterialCatalog(bad),
