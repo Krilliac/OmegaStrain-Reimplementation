@@ -1,0 +1,37 @@
+name: Native runtime bug
+description: Report a reproducible bug without uploading proprietary data.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not attach a game image, BIOS, executable, save state, extracted asset, key, or private
+        packet capture. Provide hashes and independently written reproduction steps instead.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest safe sequence that reproduces the issue.
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Project commit
+      placeholder: 12-character Git commit ID
+    validations:
+      required: true
+  - type: checkboxes
+    id: clean_room
+    attributes:
+      label: Clean-room confirmation
+      options:
+        - label: I have not attached or pasted proprietary game, firmware, credential, or key data.
+          required: true

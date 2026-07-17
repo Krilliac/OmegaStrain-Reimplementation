@@ -1,0 +1,43 @@
+name: Research finding
+description: Submit reproducible metadata or behavioral evidence without retail payloads.
+title: "[Research]: "
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Findings must contain only reproducible metadata, hashes, aggregate results, or independently
+        written descriptions. Do not attach retail code, assets, scripts, dialogue, or decompilation.
+  - type: dropdown
+    id: confidence
+    attributes:
+      label: Confidence state
+      options:
+        - confirmed
+        - inferred
+        - hypothesis
+        - rejected
+    validations:
+      required: true
+  - type: textarea
+    id: claim
+    attributes:
+      label: Claim
+      description: State one narrow claim and distinguish observation from interpretation.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Safe reproduction
+      description: Give commands, versions, hashes, and expected metadata-only output.
+    validations:
+      required: true
+  - type: checkboxes
+    id: clean_room
+    attributes:
+      label: Clean-room confirmation
+      options:
+        - label: I have not attached or pasted proprietary game, firmware, credential, or key data.
+          required: true
+        - label: This report does not contain decompiled source or translated retail instructions.
+          required: true

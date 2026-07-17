@@ -16,6 +16,14 @@
 /build/
 /logs/
 /downloads/
+/.vs/
+/out/
+/Testing/
+*.user
+*.suo
+CMakeUserPresets.json
+__pycache__/
+*.py[cod]
 
 # Third-party source/build trees are managed separately.
 /third_party/

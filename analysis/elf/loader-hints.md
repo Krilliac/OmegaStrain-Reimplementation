@@ -9,21 +9,24 @@
 - The ASCII token `MINSK` occurs in the executable at file offset `0x003ACBC8`, mapped through
   the main load segment to virtual address `0x004ACAC8`.
 - The token sits with other level identifiers, while `GAMEDATA/MINSK` is present on disc.
-  This makes a direct-level loader plausible, but does not establish its command-line syntax.
+  This earlier evidence made a direct-level loader plausible but, by itself, did not establish
+  its command-line syntax.
 
-## Not yet confirmed
+## Follow-up static trace
 
-- Static string searches did not establish literal `-x` or `-lMINSK` options.
-- The handoff claim that `-x -lMINSK` directly loads Minsk remains a hypothesis. The parser may
-  consume individual option characters or construct the level argument dynamically.
-- No loader function, file-open breakpoint, or call graph has yet been labeled.
+The argument parser and file-resolution chain are now mapped in
+[`argument-loader.md`](argument-loader.md). Static analysis confirms that the parser recognizes
+`-x`, consumes an attached payload for `-l`, and carries `MINSK` into the level-specific
+`LOADING.HOG` lookup. This establishes syntax and loader intent, but not the eventual gameplay
+state.
 
-## Next experiment
+## Optional reference-game experiment
 
 1. Launch PCSX2 with its debugger and break at `0x00100008`.
 2. Compare a normal boot with `-gameargs "-x -lMINSK"` using
    `scripts/launch-omega.ps1 -Debugger -GameArgs '-x -lMINSK'`.
-3. Trace reads of the argument vector and references to `0x004ACAC8`.
-4. Break on the game's file-open path and record the first `GAMEDATA/MINSK` request.
+3. Use the provenance-only observation points in `argument-loader.md` to trace the argument
+   vector and level-specific file lookup.
+4. Record the first `GAMEDATA/MINSK` request.
 5. Preserve screenshots/logs and convert observations into a repeatable test before treating
    the option as supported.

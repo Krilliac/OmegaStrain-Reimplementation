@@ -1,0 +1,527 @@
+{
+  "direct_map_files": {
+    "ascii_text": 1,
+    "file_bytes_range": [
+      1138,
+      1138
+    ],
+    "file_count": 1
+  },
+  "formats": {
+    "col": {
+      "col_prefix": 7036,
+      "count": 7036,
+      "header_size_48": 7036,
+      "span_16_byte_aligned": 7036,
+      "span_bytes_range": [
+        128,
+        229680
+      ],
+      "variant_word": {
+        "0": 2678,
+        "1": 3223,
+        "10": 25,
+        "102": 1,
+        "103": 1,
+        "105": 1,
+        "11": 25,
+        "114": 1,
+        "12": 28,
+        "124": 1,
+        "129": 1,
+        "13": 24,
+        "14": 16,
+        "15": 18,
+        "152": 1,
+        "16": 10,
+        "168": 1,
+        "17": 23,
+        "18": 18,
+        "19": 7,
+        "2": 142,
+        "20": 13,
+        "21": 14,
+        "22": 13,
+        "23": 15,
+        "24": 8,
+        "25": 7,
+        "26": 7,
+        "27": 4,
+        "28": 11,
+        "29": 5,
+        "3": 125,
+        "30": 9,
+        "31": 7,
+        "32": 8,
+        "33": 11,
+        "34": 7,
+        "35": 11,
+        "36": 4,
+        "37": 6,
+        "38": 10,
+        "39": 6,
+        "4": 78,
+        "40": 7,
+        "41": 4,
+        "42": 8,
+        "43": 5,
+        "44": 2,
+        "45": 5,
+        "46": 7,
+        "47": 4,
+        "48": 4,
+        "49": 4,
+        "5": 85,
+        "50": 2,
+        "51": 3,
+        "52": 1,
+        "53": 4,
+        "54": 4,
+        "55": 4,
+        "56": 7,
+        "57": 3,
+        "58": 2,
+        "59": 4,
+        "6": 40,
+        "60": 3,
+        "61": 1,
+        "62": 3,
+        "63": 5,
+        "64": 4,
+        "65": 4,
+        "66": 2,
+        "67": 5,
+        "68": 3,
+        "69": 3,
+        "7": 47,
+        "72": 5,
+        "75": 1,
+        "76": 3,
+        "77": 1,
+        "78": 1,
+        "79": 3,
+        "8": 47,
+        "81": 1,
+        "82": 2,
+        "83": 1,
+        "85": 3,
+        "86": 2,
+        "87": 1,
+        "9": 39,
+        "90": 2,
+        "91": 1,
+        "93": 1,
+        "94": 6,
+        "95": 1,
+        "96": 2
+      },
+      "version_byte": {
+        "3": 3,
+        "5": 7033
+      }
+    },
+    "lpd": {
+      "computed_count_layout_span_exact": 1,
+      "computed_count_layout_span_padding_bytes_range": [
+        8,
+        1932
+      ],
+      "computed_count_layout_span_zero_padded": 861,
+      "count": 862,
+      "header_word_count": {
+        "22": 862
+      },
+      "same_directory_vag_companions": 852,
+      "span_bytes_range": [
+        2048,
+        4096
+      ],
+      "without_same_directory_vag_companion": 10
+    },
+    "par": {
+      "ascii": 679,
+      "count": 679,
+      "crlf_only": 679,
+      "declared_version": {
+        "1.300000": 10,
+        "1.400000": 1,
+        "1.500000": 7,
+        "1.700000": 2,
+        "1.800000": 222,
+        "1.900000": 100,
+        "2.000000": 187,
+        "2.100000": 150
+      },
+      "padding_bytes_range": [
+        1,
+        2040
+      ],
+      "span_bytes_range": [
+        2048,
+        4096
+      ],
+      "version_comment_first_line": 679,
+      "zero_padded": 679
+    },
+    "skl": {
+      "ascii": 1261,
+      "count": 1261,
+      "cr_only": 18,
+      "crlf_only": 1243,
+      "exact_text_span": 162,
+      "line_count_range": [
+        10,
+        60
+      ],
+      "padding_bytes_range": [
+        1,
+        1878
+      ],
+      "span_bytes_range": [
+        176,
+        2048
+      ],
+      "starts_with_bonenoscale": 1212,
+      "zero_padded": 1099
+    },
+    "skm": {
+      "chunk_count_range": [
+        1,
+        61
+      ],
+      "computed_qword_layout_span_exact": 2732,
+      "computed_qword_layout_span_padding_bytes_range": [
+        16,
+        2032
+      ],
+      "computed_qword_layout_span_zero_padded": 1487,
+      "count": 4219,
+      "qwords_per_chunk_range": [
+        4,
+        55
+      ],
+      "secondary_count_per_chunk_range": [
+        1,
+        30
+      ],
+      "span_bytes_range": [
+        128,
+        40960
+      ],
+      "version_byte": {
+        "3": 4219
+      }
+    },
+    "tdx": {
+      "bits_per_pixel": {
+        "24": 68,
+        "32": 129,
+        "4": 9879,
+        "8": 5172
+      },
+      "bpp_psm_pair": {
+        "24/0x01": 68,
+        "32/0x00": 129,
+        "4/0x14": 9879,
+        "8/0x13": 5172
+      },
+      "count": 15248,
+      "dimensions": {
+        "1024x512": 401,
+        "128x128": 2212,
+        "128x64": 740,
+        "16x16": 985,
+        "16x8": 9,
+        "256x128": 14,
+        "256x256": 134,
+        "256x64": 2,
+        "32x16": 179,
+        "32x32": 4476,
+        "32x64": 1,
+        "512x256": 3,
+        "512x512": 52,
+        "512x64": 20,
+        "64x32": 356,
+        "64x64": 5572,
+        "8x8": 92
+      },
+      "flags": {
+        "0": 89,
+        "1": 10858,
+        "2": 3,
+        "3": 184,
+        "4": 30,
+        "5": 1357,
+        "6": 75,
+        "7": 2652
+      },
+      "header_size_field_span_exact": 11253,
+      "header_size_field_span_exceeds_span": 62,
+      "header_size_field_span_nonzero_tail": 24,
+      "header_size_field_span_padding_bytes_range": [
+        8,
+        1824
+      ],
+      "header_size_field_span_zero_padded": 3909,
+      "planes": {
+        "1": 188,
+        "16": 401,
+        "2": 14434,
+        "4": 150,
+        "8": 75
+      },
+      "ps2_gs_psm": {
+        "0x00": 129,
+        "0x01": 68,
+        "0x13": 5172,
+        "0x14": 9879
+      },
+      "span_bytes_range": [
+        416,
+        526336
+      ],
+      "storage_formula_match_by_bpp": {
+        "32": 129,
+        "4": 8531,
+        "8": 4812
+      },
+      "storage_formula_mismatch_by_bpp": {
+        "24": 68,
+        "4": 1348,
+        "8": 360
+      },
+      "storage_units_match_uncompressed_texel_bytes": 13472,
+      "version": {
+        "5": 15248
+      }
+    },
+    "vag": {
+      "adpcm_data_16_byte_aligned": 8665,
+      "count": 8665,
+      "declared_data_span_exact": 53,
+      "declared_data_span_padding_bytes_range": [
+        16,
+        2032
+      ],
+      "declared_data_span_zero_padded": 8612,
+      "reserved_word": {
+        "0x00000000": 8665
+      },
+      "sample_rate_hz": {
+        "22050": 8665
+      },
+      "span_bytes_range": [
+        4096,
+        929792
+      ],
+      "vagp_magic": 8665,
+      "version": {
+        "0x00000000": 8497,
+        "0x00000004": 166,
+        "0x00000020": 2
+      }
+    },
+    "vpk": {
+      "count": 85,
+      "declared_header_bytes": {
+        "2048": 85
+      },
+      "little_endian_vpk_fourcc": 85,
+      "span_2048_byte_aligned": 85,
+      "span_bytes_range": [
+        1320960,
+        9005056
+      ]
+    },
+    "vum": {
+      "count": 7036,
+      "header_size_field_span_exact": 6989,
+      "header_size_field_span_nonzero_tail": 47,
+      "span_16_byte_aligned": 7036,
+      "span_bytes_range": [
+        240,
+        580112
+      ],
+      "variant_word": {
+        "0": 3406,
+        "1": 513,
+        "10": 2,
+        "11": 345,
+        "17": 11,
+        "19": 101,
+        "2": 858,
+        "3": 1737,
+        "8": 37,
+        "9": 26
+      },
+      "vums_magic": 7036
+    }
+  },
+  "minsk": {
+    "containers": {
+      "DATA.HOG": {
+        "col_version_bytes": {
+          "5": 301
+        },
+        "entries": 301,
+        "nested_extension_patterns": {
+          ".col+.vum": 301
+        },
+        "nested_hog_sector_aligned": 301,
+        "nested_hog_valid": 301,
+        "nested_hog_zero_padded": 301,
+        "vum_count": 301,
+        "vum_header_size_field_exact": 301
+      },
+      "MAPTEX.HOG": {
+        "entries": 2,
+        "tdx_version_words": {
+          "5": 2
+        }
+      },
+      "MAPVUM.HOG": {
+        "col_version_bytes": {
+          "5": 5
+        },
+        "entries": 5,
+        "nested_extension_patterns": {
+          ".col+.vum": 5
+        },
+        "nested_hog_sector_aligned": 0,
+        "nested_hog_valid": 5,
+        "nested_hog_zero_padded": 0,
+        "vum_count": 5,
+        "vum_header_size_field_exact": 5
+      }
+    },
+    "pop": {
+      "bytes": 675312,
+      "data_hog_names_not_in_terrain": 2,
+      "next_section": "GOB:",
+      "ordered_section_tags_observed": [
+        "TER:",
+        "GOB:",
+        "SND:",
+        "ACL:",
+        "INL:",
+        "NPC:",
+        "WPN:",
+        "PLR:",
+        "SKY:",
+        "PNT:",
+        "DIR:",
+        "ENV:",
+        "NOD:",
+        "GEN:",
+        "GRP:",
+        "BOX:",
+        "FIR:",
+        "CAM:",
+        "INV:",
+        "BUG:"
+      ],
+      "terrain_kind_values": [
+        12,
+        13
+      ],
+      "terrain_names_matching_data_hog": 299,
+      "terrain_names_missing_from_data_hog": 0,
+      "terrain_records": 299,
+      "terrain_records_with_nonzero_alignment_bytes": 149
+    }
+  },
+  "population_files": {
+    "data_hog_names_not_in_terrain": 44,
+    "file_bytes_range": [
+      58208,
+      919360
+    ],
+    "file_count": 18,
+    "gob_follows_terrain_records": 18,
+    "terrain_kind": {
+      "10": 197,
+      "11": 100,
+      "12": 150,
+      "13": 149,
+      "14": 100,
+      "15": 135,
+      "16": 192,
+      "17": 129,
+      "18": 256,
+      "19": 321,
+      "2": 282,
+      "21": 167,
+      "22": 216,
+      "23": 129,
+      "24": 914,
+      "25": 141,
+      "26": 53,
+      "3": 191,
+      "4": 159,
+      "5": 92,
+      "6": 122,
+      "7": 566,
+      "8": 392,
+      "9": 198
+    },
+    "terrain_names_matching_data_hog": 5351,
+    "terrain_names_missing_from_data_hog": 0,
+    "terrain_parse_successes": 18,
+    "terrain_record_count": 5351,
+    "terrain_records_with_nonzero_alignment_bytes": 4144
+  },
+  "scan": {
+    "asset_spans_scanned": 53280,
+    "depth": {
+      "-1": 4,
+      "0": 32351,
+      "1": 20925
+    },
+    "extensions": {
+      ".bin": 12,
+      ".bnk": 77,
+      ".bon": 156,
+      ".col": 7036,
+      ".fnt": 3,
+      ".gui": 77,
+      ".gun": 624,
+      ".hog": 6677,
+      ".ie": 79,
+      ".lpd": 862,
+      ".par": 679,
+      ".prn": 1,
+      ".pss": 54,
+      ".scc": 1,
+      ".ska": 212,
+      ".skas": 2,
+      ".skel": 4,
+      ".skf": 26,
+      ".skl": 1261,
+      ".skm": 4219,
+      ".so": 139,
+      ".sub": 42,
+      ".tdx": 15248,
+      ".txt": 3,
+      ".vag": 8665,
+      ".vpk": 85,
+      ".vum": 7036
+    },
+    "nested_hog_candidates": 6677,
+    "nested_hog_exact_span": 501,
+    "nested_hog_padding_bytes_range": [
+      16,
+      2032
+    ],
+    "nested_hog_valid": 6677,
+    "nested_hog_zero_padded": 6176,
+    "standard_compression_magic_hits": 0,
+    "standard_compression_spans_checked": 46603,
+    "top_level_hog_entries": 32351,
+    "top_level_hog_exact_span": 273,
+    "top_level_hog_files": 273,
+    "top_level_hog_valid": 273
+  },
+  "schema_version": 1,
+  "scope": "aggregate structural fingerprints only; no proprietary payloads exported",
+  "top_level_hog_errors": []
+}

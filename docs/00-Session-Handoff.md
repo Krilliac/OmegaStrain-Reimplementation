@@ -2,9 +2,10 @@
 
 ## Objective
 
-Build a clean-room native reimplementation of *Syphon Filter: The Omega Strain*. Begin with
-a matching PS2 decompilation and observable behavioral tests, then replace platform-specific
-subsystems incrementally. PCSX2 is the reference laboratory, not a shipping dependency.
+Build a clean-room, pure-native reimplementation of *Syphon Filter: The Omega Strain* for
+modern host CPUs. Use metadata and observable behavioral tests to derive contracts, then write
+the implementation independently. PCSX2 and PS2-code analysis are offline reference tools, not
+shipping dependencies or execution mechanisms.
 
 ## Verified game identity
 
@@ -25,8 +26,8 @@ subsystems incrementally. PCSX2 is the reference laboratory, not a shipping depe
    `86d76bbf590566d9ea74d381eeff3acd9856503a`.
 2. Installed the official 2026-07-09 Windows dependency snapshot and current patches database.
 3. Built `Release AVX2` through VS2022/MSBuild with zero warnings and zero errors.
-4. Recovered the owner's existing USA BIOS, ISO, and two `SCUS-97264` save states from
-   OneDrive into the ignored `private/` tree.
+4. Recovered the owner's existing USA BIOS, ISO, and two `SCUS-97264` save states from private
+   storage into the ignored `private/` tree.
 5. Initialized a separate PCSX2 data root under `runtime/data/PCSX2` and selected
    `scph39001.bin`.
 6. Booted the game successfully through the newly compiled emulator. The log confirms BIOS
@@ -45,8 +46,8 @@ subsystems incrementally. PCSX2 is the reference laboratory, not a shipping depe
   `KYRGSTAN`, `LORELEI`, `MINSK`, and others).
 - Repeated level payloads include `DATA.HOG`, `DATA.POP`, `OBJECTS.HOG`, `SCRIPTS.HOG`,
   `TEX.HOG`, `MAPVUM.HOG`, `SND.HOG`, and `SNDVAG.HOG`.
-- `GAMEDATA/MINSK` exists in the retail image, making the reported `-x -lMINSK` direct-level
-  loader a high-priority executable-string and runtime-breakpoint target.
+- Static analysis confirms attached `-lMINSK` syntax and the MINSK table entry. The user-facing
+  meaning of `-x` and the resulting gameplay state remain open behavioral questions.
 - The ISO contains 28,672 bytes after the ISO9660 physical end. Preserve the original image
   for LBA and tail analysis; the extracted tree is not a bit-perfect substitute.
 - HOG files begin with five little-endian 32-bit words, followed by `count + 1` payload
@@ -57,21 +58,22 @@ subsystems incrementally. PCSX2 is the reference laboratory, not a shipping depe
 
 ## Next focused pass
 
-1. Import `SCUS_972.64` into Ghidra/IDA/ReSymbol as 32-bit little-endian MIPS ELF.
-2. Locate the argument parser and verify `-x` / `-lMINSK` statically and in PCSX2.
-3. Break on file-open/read paths while loading `MINSK`; record filenames, buffer ownership,
-   decompression boundaries, and archive offsets.
-4. Identify the HOG first-word algorithm and begin decoding the `.SO`, `.TDX`, `.SKM`, and
-   `.VAG` payload formats behind small golden tests.
+1. Add recursive native validation for nested, sector-padded HOG spans.
+2. Decode the first useful scene slice (`DATA.POP`, `VUMS`, and TDX texture metadata) behind
+   synthetic malformed-input tests and private metadata-only corpus checks.
+3. Trace the executable's VUM and texture consumers offline to turn structural inferences into
+   independently implementable scene contracts.
+4. Implement ReSymbol's bounded ELF32 little-endian container intake in its own repository;
+   keep R5900 disassembly separate from the native runtime.
 5. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools
 
 - PCSX2 source/debug build under `third_party/pcsx2`.
-- IDA 9.1 with MIPS processor support under `D:\IDA Professional 9.1`.
-- Ghidra 12.1.2 under `D:\RE-Tools\ghidra\ghidra_12.1.2_PUBLIC`.
-- radare2 under `D:\RE-Tools\radare2`.
-- ReSymbol release tools under `D:\ReSymbol-build\resymbol-integration-target\release`.
+- IDA 9.1 with MIPS processor support (private local installation).
+- Ghidra 12.1.2 (private local installation).
+- radare2 (private local installation).
+- ReSymbol release tools (private local build).
 
 ## Safety rules
 

@@ -3,6 +3,8 @@
 This workspace is the clean-room research starting point for a native reimplementation of
 *Syphon Filter: The Omega Strain* (NTSC-U, `SCUS-97264`). PCSX2 is used as a behavioral
 oracle and debugger; it is not intended to be a dependency of the eventual native runtime.
+The shipping runtime is pure modern-CPU native code: no MIPS interpreter, recompiler, translated
+retail instruction blocks, or PS2 execution layer.
 
 ## Current verified baseline
 
@@ -42,12 +44,34 @@ Print the exact command without launching another emulator instance:
 powershell -NoProfile -File .\scripts\launch-omega.ps1 -Debugger -DryRun
 ```
 
-The prior handoff proposed `-x -lMINSK` as game arguments. It is still an unverified
-hypothesis, but the launcher can now test it explicitly:
+Static analysis confirms that `-lMINSK` is valid attached argument syntax and selects the MINSK
+entry. The user-facing meaning of `-x` and the resulting gameplay state remain unverified; the
+launcher can test the pair explicitly against the private reference environment:
 
 ```powershell
 powershell -NoProfile -File .\scripts\launch-omega.ps1 -Debugger -GameArgs '-x -lMINSK'
 ```
+
+## Native runtime build
+
+The first native slice is a dependency-free C++23 HOG reader and corpus verifier. Configure
+inside a VS2022 developer environment, then use the checked-in multi-config presets:
+
+```powershell
+cmake --preset msvc
+cmake --build --preset msvc-debug
+ctest --preset msvc-debug
+.\build\msvc\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\openomega.exe --frames=120
+```
+
+`openomega` is the pure-native SDL3/SDL_GPU host shell. `--frames=N` is an automated smoke mode
+that opens the modern GPU backend, renders exactly `N` frames, and exits without user input.
+
+Architecture and completion criteria are versioned in
+[`docs/02-Runtime-Architecture.md`](docs/02-Runtime-Architecture.md) and
+[`docs/03-Milestones.md`](docs/03-Milestones.md). Research confidence is tracked in
+`analysis/evidence/ledger.jsonl`.
 
 ## Layout
 
@@ -66,6 +90,14 @@ The repository must never contain Sony firmware, a game ISO, extracted proprieta
 save states, or keys. Contributors provide their own legally dumped PS2 BIOS and retail disc.
 Only original source code, tools, documentation, hashes, metadata, and independently created
 compatibility data belong in version control.
+
+This is an unofficial project and is not affiliated with Sony Interactive Entertainment or
+Bend Studio. See [`TRADEMARKS.md`](TRADEMARKS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Original project code and documentation are licensed under Apache-2.0. That license does not
+grant rights to any retail game, firmware, asset, or third-party trademark.
+See [`docs/04-Legal-and-Takedown-Readiness.md`](docs/04-Legal-and-Takedown-Readiness.md) for the
+project's preventive controls and response process.
 
 Official references: [PCSX2 source](https://github.com/PCSX2/pcsx2),
 [BIOS dumping](https://pcsx2.net/docs/setup/bios/), and
