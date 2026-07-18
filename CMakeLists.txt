@@ -55,8 +55,13 @@ target_link_libraries(omega_content PUBLIC omega_assets PRIVATE omega_core omega
 target_compile_features(omega_content PUBLIC cxx_std_23)
 
 add_library(omega_runtime STATIC
+    native/src/runtime/config_service.cpp
     native/src/runtime/content_startup.cpp
+    native/src/runtime/frame_scheduler.cpp
+    native/src/runtime/input_tracker.cpp
+    native/src/runtime/job_service.cpp
     native/src/runtime/launch_options.cpp
+    native/src/runtime/log_service.cpp
     native/src/runtime/manifest_debug_image.cpp
 )
 target_include_directories(omega_runtime PUBLIC native/include)
@@ -73,7 +78,7 @@ if(MSVC)
         /utf-8
     )
 else()
-    target_compile_options(omega_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(omega_core PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
 endif()
 
 if(MSVC)
@@ -86,7 +91,7 @@ if(MSVC)
         /utf-8
     )
 else()
-    target_compile_options(omega_runtime PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(omega_runtime PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
 endif()
 
 if(MSVC)
@@ -99,7 +104,7 @@ if(MSVC)
         /utf-8
     )
 else()
-    target_compile_options(omega_content PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(omega_content PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
 endif()
 
 if(MSVC)
@@ -112,7 +117,7 @@ if(MSVC)
         /utf-8
     )
 else()
-    target_compile_options(omega_retail_formats PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(omega_retail_formats PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
 endif()
 
 add_executable(omega_tool
@@ -125,7 +130,7 @@ target_link_libraries(omega_tool PRIVATE omega_core omega_retail_formats omega_c
 if(MSVC)
     target_compile_options(omega_tool PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
 else()
-    target_compile_options(omega_tool PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(omega_tool PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
 endif()
 
 if(OMEGA_BUILD_RUNTIME)
@@ -155,7 +160,7 @@ if(OMEGA_BUILD_RUNTIME)
     if(MSVC)
         target_compile_options(openomega PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
     else()
-        target_compile_options(openomega PRIVATE -Wall -Wextra -Wpedantic -Werror)
+        target_compile_options(openomega PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
     endif()
 endif()
 
@@ -163,10 +168,15 @@ include(CTest)
 if(BUILD_TESTING)
     add_executable(omega_core_tests
         native/tests/col_spatial_mesh_decoder_tests.cpp
+        native/tests/config_service_tests.cpp
         native/tests/container_descriptor_tests.cpp
+        native/tests/frame_scheduler_tests.cpp
         native/tests/game_data_service_tests.cpp
         native/tests/hog_archive_tests.cpp
+        native/tests/input_tracker_tests.cpp
+        native/tests/job_service_tests.cpp
         native/tests/launch_options_tests.cpp
+        native/tests/log_service_tests.cpp
         native/tests/manifest_debug_image_tests.cpp
         native/tests/pop_level_manifest_decoder_tests.cpp
         native/tests/pop_terrain_index_tests.cpp
@@ -184,7 +194,7 @@ if(BUILD_TESTING)
     if(MSVC)
         target_compile_options(omega_core_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
     else()
-        target_compile_options(omega_core_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+        target_compile_options(omega_core_tests PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
     endif()
     add_test(NAME omega_core_tests COMMAND omega_core_tests)
 
