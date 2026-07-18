@@ -372,6 +372,60 @@ class TdxLayoutHypothesisTests(unittest.TestCase):
                     scorer.ScanLimits(), maximum_filesystem_depth=0
                 ))
 
+    def test_cumulative_container_byte_budget_fails_closed(self) -> None:
+        payload = bytes(list(range(16)) * 4)
+        tdx = make_tdx(8, 16, 4, [PlaneSpec(0x13, 16, 4, payload)])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "first.tdx").write_bytes(tdx)
+            (root / "second.tdx").write_bytes(tdx)
+            with self.assertRaisesRegex(ValueError, "cumulative corpus bytes"):
+                scorer.scan_disc(
+                    root,
+                    replace(
+                        scorer.ScanLimits(),
+                        maximum_total_container_bytes=len(tdx) * 2 - 1,
+                    ),
+                )
+
+    def test_changed_open_file_fails_closed(self) -> None:
+        payload = bytes(list(range(16)) * 4)
+        tdx = make_tdx(8, 16, 4, [PlaneSpec(0x13, 16, 4, payload)])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidate = root / "asset.tdx"
+            candidate.write_bytes(tdx)
+            with candidate.open("rb") as stream:
+                initial = scorer.os.fstat(stream.fileno())
+            changed = mock.Mock(
+                st_mode=initial.st_mode,
+                st_dev=initial.st_dev,
+                st_ino=initial.st_ino,
+                st_size=initial.st_size,
+                st_mtime_ns=initial.st_mtime_ns + 1,
+                st_file_attributes=getattr(initial, "st_file_attributes", 0),
+            )
+            with mock.patch.object(scorer.os, "fstat", side_effect=(initial, changed)):
+                with self.assertRaisesRegex(ValueError, "changed while being read"):
+                    scorer.scan_disc(root)
+
+    def test_reparse_like_tree_entry_fails_closed(self) -> None:
+        payload = bytes(list(range(16)) * 4)
+        tdx = make_tdx(8, 16, 4, [PlaneSpec(0x13, 16, 4, payload)])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "asset.tdx").write_bytes(tdx)
+            calls = 0
+
+            def classify_reparse(_info: object) -> bool:
+                nonlocal calls
+                calls += 1
+                return calls == 2
+
+            with mock.patch.object(scorer, "_stat_is_reparse", side_effect=classify_reparse):
+                with self.assertRaisesRegex(ValueError, "reparse point"):
+                    scorer.scan_disc(root)
+
     def test_empty_corpus_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(ValueError):

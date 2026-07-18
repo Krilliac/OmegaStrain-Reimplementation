@@ -14,6 +14,7 @@ import argparse
 import collections
 import json
 import os
+import stat
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -76,6 +77,7 @@ IMPLICIT_ZERO_FAMILIES = {
 class ScanLimits:
     maximum_filesystem_entries: int = 500_000
     maximum_container_bytes: int = 4 * 1024 * 1024 * 1024
+    maximum_total_container_bytes: int = 4 * 1024 * 1024 * 1024
     maximum_hog_entries: int = 2_000_000
     maximum_hog_directory_bytes: int = 128 * 1024 * 1024
     maximum_nesting_depth: int = 32
@@ -92,6 +94,7 @@ class ScanLimits:
 class ScanBudget:
     limits: ScanLimits
     filesystem_entries: int = 0
+    container_bytes: int = 0
     hog_entries: int = 0
     tdx_spans: int = 0
     scored_texels: int = 0
@@ -105,6 +108,13 @@ class ScanBudget:
         self.hog_entries += count
         if self.hog_entries > self.limits.maximum_hog_entries:
             raise ValueError("HOG entry count exceeds safety limit")
+
+    def add_container_bytes(self, count: int) -> None:
+        if count < 0 or count > self.limits.maximum_container_bytes:
+            raise ValueError("corpus container exceeds safety limit")
+        if count > self.limits.maximum_total_container_bytes - self.container_bytes:
+            raise ValueError("cumulative corpus bytes exceed safety limit")
+        self.container_bytes += count
 
     def add_tdx(self, span_size: int) -> None:
         self.tdx_spans += 1
@@ -735,6 +745,11 @@ def parse_bounded_hog_span(
     return directory
 
 
+def _stat_is_reparse(info: os.stat_result) -> bool:
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return bool(reparse_flag and getattr(info, "st_file_attributes", 0) & reparse_flag)
+
+
 def iter_corpus_files(root: Path, budget: ScanBudget) -> Iterator[Path]:
     def walk(directory: Path, depth: int) -> Iterator[Path]:
         if depth > budget.limits.maximum_filesystem_depth:
@@ -742,9 +757,10 @@ def iter_corpus_files(root: Path, budget: ScanBudget) -> Iterator[Path]:
         with os.scandir(directory) as entries:
             for entry in entries:
                 budget.add_filesystem_entries(1)
+                entry_stat = entry.stat(follow_symlinks=False)
                 is_junction = getattr(entry, "is_junction", lambda: False)()
-                if entry.is_symlink() or is_junction:
-                    raise ValueError("corpus contains a symbolic link or junction")
+                if entry.is_symlink() or is_junction or _stat_is_reparse(entry_stat):
+                    raise ValueError("corpus contains a link or reparse point")
                 path = Path(entry.path)
                 if entry.is_dir(follow_symlinks=False):
                     yield from walk(path, depth + 1)
@@ -758,23 +774,50 @@ def iter_corpus_files(root: Path, budget: ScanBudget) -> Iterator[Path]:
 
 
 def scan_disc(root: Path, limits: ScanLimits = ScanLimits()) -> dict[str, object]:
-    if root.is_symlink() or getattr(root, "is_junction", lambda: False)():
-        raise ValueError("corpus root must not be a symbolic link or junction")
-    resolved = root.resolve()
+    root_stat = os.stat(root, follow_symlinks=False)
+    if (
+        root.is_symlink()
+        or getattr(root, "is_junction", lambda: False)()
+        or _stat_is_reparse(root_stat)
+        or not stat.S_ISDIR(root_stat.st_mode)
+    ):
+        raise ValueError("corpus root must be a regular directory")
+    resolved = root.absolute()
     if not resolved.is_dir():
         raise ValueError("corpus root is not a directory")
     budget = ScanBudget(limits)
     aggregate = Aggregate()
     for path in iter_corpus_files(resolved, budget):
-        size = path.stat().st_size
-        if size > limits.maximum_container_bytes:
-            raise ValueError("corpus container exceeds safety limit")
+        path_stat = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(path_stat.st_mode) or _stat_is_reparse(path_stat):
+            raise ValueError("corpus candidate must be a regular file")
         with path.open("rb") as file:
+            opened_stat = os.fstat(file.fileno())
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or _stat_is_reparse(opened_stat)
+                or (opened_stat.st_dev, opened_stat.st_ino)
+                != (path_stat.st_dev, path_stat.st_ino)
+            ):
+                raise ValueError("corpus candidate changed before opening")
+            size = opened_stat.st_size
+            budget.add_container_bytes(size)
             if path.suffix.lower() == ".hog":
                 directory = parse_bounded_hog_span(file, 0, size, budget)
                 walk_hog(file, directory, 0, aggregate, budget)
             else:
                 score_tdx_span(file, Span(path.name, 0, size), aggregate, budget)
+            final_stat = os.fstat(file.fileno())
+            if (
+                (final_stat.st_dev, final_stat.st_ino, final_stat.st_size, final_stat.st_mtime_ns)
+                != (
+                    opened_stat.st_dev,
+                    opened_stat.st_ino,
+                    opened_stat.st_size,
+                    opened_stat.st_mtime_ns,
+                )
+            ):
+                raise ValueError("corpus candidate changed while being read")
     if aggregate.tdx_spans == 0:
         raise ValueError("corpus contains no bounded TDX spans")
     return aggregate.as_dict()
