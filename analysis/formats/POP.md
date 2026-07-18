@@ -89,8 +89,10 @@ candidate hits: exactly 19 per file, each candidate once per file, with one dist
 sequence across the corpus. This confirms only the bounded literal envelope. Before any candidate
 marker can become a section boundary, private evidence must establish its header/count relationship
 and exact bounded extent, disprove marker-shaped payload coincidences, and independently connect
-the consumed fields to placement or visibility behavior. Until then, no post-TER native decoder or
-canonical IR should be added.
+the consumed fields to placement or visibility behavior. Until independent evidence supplies those
+semantic links, no semantic post-TER decoder or canonical IR should be added. The retail-only
+passive descriptor below preserves only the already-published hypothesis envelope and does not
+satisfy that semantic evidence requirement.
 
 ## Candidate layout hypothesis scoring
 
@@ -123,8 +125,10 @@ occurrence tested: `INL:`/36 bytes (18/18), `PNT:`/88 bytes (17/17), `DIR:`/44 b
 `ENV:`/76 bytes (18/18), and `INV:`/84 bytes (16/16). Separate zero-word accounting finds the empty
 extent predicted by the same candidate formula in the remaining one `PNT:` and two `INV:` spans,
 so each tuple fits all 18 occurrences. The zero cases add no stride evidence. These exact arithmetic
-fits nominate the next structural proof only; they do not confirm markers, counts, records,
-boundaries, placement, visibility, or any field semantics.
+fits define only the closed hypothesis family admitted by the passive native descriptor below.
+Implementing that fail-closed guard adds no independent evidence that a literal is a boundary, a
+word is a count, an extent contains records, or any field controls placement, visibility, rendering,
+or gameplay.
 
 ## Candidate record-shape profiling
 
@@ -174,6 +178,35 @@ These are bit-pattern shape measurements only. They strengthen the exact arithme
 bound later experiments, but do not turn any literal, count word, record, or column into a decoded
 contract and do not identify numeric types, placement, direction, visibility, or gameplay meaning.
 
+## Native passive hypothesis descriptor
+
+`omega::retail::InspectPopPostTerrainHypotheses` is a stateless, reentrant, retail-only inspector
+for the already-published hypothesis family. It reuses the validated terrain-prefix parser to
+obtain the exact `GOB:` offset, requires the established 19 aligned literal candidates in their
+published order, and requires each of the five established marker-relative `+4` word/fixed-stride
+arithmetic extents to end exactly at its next candidate. The returned fixed owned
+`PopPostTerrainHypothesisDescriptor` retains only the aligned-literal count and five guarded
+hypothesis extents. It retains no input span or payload and is not canonical asset IR.
+
+These checks are variant and arithmetic guards only. A literal remains a candidate rather than a
+proven section boundary; an observed word has no assigned count semantics; a stride has no assigned
+record semantics; and an opaque range is not a decoded section or payload. The descriptor assigns
+no field type, placement, direction, visibility, rendering, gameplay, or other runtime meaning and
+executes no retail code.
+
+`omega_tool pop-post-terrain-hypotheses-verify-tree` applies bounded fail-closed discovery and
+stable file reads before invoking the inspector for each regular `.POP` candidate. Its fixed-schema
+report contains only discovery, acceptance/rejection, typed-error totals, and independent
+accepted-only logical maxima for input bytes, items, compiled-ABI descriptor output, maximum
+terrain-prefix string length, and terrain-parser scratch. No complete maximum tuple is asserted to
+co-occur. It emits no paths, names, hashes, literal spellings, candidate offsets, observed words,
+strides, opaque-range sizes, per-file rows, identities, or bindings.
+
+The confirmed owned-corpus run discovers 18 regular `.POP` candidates, accepts all 18, rejects
+none, and reports zero errors. Independent accepted-only input/items/logical-output/string/scratch
+maxima are `919360 / 1 / 168 / 26 / 80036`; these are logical accounting fields, not allocator or
+process-memory measurements.
+
 ## Reproduce
 
 ```powershell
@@ -182,12 +215,14 @@ python -B .\tools\fingerprint_assets.py `
   .\analysis\formats\asset-fingerprints.json
 
 .\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe pop-post-terrain-hypotheses-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
 python -B .\tools\scan_pop_post_terrain.py .\private\extracted-disc --pretty
 python -B .\tools\score_pop_section_layout_hypotheses.py .\private\extracted-disc --pretty
 python -B .\tools\profile_pop_candidate_record_shapes.py .\private\extracted-disc --pretty
 ```
 
-The Python reports are metadata-only. The native commands emit aggregate counts only. Review the
-post-TER scanner and profiler output privately before publishing any aggregate or evidence-ledger
-entry.
+The Python reports are metadata-only. The native commands emit only fixed-schema aggregates; the
+passive hypothesis verifier's logical maxima derive solely from accepted input size and the proven
+terrain prefix, never from post-terrain descriptor observations. Review post-TER scanner and
+profiler output privately before publishing any aggregate or evidence-ledger entry.

@@ -77,6 +77,7 @@ void Check(const bool condition, const std::string_view message)
 int VirtualFileSystemFailureCount();
 int PopTerrainIndexFailureCount();
 int PopLevelManifestDecoderFailureCount();
+int PopPostTerrainHypothesisDescriptorFailureCount();
 int ContainerDescriptorFailureCount();
 int SkaContainerDescriptorFailureCount();
 int SkmContainerDescriptorFailureCount();
@@ -307,6 +308,7 @@ int main()
     failures += VirtualFileSystemFailureCount();
     failures += PopTerrainIndexFailureCount();
     failures += PopLevelManifestDecoderFailureCount();
+    failures += PopPostTerrainHypothesisDescriptorFailureCount();
     failures += ContainerDescriptorFailureCount();
     failures += SkaContainerDescriptorFailureCount();
     failures += SkmContainerDescriptorFailureCount();

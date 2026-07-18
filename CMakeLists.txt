@@ -47,6 +47,7 @@ add_library(omega_retail_formats STATIC
     native/src/retail/col_spatial_mesh_decoder.cpp
     native/src/retail/container_descriptors.cpp
     native/src/retail/pop_level_manifest_decoder.cpp
+    native/src/retail/pop_post_terrain_hypothesis_descriptor.cpp
     native/src/retail/ska_container_descriptor.cpp
     native/src/retail/skm_container_descriptor.cpp
     native/src/retail/skl_container_descriptor.cpp
@@ -157,6 +158,7 @@ add_executable(omega_tool
     native/apps/omega_tool/asset_commands.cpp
     native/apps/omega_tool/level_texture_commands.cpp
     native/apps/omega_tool/main.cpp
+    native/apps/omega_tool/pop_post_terrain_commands.cpp
     native/apps/omega_tool/pop_commands.cpp
 )
 target_link_libraries(omega_tool PRIVATE omega_core omega_retail_formats omega_content)
@@ -220,6 +222,29 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(omega_pop_post_terrain_commands_tests
+        native/tests/pop_post_terrain_commands_tests.cpp
+        native/apps/omega_tool/pop_post_terrain_commands.cpp
+    )
+    target_include_directories(omega_pop_post_terrain_commands_tests PRIVATE
+        native/apps/omega_tool
+    )
+    target_link_libraries(omega_pop_post_terrain_commands_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_pop_post_terrain_commands_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_pop_post_terrain_commands_tests PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+    endif()
+    add_test(NAME omega_pop_post_terrain_commands_tests COMMAND omega_pop_post_terrain_commands_tests)
+    set_tests_properties(omega_pop_post_terrain_commands_tests PROPERTIES TIMEOUT 10)
+
     add_executable(omega_level_texture_commands_tests
         native/tests/level_texture_commands_tests.cpp
         native/apps/omega_tool/level_texture_commands.cpp
@@ -316,6 +341,7 @@ if(BUILD_TESTING)
         native/tests/log_service_tests.cpp
         native/tests/spatial_debug_image_tests.cpp
         native/tests/pop_level_manifest_decoder_tests.cpp
+        native/tests/pop_post_terrain_hypothesis_descriptor_tests.cpp
         native/tests/pop_terrain_index_tests.cpp
         native/tests/runtime_settings_tests.cpp
         native/tests/simulation_world_tests.cpp
@@ -349,6 +375,9 @@ if(BUILD_TESTING)
         COMMAND omega_tool hog-verify-nested-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_pop_tree
         COMMAND omega_tool pop-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_rejects_empty_pop_post_terrain_hypotheses_tree
+        COMMAND omega_tool pop-post-terrain-hypotheses-verify-tree
+            "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_level_manifest_tree
         COMMAND omega_tool level-manifest-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_level_spatial_tree
@@ -368,6 +397,7 @@ if(BUILD_TESTING)
         omega_tool_rejects_empty_hog_tree
         omega_tool_rejects_empty_nested_hog_tree
         omega_tool_rejects_empty_pop_tree
+        omega_tool_rejects_empty_pop_post_terrain_hypotheses_tree
         omega_tool_rejects_empty_level_manifest_tree
         omega_tool_rejects_empty_level_spatial_tree
         omega_tool_rejects_empty_level_material_catalogs_tree

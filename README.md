@@ -26,6 +26,14 @@ retail instruction blocks, or PS2 execution layer.
   verified all-zero sector tails.
 - The first native scene importer validates the terrain prefix of all 18 level POP files:
   5,351 records, including 4,144 with nonzero alignment bytes that are safely skipped.
+- A retail-only passive POP post-terrain descriptor fail-closed checks the already-established
+  ordered 19-candidate aligned-literal envelope and five exact arithmetic extent hypotheses without
+  promoting any literal, word, stride, or opaque range to section, count, record, or payload
+  semantics. Its fixed-schema native verifier discovers and accepts all 18 owned-corpus `.POP`
+  candidates with zero rejections or errors. Independent accepted-only
+  input/items/logical-output/string/scratch maxima are `919360 / 1 / 168 / 26 / 80036`; no tuple
+  co-occurrence is asserted. The descriptor is fixed owned hypothesis metadata, not canonical asset
+  IR, and the report exposes no source identity or descriptor observation.
 - The native host validates an owner-supplied NTSC-U data root, loads MINSK as 299 canonical
   manifest cells with matching owned spatial meshes, and renders a deterministic synthetic
   canonical-COL wireframe contact sheet through SDL_GPU/D3D12.
@@ -129,6 +137,7 @@ ctest --preset msvc-debug
 .\build\msvc\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe pop-post-terrain-hypotheses-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-spatial-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-material-catalogs-verify-tree .\private\extracted-disc
@@ -181,7 +190,8 @@ Architecture and completion criteria are versioned in
 - `tools/` — deterministic disc/ELF archaeology tools.
 - `analysis/` — generated, redistributable metadata and reports.
 - `analysis/formats/HOG.md` — validated HOG container layout and extraction notes.
-- `analysis/formats/POP.md` — validated terrain-prefix contract and native parser boundary.
+- `analysis/formats/POP.md` — validated terrain-prefix contract, passive post-terrain hypothesis
+  boundary, and native verifier.
 - `analysis/formats/TDX.md` — validated texture block, plane, palette, and zero-suffix contract.
 - `analysis/formats/VUM.md` — validated material catalog and render-payload boundary contract.
 - `analysis/elf/loader-hints.md` — confirmed executable evidence and open loader questions.
