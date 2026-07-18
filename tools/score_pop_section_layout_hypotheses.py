@@ -262,7 +262,10 @@ class _Aggregate:
         self.candidate_spans = 0
         self.field_probes = 0
         self.bounded_nonzero_count_probes = 0
+        self.bounded_zero_count_probes = 0
         self._tested: collections.Counter[tuple[str, int]] = collections.Counter()
+        self._zero_tested: collections.Counter[tuple[str, int]] = collections.Counter()
+        self._zero_empty_extent: collections.Counter[tuple[str, int]] = collections.Counter()
         self._exact: collections.Counter[tuple[str, int, int]] = collections.Counter()
 
     def add(
@@ -319,18 +322,28 @@ class _Aggregate:
                 if field_end > boundary:
                     continue
                 candidate_count = _read_u32(stream, field_offset)
-                if candidate_count == 0 or candidate_count > limits.maximum_candidate_records:
+                if candidate_count > limits.maximum_candidate_records:
                     continue
 
                 field_delta = field_offset - marker_offset
                 tested_key = (literal_marker, field_delta)
+                opaque_extent = boundary - field_end
+                if candidate_count == 0:
+                    if tested_key not in self._zero_tested:
+                        metadata.add(2 * _ENTRY_METADATA_OVERHEAD + len(literal_marker))
+                    self._zero_tested[tested_key] += 1
+                    self.bounded_zero_count_probes = _checked_add(
+                        self.bounded_zero_count_probes, 1, _UINT64_MAX
+                    )
+                    if opaque_extent == 0:
+                        self._zero_empty_extent[tested_key] += 1
+                    continue
                 if tested_key not in self._tested:
                     metadata.add(2 * _ENTRY_METADATA_OVERHEAD + len(literal_marker))
                 self._tested[tested_key] += 1
                 self.bounded_nonzero_count_probes = _checked_add(
                     self.bounded_nonzero_count_probes, 1, _UINT64_MAX
                 )
-                opaque_extent = boundary - field_end
                 if opaque_extent % candidate_count != 0:
                     continue
                 fixed_stride = opaque_extent // candidate_count
@@ -357,6 +370,10 @@ class _Aggregate:
             tested = self._tested[(literal_marker, field_delta)]
             if tested < exact_matches:
                 raise ScanFailure("malformed")
+            zero_tested = self._zero_tested[(literal_marker, field_delta)]
+            zero_empty_extent = self._zero_empty_extent[(literal_marker, field_delta)]
+            if zero_tested < zero_empty_extent:
+                raise ScanFailure("malformed")
             hypotheses.append({
                 "literal_marker": literal_marker,
                 "candidate_count_field_delta_bytes": field_delta,
@@ -365,6 +382,15 @@ class _Aggregate:
                 "bounded_nonzero_count_occurrences_tested": tested,
                 "candidate_extent_exact_matches": exact_matches,
                 "candidate_extent_mismatches": tested - exact_matches,
+                "zero_count_occurrences_tested": zero_tested,
+                "zero_count_empty_extent_matches": zero_empty_extent,
+                "bounded_count_occurrences_tested": tested + zero_tested,
+                "candidate_extent_exact_matches_including_zero": (
+                    exact_matches + zero_empty_extent
+                ),
+                "candidate_extent_mismatches_including_zero": (
+                    tested - exact_matches + zero_tested - zero_empty_extent
+                ),
             })
         return {
             "schema_version": SCHEMA_VERSION,
@@ -377,6 +403,7 @@ class _Aggregate:
                 "candidate_marker_spans": self.candidate_spans,
                 "count_field_probes": self.field_probes,
                 "bounded_nonzero_count_probes": self.bounded_nonzero_count_probes,
+                "bounded_zero_count_probes": self.bounded_zero_count_probes,
                 "exact_extent_hypothesis_hits": sum(self._exact.values()),
                 "hypothesis_candidates_emitted": len(hypotheses),
             },

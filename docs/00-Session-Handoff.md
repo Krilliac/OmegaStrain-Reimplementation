@@ -83,8 +83,9 @@ shipping dependencies or execution mechanisms.
     versus 7, with 10 ties. These content-dependent scores are candidate selection only and do not
     confirm nibble order, palette order, channel meaning, swizzle, or display-ready pixels.
 19. Added a bounded POP layout hypothesis scorer. Across all 18 POPs, five marker-relative `+4`
-    word/fixed-stride tuples fit every bounded nonzero occurrence tested: `INL:`/36, `PNT:`/88,
-    `DIR:`/44, `ENV:`/76, and `INV:`/84 bytes. Zero words supply no stride evidence, and these
+    word/fixed-stride tuples fit every occurrence: `INL:`/36, `PNT:`/88, `DIR:`/44, `ENV:`/76,
+    and `INV:`/84 bytes. Nonzero instances establish the candidate strides; one zero `PNT:` and two
+    zero `INV:` instances have the predicted empty extent but add no stride evidence. These
     arithmetic fits do not yet confirm markers, counts, records, section boundaries, placement,
     visibility, or field meanings.
 
