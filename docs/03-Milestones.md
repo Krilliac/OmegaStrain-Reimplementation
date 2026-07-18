@@ -28,7 +28,9 @@ incomplete.
 - Native aggregate validation: 18/18 level manifests, 7,036/7,036 semantic COL meshes, and all
   35,013 COL/VUM/TDX/SKA/SKM/SKL descriptor assets.
 - GameDataService aggregate validation: 5,351/5,351 manifest cells load as owned spatial meshes,
-  and all 18 headless startup probes preserve manifest/spatial cardinality. The public-safe
+  and all 18 headless startup probes preserve manifest/spatial cardinality. Startup now obtains
+  the spatial and material collections through one all-or-error `LevelContentIR` archive traversal
+  and shared budget; the parallel collections assert no binding. The public-safe
   level-material catalog verifier also loads all 18 levels and 5,351/5,351 manifest-ordered
   catalogs with zero errors: 34,267 owned names, 34,589 material records, and 37,893 dense name
   references. It emits only aggregate counts and typed error categories.
@@ -42,6 +44,15 @@ incomplete.
   and 42,631 dense name references. Its passive payload pass validates 91,460 pairs, 38,023
   normalized targets, 134,122 middle-to-final references, and 365,840 ordered Q/P references,
   with zero errors.
+- The first privacy-safe VUM consumer trace has one strict-validator-accepted complete 120-frame
+  pair from one selected runtime copy. Its repeat is byte-identical; each validated report contains
+  two EE-read aggregate rows, two anonymous-site rows, and zero VIF1 chunk rows. Post-run
+  containment auditing found no retained runtime copy, executable surface, reparse point,
+  owner-input copy, or emulator/build process. This confirms deterministic bounded observation
+  only. Both EE rows remain confined to separate slots of the already-opaque header-vector block;
+  no accepted row reaches counts, records, metadata, payload, or tail data. This is header-only
+  evidence and assigns no geometry, topology, vertex, material, packet, draw, placement,
+  visibility, or gameplay semantics.
 - Passive SKM and SKL native descriptors preserve only bounded structural metadata. The passive
   SKA descriptor implements the aggregate-proven neutral counted-word extent as fixed output while
   the two-candidate SKAS text envelope remains separate; neither assigns animation semantics. The
@@ -121,9 +132,10 @@ Status: in progress. Native `--level=MINSK` selection, canonical manifest/spatia
 renderer-neutral texture storage decoding are complete; the current synthetic canonical-COL
 wireframe contact sheet is diagnostic only. It uses source-order tiles and a per-mesh projection of
 the two largest coordinate extents, not world placement or reconstructed geometry, and makes no
-VUM, TDX, or other retail semantic claim. Startup now owns one confirmed semantic VUM
-material/name catalog per manifest cell in exact manifest order and cardinality, under a cumulative
-fail-closed level budget. The names remain role-free and unbound: render geometry, material
+VUM, TDX, or other retail semantic claim. Startup now owns its spatial meshes and one confirmed
+semantic VUM material/name catalog per manifest cell together in `LevelContentIR`. One archive pass
+and one cumulative fail-closed budget preserve exact manifest order and cardinality without
+asserting a mesh-to-material binding. The names remain role-free and unbound: render geometry, material
 binding/parameters, display-ready texture expansion, cameras, placements, transforms, and
 visibility remain incomplete. A passive retail-only VUM descriptor preserves the proven
 pair/reference grammar without asserting vertices, indices, draws, or material assignments, and

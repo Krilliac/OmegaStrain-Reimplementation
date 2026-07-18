@@ -52,6 +52,14 @@ retail instruction blocks, or PS2 execution layer.
   A separate retail-only passive descriptor validates 91,460 payload pairs, 38,023 normalized
   targets, 134,122 middle-to-final references, and 365,840 ordered Q/P references without
   exposing payload bytes, render geometry, or console instructions.
+- The privacy-safe VUM consumer trace has one strict-validator-accepted complete 120-frame pair
+  from one selected runtime copy. Its repeat is byte-identical; each validated report contains two
+  EE-read aggregate rows, two anonymous-site rows, and zero VIF1 chunk rows. Post-run containment
+  auditing found no retained runtime copy, executable surface, reparse point, owner-input copy, or
+  emulator/build process. Both EE rows remain confined to separate slots of the already-opaque
+  header-vector block; no accepted row reaches counts, records, metadata, payload, or tail data.
+  This confirms deterministic bounded header-only observation and assigns no
+  geometry, topology, vertex, material, packet, draw, placement, visibility, or gameplay semantics.
 
 ## Quick start
 
@@ -110,8 +118,11 @@ python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\priv
 
 `openomega` is the pure-native SDL3/SDL_GPU host shell. `--frames=N` is an automated smoke mode
 that opens the modern GPU backend, renders exactly `N` frames, and exits without user input.
-`--probe-only` validates the retail root and selected level, then loads matching owned manifest and
-spatial-mesh state without opening a window. The current MINSK view is a deterministic synthetic
+`--probe-only` validates the retail root and selected level, then loads the owned manifest plus one
+all-or-error `LevelContentIR` without opening a window. Its spatial meshes and role-free material
+catalogs are decoded under one shared budget while each common/cell archive is traversed once;
+their parallel manifest order asserts no mesh-to-material binding. The current MINSK view is a
+deterministic synthetic
 canonical-COL wireframe contact sheet: meshes occupy source-order tiles, and each mesh is projected
 along its two largest coordinate extents. This clean-room diagnostic is not world placement or
 reconstructed geometry and makes no VUM, TDX, or other retail semantic claim. The app-owned loop

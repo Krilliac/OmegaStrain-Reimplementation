@@ -1,6 +1,7 @@
 #pragma once
 
 #include "omega/asset/decode.h"
+#include "omega/asset/level_content_ir.h"
 #include "omega/asset/level_ir.h"
 #include "omega/asset/level_material_catalogs_ir.h"
 #include "omega/asset/level_spatial_ir.h"
@@ -70,7 +71,7 @@ public:
     [[nodiscard]] static std::expected<GameDataService, GameDataError> Open(
         GameDataServiceConfig config);
 
-    // [game thread, after all readers have joined]
+    // [game thread, with no concurrent readers; destruction after all readers have joined]
     ~GameDataService();
     GameDataService(GameDataService&&) noexcept;
     GameDataService& operator=(GameDataService&&) noexcept;
@@ -96,6 +97,13 @@ public:
     // terrain cell. Output follows manifest order; names retain no assigned role or asset binding.
     [[nodiscard]] std::expected<asset::LevelMaterialCatalogsIR, GameDataError>
     LoadLevelMaterialCatalogs(const asset::LevelManifestIR& manifest) const;
+
+    // [any worker thread after Open(); thread-safe] Resolves each archive and cell once, then
+    // returns both canonical spatial meshes and material/name catalogs as one all-or-error value
+    // under one shared operation budget. Parallel vector positions preserve manifest order but
+    // imply no binding.
+    [[nodiscard]] std::expected<asset::LevelContentIR, GameDataError> LoadLevelContent(
+        const asset::LevelManifestIR& manifest) const;
 
 private:
     struct Impl;

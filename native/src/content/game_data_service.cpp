@@ -151,6 +151,42 @@ public:
             limits, initial_items, sizeof(asset::LevelMaterialCatalogsIR));
     }
 
+    [[nodiscard]] static asset::DecodeResult<LevelDecodeBudget> CreateContent(
+        const asset::LevelManifestIR& manifest, const asset::DecodeLimits limits)
+    {
+        std::uint64_t initial_items = 0;
+        if (!Add(manifest.terrain_cells.size(), manifest.data_hog_source.hog_entries.size(),
+                initial_items) ||
+            initial_items > limits.maximum_items)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "level cells and source chain exceed the shared item limit"));
+
+        std::uint64_t mesh_storage = 0;
+        std::uint64_t catalog_storage = 0;
+        std::uint64_t cell_storage = 0;
+        std::uint64_t minimum_output = 0;
+        if (!Multiply(manifest.terrain_cells.size(), sizeof(asset::SpatialMeshIR), mesh_storage) ||
+            !Multiply(manifest.terrain_cells.size(), sizeof(asset::MaterialCatalogIR),
+                catalog_storage) ||
+            !Add(mesh_storage, catalog_storage, cell_storage) ||
+            !Add(sizeof(asset::LevelContentIR), cell_storage, minimum_output))
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "level content result size overflows"));
+        if (minimum_output > limits.maximum_output_bytes)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "level content result exceeds the shared output limit"));
+
+        const std::uint64_t cell_depth = manifest.terrain_cells.empty() ? 0U : 1U;
+        std::uint64_t required_archive_depth = 0;
+        if (!Add(manifest.data_hog_source.hog_entries.size(), cell_depth,
+                required_archive_depth) ||
+            required_archive_depth > limits.maximum_nesting_depth)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "level archive chain exceeds the shared nesting-depth limit"));
+
+        return LevelDecodeBudget(limits, initial_items, sizeof(asset::LevelContentIR));
+    }
+
     [[nodiscard]] asset::DecodeResult<void> ConsumeInput(
         const std::uint64_t bytes, const std::string_view description)
     {
@@ -849,6 +885,152 @@ GameDataService::LoadLevelMaterialCatalogs(const asset::LevelManifestIR& manifes
             return std::unexpected(DecodeFailure(
                 "unable to commit " + cell_context + " material catalog", committed.error()));
         result.terrain_cells.push_back(std::move(decoded->catalog));
+    }
+    return result;
+}
+
+std::expected<asset::LevelContentIR, GameDataError> GameDataService::LoadLevelContent(
+    const asset::LevelManifestIR& manifest) const
+{
+    const asset::DecodeLimits limits = impl_->config.decode_limits;
+    auto budget_result = LevelDecodeBudget::CreateContent(manifest, limits);
+    if (!budget_result)
+        return std::unexpected(DecodeFailure(
+            "unable to initialize level content decode", budget_result.error()));
+    LevelDecodeBudget budget = std::move(*budget_result);
+
+    auto source_path = NormalizeArchiveName(manifest.data_hog_source.game_path, limits);
+    if (!source_path)
+        return std::unexpected(DecodeFailure(
+            "invalid level archive source", source_path.error()));
+    auto source_bytes = impl_->files.Read(*source_path, impl_->config.maximum_data_hog_bytes);
+    if (!source_bytes)
+        return std::unexpected(Error(GameDataErrorCode::ReadFailed,
+            "unable to read level archive source: " + source_bytes.error()));
+    auto source_input = budget.ConsumeInput(source_bytes->size(), "level archive source");
+    if (!source_input)
+        return std::unexpected(DecodeFailure(
+            "unable to load level content", source_input.error()));
+    auto source_items = PreflightArchiveDirectory(
+        *source_bytes, budget, "level archive directory");
+    if (!source_items)
+        return std::unexpected(DecodeFailure(
+            "unable to index level archive source", source_items.error()));
+
+    auto source_archive = archive::HogArchive::FromBytes(std::move(*source_bytes));
+    if (!source_archive)
+        return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+            "invalid level archive source: " + source_archive.error()));
+    auto source_directory = BuildArchiveDirectory(*source_archive, limits);
+    if (!source_directory)
+        return std::unexpected(DecodeFailure(
+            "unable to index level archive source", source_directory.error()));
+
+    for (const auto& component : manifest.data_hog_source.hog_entries)
+    {
+        auto entry = FindArchiveEntry(*source_directory, component, limits);
+        if (!entry)
+            return std::unexpected(DecodeFailure(
+                "unable to resolve nested level archive", entry.error()));
+        const auto nested_bytes = source_archive->payload(**entry);
+        auto nested_input = budget.ConsumeInput(nested_bytes.size(), "nested level archive");
+        if (!nested_input)
+            return std::unexpected(DecodeFailure(
+                "unable to load nested level archive", nested_input.error()));
+        auto nested_size = ValidateNestedArchiveSize(nested_bytes,
+            impl_->config.maximum_nested_hog_bytes, "nested level archive");
+        if (!nested_size)
+            return std::unexpected(DecodeFailure(
+                "unable to load nested level archive", nested_size.error()));
+        auto nested_items = PreflightArchiveDirectory(
+            nested_bytes, budget, "nested level archive directory");
+        if (!nested_items)
+            return std::unexpected(DecodeFailure(
+                "unable to index nested level archive", nested_items.error()));
+        auto nested = archive::HogArchive::FromSpan(
+            nested_bytes, impl_->config.maximum_nested_hog_bytes);
+        if (!nested)
+            return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+                "invalid nested level archive: " + nested.error()));
+        *source_archive = std::move(*nested);
+        source_directory = BuildArchiveDirectory(*source_archive, limits);
+        if (!source_directory)
+            return std::unexpected(DecodeFailure(
+                "unable to index nested level archive", source_directory.error()));
+    }
+
+    asset::LevelContentIR result;
+    result.spatial.terrain_cells.reserve(manifest.terrain_cells.size());
+    result.material_catalogs.terrain_cells.reserve(manifest.terrain_cells.size());
+    const std::uint32_t archive_depth = static_cast<std::uint32_t>(
+        manifest.data_hog_source.hog_entries.size() + 1U);
+    for (std::size_t cell_index = 0; cell_index < manifest.terrain_cells.size(); ++cell_index)
+    {
+        const auto& cell = manifest.terrain_cells[cell_index];
+        const std::string cell_context = "level cell " + std::to_string(cell_index);
+        auto cell_entry = FindArchiveEntry(*source_directory, cell.data_hog_entry, limits);
+        if (!cell_entry)
+            return std::unexpected(DecodeFailure(
+                "unable to resolve " + cell_context, cell_entry.error()));
+        const auto cell_bytes = source_archive->payload(**cell_entry);
+        auto cell_input = budget.ConsumeInput(cell_bytes.size(), "cell archive");
+        if (!cell_input)
+            return std::unexpected(DecodeFailure(
+                "unable to load " + cell_context, cell_input.error()));
+        auto cell_size = ValidateNestedArchiveSize(
+            cell_bytes, impl_->config.maximum_nested_hog_bytes, "cell archive");
+        if (!cell_size)
+            return std::unexpected(DecodeFailure(
+                "unable to load " + cell_context, cell_size.error()));
+        auto cell_items = PreflightArchiveDirectory(
+            cell_bytes, budget, "cell archive directory");
+        if (!cell_items)
+            return std::unexpected(DecodeFailure(
+                "unable to index " + cell_context, cell_items.error()));
+        auto cell_archive = archive::HogArchive::FromSpan(
+            cell_bytes, impl_->config.maximum_nested_hog_bytes);
+        if (!cell_archive)
+            return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+                "invalid " + cell_context + " archive: " + cell_archive.error()));
+        auto cell_directory = BuildArchiveDirectory(*cell_archive, limits);
+        if (!cell_directory)
+            return std::unexpected(DecodeFailure(
+                "unable to index " + cell_context, cell_directory.error()));
+
+        auto col_entry = FindUniqueCol(*cell_directory);
+        if (!col_entry)
+            return std::unexpected(DecodeFailure(
+                "unable to resolve " + cell_context + " spatial member", col_entry.error()));
+        auto vum_entry = FindUniqueVum(*cell_directory);
+        if (!vum_entry)
+            return std::unexpected(DecodeFailure(
+                "unable to resolve " + cell_context + " material member", vum_entry.error()));
+
+        const auto col_bytes = cell_archive->payload(**col_entry);
+        auto mesh = retail::DecodeColSpatialMesh(
+            col_bytes, budget.ChildLimits(archive_depth));
+        if (!mesh)
+            return std::unexpected(DecodeFailure(
+                "unable to decode " + cell_context + " spatial mesh", mesh.error()));
+        auto committed_mesh = budget.CommitMesh(*mesh, col_bytes.size());
+        if (!committed_mesh)
+            return std::unexpected(DecodeFailure(
+                "unable to commit " + cell_context + " spatial mesh", committed_mesh.error()));
+
+        const auto vum_bytes = cell_archive->payload(**vum_entry);
+        auto catalog = retail::DecodeVumMaterialCatalogMeasured(
+            vum_bytes, budget.ChildLimits(archive_depth));
+        if (!catalog)
+            return std::unexpected(DecodeFailure(
+                "unable to decode " + cell_context + " material catalog", catalog.error()));
+        auto committed_catalog = budget.CommitCatalog(*catalog, vum_bytes.size());
+        if (!committed_catalog)
+            return std::unexpected(DecodeFailure(
+                "unable to commit " + cell_context + " material catalog",
+                committed_catalog.error()));
+
+        result.spatial.terrain_cells.push_back(std::move(*mesh));
+        result.material_catalogs.terrain_cells.push_back(std::move(catalog->catalog));
     }
     return result;
 }

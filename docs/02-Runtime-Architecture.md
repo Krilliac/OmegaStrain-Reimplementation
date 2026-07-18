@@ -206,6 +206,17 @@ depth ends at the cell-HOG edge. The fully owned `LevelMaterialCatalogsIR` prese
 cardinality, and repeated references without deduplication. It exposes only the already-confirmed
 name table and dense MTRL-to-name index relationships; passive VUM payloads remain retail-only.
 
+`LoadLevelContent` is the startup composition boundary for those two canonical collections. It
+reads and indexes the common archive chain and each referenced cell HOG once, then decodes the
+unique COL and VUM members under one cumulative input, item, output, scratch-peak, and depth budget.
+The shared decoder input default is 72 MiB; each physical DATA.HOG, nested-HOG, and cell-HOG read
+remains independently capped at 64 MiB.
+The all-or-error `LevelContentIR` preserves both manifest-order collections together; their parallel
+positions assert common source order and cardinality only, not a mesh-to-material relationship.
+Startup retains that composite directly, while the synthetic diagnostic reads only its spatial
+member. Independent worker calls use only the service's frozen VFS and return separately owned
+results.
+
 `omega_tool level-material-catalogs-verify-tree` exercises that service boundary across every
 strictly discovered level directory. It publishes only aggregate level, cell, catalog, name,
 material, reference, and error counts. Diagnostics expose stage and typed error categories without
@@ -227,8 +238,8 @@ reject Windows alternate-data-stream, reserved-device, trailing-dot/space, and o
 path aliases.
 Unsupported file types under both classified and unclassified shipping roots also fail closed.
 
-Startup owns `LevelManifestIR`, `LevelSpatialIR`, and `LevelMaterialCatalogsIR` as one all-or-error
-content state. The material catalogs do not enter `RenderFramePacket`, `SimulationWorld`, or
+Startup owns `LevelManifestIR` plus one `LevelContentIR` as an all-or-error content state. The
+material catalogs do not enter `RenderFramePacket`, `SimulationWorld`, or
 `SdlGpuHost`. The initial renderer consumes canonical spatial meshes only to build a deterministic
 synthetic canonical-COL wireframe contact sheet. Meshes occupy source-order tiles, and each mesh is
 projected along its two largest coordinate extents. This clean-room diagnostic is not world
