@@ -106,6 +106,7 @@ int main(const int argc, char** argv)
     }
     std::cout << "OpenOmega native shell: rendered_frames=" << run->rendered_frames
               << " planned_simulation_steps=" << run->planned_simulation_steps
+              << " executed_simulation_steps=" << run->executed_simulation_steps
               << " input_frames=" << run->input_frames << '\n';
     if (options->frame_limit >= 0 && run->rendered_frames != options->frame_limit)
     {

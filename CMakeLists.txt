@@ -36,6 +36,12 @@ add_library(omega_assets INTERFACE)
 target_include_directories(omega_assets INTERFACE native/include)
 target_compile_features(omega_assets INTERFACE cxx_std_23)
 
+add_library(omega_simulation STATIC
+    native/src/simulation/simulation_world.cpp
+)
+target_include_directories(omega_simulation PUBLIC native/include)
+target_compile_features(omega_simulation PUBLIC cxx_std_23)
+
 add_library(omega_retail_formats STATIC
     native/src/retail/col_spatial_mesh_decoder.cpp
     native/src/retail/container_descriptors.cpp
@@ -88,6 +94,19 @@ if(MSVC)
     )
 else()
     target_compile_options(omega_core PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+endif()
+
+if(MSVC)
+    target_compile_options(omega_simulation PRIVATE
+        /W4
+        /WX
+        /permissive-
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /utf-8
+    )
+else()
+    target_compile_options(omega_simulation PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
 endif()
 
 if(MSVC)
@@ -163,7 +182,7 @@ if(OMEGA_BUILD_RUNTIME)
         native/apps/openomega/omega_app.cpp
         native/apps/openomega/sdl_gpu_host.cpp
     )
-    target_link_libraries(openomega PRIVATE omega_runtime SDL3::SDL3)
+    target_link_libraries(openomega PRIVATE omega_runtime omega_simulation SDL3::SDL3)
     target_compile_definitions(openomega PRIVATE
         $<$<CONFIG:Debug>:OMEGA_GPU_DEBUG=1>
     )
@@ -191,6 +210,7 @@ if(BUILD_TESTING)
         native/tests/pop_level_manifest_decoder_tests.cpp
         native/tests/pop_terrain_index_tests.cpp
         native/tests/runtime_settings_tests.cpp
+        native/tests/simulation_world_tests.cpp
         native/tests/tdx_texture_storage_decoder_tests.cpp
         native/tests/virtual_file_system_tests.cpp
         native/tests/vum_material_catalog_decoder_tests.cpp
@@ -201,6 +221,7 @@ if(BUILD_TESTING)
         omega_retail_formats
         omega_content
         omega_runtime
+        omega_simulation
     )
     if(MSVC)
         target_compile_options(omega_core_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)

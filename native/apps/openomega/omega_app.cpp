@@ -3,6 +3,8 @@
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <chrono>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -76,6 +78,16 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     }
     auto input = std::make_unique<runtime::InputTracker>(std::move(*created_input));
 
+    auto created_simulation = simulation::SimulationWorld::Create(
+        {.fixed_step = settings.frame.simulation_step});
+    if (!created_simulation)
+    {
+        log->Error("startup", "simulation world: " + created_simulation.error());
+        return std::unexpected("simulation world: " + created_simulation.error());
+    }
+    auto simulation =
+        std::make_unique<simulation::SimulationWorld>(std::move(*created_simulation));
+
     auto created_host = SdlGpuHost::Create(
         content_owner->debug_image ? &*content_owner->debug_image : nullptr, debug_device);
     if (!created_host)
@@ -89,7 +101,7 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
 
     return OmegaApp(std::move(config_owner), std::move(content_owner), std::move(stderr_sink),
         std::move(ring_sink), std::move(log), std::move(jobs), std::move(frame_scheduler),
-        std::move(input), std::move(host));
+        std::move(input), std::move(simulation), std::move(host));
 }
 
 OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
@@ -98,12 +110,14 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<runtime::RingLogSink> ring_sink,
     std::unique_ptr<runtime::LogService> log, std::unique_ptr<runtime::JobService> jobs,
     std::unique_ptr<runtime::FrameScheduler> frame_scheduler,
-    std::unique_ptr<runtime::InputTracker> input, std::unique_ptr<SdlGpuHost> host) noexcept
+    std::unique_ptr<runtime::InputTracker> input,
+    std::unique_ptr<simulation::SimulationWorld> simulation,
+    std::unique_ptr<SdlGpuHost> host) noexcept
     : config_(std::move(config)), content_(std::move(content)),
       stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)),
       log_(std::move(log)), jobs_(std::move(jobs)),
       frame_scheduler_(std::move(frame_scheduler)), input_(std::move(input)),
-      host_(std::move(host))
+      simulation_(std::move(simulation)), host_(std::move(host))
 {
 }
 
@@ -112,19 +126,86 @@ OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
 
 std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
 {
+    using Clock = std::chrono::steady_clock;
+
     log_->Info("runtime", "entering native host loop");
-    auto result = host_->Run(frame_limit, *frame_scheduler_, *input_, *log_, kQuitAction);
-    jobs_->WaitForIdle();
-    if (!result)
+    RunResult result;
+    bool running = true;
+    auto previous_frame = Clock::now();
+    while (running && (frame_limit < 0 || result.rendered_frames < frame_limit))
     {
-        log_->Error("runtime", result.error());
-        return std::unexpected(result.error());
+        const HostEventResult events = host_->PumpEvents(*input_, *log_);
+        const runtime::InputSnapshot input_snapshot = input_->EndFrame();
+        ++result.input_frames;
+        if (input_snapshot.rejected_event_count() != 0U)
+        {
+            log_->Warning("input", "rejected " +
+                                       std::to_string(input_snapshot.rejected_event_count()) +
+                                       " host events in one frame");
+        }
+        if (events.quit_requested || input_snapshot.WasPressed(kQuitAction))
+        {
+            running = false;
+            result.quit_requested = true;
+            break;
+        }
+
+        const auto current_frame = Clock::now();
+        const runtime::FramePlan plan = frame_scheduler_->BeginFrame(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                current_frame - previous_frame));
+        previous_frame = current_frame;
+        if (plan.simulation_steps >
+            std::numeric_limits<std::uint64_t>::max() - result.planned_simulation_steps)
+        {
+            jobs_->WaitForIdle();
+            constexpr std::string_view error = "run-local simulation step counter exhausted";
+            log_->Error("simulation", error);
+            return std::unexpected(std::string(error));
+        }
+        result.planned_simulation_steps += plan.simulation_steps;
+        if (plan.clamped_delta)
+        {
+            ++result.clamped_frame_count;
+            if (result.clamped_frame_count == 1U)
+                log_->Warning("frame", "wall-time delta reached the configured clamp");
+        }
+        if (plan.dropped_time)
+        {
+            ++result.dropped_time_frame_count;
+            if (result.dropped_time_frame_count == 1U)
+                log_->Warning(
+                    "frame", "fixed-step backlog exceeded the configured frame budget");
+        }
+
+        for (std::uint32_t step = 0; step < plan.simulation_steps; ++step)
+        {
+            if (simulation_->AdvanceOneStep() != simulation::SimulationStepResult::Advanced)
+            {
+                jobs_->WaitForIdle();
+                constexpr std::string_view error =
+                    "simulation world representation exhausted";
+                log_->Error("simulation", error);
+                return std::unexpected(std::string(error));
+            }
+            ++result.executed_simulation_steps;
+        }
+
+        auto rendered = host_->RenderFrame(static_cast<std::uint64_t>(result.rendered_frames));
+        if (!rendered)
+        {
+            jobs_->WaitForIdle();
+            log_->Error("render", rendered.error());
+            return std::unexpected(rendered.error());
+        }
+        ++result.rendered_frames;
     }
 
+    jobs_->WaitForIdle();
     log_->Info("runtime", "host loop ended after " +
-                              std::to_string(result->rendered_frames) + " rendered frames and " +
-                              std::to_string(result->planned_simulation_steps) +
-                              " planned simulation steps");
+                              std::to_string(result.rendered_frames) + " rendered frames and " +
+                              std::to_string(result.executed_simulation_steps) +
+                              " executed simulation steps");
     return result;
 }
 

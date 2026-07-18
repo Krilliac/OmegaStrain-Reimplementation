@@ -23,10 +23,12 @@ lifetime is guaranteed by the app. Long-lived asset references are typed generat
 not raw pointers or `shared_ptr` ownership graphs.
 
 The initial composition root now owns the validated configuration store, content startup state,
-stderr/ring log sinks, logging service, worker pool, fixed-step scheduler, input tracker, and SDL
-GPU host in that order. The host is created last and destroyed first. It borrows the scheduler,
-input tracker, and logger only while `OmegaApp::Run` is active; no SDL type crosses into the
-platform-neutral runtime library.
+stderr/ring log sinks, logging service, worker pool, fixed-step scheduler, input tracker,
+`SimulationWorld`, and SDL GPU host in that order. The host is created last and destroyed first.
+`OmegaApp::Run` owns the steady clock, closes immutable input frames, asks the scheduler for a
+bounded plan, executes every planned world step, then submits one render frame. The SDL host only
+pumps events and renders; no SDL type crosses into the platform-neutral runtime or simulation
+libraries.
 
 `GameDataService` is the implemented startup boundary. It owns its VFS, freezes mounts during
 `Open()`, and returns only canonical owned IR. It now resolves each manifest cell HOG and its unique
@@ -65,8 +67,9 @@ queues.
   CPU assets before render/audio upload.
 - `ScriptService` executes only project-owned native logic or declarative mission data. Retail
   executable/script modules are inspected offline and are never loaded as executable code.
-- `SimulationWorld` uses a measured fixed step. The retail tick rate remains evidence-driven,
-  not assumed from display refresh.
+- `SimulationWorld` advances only from explicit fixed-step calls and owns deterministic completed-
+  step/simulated-time state. The composition root supplies the scheduler's validated step; its
+  current default is a synthetic-shell value, while the retail tick rate remains evidence-driven.
 - `RenderService` receives scene snapshots and exposes no retail-format details.
 
 ## Hot reload
@@ -80,7 +83,8 @@ non-hot-reloadable. No vtable pointer crosses a reloadable boundary.
 
 ```text
 apps -> runtime -> content -> retail formats -> assets/core
-                       \-> vfs -> core
+   |                   \-> vfs -> core
+   \-> simulation
 gameplay -> simulation -> core
         \-> assets -> vfs -> core
 renderer/audio/platform -> core
@@ -93,12 +97,13 @@ The initial native build targets express the same direction:
 
 - `omega_core`: HOG indexing, VFS, and generic bounded infrastructure;
 - `omega_assets`: canonical owned IR values and decode contracts;
+- `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
 - `omega_retail_formats`: stateless POP/COL/VUM/TDX adapters that may depend on the first
   two targets;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
   orchestration; and
-- `omega_runtime`: launch options and renderer-neutral diagnostic scene values consumed by the
-  SDL host.
+- `omega_runtime`: launch/configuration services and renderer-neutral diagnostic scene values
+  consumed by the composition root and SDL host.
 
 VUM has a bounded semantic adapter that returns owned source-order names plus one-to-three dense
 name indices per material. A separate retail-only passive descriptor preserves only the three

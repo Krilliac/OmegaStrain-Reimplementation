@@ -91,6 +91,7 @@ int ManifestDebugImageFailureCount();
 int FrameSchedulerFailureCount();
 int InputTrackerFailureCount();
 int RuntimeSettingsFailureCount();
+int SimulationWorldFailureCount();
 
 int main()
 {
@@ -315,6 +316,7 @@ int main()
     failures += FrameSchedulerFailureCount();
     failures += InputTrackerFailureCount();
     failures += RuntimeSettingsFailureCount();
+    failures += SimulationWorldFailureCount();
     if (failures == 0)
         std::cout << "omega_core_tests: all checks passed\n";
     return failures == 0 ? 0 : 1;
