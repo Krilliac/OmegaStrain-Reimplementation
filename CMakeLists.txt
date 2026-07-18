@@ -70,7 +70,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/job_service.cpp
     native/src/runtime/launch_options.cpp
     native/src/runtime/log_service.cpp
-    native/src/runtime/manifest_debug_image.cpp
+    native/src/runtime/spatial_debug_image.cpp
     native/src/runtime/runtime_settings.cpp
 )
 target_include_directories(omega_runtime PUBLIC native/include)
@@ -241,7 +241,7 @@ if(BUILD_TESTING)
         native/tests/job_service_tests.cpp
         native/tests/launch_options_tests.cpp
         native/tests/log_service_tests.cpp
-        native/tests/manifest_debug_image_tests.cpp
+        native/tests/spatial_debug_image_tests.cpp
         native/tests/pop_level_manifest_decoder_tests.cpp
         native/tests/pop_terrain_index_tests.cpp
         native/tests/runtime_settings_tests.cpp

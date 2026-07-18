@@ -41,8 +41,11 @@ shipping dependencies or execution mechanisms.
     POP terrain references across 18 level manifests, semantically decodes all 7,036 COL spatial
     meshes, all 15,248 TDX storage assets, and all 7,036 VUM material catalogs with zero errors.
 11. Added owner-supplied data-root validation and native named-level startup. A headless MINSK
-    probe loads 299 canonical manifest cells; the SDL_GPU/D3D12 path renders their explicitly
-    synthetic coverage grid for 120 frames and exits without a lingering process.
+    probe loads 299 canonical manifest cells and matching owned spatial meshes; the SDL_GPU/D3D12
+    path renders a deterministic synthetic canonical-COL wireframe contact sheet for 120 frames
+    and exits without a lingering process. Meshes occupy source-order tiles, with each mesh
+    projected along its two largest coordinate extents. This clean-room diagnostic is not world
+    placement or reconstructed geometry and makes no VUM, TDX, or other retail semantic claim.
 12. Routed every manifest cell through `GameDataService` into owned neutral spatial meshes under a
     shared level-operation budget. Native verification covers all 18 levels and 5,351 cells with
     zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices, 1,239,980 triangles and

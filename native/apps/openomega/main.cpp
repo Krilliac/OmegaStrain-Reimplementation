@@ -74,7 +74,7 @@ int main(const int argc, char** argv)
             std::cout << "OpenOmega level: code=" << *options->level_code
                        << " terrain_cells=" << content.level_manifest->terrain_cells.size()
                        << " spatial_meshes=" << content.level_spatial->terrain_cells.size()
-                       << " view=synthetic-manifest-grid\n";
+                       << " view=synthetic-spatial-wireframe\n";
         }
     }
 

@@ -414,6 +414,54 @@ int GameDataServiceFailureCount()
                   startup->level_spatial->terrain_cells.size() == 2 &&
                   startup->debug_image->width != 0 && startup->debug_image->height != 0,
             "application startup composes matching manifest and spatial cardinalities");
+
+        const std::vector<std::byte> original_debug_pixels(
+            startup->debug_image->pixels().begin(), startup->debug_image->pixels().end());
+        auto changed_col_a = MakeDirectLeafCol(4.0F, 3);
+        WriteF32(changed_col_a, 48U + 20U, 3.0F);
+        WriteF32(changed_col_a, 128U + 4U, 1.0F);
+        WriteF32(changed_col_a, 144U, 1.0F);
+        WriteF32(changed_col_a, 144U + 4U, 3.0F);
+        const auto changed_cell_a = MakeCellHog("CeLlA.vUm",
+            {HogMember{.name = "aLpHa.CoL", .payload = std::move(changed_col_a)}});
+        Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG",
+                  MakeSpatialDataHog(changed_cell_a, spatial_fixture.cell_b)),
+            "same-manifest fixture with changed canonical spatial geometry is written");
+
+        auto changed_geometry_startup = omega::runtime::StartContent(startup_options);
+        Check(changed_geometry_startup && changed_geometry_startup->level_manifest &&
+                  changed_geometry_startup->level_spatial &&
+                  changed_geometry_startup->debug_image,
+            "startup rebuilds the synthetic diagnostic from changed canonical spatial geometry");
+        if (changed_geometry_startup && changed_geometry_startup->level_manifest &&
+            changed_geometry_startup->debug_image)
+        {
+            const std::vector<std::byte> changed_debug_pixels(
+                changed_geometry_startup->debug_image->pixels().begin(),
+                changed_geometry_startup->debug_image->pixels().end());
+            const auto& original_cells = startup->level_manifest->terrain_cells;
+            const auto& changed_cells =
+                changed_geometry_startup->level_manifest->terrain_cells;
+            const bool same_manifest_records = changed_cells.size() == original_cells.size() &&
+                std::equal(original_cells.begin(), original_cells.end(), changed_cells.begin(),
+                    [](const omega::asset::LevelCellSourceIR& left,
+                        const omega::asset::LevelCellSourceIR& right) {
+                        return left.observed_kind == right.observed_kind &&
+                               left.observed_index == right.observed_index &&
+                               left.data_hog_entry == right.data_hog_entry;
+                    });
+            Check(same_manifest_records &&
+                      (changed_geometry_startup->debug_image->width !=
+                              startup->debug_image->width ||
+                          changed_geometry_startup->debug_image->height !=
+                              startup->debug_image->height ||
+                          changed_debug_pixels != original_debug_pixels),
+                "unchanged manifest records produce a different diagnostic when canonical "
+                "spatial geometry changes");
+        }
+        Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG",
+                  spatial_fixture.data_hog),
+            "original spatial fixture is restored after the startup diagnostic proof");
     }
 
     auto spatial_service = omega::content::GameDataService::Open({.root = root});

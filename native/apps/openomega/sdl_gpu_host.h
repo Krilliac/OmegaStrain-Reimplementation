@@ -10,7 +10,7 @@ namespace omega::runtime
 {
 class InputTracker;
 class LogService;
-struct ManifestDebugImage;
+struct DebugImage;
 }
 
 namespace omega::app
@@ -29,7 +29,7 @@ public:
     // [main/render thread] The debug image is uploaded during creation and is not retained.
     [[nodiscard]] static std::expected<SdlGpuHost, std::string> Create(
         const SdlPlatformService& platform,
-        const runtime::ManifestDebugImage* debug_image, bool debug_device);
+        const runtime::DebugImage* debug_image, bool debug_device);
 
     // [main/render thread, after GPU idle]
     ~SdlGpuHost();
