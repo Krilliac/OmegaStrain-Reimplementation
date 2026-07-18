@@ -217,6 +217,10 @@ The confirmed baseline is 7,036 catalogs, 38,793 owned names, 38,899 material re
 dense name references, 91,460 passive payload pairs, 38,023 normalized T targets, 134,122
 middle-to-final references, 365,840 ordered Q/P final references, and zero errors. The same pass
 validates all 220,943 P/Q/T metadata records without retaining payload bytes or opaque words.
+The separate level-composition pass accepts all 18 levels and all 5,351 manifest-referenced
+catalogs with zero errors, preserving manifest order and producing 34,267 owned names, 34,589
+material records, and 37,893 dense name references. Those totals confirm only bounded service
+orchestration and ownership; they assign no name role, asset binding, placement, or render meaning.
 
 Synthetic regressions cover ownership, opaque-field immunity, nonzero trailing data, truncation,
 boundary order/alignment, count/extent contradictions, string grammar and limits, fixed-record
