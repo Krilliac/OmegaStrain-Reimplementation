@@ -54,9 +54,14 @@ claim), and the platform-neutral input tracking core (bounded binding table plus
 edge snapshots) are implemented as tested library services. Wiring those services into the
 SDL host shell is complete through an app-owned composition root: strict file/command-line
 configuration resolves their bounded settings, logging owns stderr and ring sinks, the worker
-pool drains before shutdown, SDL input is translated into neutral frame snapshots with focus-loss
-reconciliation, and steady-clock deltas drive fixed-step planning. Executing a SimulationWorld
-from those plans is now wired through `OmegaApp`: every planned step advances an owned,
+pool drains before shutdown, and steady-clock deltas drive fixed-step planning. SDL input now has
+an app-owned, non-hot-reloadable `SdlInputService` that owns the gamepad subsystem, the global event
+pump through `PumpEvents`, and one primary gamepad. It filters button events by instance ID,
+reconciles only gamepad controls on disconnect, and promotes the next available device;
+deterministic headless virtual-gamepad coverage exercises this boundary. The single-primary rule is
+synthetic shell policy, not inferred retail behavior, and `SdlGpuHost` is now video/render-only.
+Executing a `SimulationWorld` from the fixed-step plans is wired through `OmegaApp`: every planned
+step advances an owned,
 platform-neutral deterministic world clock before rendering, with fail-closed representation
 limits. The app also owns the SDL process lifetime and a resumed system-default playback stream;
 its callback supplies bounded project-owned silence and exposes lock-free health counters without

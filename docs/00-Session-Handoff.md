@@ -61,6 +61,13 @@ shipping dependencies or execution mechanisms.
     42,631 dense name references, 91,460 Q/P pairs, 38,023 normalized T targets, 134,122
     middle-to-final references, and 365,840 ordered Q/P final references with zero errors. Payload
     bytes, topology, vertex attributes, usage-code meaning, and material binding remain unassigned.
+15. Split SDL input from the GPU host into the app-owned, non-hot-reloadable `SdlInputService`. Its
+    `PumpEvents` owns the process-global event pump, while the service owns the gamepad subsystem
+    and one primary `SDL_Gamepad`; accepts button events only from that instance; resets only
+    gamepad controls when it disconnects; and promotes the next available device. `SdlGpuHost` now
+    owns video/render resources only. Deterministic headless virtual-gamepad coverage exercises
+    attach, button edges, disconnect reconciliation, and promotion. The single-primary rule is
+    synthetic shell policy, not inferred retail behavior.
 
 ## Disc observations
 

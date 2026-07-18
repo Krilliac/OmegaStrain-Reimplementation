@@ -180,6 +180,7 @@ if(OMEGA_BUILD_RUNTIME)
     add_library(omega_sdl_backend STATIC
         native/apps/openomega/sdl_audio_service.cpp
         native/apps/openomega/sdl_gpu_host.cpp
+        native/apps/openomega/sdl_input_service.cpp
         native/apps/openomega/sdl_platform_service.cpp
     )
     target_include_directories(omega_sdl_backend PUBLIC native/apps/openomega)
@@ -228,6 +229,23 @@ if(BUILD_TESTING)
             ENVIRONMENT "SDL_AUDIO_DRIVER=dummy"
             TIMEOUT 5
         )
+
+        add_executable(omega_sdl_input_tests
+            native/tests/sdl_input_service_tests.cpp
+        )
+        target_link_libraries(omega_sdl_input_tests
+            PRIVATE
+                omega_sdl_backend
+                omega_runtime
+                Threads::Threads
+        )
+        if(MSVC)
+            target_compile_options(omega_sdl_input_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+        else()
+            target_compile_options(omega_sdl_input_tests PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+        endif()
+        add_test(NAME omega_sdl_input_tests COMMAND omega_sdl_input_tests)
+        set_tests_properties(omega_sdl_input_tests PROPERTIES TIMEOUT 5)
     endif()
 
     add_executable(omega_core_tests

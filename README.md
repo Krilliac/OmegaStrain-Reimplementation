@@ -32,6 +32,11 @@ retail instruction blocks, or PS2 execution layer.
 - The native host opens and resumes the system-default SDL playback stream as 48 kHz stereo F32;
   its fixed-buffer callback supplies project-owned silence until clean-room audio decode and
   mixing land, with a deterministic dummy-device test covering the callback boundary.
+- An app-owned, non-hot-reloadable SDL input leaf owns the gamepad subsystem, the process-global
+  event pump, and one primary gamepad. It filters controller events by SDL instance ID, resets only
+  gamepad controls when that device disconnects, and promotes the next available device. A
+  deterministic headless virtual-gamepad test covers that hotplug boundary; selecting only one
+  primary gamepad is a synthetic host-shell policy, not a claim about retail behavior.
 - The native content service resolves all 5,351 manifest cells across all 18 levels into 5,351
   owned spatial meshes with zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices,
   1,239,980 triangles/references, and 2,137 normalized empty meshes.
@@ -110,7 +115,11 @@ converts steady-clock deltas into bounded fixed-step plans and executes each ste
 platform-neutral deterministic `SimulationWorld`; the configured default remains a synthetic-shell
 timing value, not a retail-rate claim. The app also owns a non-hot-reloadable SDL audio service whose
 callback never reads files, logs, blocks, or touches retail data; the current silent stream proves
-device lifecycle and thread plumbing without embedding or guessing proprietary audio.
+device lifecycle and thread plumbing without embedding or guessing proprietary audio. A separate
+non-hot-reloadable `SdlInputService` is the sole global event-queue consumer through `PumpEvents`,
+owns the gamepad subsystem and primary-gamepad lifetime, and translates accepted events into the
+neutral input tracker. `SdlGpuHost` is consequently limited to video, window, GPU, and rendering
+resources.
 
 The optional project-owned configuration file uses strict `lower_snake_case` dotted keys and
 `key = value` lines. `--set=KEY=VALUE` applies one validated command-line override per key. Current
