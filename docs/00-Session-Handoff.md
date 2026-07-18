@@ -73,6 +73,10 @@ shipping dependencies or execution mechanisms.
     158 exact, 55 zero-padded, and 2,180,832 logical bytes. It retains no payload and assigns no
     actor, skeleton, timing, channel, transform, compression, or animation semantics; SKAS remains
     a separate two-candidate text-evidence family.
+17. Added a privacy-safe bounded POP post-terrain scanner. It accepts all 18 owner-supplied POPs
+    with zero errors and finds the same 19 aligned literal-tag candidates exactly once per file and
+    in one shared order: 342 aggregate hits. These are candidate markers only; section headers,
+    counts, extents, placement, visibility, and all other field semantics remain unassigned.
 
 ## Disc observations
 
@@ -109,7 +113,9 @@ shipping dependencies or execution mechanisms.
    deterministic trace passes the gate.
 2. Validate TDX swizzle, nibble order, palette permutation, and channel expansion independently
    before producing display-ready pixels or GPU uploads.
-3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
+3. Continue POP after the validated terrain prefix. First prove a candidate marker's header/count
+   relationship and exact bounded extent, then connect consumed fields independently to placement
+   or visibility behavior.
 4. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools

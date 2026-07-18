@@ -84,12 +84,13 @@ The scanner:
   counts/ranges, and the number of distinct ordered sequences; and
 - emits no paths, asset names, hashes, payload bytes, executable data, or per-file fingerprints.
 
-Only synthetic coverage has exercised this scanner so far. No post-TER corpus result or format
-claim is established by its presence. Before any candidate marker can become a section boundary,
-private evidence must establish its header/count relationship and exact bounded extent across the
-corpus, disprove marker-shaped payload coincidences, and independently connect the consumed fields
-to placement or visibility behavior. Until then, no post-TER native decoder or canonical IR should
-be added.
+Owned-corpus scanning accepts all 18 level POPs with zero errors. It finds 342 aligned literal-tag
+candidate hits: exactly 19 per file, each candidate once per file, with one distinct ordered
+sequence across the corpus. This confirms only the bounded literal envelope. Before any candidate
+marker can become a section boundary, private evidence must establish its header/count relationship
+and exact bounded extent, disprove marker-shaped payload coincidences, and independently connect
+the consumed fields to placement or visibility behavior. Until then, no post-TER native decoder or
+canonical IR should be added.
 
 ## Reproduce
 

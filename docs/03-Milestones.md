@@ -41,6 +41,9 @@ incomplete.
   the two-candidate SKAS text envelope remains separate; neither assigns animation semantics. The
   native corpus verifier accepts 213/213 SKA spans with zero errors: 158 exact, 55 zero-padded, and
   2,180,832 aggregate logical bytes.
+- Bounded POP post-terrain scanning accepts 18/18 level POPs with zero errors and finds 19 aligned
+  literal-tag candidates exactly once per file in one shared order, for 342 aggregate hits. The
+  literals are not yet decoded section boundaries and assign no placement or visibility semantics.
 - Inspectors for ELF, scripts, textures, meshes, skeletons, animation, audio, and maps.
 - Synthetic malformed-input tests for every decoder.
 
