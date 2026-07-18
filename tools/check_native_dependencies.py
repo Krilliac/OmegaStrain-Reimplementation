@@ -7,6 +7,7 @@ import argparse
 import os
 import re
 import stat
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -34,13 +35,29 @@ _DIRECTIVE_PATTERN = re.compile(
 )
 _LINE_SPLICE_PATTERN = re.compile(r"\\(?:\r\n|\n|\r)")
 _MODULE_IMPORT_PATTERN = re.compile(
-    r"\bimport[ \t\v\f]+(?=[:<\"A-Za-z_])"
+    r"\bimport[ \t\v\f\r\n]+(?=[:<\"A-Za-z_])"
 )
 _MODULE_DECLARATION_PATTERN = re.compile(
-    r"(?:^|[;{}])[ \t\v\f]*(?:export[ \t\v\f]+)?module"
-    r"(?:[ \t\v\f]+(?=[:A-Za-z_])|[ \t\v\f]*;)"
+    r"(?:^|[;{}])[ \t\v\f\r\n]*(?:export[ \t\v\f\r\n]+)?module"
+    r"(?:[ \t\v\f\r\n]+(?=[:A-Za-z_])|[ \t\v\f\r\n]*;)"
 )
 _REPARSE_POINT_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_WINDOWS_FORBIDDEN_PATH_CHARACTERS = frozenset('<>"|?*:')
+_WINDOWS_RESERVED_PATH_STEMS = frozenset(
+    {
+        "aux",
+        "clock$",
+        "con",
+        "conin$",
+        "conout$",
+        "nul",
+        "prn",
+        *(f"com{index}" for index in range(1, 10)),
+        *(f"lpt{index}" for index in range(1, 10)),
+        *(f"com{index}" for index in "¹²³"),
+        *(f"lpt{index}" for index in "¹²³"),
+    }
+)
 
 
 # Platform-neutral modules accept only the standard C/C++ library headers in
@@ -283,6 +300,15 @@ MODULE_RULES = (
     ),
 )
 
+EXACT_MODULE_RULES = {
+    "native/include/omega/asset/pop_terrain_index.h": ModuleRule(
+        "native/include/omega/asset/pop_terrain_index.h",
+        "omega_core",
+        _CORE_EDGES,
+        platform_neutral=True,
+    ),
+}
+
 PROJECT_HEADER_MODULES = (
     ("omega/simulation/", "omega_simulation"),
     ("omega/runtime/", "omega_runtime"),
@@ -292,8 +318,16 @@ PROJECT_HEADER_MODULES = (
     ("omega/archive/", "omega_core"),
     ("omega/vfs/", "omega_core"),
 )
+EXACT_PROJECT_HEADER_MODULES = {
+    "omega/asset/pop_terrain_index.h": "omega_core",
+}
 
 GLOBAL_ONLY_PREFIXES = ("native/tests/", "native/apps/omega_tool/")
+SHIPPING_PREFIXES = (
+    "native/apps/",
+    "native/include/omega/",
+    "native/src/",
+)
 _RAW_STRING_PREFIXES = ("u8R\"", "uR\"", "UR\"", "LR\"", "R\"")
 
 
@@ -319,6 +353,9 @@ class SourceParseFailure(ValueError):
 
 def module_rule(relative_path: Path) -> ModuleRule | None:
     normalized = relative_path.as_posix().casefold()
+    exact = EXACT_MODULE_RULES.get(normalized)
+    if exact is not None:
+        return exact
     for rule in MODULE_RULES:
         if normalized.startswith(rule.path_prefix):
             return rule
@@ -330,7 +367,17 @@ def _is_global_only(relative_path: Path) -> bool:
     return any(normalized.startswith(prefix) for prefix in GLOBAL_ONLY_PREFIXES)
 
 
+def _is_shipping_path(relative_path: Path) -> bool:
+    normalized = relative_path.as_posix().casefold()
+    return not _is_global_only(relative_path) and any(
+        normalized.startswith(prefix) for prefix in SHIPPING_PREFIXES
+    )
+
+
 def _project_header_module(include_lower: str) -> str | None:
+    exact = EXACT_PROJECT_HEADER_MODULES.get(include_lower)
+    if exact is not None:
+        return exact
     for prefix, module in PROJECT_HEADER_MODULES:
         if include_lower.startswith(prefix):
             return module
@@ -522,7 +569,12 @@ def scan_source(source: str) -> SourceScan:
 
     includes: list[IncludeDirective] = []
     errors: list[tuple[int, str]] = []
-    for line_number, line in enumerate(sanitized.splitlines(), start=1):
+    module_lines: list[str] = []
+    for line_number, line_with_ending in enumerate(
+        sanitized.splitlines(keepends=True), start=1
+    ):
+        line = line_with_ending.rstrip("\r\n")
+        ending = "\n" if len(line) != len(line_with_ending) else ""
         directive = _DIRECTIVE_PATTERN.match(line)
         if directive is not None:
             name = directive.group(1)
@@ -535,13 +587,24 @@ def scan_source(source: str) -> SourceScan:
                     includes.append(IncludeDirective(line_number, delimiter, include))
             elif name == "import":
                 errors.append((line_number, "preprocessor imports are unsupported"))
+            module_lines.append(" " * len(line) + ending)
             continue
 
-        code = _blank_ordinary_literals(line)
-        if _MODULE_IMPORT_PATTERN.search(code):
-            errors.append((line_number, "C++ module imports are unsupported"))
-        if _MODULE_DECLARATION_PATTERN.search(code):
-            errors.append((line_number, "C++ module declarations are unsupported"))
+        module_lines.append(_blank_ordinary_literals(line) + ending)
+
+    module_source = "".join(module_lines)
+    newline_offsets = [
+        index for index, character in enumerate(module_source) if character == "\n"
+    ]
+    for match in _MODULE_IMPORT_PATTERN.finditer(module_source):
+        line_number = bisect_right(newline_offsets, match.start()) + 1
+        errors.append((line_number, "C++ module imports are unsupported"))
+    for match in _MODULE_DECLARATION_PATTERN.finditer(module_source):
+        module_offset = match.group(0).find("module")
+        line_number = bisect_right(
+            newline_offsets, match.start() + max(module_offset, 0)
+        ) + 1
+        errors.append((line_number, "C++ module declarations are unsupported"))
     return SourceScan(tuple(includes), tuple(errors))
 
 
@@ -558,11 +621,65 @@ def _normalize_include_path(include: str) -> tuple[str, str, str | None]:
     parts = normalized.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         return normalized, lower, "empty or dot include-path segments are forbidden"
+    for part in parts:
+        if any(ord(character) < 32 for character in part) or any(
+            character in _WINDOWS_FORBIDDEN_PATH_CHARACTERS for character in part
+        ):
+            return normalized, lower, "Windows-unsafe include-path characters are forbidden"
+        if part.endswith((" ", ".")):
+            return normalized, lower, "Windows-aliased trailing dots or spaces are forbidden"
+        stem = part.split(".", 1)[0].casefold()
+        if stem in _WINDOWS_RESERVED_PATH_STEMS:
+            return normalized, lower, "Windows reserved device include paths are forbidden"
     return normalized, lower, None
 
 
 def _format_error(relative_path: Path, line_number: int, message: str) -> str:
     return f"{relative_path.as_posix()}:{line_number}: {message}"
+
+
+def _resolve_local_include(
+    root: Path, source_path: Path, normalized: str
+) -> tuple[Path | None, str | None]:
+    current = source_path.parent
+    parts = PurePosixPath(normalized).parts
+    for index, part in enumerate(parts):
+        try:
+            with os.scandir(current) as entries:
+                names = [entry.name for entry in entries]
+        except OSError:
+            return None, "local include path could not be inspected safely"
+
+        if part not in names:
+            if any(name.casefold() == part.casefold() for name in names):
+                return None, "local include paths must use exact on-disk spelling"
+            # Win32 can resolve names that directory enumeration never returns,
+            # notably 8.3 short aliases.  A path that resolves without an exact
+            # directory entry is non-canonical even when its spelling is not a
+            # simple case variant.
+            try:
+                os.stat(current / part, follow_symlinks=False)
+            except FileNotFoundError:
+                return None, None
+            except OSError:
+                return None, "local include path could not be inspected safely"
+            return None, "local include paths must use exact on-disk spelling"
+
+        current = current / part
+        value, entry_error = _safe_stat(current)
+        if entry_error is not None or value is None:
+            return None, "local include resolves through an unsafe filesystem entry"
+        final = index + 1 == len(parts)
+        if final and not stat.S_ISREG(value.st_mode):
+            return None, "local include target is not a regular file"
+        if not final and not stat.S_ISDIR(value.st_mode):
+            return None, "local include path crosses a non-directory entry"
+
+    try:
+        current.relative_to(root)
+    except ValueError:
+        return None, "local include escapes the repository root"
+    return current, None
 
 
 def check_include(
@@ -607,14 +724,11 @@ def check_include(
         return None
 
     if delimiter == '"' and root is not None and source_path is not None:
-        local_path = source_path.parent.joinpath(*PurePosixPath(normalized).parts)
-        try:
+        local_path, local_error = _resolve_local_include(root, source_path, normalized)
+        if local_error is not None:
+            return _format_error(relative_path, line_number, local_error)
+        if local_path is not None:
             local_relative = local_path.relative_to(root)
-        except ValueError:
-            return _format_error(
-                relative_path, line_number, "local include escapes the repository root"
-            )
-        if local_path.exists():
             destination_rule = module_rule(local_relative)
             if rule is not None:
                 if destination_rule is None:
@@ -781,6 +895,10 @@ def check_tree(root: Path) -> tuple[int, list[str]]:
                 if module_rule(relative_path) is not None:
                     errors.append(
                         f"{relative_path.as_posix()}: unsupported file type in a shipping native module"
+                    )
+                elif _is_shipping_path(relative_path):
+                    errors.append(
+                        f"{relative_path.as_posix()}: unsupported file type in an unclassified shipping native path"
                     )
 
             directory_after, final_error = _safe_stat(directory_path)
