@@ -26,7 +26,7 @@ incomplete.
 - Owned level-manifest, spatial-mesh, and texture-storage IR plus bounded COL/VUM/TDX structural
   descriptors. The VUM render-payload descriptor remains retail-only and is not canonical IR.
 - Native aggregate validation: 18/18 level manifests, 7,036/7,036 semantic COL meshes, and all
-  29,320 structural descriptor assets.
+  35,013 COL/VUM/TDX/SKA/SKM/SKL descriptor assets.
 - GameDataService aggregate validation: 5,351/5,351 manifest cells load as owned spatial meshes,
   and all 18 headless startup probes preserve manifest/spatial cardinality.
 - TDX aggregate validation: 15,248/15,248 textures normalize to 15,442 owned blocks and 17,960
@@ -38,8 +38,9 @@ incomplete.
   with zero errors.
 - Passive SKM and SKL native descriptors preserve only bounded structural metadata. The passive
   SKA descriptor implements the aggregate-proven neutral counted-word extent as fixed output while
-  the two-candidate SKAS text envelope remains separate; neither assigns animation semantics. SKA
-  is wired into the sanitized native corpus verifier, with its independent 213/213 run still pending.
+  the two-candidate SKAS text envelope remains separate; neither assigns animation semantics. The
+  native corpus verifier accepts 213/213 SKA spans with zero errors: 158 exact, 55 zero-padded, and
+  2,180,832 aggregate logical bytes.
 - Inspectors for ELF, scripts, textures, meshes, skeletons, animation, audio, and maps.
 - Synthetic malformed-input tests for every decoder.
 

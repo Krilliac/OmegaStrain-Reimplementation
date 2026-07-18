@@ -68,6 +68,11 @@ shipping dependencies or execution mechanisms.
     owns video/render resources only. Deterministic headless virtual-gamepad coverage exercises
     attach, button edges, disconnect reconciliation, and promotion. The single-primary rule is
     synthetic shell policy, not inferred retail behavior.
+16. Added a fixed-output retail-only SKA descriptor for the proven 112-byte-prefix counted-word
+    envelope. Native aggregate verification accepts all 213 owner-supplied spans with zero errors:
+    158 exact, 55 zero-padded, and 2,180,832 logical bytes. It retains no payload and assigns no
+    actor, skeleton, timing, channel, transform, compression, or animation semantics; SKAS remains
+    a separate two-candidate text-evidence family.
 
 ## Disc observations
 
@@ -105,13 +110,7 @@ shipping dependencies or execution mechanisms.
 2. Validate TDX swizzle, nibble order, palette permutation, and channel expansion independently
    before producing display-ready pixels or GPU uploads.
 3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
-4. SKM, SKL, and SKA now have bounded passive native descriptors. SKA is a fixed-output retail-only
-   view of the proven 112-byte-prefix counted-word envelope. Keep the two-candidate SKAS text family
-   separate and assign no actor, skeleton, timing, channel, transform, or animation semantics. Its
-   `omega_tool` corpus-verifier path is wired, but record no native aggregate-pass claim until an
-   owner-supplied private run reports 213 candidates, 213 valid, zero errors, 158 exact, and 55
-   zero-tailed spans.
-5. Capture PS Rewired network behavior separately before designing any replacement service.
+4. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools
 
