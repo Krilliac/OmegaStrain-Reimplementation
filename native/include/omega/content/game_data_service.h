@@ -5,7 +5,9 @@
 #include "omega/asset/level_ir.h"
 #include "omega/asset/level_material_catalogs_ir.h"
 #include "omega/asset/level_spatial_ir.h"
+#include "omega/asset/source_locator.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -13,9 +15,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace omega::content
 {
+class LevelTextureStore;
+struct GameDataServiceTestAccess;
+
 enum class RetailBuild
 {
     NtscUScus97264,
@@ -32,6 +38,7 @@ struct GameDataIdentity
 enum class GameDataErrorCode
 {
     InvalidConfiguration,
+    ForeignService,
     MountFailed,
     MissingRequiredFile,
     UnsupportedBuild,
@@ -108,8 +115,37 @@ public:
         const asset::LevelManifestIR& manifest) const;
 
 private:
+    // Opaque non-owning source identity. It follows the service implementation across moves but
+    // cannot keep the service or its VFS alive.
+    struct SourceBinding
+    {
+        std::weak_ptr<const void> identity;
+    };
+
+    // Owned terminal bytes plus work already performed while resolving ancestor containers. The
+    // terminal member is deliberately not charged here: an Open caller charges it as a container,
+    // while a Load caller charges it once as decoder input. A terminal .HOG component still obeys
+    // the service's nested-HOG byte cap before it crosses this boundary.
+    struct ResolvedSourceLocator
+    {
+        std::vector<std::byte> terminal_bytes;
+        std::uint64_t ancestor_input_bytes = 0;
+        std::uint64_t ancestor_directory_items = 0;
+        std::uint32_t archive_depth = 0;
+    };
+
+    // [any worker thread after Open(); thread-safe] The expected binding is checked before any VFS
+    // query or read. All returned storage is independently owned.
+    [[nodiscard]] SourceBinding source_binding() const noexcept;
+    [[nodiscard]] std::expected<ResolvedSourceLocator, GameDataError> ResolveSourceLocator(
+        const SourceBinding& expected_source, const asset::SourceLocator& locator,
+        asset::DecodeLimits caller_limits) const;
+
     struct Impl;
     explicit GameDataService(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;
+
+    friend class LevelTextureStore;
+    friend struct GameDataServiceTestAccess;
 };
 } // namespace omega::content

@@ -20,6 +20,25 @@
 #include <utility>
 #include <vector>
 
+namespace omega::content
+{
+struct GameDataServiceTestAccess final
+{
+    [[nodiscard]] static GameDataService::SourceBinding Bind(
+        const GameDataService& service) noexcept
+    {
+        return service.source_binding();
+    }
+
+    [[nodiscard]] static std::expected<GameDataService::ResolvedSourceLocator, GameDataError>
+    Resolve(const GameDataService& service, const GameDataService::SourceBinding& binding,
+        const asset::SourceLocator& locator, const asset::DecodeLimits limits = {})
+    {
+        return service.ResolveSourceLocator(binding, locator, limits);
+    }
+};
+} // namespace omega::content
+
 namespace
 {
 void AppendU32(std::vector<std::byte>& bytes, const std::uint32_t value)
@@ -472,6 +491,191 @@ LoadContentWithLimits(const std::filesystem::path& root,
         return std::unexpected(service.error());
     return service->LoadLevelContent(manifest);
 }
+
+void RunSourceResolverTests(const std::filesystem::path& root)
+{
+    using Access = omega::content::GameDataServiceTestAccess;
+    auto service = omega::content::GameDataService::Open({.root = root});
+    Check(service.has_value(), "source resolver fixture service opens");
+    if (!service)
+        return;
+    const auto binding = Access::Bind(*service);
+    const auto game_path = std::string{"GAMEDATA/MINSK/DATA.HOG"};
+
+    const auto direct_hog = MakeDataHog();
+    auto direct_file = Access::Resolve(*service, binding,
+        omega::asset::SourceLocator{.game_path = game_path});
+    Check(direct_file && direct_file->terminal_bytes == direct_hog &&
+              direct_file->ancestor_input_bytes == 0U &&
+              direct_file->ancestor_directory_items == 0U &&
+              direct_file->archive_depth == 0U,
+        "empty source chain returns the owned VFS file without charging a terminal parser");
+
+    auto direct_leaf = Access::Resolve(*service, binding, omega::asset::SourceLocator{
+        .game_path = game_path,
+        .hog_entries = {"cell.hog"},
+    });
+    Check(direct_leaf && direct_leaf->terminal_bytes == Bytes("xyz") &&
+              direct_leaf->ancestor_input_bytes == direct_hog.size() &&
+              direct_leaf->ancestor_directory_items == 1U &&
+              direct_leaf->archive_depth == 0U,
+        "direct source member charges one ancestor archive and excludes the terminal leaf");
+
+    auto exact_limits = omega::asset::DecodeLimits{};
+    exact_limits.maximum_input_bytes = direct_hog.size() + 3U;
+    exact_limits.maximum_items = 1U;
+    exact_limits.maximum_nesting_depth = 0U;
+    Check(Access::Resolve(*service, binding, omega::asset::SourceLocator{
+              .game_path = game_path,
+              .hog_entries = {"CELL.HOG"},
+          }, exact_limits)
+              .has_value(),
+        "direct source member accepts exact input, item, and depth limits");
+    --exact_limits.maximum_input_bytes;
+    CheckDecodeError(Access::Resolve(*service, binding, omega::asset::SourceLocator{
+                         .game_path = game_path,
+                         .hog_entries = {"CELL.HOG"},
+                     }, exact_limits),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "direct source member rejects a one-below cumulative input limit");
+    exact_limits.maximum_input_bytes = direct_hog.size() + 3U;
+    exact_limits.maximum_items = 0U;
+    CheckDecodeError(Access::Resolve(*service, binding, omega::asset::SourceLocator{
+                         .game_path = game_path,
+                         .hog_entries = {"CELL.HOG"},
+                     }, exact_limits),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "direct source member rejects a one-below ancestor-directory item limit");
+
+    const auto leaf_bytes = Bytes("resolved-leaf");
+    const auto inner_hog = MakeHog({HogMember{
+        .name = "SECRET-LEAF.BIN",
+        .payload = leaf_bytes,
+    }});
+    const auto outer_hog = MakeHog({HogMember{
+        .name = "InNeR.HoG",
+        .payload = inner_hog,
+    }});
+    Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG", outer_hog),
+        "nested source resolver fixture is written");
+
+    auto terminal_container = Access::Resolve(*service, binding,
+        omega::asset::SourceLocator{
+            .game_path = game_path,
+            .hog_entries = {"inner.hog"},
+        });
+    Check(terminal_container && terminal_container->terminal_bytes == inner_hog &&
+              terminal_container->ancestor_input_bytes == outer_hog.size() &&
+              terminal_container->ancestor_directory_items == 1U &&
+              terminal_container->archive_depth == 0U,
+        "a final locator component may return an owned nested container");
+
+    auto terminal_cap_config = omega::content::GameDataServiceConfig{.root = root};
+    terminal_cap_config.maximum_nested_hog_bytes = inner_hog.size() - 1U;
+    auto terminal_cap_service =
+        omega::content::GameDataService::Open(std::move(terminal_cap_config));
+    Check(terminal_cap_service.has_value(), "terminal-container cap fixture service opens");
+    if (terminal_cap_service)
+    {
+        const auto terminal_cap_binding = Access::Bind(*terminal_cap_service);
+        CheckDecodeError(Access::Resolve(*terminal_cap_service, terminal_cap_binding,
+                             omega::asset::SourceLocator{
+                                 .game_path = game_path,
+                                 .hog_entries = {"INNER.HOG"},
+                             }),
+            omega::asset::DecodeErrorCode::LimitExceeded,
+            "terminal HOG member obeys the configured nested-container byte cap");
+    }
+
+    const omega::asset::SourceLocator nested_locator{
+        .game_path = game_path,
+        .hog_entries = {"inner.hog", "secret-leaf.bin"},
+    };
+    auto nested_leaf = Access::Resolve(*service, binding, nested_locator);
+    Check(nested_leaf && nested_leaf->terminal_bytes == leaf_bytes &&
+              nested_leaf->ancestor_input_bytes == outer_hog.size() + inner_hog.size() &&
+              nested_leaf->ancestor_directory_items == 2U &&
+              nested_leaf->archive_depth == 1U,
+        "nested source resolution returns exact ancestor input, directory items, and depth");
+
+    auto nested_limits = omega::asset::DecodeLimits{};
+    nested_limits.maximum_input_bytes =
+        outer_hog.size() + inner_hog.size() + leaf_bytes.size();
+    nested_limits.maximum_items = 2U;
+    nested_limits.maximum_nesting_depth = 1U;
+    Check(Access::Resolve(*service, binding, nested_locator, nested_limits).has_value(),
+        "nested source resolution accepts exact cumulative limits");
+    nested_limits.maximum_nesting_depth = 0U;
+    CheckDecodeError(Access::Resolve(*service, binding, nested_locator, nested_limits),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "nested source resolution rejects one-below depth before lookup");
+    nested_limits.maximum_nesting_depth = 1U;
+    --nested_limits.maximum_input_bytes;
+    CheckDecodeError(Access::Resolve(*service, binding, nested_locator, nested_limits),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "nested source resolution rejects one-below cumulative input");
+    ++nested_limits.maximum_input_bytes;
+    nested_limits.maximum_items = 1U;
+    CheckDecodeError(Access::Resolve(*service, binding, nested_locator, nested_limits),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "nested source resolution rejects one-below cumulative directory items");
+
+    const auto colliding_hog = MakeHog({
+        HogMember{.name = "Secret.bin", .payload = leaf_bytes},
+        HogMember{.name = "SECRET.BIN", .payload = leaf_bytes},
+    });
+    Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG", colliding_hog),
+        "normalized-collision source fixture is written");
+    auto collision = Access::Resolve(*service, binding, omega::asset::SourceLocator{
+        .game_path = game_path,
+        .hog_entries = {"SECRET.BIN"},
+    });
+    CheckDecodeError(collision, omega::asset::DecodeErrorCode::DuplicateReference,
+        "source resolver rejects a normalized archive-name collision");
+    Check(!collision && collision.error().message.find("SECRET") == std::string::npos &&
+              (!collision.error().decode_error ||
+                  collision.error().decode_error->message.find("SECRET") == std::string::npos),
+        "source resolver collision diagnostics do not echo member identity");
+
+    Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG", direct_hog),
+        "valid source resolver fixture is restored");
+    auto foreign_service = omega::content::GameDataService::Open({.root = root});
+    Check(foreign_service.has_value(), "foreign source resolver fixture service opens");
+    if (foreign_service)
+    {
+        auto foreign = Access::Resolve(*foreign_service, binding,
+            omega::asset::SourceLocator{.game_path = "MISSING/SECRET.HOG"});
+        CheckError(foreign, omega::content::GameDataErrorCode::ForeignService,
+            "foreign source binding is rejected before locator validation or I/O");
+        Check(!foreign && foreign.error().message.find("MISSING") == std::string::npos &&
+                  foreign.error().message.find("SECRET") == std::string::npos,
+            "foreign-binding diagnostics do not echo locator identity");
+    }
+
+    auto move_source = omega::content::GameDataService::Open({.root = root});
+    auto move_destination = omega::content::GameDataService::Open({.root = root});
+    Check(move_source && move_destination, "move-identity resolver services open");
+    if (move_source && move_destination)
+    {
+        const auto source_binding = Access::Bind(*move_source);
+        const auto overwritten_binding = Access::Bind(*move_destination);
+        *move_destination = std::move(*move_source);
+        Check(Access::Resolve(*move_destination, source_binding,
+                  omega::asset::SourceLocator{.game_path = game_path})
+                  .has_value(),
+            "service move-assignment preserves the moved source identity");
+        CheckError(Access::Resolve(*move_destination, overwritten_binding,
+                       omega::asset::SourceLocator{.game_path = game_path}),
+            omega::content::GameDataErrorCode::ForeignService,
+            "service move-assignment invalidates the overwritten destination identity");
+
+        auto move_constructed = std::move(*move_destination);
+        Check(Access::Resolve(move_constructed, source_binding,
+                  omega::asset::SourceLocator{.game_path = game_path})
+                  .has_value(),
+            "service move construction preserves source identity");
+    }
+}
 } // namespace
 
 int GameDataServiceFailureCount()
@@ -486,6 +690,8 @@ int GameDataServiceFailureCount()
     const auto root = std::filesystem::temp_directory_path() /
         ("openomega-game-data-tests-" + std::to_string(nonce));
     Check(MakeValidTree(root), "synthetic NTSC-U-like data tree is created");
+
+    RunSourceResolverTests(root);
 
     auto service = omega::content::GameDataService::Open({.root = root});
     Check(service.has_value(), "valid owner-supplied data tree opens");
