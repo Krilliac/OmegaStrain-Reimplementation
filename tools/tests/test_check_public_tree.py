@@ -27,6 +27,14 @@ class PublicTreeGateTests(unittest.TestCase):
 
     def test_payload_extensions_and_boot_names_are_blocked(self) -> None:
         self.assertTrue(any("payload extension" in error for error in self.errors("fixture.iso")))
+        for extension in (".ska", ".skas"):
+            with self.subTest(extension=extension):
+                self.assertTrue(
+                    any(
+                        "payload extension" in error
+                        for error in self.errors(f"fixture{extension}")
+                    )
+                )
         self.assertTrue(
             any("retail executable name" in error for error in self.errors("SCUS_972.64"))
         )

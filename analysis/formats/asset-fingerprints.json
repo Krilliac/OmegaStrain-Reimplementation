@@ -166,6 +166,79 @@
       "version_comment_first_line": 679,
       "zero_padded": 679
     },
+    "ska": {
+      "computed_counted_word_span_exact": 158,
+      "computed_counted_word_span_padding_bytes_range": [
+        16,
+        2000
+      ],
+      "computed_counted_word_span_zero_padded": 55,
+      "computed_logical_bytes_range": [
+        464,
+        125776
+      ],
+      "count": 213,
+      "observed_word_0x04_range": [
+        1,
+        357
+      ],
+      "observed_word_0x08": {
+        "56": 16,
+        "88": 192,
+        "92": 5
+      },
+      "observed_word_0x08_0x10_pair": {
+        "56/0": 16,
+        "88/0": 122,
+        "88/1": 70,
+        "92/0": 2,
+        "92/1": 3
+      },
+      "observed_word_0x10": {
+        "0": 140,
+        "1": 73
+      },
+      "span_16_byte_aligned": 213,
+      "span_bytes_range": [
+        464,
+        125776
+      ],
+      "version_word": {
+        "3": 213
+      }
+    },
+    "skas": {
+      "ascii": 2,
+      "blank_line_count_range": [
+        5,
+        5
+      ],
+      "content_bytes_range": [
+        5129,
+        5155
+      ],
+      "count": 2,
+      "crlf_only": 2,
+      "ends_with_crlf": 2,
+      "line_count_range": [
+        72,
+        72
+      ],
+      "padding_bytes_range": [
+        1,
+        3
+      ],
+      "printable_ascii_with_line_endings": 2,
+      "single_colon_line_count_range": [
+        67,
+        67
+      ],
+      "span_bytes_range": [
+        5132,
+        5156
+      ],
+      "zero_padded": 2
+    },
     "skl": {
       "ascii": 1261,
       "count": 1261,
@@ -514,9 +587,9 @@
     "terrain_records_with_nonzero_alignment_bytes": 4144
   },
   "scan": {
-    "asset_spans_scanned": 53280,
+    "asset_spans_scanned": 53281,
     "depth": {
-      "-1": 4,
+      "-1": 5,
       "0": 32351,
       "1": 20925
     },
@@ -535,7 +608,7 @@
       ".prn": 1,
       ".pss": 54,
       ".scc": 1,
-      ".ska": 212,
+      ".ska": 213,
       ".skas": 2,
       ".skel": 4,
       ".skf": 26,
@@ -558,13 +631,13 @@
     "nested_hog_valid": 6677,
     "nested_hog_zero_padded": 6176,
     "standard_compression_magic_hits": 0,
-    "standard_compression_spans_checked": 46603,
+    "standard_compression_spans_checked": 46604,
     "top_level_hog_entries": 32351,
     "top_level_hog_exact_span": 273,
     "top_level_hog_files": 273,
     "top_level_hog_valid": 273
   },
-  "schema_version": 2,
+  "schema_version": 3,
   "scope": "aggregate structural fingerprints only; no proprietary payloads exported",
   "top_level_hog_errors": []
 }

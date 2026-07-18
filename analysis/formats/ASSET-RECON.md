@@ -26,6 +26,8 @@ the physical end of the span.
 | TDX | 15,248 | Every header begins with little-endian version word 5. |
 | SKM | 4,219 | Every file satisfies the chunk/qword size formula below; version byte is 3. |
 | SKL | 1,261 | Every file is ASCII line-oriented data. |
+| SKA | 213 | Every span satisfies the neutral counted-word extent below; version word is 3. |
+| SKAS | 2 | Both spans are zero-padded, CRLF-delimited printable ASCII. |
 | VAG | 8,665 | Every file has a conventional `VAGp` header and 16-byte-aligned ADPCM payload. |
 | LPD | 862 | Every file satisfies the 22-word count-table formula below. |
 | PAR | 679 | Every file is zero-padded ASCII with a version comment on line one. |
@@ -128,6 +130,30 @@ All 1,261 SKLs are ASCII. There are 1,243 CRLF files and 18 CR-only files, so th
 support both. Files contain 10-60 lines; 1,212 begin with the common `BONENOSCALE` profile and 49
 use other profile labels. The evidence supports a line-oriented skeleton/loadout reference list,
 not yet a decoded transform hierarchy. Strip only trailing NUL padding; do not assume CRLF.
+
+### SKA and SKAS structural envelopes
+
+SKA remains a structural family rather than a decoded animation format. All 213 observed spans
+begin with little-endian version word 3, are 16-byte aligned, and satisfy this neutral extent:
+
+```text
+header_bytes = 112
+counted_word_bytes = 4 * word_0x08 * (word_0x04 + int(word_0x10 == 0))
+logical_bytes = header_bytes + counted_word_bytes
+```
+
+The word at `0x04` ranges from 1 to 357. The word at `0x08` is 56 (16 spans), 88 (192), or 92
+(5), while the word at `0x10` is 0 (140) or 1 (73). Computed logical extents range from 464 to
+125,776 bytes: 158 spans are exact and 55 have 16-2,000 bytes of all-zero padding. No span has a
+nonzero tail or a computed extent beyond its physical boundary. This proves a counted 32-bit-word
+envelope only; frames, channels, bones, transforms, compression, timing, and animation meaning
+remain unassigned.
+
+SKAS is kept separate because only two distinct candidates exist. Both are printable ASCII with
+CRLF delimiters, a final CRLF, 72 lines, 5 blank lines, 67 lines containing exactly one colon, and
+1-3 trailing NUL bytes. Their physical spans are 5,132-5,156 bytes. This sample supports only a
+bounded text-shape check; labels, values, relationships, and any association with SKA are not yet
+established.
 
 ### VAG audio
 

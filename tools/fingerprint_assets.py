@@ -231,6 +231,44 @@ def fingerprint_skm(file: BinaryIO, span: Span, stats: Aggregate) -> None:
     stats.record_span(file, span.offset, span.size, logical_size, "computed_qword_layout_span")
 
 
+def fingerprint_ska(file: BinaryIO, span: Span, stats: Aggregate) -> None:
+    """Record the observed counted-word envelope without assigning animation semantics."""
+    stats.add("count")
+    stats.observe("span_bytes", span.size)
+    if span.size % 16 == 0:
+        stats.add("span_16_byte_aligned")
+
+    header_bytes = 112
+    if span.size < header_bytes:
+        stats.add("short_header")
+        return
+    header = read_at(file, span.offset, header_bytes)
+    version_word, word_0x04, word_0x08, _word_0x0c, word_0x10 = struct.unpack_from(
+        "<5I", header
+    )
+    stats.count("version_word", version_word)
+    stats.observe("observed_word_0x04", word_0x04)
+    stats.count("observed_word_0x08", word_0x08)
+    stats.count("observed_word_0x10", word_0x10)
+    stats.count("observed_word_0x08_0x10_pair", f"{word_0x08}/{word_0x10}")
+
+    if version_word != 3:
+        stats.add("unsupported_version_word")
+        return
+    if word_0x04 == 0 or word_0x08 == 0:
+        stats.add("zero_counted_word")
+        return
+    if word_0x10 not in (0, 1):
+        stats.add("unsupported_observed_word_0x10")
+        return
+
+    logical_size = header_bytes + 4 * word_0x08 * (word_0x04 + int(word_0x10 == 0))
+    stats.observe("computed_logical_bytes", logical_size)
+    stats.record_span(
+        file, span.offset, span.size, logical_size, "computed_counted_word_span"
+    )
+
+
 def text_payload(file: BinaryIO, span: Span, maximum: int = 1_048_576) -> tuple[bytes, int] | None:
     if span.size > maximum:
         return None
@@ -280,6 +318,43 @@ def fingerprint_skl(file: BinaryIO, span: Span, stats: Aggregate) -> None:
         stats.observe("padding_bytes", padding)
     else:
         stats.add("exact_text_span")
+
+
+def fingerprint_skas(file: BinaryIO, span: Span, stats: Aggregate) -> None:
+    """Record only bounded text-shape aggregates for the distinct SKAS family."""
+    stats.add("count")
+    stats.observe("span_bytes", span.size)
+    payload = text_payload(file, span)
+    if payload is None:
+        stats.add("too_large_for_text_validation")
+        return
+    content, padding = payload
+    stats.observe("content_bytes", len(content))
+    if padding:
+        stats.add("zero_padded")
+        stats.observe("padding_bytes", padding)
+    else:
+        stats.add("exact_text_span")
+    if b"\0" in content:
+        stats.add("internal_nul")
+        return
+    try:
+        text = content.decode("ascii")
+    except UnicodeDecodeError:
+        stats.add("non_ascii")
+        return
+    stats.add("ascii")
+    if not all(byte in (0x0A, 0x0D) or 0x20 <= byte <= 0x7E for byte in content):
+        stats.add("ascii_outside_text_envelope")
+        return
+    stats.add("printable_ascii_with_line_endings")
+    record_line_endings(text, stats)
+    lines = text.splitlines()
+    stats.observe("line_count", len(lines))
+    stats.observe("blank_line_count", sum(not line for line in lines))
+    stats.observe("single_colon_line_count", sum(line.count(":") == 1 for line in lines))
+    if text.endswith("\r\n"):
+        stats.add("ends_with_crlf")
 
 
 def fingerprint_vag(file: BinaryIO, span: Span, stats: Aggregate) -> None:
@@ -423,6 +498,8 @@ def fingerprint_vpk(file: BinaryIO, span: Span, stats: Aggregate) -> None:
 
 FORMAT_HANDLERS = {
     ".tdx": fingerprint_tdx,
+    ".ska": fingerprint_ska,
+    ".skas": fingerprint_skas,
     ".skm": fingerprint_skm,
     ".skl": fingerprint_skl,
     ".vag": fingerprint_vag,
@@ -678,7 +755,7 @@ def scan_disc(disc_root: Path, maximum_depth: int) -> dict[str, object]:
     pop, minsk = scan_pop_files(disc_root)
     minsk_container_summary(disc_root, minsk)
     output = {
-        "schema_version": 2,
+        "schema_version": 3,
         "scope": "aggregate structural fingerprints only; no proprietary payloads exported",
         "scan": scan.as_dict(),
         "top_level_hog_errors": top_level_errors,
