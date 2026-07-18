@@ -7,6 +7,7 @@
 #include "omega/retail/vum_material_catalog_decoder.h"
 #include "omega/vfs/virtual_file_system.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -333,13 +334,27 @@ public:
         return {};
     }
 
+    [[nodiscard]] asset::DecodeResult<void> ObserveScratch(const std::uint64_t bytes)
+    {
+        if (bytes > limits_.maximum_scratch_bytes)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "source locator resolution exceeds the scratch limit"));
+        peak_scratch_bytes_ = std::max(peak_scratch_bytes_, bytes);
+        return {};
+    }
+
     [[nodiscard]] std::uint64_t input_bytes() const noexcept { return input_bytes_; }
     [[nodiscard]] std::uint64_t directory_items() const noexcept { return directory_items_; }
+    [[nodiscard]] std::uint64_t peak_scratch_bytes() const noexcept
+    {
+        return peak_scratch_bytes_;
+    }
 
 private:
     asset::DecodeLimits limits_;
     std::uint64_t input_bytes_ = 0;
     std::uint64_t directory_items_ = 0;
+    std::uint64_t peak_scratch_bytes_ = 0;
 };
 
 [[nodiscard]] asset::DecodeResult<void> PreflightArchiveDirectory(
@@ -354,6 +369,58 @@ private:
 }
 
 using ArchiveDirectory = std::unordered_map<std::string, const archive::HogEntry*>;
+
+[[nodiscard]] asset::DecodeResult<std::uint64_t> LocatorWorkspaceUpperBound(
+    const asset::SourceLocator& locator, const asset::DecodeLimits limits)
+{
+    std::uint64_t component_objects = 0;
+    std::uint64_t workspace =
+        sizeof(std::string) + sizeof(std::vector<std::string>);
+    if (locator.game_path.size() > limits.maximum_string_bytes)
+        return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+            "source locator path exceeds the string limit"));
+    if (!Multiply(locator.hog_entries.size(), sizeof(std::string), component_objects) ||
+        !Add(workspace, component_objects, workspace) ||
+        !Add(workspace, locator.game_path.size(), workspace))
+        return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+            "source locator workspace size overflows"));
+
+    for (const auto& component : locator.hog_entries)
+    {
+        if (component.size() > limits.maximum_string_bytes)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "source locator component exceeds the string limit"));
+        if (!Add(workspace, component.size(), workspace))
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "source locator workspace size overflows"));
+    }
+    return workspace;
+}
+
+[[nodiscard]] asset::DecodeResult<std::uint64_t> DirectoryWorkspaceUpperBound(
+    const archive::HogArchive& archive, const asset::DecodeLimits limits)
+{
+    // Logical hash storage per entry: the value object, a node link, a bucket link, and one cached
+    // hash/metadata word. Spare implementation-selected bucket capacity is deliberately excluded.
+    constexpr std::uint64_t entry_objects =
+        sizeof(ArchiveDirectory::value_type) + 3U * sizeof(void*);
+    std::uint64_t entries = 0;
+    std::uint64_t workspace = 0;
+    if (!Multiply(archive.entries().size(), entry_objects, entries) ||
+        !Add(workspace, entries, workspace))
+        return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+            "source locator directory workspace size overflows"));
+    for (const auto& entry : archive.entries())
+    {
+        if (entry.name.size() > limits.maximum_string_bytes)
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "source locator directory name exceeds the string limit"));
+        if (!Add(workspace, entry.name.size(), workspace))
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "source locator directory workspace size overflows"));
+    }
+    return workspace;
+}
 
 [[nodiscard]] asset::DecodeResult<std::string> NormalizeArchiveName(
     const std::string_view name, const asset::DecodeLimits limits)
@@ -386,6 +453,23 @@ using ArchiveDirectory = std::unordered_map<std::string, const archive::HogEntry
                 "archive contains duplicate normalized names"));
     }
     return directory;
+}
+
+[[nodiscard]] asset::DecodeResult<ArchiveDirectory> BuildMeasuredArchiveDirectory(
+    const archive::HogArchive& archive, const asset::DecodeLimits limits,
+    const std::uint64_t locator_workspace, SourceResolveBudget& budget)
+{
+    auto directory_workspace = DirectoryWorkspaceUpperBound(archive, limits);
+    if (!directory_workspace)
+        return std::unexpected(directory_workspace.error());
+    std::uint64_t combined_workspace = 0;
+    if (!Add(locator_workspace, *directory_workspace, combined_workspace))
+        return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+            "source locator resolution workspace size overflows"));
+    auto scratch = budget.ObserveScratch(combined_workspace);
+    if (!scratch)
+        return std::unexpected(scratch.error());
+    return BuildArchiveDirectory(archive, limits);
 }
 
 [[nodiscard]] asset::DecodeResult<const archive::HogEntry*> FindArchiveEntry(
@@ -683,6 +767,16 @@ GameDataService::ResolveSourceLocator(const SourceBinding& expected_source,
         ? 0U
         : static_cast<std::uint32_t>(component_count - 1U);
 
+    SourceResolveBudget budget(caller_limits);
+    auto locator_workspace = LocatorWorkspaceUpperBound(locator, caller_limits);
+    if (!locator_workspace)
+        return std::unexpected(DecodeFailure(
+            "invalid source locator", locator_workspace.error()));
+    auto locator_scratch = budget.ObserveScratch(*locator_workspace);
+    if (!locator_scratch)
+        return std::unexpected(DecodeFailure(
+            "unable to resolve source locator", locator_scratch.error()));
+
     auto normalized_game_path = NormalizeArchiveName(locator.game_path, caller_limits);
     if (!normalized_game_path)
         return std::unexpected(DecodeFailure(
@@ -708,7 +802,6 @@ GameDataService::ResolveSourceLocator(const SourceBinding& expected_source,
         return std::unexpected(Error(GameDataErrorCode::ReadFailed,
             "unable to read source locator game path"));
 
-    SourceResolveBudget budget(caller_limits);
     if (normalized_components.empty())
     {
         auto terminal_limit = budget.CheckTerminal(source_bytes->size());
@@ -720,6 +813,7 @@ GameDataService::ResolveSourceLocator(const SourceBinding& expected_source,
             .ancestor_input_bytes = 0,
             .ancestor_directory_items = 0,
             .archive_depth = 0,
+            .peak_scratch_bytes = budget.peak_scratch_bytes(),
         };
     }
 
@@ -731,19 +825,21 @@ GameDataService::ResolveSourceLocator(const SourceBinding& expected_source,
     if (!current_archive)
         return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
             "source locator ancestor archive is malformed"));
-    auto current_directory = BuildArchiveDirectory(*current_archive, caller_limits);
+    auto current_directory = BuildMeasuredArchiveDirectory(
+        *current_archive, caller_limits, *locator_workspace, budget);
     if (!current_directory)
         return std::unexpected(DecodeFailure(
             "unable to resolve source locator", current_directory.error()));
 
     for (std::size_t index = 0; index < normalized_components.size(); ++index)
     {
-        auto entry = FindArchiveEntry(
-            *current_directory, normalized_components[index], caller_limits);
-        if (!entry)
+        const auto match = current_directory->find(normalized_components[index]);
+        if (match == current_directory->end())
             return std::unexpected(DecodeFailure(
-                "unable to resolve source locator", entry.error()));
-        const auto member_bytes = current_archive->payload(**entry);
+                "unable to resolve source locator",
+                AssetError(asset::DecodeErrorCode::InvalidReference,
+                    "manifest archive reference does not resolve")));
+        const auto member_bytes = current_archive->payload(*match->second);
         const bool terminal = index + 1U == normalized_components.size();
         if (terminal)
         {
@@ -766,6 +862,7 @@ GameDataService::ResolveSourceLocator(const SourceBinding& expected_source,
                 .ancestor_input_bytes = budget.input_bytes(),
                 .ancestor_directory_items = budget.directory_items(),
                 .archive_depth = archive_depth,
+                .peak_scratch_bytes = budget.peak_scratch_bytes(),
             };
         }
 
@@ -778,13 +875,17 @@ GameDataService::ResolveSourceLocator(const SourceBinding& expected_source,
         if (!nested_budget)
             return std::unexpected(DecodeFailure(
                 "unable to resolve source locator", nested_budget.error()));
+        // The member span remains backed by current_archive, so the normalized directory can be
+        // released before the next parser/directory workspace is created.
+        *current_directory = ArchiveDirectory{};
         auto nested_archive = archive::HogArchive::FromSpan(
             member_bytes, impl_->config.maximum_nested_hog_bytes);
         if (!nested_archive)
             return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
                 "source locator ancestor archive is malformed"));
         *current_archive = std::move(*nested_archive);
-        current_directory = BuildArchiveDirectory(*current_archive, caller_limits);
+        current_directory = BuildMeasuredArchiveDirectory(
+            *current_archive, caller_limits, *locator_workspace, budget);
         if (!current_directory)
             return std::unexpected(DecodeFailure(
                 "unable to resolve source locator", current_directory.error()));
@@ -804,12 +905,52 @@ std::expected<asset::LevelManifestIR, GameDataError> GameDataService::LoadLevelM
     const std::string level_root = "GAMEDATA/" + *normalized_level;
     const std::string pop_path = level_root + "/DATA.POP";
     const std::string data_hog_path = level_root + "/DATA.HOG";
+    std::array<std::string, 2> texture_paths{
+        level_root + "/TEX.HOG",
+        level_root + "/MAPTEX.HOG",
+    };
     if (!impl_->files.Contains(pop_path))
         return std::unexpected(Error(GameDataErrorCode::MissingRequiredFile,
             "level is missing DATA.POP: " + *normalized_level));
     if (!impl_->files.Contains(data_hog_path))
         return std::unexpected(Error(GameDataErrorCode::MissingRequiredFile,
             "level is missing DATA.HOG: " + *normalized_level));
+    if (!impl_->files.Contains(texture_paths[0]))
+        return std::unexpected(Error(GameDataErrorCode::MissingRequiredFile,
+            "level is missing required primary texture container"));
+    if (!impl_->files.Contains(texture_paths[1]))
+        return std::unexpected(Error(GameDataErrorCode::MissingRequiredFile,
+            "level is missing required map texture container"));
+
+    // DecodePopLevelManifest accounts sizeof(LevelManifestIR), including the empty vector object.
+    // Reserve only the two appended SourceLocator elements, their owned path bytes, and two items.
+    const auto decode_limits = impl_->config.decode_limits;
+    std::uint64_t texture_source_output_bytes = 0;
+    if (!Multiply(texture_paths.size(), sizeof(asset::SourceLocator),
+            texture_source_output_bytes))
+        return std::unexpected(DecodeFailure("unable to decode level manifest",
+            AssetError(asset::DecodeErrorCode::Overflow,
+                "level texture source output size overflows")));
+    for (const auto& path : texture_paths)
+    {
+        if (path.size() > decode_limits.maximum_string_bytes)
+            return std::unexpected(DecodeFailure("unable to decode level manifest",
+                AssetError(asset::DecodeErrorCode::LimitExceeded,
+                    "level texture source path exceeds decoder string limit")));
+        if (!Add(texture_source_output_bytes, path.size(), texture_source_output_bytes))
+            return std::unexpected(DecodeFailure("unable to decode level manifest",
+                AssetError(asset::DecodeErrorCode::Overflow,
+                    "level texture source output size overflows")));
+    }
+    if (texture_paths.size() > decode_limits.maximum_items ||
+        texture_source_output_bytes > decode_limits.maximum_output_bytes)
+        return std::unexpected(DecodeFailure("unable to decode level manifest",
+            AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "level texture sources exceed decoder limits")));
+
+    auto manifest_limits = decode_limits;
+    manifest_limits.maximum_items -= texture_paths.size();
+    manifest_limits.maximum_output_bytes -= texture_source_output_bytes;
 
     auto pop_bytes = impl_->files.Read(pop_path, impl_->config.maximum_pop_bytes);
     if (!pop_bytes)
@@ -828,7 +969,7 @@ std::expected<asset::LevelManifestIR, GameDataError> GameDataService::LoadLevelM
 
     auto manifest = retail::DecodePopLevelManifest(*pop_bytes, data_hog->entries(),
         asset::SourceLocator{.game_path = data_hog_path, .hog_entries = {}},
-        impl_->config.decode_limits);
+        manifest_limits);
     if (!manifest)
     {
         return std::unexpected(GameDataError{
@@ -836,6 +977,12 @@ std::expected<asset::LevelManifestIR, GameDataError> GameDataService::LoadLevelM
             .message = "unable to decode level manifest: " + manifest.error().message,
             .decode_error = std::move(manifest.error()),
         });
+    }
+    manifest->texture_sources.reserve(texture_paths.size());
+    for (auto& path : texture_paths)
+    {
+        manifest->texture_sources.push_back(
+            asset::SourceLocator{.game_path = std::move(path), .hog_entries = {}});
     }
     return std::move(*manifest);
 }

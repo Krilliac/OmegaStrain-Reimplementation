@@ -104,6 +104,8 @@ int PopLevelManifestDecoderFailureCount()
         Check(decoded->data_hog_source.hog_entries.size() == 1 &&
                   decoded->data_hog_source.hog_entries[0] == "OUTER.HOG",
             "common nested-HOG source chain is stored once on the manifest");
+        Check(decoded->texture_sources.empty(),
+            "the standalone POP decoder does not invent sibling texture sources");
         Check(decoded->terrain_cells[0].data_hog_entry == "CELL_A.HOG" &&
                   decoded->terrain_cells[1].data_hog_entry == "CELL_B.HOG",
             "case-insensitive lookups publish canonical entry names");

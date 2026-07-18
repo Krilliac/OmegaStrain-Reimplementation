@@ -96,9 +96,8 @@ owned plane payloads, and one four-byte array per palette entry. These are logic
 not allocator, vector-capacity, resident-memory, or process-memory measurements.
 
 The aggregate topology scanner does not execute this native API or observe C++ object sizes.
-Composed runtime Open/Load maxima remain explicit measurement gaps until the bounded
-`LevelTextureStore` path and a native corpus measurement exist; structural Python proxies must not
-be substituted for those runtime values.
+Composed runtime Open/Load usage is measured separately by the native `LevelTextureStore` verifier
+documented below; structural Python proxies must not be substituted for those runtime values.
 
 ## Common-archive containment result
 
@@ -131,13 +130,14 @@ it accepts all 36 containers and all 5,801 directory members with zero errors, m
 normalized collisions, or non-TDX entries. The primary class contributes 5,765 direct TDX
 occurrences and the map class contributes 36. Independent single-container maxima are 728 entries,
 3,073,600 bytes, and 1,456 structural Open directory-plus-locator items at archive depth zero; they
-are not asserted to co-occur. Native composed Open/Load item and logical-output maxima remain
-explicit measurement gaps.
+are not asserted to co-occur and are not native ABI budgets.
 
-This establishes direct containment in the two scanned sibling classes, not runtime ownership,
+This establishes direct containment in the two scanned sibling classes, not retail ownership,
 necessity, priority, or a material, cell, mesh, name, draw, placement, visibility, mip, or render
-binding. Nested containers are deliberately not traversed, class order conveys no priority, and
-the 5,801 occurrences are a level-scope inventory rather than a whole-disc ownership claim.
+binding. The native store's level-scoped locator inventory is an explicit engineering contract, not
+a claim that the scan recovered a retail ownership relationship. Nested containers are deliberately
+not traversed, class order conveys no priority, and the 5,801 occurrences are a level-scope inventory
+rather than a whole-disc ownership claim.
 
 ```powershell
 python -B tools/measure_level_texture_container_topology.py private/extracted-disc
@@ -197,3 +197,31 @@ build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-dis
 The confirmed semantic baseline is 15,248 textures, 15,442 blocks, 17,960 primary planes,
 285,521,272 owned primary bytes, 15,190 palette blocks, 252 direct blocks, 1,510,240 palette entries,
 62 implicit-zero textures, and 4,112 implicit-zero bytes, with zero errors.
+
+The separate public-safe level-scoped verifier executes the native composed store API: one `Open`
+per level followed by one `Load` for every published handle.
+
+```powershell
+build/msvc/Debug/omega_tool.exe level-texture-store-verify-tree private/extracted-disc
+```
+
+The confirmed run accepts all 18 levels, all 36 explicit texture sources, and 5,801 level-inventory
+texture occurrences with zero errors. The loaded occurrence totals are 5,913 blocks, 7,603 planes,
+615,232 palette entries, 27,101,352 plane bytes, 2,460,928 palette bytes, and 29,562,280 total owned
+storage bytes.
+
+Independent Open input/items/logical-output/depth/scratch maxima are
+`3,076,944 / 1,460 / 111,014 / 0 / 71,467`; independent Load maxima are
+`3,139,344 / 5,169 / 333,232 / 0 / 65,595`. Each field is maximized independently across its
+operation class, so no single level, texture, or operation is asserted to exhibit a complete tuple.
+These are deterministic logical API budgets rather than allocator or process-memory measurements.
+They set internal defaults of 4 MiB input, 512 KiB logical output, 128 KiB scratch, 8,192 items,
+4 KiB strings, and nesting depth one. Input, output, scratch, and items are independently rounded to
+the next binary boundary above the larger Open/Load field maximum. Depth one is the smallest nonzero
+headroom above measured depth zero while preserving bounded nested-source support; strings retain
+the common 4 KiB safety cap. These defaults neither describe a co-occurring corpus tuple nor expose
+runtime configuration or `--set` keys.
+The occurrence totals are not a unique whole-disc asset count. The fixed report contains no paths,
+names, hashes, offsets, payloads, per-level rows, identities, or bindings, and the native path assigns
+no display pixels, channel order, nibble/palette policy, mip purpose, material relationship,
+placement, visibility, draw, GPU-upload, or retail ownership semantics.

@@ -124,14 +124,18 @@ private:
 
     // Owned terminal bytes plus work already performed while resolving ancestor containers. The
     // terminal member is deliberately not charged here: an Open caller charges it as a container,
-    // while a Load caller charges it once as decoder input. A terminal .HOG component still obeys
-    // the service's nested-HOG byte cap before it crosses this boundary.
+    // while a Load caller charges it once as decoder input. Scratch is the deterministic logical
+    // peak of resident normalized-locator storage plus one sequential normalized ancestor
+    // directory; parser storage, backing VFS reads, allocator metadata, and spare hash capacity are
+    // excluded. A terminal .HOG component still obeys the service's nested-HOG byte cap before it
+    // crosses this boundary.
     struct ResolvedSourceLocator
     {
         std::vector<std::byte> terminal_bytes;
         std::uint64_t ancestor_input_bytes = 0;
         std::uint64_t ancestor_directory_items = 0;
         std::uint32_t archive_depth = 0;
+        std::uint64_t peak_scratch_bytes = 0;
     };
 
     // [any worker thread after Open(); thread-safe] The expected binding is checked before any VFS

@@ -12,11 +12,13 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <initializer_list>
 #include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -182,6 +184,54 @@ std::vector<std::byte> MakeHog(
 std::vector<std::byte> MakeDataHog()
 {
     return MakeHog({HogMember{.name = "CELL.HOG", .payload = Bytes("xyz")}});
+}
+
+std::vector<std::byte> MakeEmptyHog()
+{
+    return MakeHog({});
+}
+
+std::vector<std::byte> MakeDirect24Tdx(const std::uint8_t seed)
+{
+    constexpr std::uint16_t width = 16;
+    constexpr std::uint16_t height = 16;
+    constexpr std::uint32_t descriptor_bytes = 128;
+    constexpr std::uint32_t primary_base = 0x20;
+    constexpr std::uint32_t primary_start = primary_base + descriptor_bytes;
+    constexpr std::uint32_t payload_bytes = width * height * 3U;
+    constexpr std::uint32_t stride = primary_start + payload_bytes;
+
+    std::vector<std::byte> bytes(64, std::byte{0});
+    WriteU16(bytes, 0x00, 5);
+    WriteU16(bytes, 0x02, 0);
+    WriteU16(bytes, 0x04, width);
+    WriteU16(bytes, 0x06, height);
+    WriteU16(bytes, 0x08, 24);
+    WriteU16(bytes, 0x0A, 0x01);
+    WriteU16(bytes, 0x0C, 1);
+    WriteU16(bytes, 0x0E, 3);
+    WriteU16(bytes, 0x22, 1);
+    WriteU16(bytes, 0x24, 1);
+    WriteU16(bytes, 0x26, 0);
+    WriteU16(bytes, 0x34, descriptor_bytes);
+    WriteU16(bytes, 0x36, 0);
+    WriteU32(bytes, 0x38, stride);
+
+    std::vector<std::byte> block(stride, std::byte{0});
+    WriteU32(block, 0x18, primary_base);
+    WriteU32(block, 0x1C, primary_base);
+    WriteU32(block, 0x00, 0x20);
+    constexpr std::size_t object = primary_base + 0x20;
+    WriteU32(block, object + 0x04, 0x01U << 24U);
+    WriteU32(block, object + 0x20, width);
+    WriteU32(block, object + 0x24, height);
+    WriteU32(block, object + 0x40, payload_bytes / 4U);
+    WriteU32(block, object + 0x54, 0);
+    for (std::uint32_t index = 0; index < payload_bytes; ++index)
+        block[primary_start + index] =
+            static_cast<std::byte>(static_cast<std::uint8_t>(seed + index));
+    bytes.insert(bytes.end(), block.begin(), block.end());
+    return bytes;
 }
 
 std::vector<std::byte> MakePop()
@@ -420,7 +470,9 @@ bool MakeValidTree(const std::filesystem::path& root)
                "BOOT2 = cdrom0:\\SCUS_972.64;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n") &&
            WriteText(root / "SCUS_972.64", "synthetic placeholder") &&
            WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG", MakeDataHog()) &&
-           WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.POP", MakePop());
+           WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.POP", MakePop()) &&
+           WriteBytes(root / "GAMEDATA" / "MINSK" / "TEX.HOG", MakeEmptyHog()) &&
+           WriteBytes(root / "GAMEDATA" / "MINSK" / "MAPTEX.HOG", MakeEmptyHog());
 }
 
 int failures = 0;
@@ -502,14 +554,55 @@ void RunSourceResolverTests(const std::filesystem::path& root)
     const auto binding = Access::Bind(*service);
     const auto game_path = std::string{"GAMEDATA/MINSK/DATA.HOG"};
 
+    const auto locator_scratch = [](const omega::asset::SourceLocator& locator) {
+        std::uint64_t bytes =
+            sizeof(std::string) + sizeof(std::vector<std::string>) + locator.game_path.size() +
+            locator.hog_entries.size() * sizeof(std::string);
+        for (const auto& component : locator.hog_entries)
+            bytes += component.size();
+        return bytes;
+    };
+    const auto directory_scratch = [](const std::initializer_list<std::string_view> names) {
+        using ScratchDirectory = std::unordered_map<std::string, const void*>;
+        std::uint64_t bytes = names.size() *
+            (sizeof(ScratchDirectory::value_type) + 3U * sizeof(void*));
+        for (const auto name : names)
+            bytes += name.size();
+        return bytes;
+    };
+
     const auto direct_hog = MakeDataHog();
-    auto direct_file = Access::Resolve(*service, binding,
-        omega::asset::SourceLocator{.game_path = game_path});
+    const omega::asset::SourceLocator direct_locator{.game_path = game_path};
+    const std::uint64_t direct_locator_scratch = locator_scratch(direct_locator);
+    auto direct_file = Access::Resolve(*service, binding, direct_locator);
     Check(direct_file && direct_file->terminal_bytes == direct_hog &&
               direct_file->ancestor_input_bytes == 0U &&
               direct_file->ancestor_directory_items == 0U &&
-              direct_file->archive_depth == 0U,
+              direct_file->archive_depth == 0U &&
+              direct_file->peak_scratch_bytes == direct_locator_scratch,
         "empty source chain returns the owned VFS file without charging a terminal parser");
+
+    auto direct_scratch_limits = omega::asset::DecodeLimits{};
+    direct_scratch_limits.maximum_scratch_bytes = direct_locator_scratch;
+    Check(Access::Resolve(*service, binding, direct_locator, direct_scratch_limits).has_value(),
+        "source resolver accepts the exact normalized-locator scratch limit");
+    --direct_scratch_limits.maximum_scratch_bytes;
+    const std::filesystem::path direct_hog_path =
+        root / "GAMEDATA" / "MINSK" / "DATA.HOG";
+    std::error_code direct_hog_error;
+    const bool direct_hog_removed = std::filesystem::remove(
+        direct_hog_path, direct_hog_error);
+    Check(direct_hog_removed && !direct_hog_error,
+        "direct source is removed after the service freezes its VFS mapping");
+    if (direct_hog_removed && !direct_hog_error)
+    {
+        CheckDecodeError(Access::Resolve(
+                             *service, binding, direct_locator, direct_scratch_limits),
+            omega::asset::DecodeErrorCode::LimitExceeded,
+            "source resolver rejects one below normalized-locator scratch before VFS I/O");
+        Check(WriteBytes(direct_hog_path, direct_hog),
+            "direct source is restored after scratch-ordering coverage");
+    }
 
     auto direct_leaf = Access::Resolve(*service, binding, omega::asset::SourceLocator{
         .game_path = game_path,
@@ -591,12 +684,26 @@ void RunSourceResolverTests(const std::filesystem::path& root)
         .game_path = game_path,
         .hog_entries = {"inner.hog", "secret-leaf.bin"},
     };
+    const std::uint64_t nested_resolver_scratch = locator_scratch(nested_locator) +
+        std::max(directory_scratch({"InNeR.HoG"}),
+            directory_scratch({"SECRET-LEAF.BIN"}));
     auto nested_leaf = Access::Resolve(*service, binding, nested_locator);
     Check(nested_leaf && nested_leaf->terminal_bytes == leaf_bytes &&
               nested_leaf->ancestor_input_bytes == outer_hog.size() + inner_hog.size() &&
               nested_leaf->ancestor_directory_items == 2U &&
-              nested_leaf->archive_depth == 1U,
+              nested_leaf->archive_depth == 1U &&
+              nested_leaf->peak_scratch_bytes == nested_resolver_scratch,
         "nested source resolution returns exact ancestor input, directory items, and depth");
+
+    auto nested_scratch_limits = omega::asset::DecodeLimits{};
+    nested_scratch_limits.maximum_scratch_bytes = nested_resolver_scratch;
+    Check(Access::Resolve(*service, binding, nested_locator, nested_scratch_limits).has_value(),
+        "nested source resolver accepts exact locator-plus-directory scratch");
+    --nested_scratch_limits.maximum_scratch_bytes;
+    CheckDecodeError(Access::Resolve(
+                         *service, binding, nested_locator, nested_scratch_limits),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "nested source resolver rejects one below peak sequential-directory scratch");
 
     auto nested_limits = omega::asset::DecodeLimits{};
     nested_limits.maximum_input_bytes =
@@ -685,6 +792,8 @@ int GameDataServiceFailureCount()
     Check(omega::content::GameDataServiceConfig{}.decode_limits.maximum_input_bytes ==
               72ULL * 1024ULL * 1024ULL,
         "the service default shared input budget covers confirmed whole-level composition");
+    Check(MakeEmptyHog().size() == 32U,
+        "empty texture-container fixtures retain a bounded canonical HOG header");
 
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -706,6 +815,19 @@ int GameDataServiceFailureCount()
         {
             Check(manifest->data_hog_source.game_path == "GAMEDATA/MINSK/DATA.HOG",
                 "level bootstrap publishes a normalized canonical source path");
+            Check(manifest->texture_sources.size() == 2U &&
+                      manifest->texture_sources[0].game_path ==
+                          "GAMEDATA/MINSK/TEX.HOG" &&
+                      manifest->texture_sources[0].hog_entries.empty() &&
+                      manifest->texture_sources[1].game_path ==
+                          "GAMEDATA/MINSK/MAPTEX.HOG" &&
+                      manifest->texture_sources[1].hog_entries.empty(),
+                "level bootstrap owns exactly the primary then map texture container sources");
+            auto copied_texture_sources = manifest->texture_sources;
+            copied_texture_sources[0].game_path.clear();
+            Check(copied_texture_sources[0].game_path.empty() &&
+                      manifest->texture_sources[0].game_path == "GAMEDATA/MINSK/TEX.HOG",
+                "canonical texture source paths are independently owned values");
             Check(manifest->terrain_cells.size() == 1 &&
                       manifest->terrain_cells[0].data_hog_entry == "CELL.HOG" &&
                       manifest->terrain_cells[0].observed_kind == 4 &&
@@ -719,6 +841,63 @@ int GameDataServiceFailureCount()
         CheckError(service->LoadLevelManifest("UNKNOWN"),
             omega::content::GameDataErrorCode::MissingRequiredFile,
             "missing named levels have a stable error category");
+
+        std::error_code texture_file_error;
+        Check(std::filesystem::remove(
+                  root / "GAMEDATA" / "MINSK" / "TEX.HOG", texture_file_error) &&
+                  !texture_file_error,
+            "primary texture-container fixture is removed");
+        {
+            auto missing_primary_service =
+                omega::content::GameDataService::Open({.root = root});
+            Check(missing_primary_service.has_value(),
+                "a fresh service opens after the primary texture fixture is removed");
+            if (missing_primary_service)
+            {
+                auto missing_primary_texture =
+                    missing_primary_service->LoadLevelManifest("MINSK");
+                CheckError(missing_primary_texture,
+                    omega::content::GameDataErrorCode::MissingRequiredFile,
+                    "a missing primary texture container has a stable error category");
+                Check(!missing_primary_texture &&
+                          missing_primary_texture.error().message ==
+                              "level is missing required primary texture container" &&
+                          manifest && manifest->texture_sources.size() == 2U,
+                    "missing primary texture diagnostics are sanitized and prior sources remain "
+                    "owned");
+            }
+        }
+        Check(WriteBytes(
+                  root / "GAMEDATA" / "MINSK" / "TEX.HOG", MakeEmptyHog()),
+            "primary texture-container fixture is restored");
+
+        texture_file_error.clear();
+        Check(std::filesystem::remove(
+                  root / "GAMEDATA" / "MINSK" / "MAPTEX.HOG", texture_file_error) &&
+                  !texture_file_error,
+            "map texture-container fixture is removed");
+        {
+            auto missing_map_service =
+                omega::content::GameDataService::Open({.root = root});
+            Check(missing_map_service.has_value(),
+                "a fresh service opens after the map texture fixture is removed");
+            if (missing_map_service)
+            {
+                auto missing_map_texture = missing_map_service->LoadLevelManifest("MINSK");
+                CheckError(missing_map_texture,
+                    omega::content::GameDataErrorCode::MissingRequiredFile,
+                    "a missing map texture container has a stable error category");
+                Check(!missing_map_texture &&
+                          missing_map_texture.error().message ==
+                              "level is missing required map texture container" &&
+                          manifest && manifest->texture_sources.size() == 2U,
+                    "missing map texture diagnostics are sanitized and prior sources remain "
+                    "owned");
+            }
+        }
+        Check(WriteBytes(
+                  root / "GAMEDATA" / "MINSK" / "MAPTEX.HOG", MakeEmptyHog()),
+            "map texture-container fixture is restored");
 
         Check(WriteText(root / "GAMEDATA" / "MINSK" / "DATA.HOG", "not a HOG"),
             "malformed archive replacement is written");
@@ -738,12 +917,69 @@ int GameDataServiceFailureCount()
             "valid POP fixture is restored");
     }
 
+    constexpr std::string_view data_hog_game_path = "GAMEDATA/MINSK/DATA.HOG";
+    constexpr std::string_view primary_texture_game_path = "GAMEDATA/MINSK/TEX.HOG";
+    constexpr std::string_view map_texture_game_path = "GAMEDATA/MINSK/MAPTEX.HOG";
+    constexpr std::string_view resolved_cell_entry = "CELL.HOG";
+    const std::uint64_t exact_manifest_output_bytes =
+        sizeof(omega::asset::LevelManifestIR) + data_hog_game_path.size() +
+        sizeof(omega::asset::LevelCellSourceIR) + resolved_cell_entry.size() +
+        2U * sizeof(omega::asset::SourceLocator) + primary_texture_game_path.size() +
+        map_texture_game_path.size();
+    constexpr std::uint64_t exact_manifest_items = 4U;
+
+    auto exact_manifest_config = omega::content::GameDataServiceConfig{.root = root};
+    exact_manifest_config.decode_limits.maximum_output_bytes = exact_manifest_output_bytes;
+    exact_manifest_config.decode_limits.maximum_items = exact_manifest_items;
+    auto exact_manifest_service =
+        omega::content::GameDataService::Open(std::move(exact_manifest_config));
+    Check(exact_manifest_service.has_value(),
+        "exact manifest result budgets do not prevent root validation");
+    if (exact_manifest_service)
+    {
+        auto exact_manifest = exact_manifest_service->LoadLevelManifest("MINSK");
+        Check(exact_manifest && exact_manifest->texture_sources.size() == 2U,
+            "exact cumulative item/output budgets admit the complete owned manifest");
+    }
+
+    auto short_output_config = omega::content::GameDataServiceConfig{.root = root};
+    short_output_config.decode_limits.maximum_output_bytes = exact_manifest_output_bytes - 1U;
+    short_output_config.decode_limits.maximum_items = exact_manifest_items;
+    auto short_output_service =
+        omega::content::GameDataService::Open(std::move(short_output_config));
+    Check(short_output_service.has_value(),
+        "one-below manifest output budget does not prevent root validation");
+    if (short_output_service)
+        CheckDecodeError(short_output_service->LoadLevelManifest("MINSK"),
+            omega::asset::DecodeErrorCode::LimitExceeded,
+            "one-below cumulative manifest output budget fails before publication");
+
+    auto short_item_config = omega::content::GameDataServiceConfig{.root = root};
+    short_item_config.decode_limits.maximum_output_bytes = exact_manifest_output_bytes;
+    short_item_config.decode_limits.maximum_items = exact_manifest_items - 1U;
+    auto short_item_service =
+        omega::content::GameDataService::Open(std::move(short_item_config));
+    Check(short_item_service.has_value(),
+        "one-below manifest item budget does not prevent root validation");
+    if (short_item_service)
+        CheckDecodeError(short_item_service->LoadLevelManifest("MINSK"),
+            omega::asset::DecodeErrorCode::LimitExceeded,
+            "one-below cumulative manifest item budget fails before publication");
+
     omega::runtime::LaunchOptions invalid_startup;
     invalid_startup.level_code = "MINSK";
     auto invalid = omega::runtime::StartContent(invalid_startup);
     Check(!invalid && invalid.error().code ==
               omega::runtime::ContentStartupErrorCode::InvalidOptions,
         "application startup independently enforces its data-root invariant");
+
+    omega::runtime::LaunchOptions service_only_options;
+    service_only_options.data_root = root;
+    auto service_only = omega::runtime::StartContent(service_only_options);
+    Check(service_only && service_only->game_data && !service_only->level_manifest &&
+              !service_only->level_content && !service_only->debug_image &&
+              !service_only->level_texture_store,
+        "startup without a level leaves the level texture inventory disengaged");
 
     auto small_read_config = omega::content::GameDataServiceConfig{.root = root};
     small_read_config.maximum_pop_bytes = 8;
@@ -787,8 +1023,51 @@ int GameDataServiceFailureCount()
     startup_options.probe_only = true;
     auto startup = omega::runtime::StartContent(startup_options);
     Check(startup && startup->game_data && startup->level_manifest && startup->level_content &&
-              startup->debug_image,
-        "the exact non-SDL startup path owns validated manifest, spatial, material, and debug data");
+              startup->debug_image && startup->level_texture_store,
+        "the exact non-SDL startup path owns validated manifest, spatial, material, debug, and "
+        "texture-inventory data");
+
+    const auto direct_tdx = MakeDirect24Tdx(0x52);
+    Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "TEX.HOG",
+              MakeHog({HogMember{.name = "STARTUP.TDX", .payload = direct_tdx}})),
+        "a valid direct startup TDX fixture is written");
+    auto textured_startup = omega::runtime::StartContent(startup_options);
+    Check(textured_startup && textured_startup->game_data &&
+              textured_startup->level_texture_store &&
+              textured_startup->level_texture_store->size() == 1U,
+        "startup inventories one direct TDX without loading or binding it");
+    if (textured_startup && textured_startup->game_data &&
+        textured_startup->level_texture_store &&
+        textured_startup->level_texture_store->size() == 1U)
+    {
+        auto handle = textured_startup->level_texture_store->HandleAt(0);
+        Check(handle.has_value(), "startup texture inventory publishes its bounded handle");
+        if (handle)
+        {
+            auto moved_startup = std::move(*textured_startup);
+            auto loaded = moved_startup.level_texture_store->Load(
+                *moved_startup.game_data, *handle);
+            Check(loaded && loaded->storage.width == 16U && loaded->storage.height == 16U,
+                "moving startup state retains the store-to-service binding and handle identity");
+        }
+    }
+    Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "TEX.HOG", MakeEmptyHog()),
+        "the empty primary texture fixture is restored after the move proof");
+
+    Check(WriteText(root / "GAMEDATA" / "MINSK" / "TEX.HOG", "not a HOG"),
+        "a malformed startup texture source is written");
+    auto malformed_texture_startup = omega::runtime::StartContent(startup_options);
+    Check(!malformed_texture_startup &&
+              malformed_texture_startup.error().code ==
+                  omega::runtime::ContentStartupErrorCode::LevelTextures &&
+              !malformed_texture_startup.error().game_data_error &&
+              malformed_texture_startup.error().level_texture_error &&
+              malformed_texture_startup.error().level_texture_error->code ==
+                  omega::content::LevelTextureStoreErrorCode::MalformedArchive,
+        "startup returns no partial state and preserves the typed malformed-texture error");
+    Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "TEX.HOG", MakeEmptyHog()),
+        "the empty primary texture fixture is restored after the typed startup failure");
+
     if (startup && startup->level_manifest && startup->level_content && startup->debug_image)
     {
         Check(startup->level_manifest->terrain_cells.size() == 2 &&

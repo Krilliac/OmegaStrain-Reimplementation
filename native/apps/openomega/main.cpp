@@ -18,6 +18,9 @@ void PrintContentError(const omega::runtime::ContentStartupError& error)
     std::cerr << "content startup [";
     if (error.game_data_error)
         std::cerr << omega::content::GameDataErrorCodeName(error.game_data_error->code);
+    else if (error.level_texture_error)
+        std::cerr << omega::content::LevelTextureStoreErrorCodeName(
+            error.level_texture_error->code);
     else
         std::cerr << omega::runtime::ContentStartupErrorCodeName(error.code);
     std::cerr << "]: " << error.message << '\n';
