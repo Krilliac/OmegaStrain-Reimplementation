@@ -96,6 +96,14 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     }
     auto platform = std::make_unique<SdlPlatformService>(std::move(*created_platform));
 
+    auto created_sdl_input = SdlInputService::Create(*platform);
+    if (!created_sdl_input)
+    {
+        log->Error("startup", "SDL input service: " + created_sdl_input.error());
+        return std::unexpected("SDL input service: " + created_sdl_input.error());
+    }
+    auto sdl_input = std::make_unique<SdlInputService>(std::move(*created_sdl_input));
+
     auto created_audio = SdlAudioService::Create(*platform);
     if (!created_audio)
     {
@@ -119,8 +127,8 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
 
     return OmegaApp(std::move(config_owner), std::move(content_owner), std::move(stderr_sink),
         std::move(ring_sink), std::move(log), std::move(jobs), std::move(frame_scheduler),
-        std::move(input), std::move(simulation), std::move(platform), std::move(audio),
-        std::move(host));
+        std::move(input), std::move(simulation), std::move(platform), std::move(sdl_input),
+        std::move(audio), std::move(host));
 }
 
 OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
@@ -132,6 +140,7 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<runtime::InputTracker> input,
     std::unique_ptr<simulation::SimulationWorld> simulation,
     std::unique_ptr<SdlPlatformService> platform,
+    std::unique_ptr<SdlInputService> sdl_input,
     std::unique_ptr<SdlAudioService> audio,
     std::unique_ptr<SdlGpuHost> host) noexcept
     : config_(std::move(config)), content_(std::move(content)),
@@ -139,7 +148,7 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
       log_(std::move(log)), jobs_(std::move(jobs)),
       frame_scheduler_(std::move(frame_scheduler)), input_(std::move(input)),
       simulation_(std::move(simulation)), platform_(std::move(platform)),
-      audio_(std::move(audio)), host_(std::move(host))
+      sdl_input_(std::move(sdl_input)), audio_(std::move(audio)), host_(std::move(host))
 {
 }
 
@@ -156,7 +165,7 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
     auto previous_frame = Clock::now();
     while (running && (frame_limit < 0 || result.rendered_frames < frame_limit))
     {
-        const HostEventResult events = host_->PumpEvents(*input_, *log_);
+        const InputPumpResult events = sdl_input_->PumpEvents(*input_, *log_);
         const runtime::InputSnapshot input_snapshot = input_->EndFrame();
         ++result.input_frames;
         if (input_snapshot.rejected_event_count() != 0U)

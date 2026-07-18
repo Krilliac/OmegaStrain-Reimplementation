@@ -10,7 +10,7 @@ OmegaApp [game thread, sole lifetime owner]
 |- AssetService [game thread API; worker decode]
 |- RenderService [render thread]
 |- AudioService [game thread API; audio callback]
-|- InputService [main/game thread]
+|- SdlInputService [main thread; SDL event/gamepad owner]
 |- ScriptService [game thread]
 |- SimulationWorld [game thread]
 |- UiService [game thread build; render thread consume]
@@ -24,13 +24,14 @@ not raw pointers or `shared_ptr` ownership graphs.
 
 The initial composition root now owns the validated configuration store, content startup state,
 stderr/ring log sinks, logging service, worker pool, fixed-step scheduler, input tracker,
-`SimulationWorld`, SDL process-global platform service, SDL audio service, and SDL GPU host in that
-order. The host is created last and destroyed first; audio stops before the platform service calls
-the process-global SDL shutdown.
+`SimulationWorld`, SDL process-global platform service, SDL input service, SDL audio service, and
+SDL GPU host in that order. The host is created last and destroyed first; audio and input stop
+before the platform service calls the process-global SDL shutdown.
 `OmegaApp::Run` owns the steady clock, closes immutable input frames, asks the scheduler for a
-bounded plan, executes every planned world step, then submits one render frame. The SDL host only
-pumps events and renders; no SDL type crosses into the platform-neutral runtime or simulation
-libraries.
+bounded plan, executes every planned world step, then submits one render frame.
+`SdlInputService::PumpEvents` is the sole process-global event-queue consumer. `SdlGpuHost` owns
+only video, window, GPU, and rendering resources; no SDL type crosses into the platform-neutral
+runtime or simulation libraries.
 
 `GameDataService` is the implemented startup boundary. It owns its VFS, freezes mounts during
 `Open()`, and returns only canonical owned IR. It now resolves each manifest cell HOG and its unique
@@ -73,6 +74,14 @@ queues.
   step/simulated-time state. The composition root supplies the scheduler's validated step; its
   current default is a synthetic-shell value, while the retail tick rate remains evidence-driven.
 - `RenderService` receives scene snapshots and exposes no retail-format details.
+- `SdlInputService` is an app-owned, non-hot-reloadable main-thread leaf. It owns the ref-counted
+  SDL gamepad subsystem, pumps the global SDL event queue, and owns at most one primary gamepad.
+  Button events are accepted only when their instance ID matches that primary. Window focus loss
+  reconciles all neutral controls; primary disconnect instead reconciles only `GamepadButton`
+  controls to up, preserving keyboard and mouse state, then promotes the next available gamepad.
+  Choosing one primary is a synthetic host-shell policy, not a retail behavior claim. A
+  deterministic headless virtual-gamepad regression covers attach/open, filtered button edges,
+  disconnect reconciliation, and promotion without a window or physical controller.
 - `AudioService` owns a system-default SDL playback stream. Its first callback supplies bounded,
   frame-aligned project-owned silence from a fixed buffer and publishes only lock-free diagnostic
   counters. The 48 kHz stereo F32 source format is a native engineering choice, not a retail claim;
@@ -81,9 +90,9 @@ queues.
 ## Hot reload
 
 Research builds may hot-reload decoded assets, internal scripts, and mission compatibility
-tables at frame boundaries. Platform, renderer, audio device, and network transport are
-non-hot-reloadable initially. The validated retail-data root and its frozen mount table are also
-non-hot-reloadable. No vtable pointer crosses a reloadable boundary.
+tables at frame boundaries. Platform, renderer, input device/event pump, audio device, and network
+transport are non-hot-reloadable initially. The validated retail-data root and its frozen mount
+table are also non-hot-reloadable. No vtable pointer crosses a reloadable boundary.
 
 ## Dependency direction
 

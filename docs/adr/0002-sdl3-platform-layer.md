@@ -11,14 +11,18 @@ device/streams, and GPU device/swapchain. The first renderer backend is SDL_GPU,
 modern Direct3D 12, Vulkan, or Metal-style APIs.
 
 Gameplay, simulation, retail-format decoders, and asset types never include SDL headers.
-`PlatformService`, `InputService`, `AudioService`, and `RenderService` own the SDL-facing code.
-The app-owned platform service owns SDL's process-global lifetime. Audio and GPU/input leaves use
-ref-counted subsystem initialization and shut down before the platform service calls `SDL_Quit`.
+`SdlPlatformService`, `SdlInputService`, `SdlAudioService`, and `SdlGpuHost` own the SDL-facing code.
+The app-owned platform service owns SDL's process-global lifetime. The non-hot-reloadable
+`SdlInputService` owns the ref-counted gamepad subsystem, the global event pump through
+`PumpEvents`, and primary-gamepad lifetime; `SdlGpuHost` owns video, window, GPU, and rendering
+resources only. Input, audio, and GPU leaves shut down before the platform service calls `SDL_Quit`.
 
 ## Reasons
 
 - One zlib-licensed dependency covers the native host surfaces without any PS2 execution code.
 - SDL's gamepad API normalizes common controller layouts while retaining hotplug support.
+- SDL virtual gamepads provide deterministic headless coverage of attach, input, disconnect, and
+  replacement-device behavior without requiring a window or physical controller.
 - SDL audio streams provide device migration, conversion, buffering, and mixing primitives.
 - SDL_GPU supplies modern 3D/compute resources and command buffers across D3D12, Vulkan, and
   Metal without requiring separate gameplay-facing renderer implementations.
@@ -28,6 +32,10 @@ ref-counted subsystem initialization and shut down before the platform service c
 - Pin an exact stable release and update intentionally through a tested dependency change.
 - Precompile shipping shaders; runtime shader cross-compilation is a development convenience.
 - The render thread owns the GPU device and queue. The game thread submits immutable frames.
+- The main thread is the sole consumer of SDL's process-global event queue. The input leaf accepts
+  gamepad button events only from its primary instance ID. When that device disconnects, it resets
+  only gamepad controls and promotes the next available gamepad, preserving keyboard and mouse
+  state. Selecting one primary device is a synthetic shell policy, not a retail behavior claim.
 - SDL coordinate conventions are a renderer detail; retail importers convert into the engine's
   canonical coordinate system.
 

@@ -3,8 +3,6 @@
 #include "sdl_platform_service.h"
 
 #include "omega/runtime/debug_image.h"
-#include "omega/runtime/input_tracker.h"
-#include "omega/runtime/log_service.h"
 
 #include <SDL3/SDL.h>
 
@@ -12,7 +10,6 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <optional>
 #include <string>
 #include <utility>
 
@@ -27,46 +24,12 @@ namespace
            (detail != nullptr && detail[0] != '\0' ? detail : "unknown SDL error");
 }
 
-[[nodiscard]] std::optional<runtime::InputEvent> TranslateInputEvent(
-    const SDL_Event& event) noexcept
-{
-    switch (event.type)
-    {
-    case SDL_EVENT_KEY_DOWN:
-    case SDL_EVENT_KEY_UP:
-        if (event.key.repeat)
-            return std::nullopt;
-        return runtime::InputEvent{
-            .device = runtime::InputDevice::Keyboard,
-            .code = static_cast<std::uint16_t>(event.key.scancode),
-            .pressed = event.type == SDL_EVENT_KEY_DOWN,
-        };
-    case SDL_EVENT_MOUSE_BUTTON_DOWN:
-    case SDL_EVENT_MOUSE_BUTTON_UP:
-        return runtime::InputEvent{
-            .device = runtime::InputDevice::MouseButton,
-            .code = event.button.button,
-            .pressed = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN,
-        };
-    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-    case SDL_EVENT_GAMEPAD_BUTTON_UP:
-        return runtime::InputEvent{
-            .device = runtime::InputDevice::GamepadButton,
-            .code = event.gbutton.button,
-            .pressed = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN,
-        };
-    default:
-        return std::nullopt;
-    }
-}
 } // namespace
 
 struct SdlGpuHost::Impl
 {
     ~Impl()
     {
-        if (gamepad != nullptr)
-            SDL_CloseGamepad(gamepad);
         if (device != nullptr)
         {
             SDL_WaitForGPUIdle(device);
@@ -79,15 +42,13 @@ struct SdlGpuHost::Impl
         if (window != nullptr)
             SDL_DestroyWindow(window);
         if (subsystems_initialized)
-            SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
     }
 
     bool subsystems_initialized = false;
     bool window_claimed = false;
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;
-    SDL_Gamepad* gamepad = nullptr;
-    SDL_JoystickID gamepad_id = 0;
     SDL_GPUTexture* debug_texture = nullptr;
     std::uint32_t debug_width = 0;
     std::uint32_t debug_height = 0;
@@ -102,8 +63,8 @@ std::expected<SdlGpuHost, std::string> SdlGpuHost::Create(
         return std::unexpected("SDL platform service is not ready");
 
     auto impl = std::make_unique<Impl>();
-    if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
-        return std::unexpected(SdlError("SDL_InitSubSystem(video/gamepad)"));
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
+        return std::unexpected(SdlError("SDL_InitSubSystem(video)"));
     impl->subsystems_initialized = true;
 
     impl->window = SDL_CreateWindow("OpenOmega - native runtime", 1280, 720,
@@ -211,54 +172,6 @@ SdlGpuHost::SdlGpuHost(std::unique_ptr<Impl> impl) noexcept
 
 SdlGpuHost::~SdlGpuHost() = default;
 SdlGpuHost::SdlGpuHost(SdlGpuHost&&) noexcept = default;
-SdlGpuHost& SdlGpuHost::operator=(SdlGpuHost&&) noexcept = default;
-
-HostEventResult SdlGpuHost::PumpEvents(
-    runtime::InputTracker& input, runtime::LogService& log)
-{
-    HostEventResult result;
-    SDL_Event event{};
-    while (SDL_PollEvent(&event))
-    {
-        if (event.type == SDL_EVENT_QUIT)
-        {
-            result.quit_requested = true;
-        }
-        else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
-        {
-            input.ResetAllControls();
-        }
-        else if (event.type == SDL_EVENT_GAMEPAD_ADDED && impl_->gamepad == nullptr)
-        {
-            impl_->gamepad = SDL_OpenGamepad(event.gdevice.which);
-            if (impl_->gamepad == nullptr)
-            {
-                log.Warning("input", SdlError("SDL_OpenGamepad"));
-            }
-            else
-            {
-                impl_->gamepad_id = event.gdevice.which;
-                log.Info("input", "opened the primary SDL gamepad");
-            }
-        }
-        else if (event.type == SDL_EVENT_GAMEPAD_REMOVED && impl_->gamepad != nullptr &&
-                 event.gdevice.which == impl_->gamepad_id)
-        {
-            SDL_CloseGamepad(impl_->gamepad);
-            impl_->gamepad = nullptr;
-            impl_->gamepad_id = 0;
-            input.ResetDevice(runtime::InputDevice::GamepadButton);
-            log.Info("input", "closed the removed primary SDL gamepad");
-        }
-
-        if (const auto translated = TranslateInputEvent(event))
-        {
-            const auto accepted = input.PushEvent(*translated);
-            (void)accepted;
-        }
-    }
-    return result;
-}
 
 std::expected<void, std::string> SdlGpuHost::RenderFrame(
     const std::uint64_t rendered_frame_index)

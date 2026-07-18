@@ -2,6 +2,7 @@
 
 #include "sdl_audio_service.h"
 #include "sdl_gpu_host.h"
+#include "sdl_input_service.h"
 #include "sdl_platform_service.h"
 
 #include "omega/runtime/config_service.h"
@@ -71,6 +72,7 @@ private:
         std::unique_ptr<runtime::InputTracker> input,
         std::unique_ptr<simulation::SimulationWorld> simulation,
         std::unique_ptr<SdlPlatformService> platform,
+        std::unique_ptr<SdlInputService> sdl_input,
         std::unique_ptr<SdlAudioService> audio,
         std::unique_ptr<SdlGpuHost> host) noexcept;
 
@@ -85,6 +87,7 @@ private:
     std::unique_ptr<runtime::InputTracker> input_;
     std::unique_ptr<simulation::SimulationWorld> simulation_;
     std::unique_ptr<SdlPlatformService> platform_;
+    std::unique_ptr<SdlInputService> sdl_input_;
     std::unique_ptr<SdlAudioService> audio_;
     std::unique_ptr<SdlGpuHost> host_;
 };

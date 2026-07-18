@@ -1,0 +1,49 @@
+#pragma once
+
+#include <expected>
+#include <memory>
+#include <string>
+
+namespace omega::runtime
+{
+class InputTracker;
+class LogService;
+}
+
+namespace omega::app
+{
+class SdlPlatformService;
+
+struct InputPumpResult
+{
+    bool quit_requested = false;
+};
+
+// Non-hot-reloadable main-thread SDL event and primary-gamepad owner. This leaf borrows the
+// process-global platform lifetime, which must outlive it.
+class SdlInputService final
+{
+public:
+    // [main thread, startup] Initializes SDL's gamepad subsystem and selects the first openable
+    // attached gamepad. Having no attached or openable gamepad is not a startup failure.
+    [[nodiscard]] static std::expected<SdlInputService, std::string> Create(
+        const SdlPlatformService& platform);
+
+    // [main thread, before the platform service is destroyed]
+    ~SdlInputService();
+    SdlInputService(SdlInputService&&) noexcept;
+    SdlInputService& operator=(SdlInputService&&) noexcept = delete;
+    SdlInputService(const SdlInputService&) = delete;
+    SdlInputService& operator=(const SdlInputService&) = delete;
+
+    // [main thread] Owns the SDL event queue, translating neutral controls into the borrowed
+    // tracker. OmegaApp owns frame closure and quit-action policy.
+    [[nodiscard]] InputPumpResult PumpEvents(
+        runtime::InputTracker& input, runtime::LogService& log);
+
+private:
+    struct Impl;
+    explicit SdlInputService(std::unique_ptr<Impl> impl) noexcept;
+    std::unique_ptr<Impl> impl_;
+};
+} // namespace omega::app
