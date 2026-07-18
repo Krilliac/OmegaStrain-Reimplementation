@@ -33,8 +33,9 @@ enum class SimulationStepResult : std::uint8_t
 
 // App-owned, non-hot-reloadable deterministic game-thread state boundary. This
 // first implementation owns only the canonical simulation clock and entity
-// identity storage; components and systems will enter behind this API without
-// making the SDL host or frame scheduler depend on gameplay state.
+// identity storage. Entity lifecycle remains behind this boundary so future
+// direct component stores can be cleaned in deterministic declaration order
+// without making the SDL host or frame scheduler depend on gameplay state.
 class SimulationWorld final
 {
 public:
@@ -49,6 +50,24 @@ public:
     SimulationWorld(const SimulationWorld&) = delete;
     SimulationWorld& operator=(const SimulationWorld&) = delete;
 
+    // [game thread] Returns the next deterministic identity or
+    // CapacityExhausted. All identity storage was allocated during Create().
+    [[nodiscard]] std::expected<EntityId, EntityCreateError> CreateEntity() noexcept;
+
+    // [game thread, lifecycle] This is the sole world-owned entity destruction
+    // path. An exact live generation is destroyed; every other handle is inert.
+    // Future direct component stores must erase this exact generation in
+    // deterministic declaration order before the registry advances it.
+    [[nodiscard]] EntityDestroyResult DestroyEntity(EntityId entity) noexcept;
+
+    // [game thread] Tests an exact generation in this world's registry. EntityId
+    // remains a plain world-scoped value, not a cross-world capability token.
+    [[nodiscard]] bool IsAlive(EntityId entity) const noexcept;
+
+    // [game thread] Returns aggregate identity state by value. No mutable
+    // registry reference or storage view escapes SimulationWorld ownership.
+    [[nodiscard]] EntityRegistrySnapshot EntitySnapshot() const noexcept;
+
     // [game thread] Advances exactly one fixed step. If either diagnostic representation is full,
     // returns RepresentationExhausted and leaves the complete state unchanged.
     [[nodiscard]] SimulationStepResult AdvanceOneStep() noexcept;
@@ -58,12 +77,6 @@ public:
 
     // [game thread; immutable after Create()]
     [[nodiscard]] const SimulationWorldConfig& config() const noexcept;
-
-    // [game thread] Returns a borrowed reference to the world-owned identity
-    // store used by future component systems. The reference is invalidated by
-    // moving or destroying this world and must not cross a hot-reload boundary.
-    [[nodiscard]] EntityRegistry& entities() noexcept;
-    [[nodiscard]] const EntityRegistry& entities() const noexcept;
 
 private:
     SimulationWorld(const SimulationWorldConfig& config, EntityRegistry entities) noexcept;
