@@ -48,11 +48,14 @@ incomplete.
   pair from one selected runtime copy. Its repeat is byte-identical; each validated report contains
   two EE-read aggregate rows, two anonymous-site rows, and zero VIF1 chunk rows. Post-run
   containment auditing found no retained runtime copy, executable surface, reparse point,
-  owner-input copy, or emulator/build process. This confirms deterministic bounded observation
-  only. Both EE rows remain confined to separate slots of the already-opaque header-vector block;
-  no accepted row reaches counts, records, metadata, payload, or tail data. This is header-only
-  evidence and assigns no geometry, topology, vertex, material, packet, draw, placement,
-  visibility, or gameplay semantics.
+  owner-input copy, or emulator/build process. An independently guarded second ranked trial
+  reproduced those aggregates exactly: one capture with four accepted aggregate rows, split evenly
+  between EE-read and anonymous-site rows, zero VIF1 rows, and zero aggregate-count deltas. In both
+  trials, the EE-read rows remain confined to the already-opaque header-vector block; no accepted
+  row reaches counts, records, metadata, payload, VIF, or tail data. This repeated header-only
+  evidence does not exclude copied buffers or activity outside the bounded observation window and
+  assigns no geometry, topology, vertex, material, packet, draw, placement, visibility, or gameplay
+  semantics.
 - Passive SKM and SKL native descriptors preserve only bounded structural metadata. The passive
   SKA descriptor implements the aggregate-proven neutral counted-word extent as fixed output while
   the two-candidate SKAS text envelope remains separate; neither assigns animation semantics. The

@@ -153,11 +153,13 @@ was byte-identical. Each accepted report contains two EE-read aggregate rows, tw
 rows, and zero VIF1 chunk rows. These counts confirm only a deterministic bounded consumer-read
 observation; they do not identify a consumed structure or assign runtime meaning.
 
-Both EE-read rows fall in separate slots of the already-opaque homogeneous header-vector block.
-No accepted row reaches the scalar/count words, endpoint words, record preamble, name/material
-records, metadata, payload, or tail. The accepted pair is therefore header-only evidence; the
-absence of a direct VIF1 row does not rule out copied buffers or consumption outside the bounded
-observation window.
+An independently guarded second ranked trial reproduced those aggregates exactly: one capture with
+four accepted aggregate rows, split evenly between EE-read and anonymous-site rows, zero VIF1 rows,
+and zero aggregate-count deltas. Across both trials, the EE-read rows remain confined to the
+already-opaque homogeneous header-vector block. No accepted row reaches the scalar/count words,
+endpoint words, record preamble, name/material records, metadata, payload, VIF, or tail. The
+reproduced result is therefore header-only evidence; it does not rule out copied buffers or
+consumption outside the bounded observation window and does not establish runtime semantics.
 
 A publishable trace report may expose only sanitized aggregates:
 
