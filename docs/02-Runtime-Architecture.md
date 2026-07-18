@@ -71,8 +71,10 @@ queues.
 - `ScriptService` executes only project-owned native logic or declarative mission data. Retail
   executable/script modules are inspected offline and are never loaded as executable code.
 - `SimulationWorld` advances only from explicit fixed-step calls and owns deterministic completed-
-  step/simulated-time state. The composition root supplies the scheduler's validated step; its
-  current default is a synthetic-shell value, while the retail tick rate remains evidence-driven.
+  step/simulated-time state plus a preallocated bounded `EntityRegistry`. Generational entity IDs
+  reject stale handles, and the registry allocates only during world creation. The composition root
+  supplies the scheduler's validated step; its current default and entity capacity are synthetic-
+  shell values, while retail timing and population limits remain evidence-driven.
 - `RenderService` receives scene snapshots and exposes no retail-format details.
 - `SdlInputService` is an app-owned, non-hot-reloadable main-thread leaf. It owns the ref-counted
   SDL gamepad subsystem, pumps the global SDL event queue, and owns at most one primary gamepad.

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "omega/simulation/entity_registry.h"
+
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -12,6 +14,8 @@ struct SimulationWorldConfig
     // Project-owned fixed step supplied by the composition root. It must be positive; its value is
     // a synthetic-shell choice until retail timing is established from evidence.
     std::chrono::nanoseconds fixed_step{0};
+    // Project-owned bounded identity capacity. It is host infrastructure, not a retail limit.
+    std::uint32_t maximum_entities = 65'536U;
 };
 
 struct SimulationState
@@ -46,10 +50,15 @@ public:
     // [game thread; immutable after Create()]
     [[nodiscard]] const SimulationWorldConfig& config() const noexcept;
 
+    // [game thread] Returns the world-owned identity store used by future component systems.
+    [[nodiscard]] EntityRegistry& entities() noexcept;
+    [[nodiscard]] const EntityRegistry& entities() const noexcept;
+
 private:
-    explicit SimulationWorld(const SimulationWorldConfig& config) noexcept;
+    SimulationWorld(const SimulationWorldConfig& config, EntityRegistry entities) noexcept;
 
     SimulationWorldConfig config_{};
+    EntityRegistry entities_;
     SimulationState state_{};
 };
 } // namespace omega::simulation

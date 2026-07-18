@@ -29,6 +29,11 @@ int SimulationWorldFailureCount()
         "a zero fixed step is rejected");
     Check(!SimulationWorld::Create({.fixed_step = std::chrono::nanoseconds{-1}}),
         "a negative fixed step is rejected");
+    Check(!SimulationWorld::Create({
+              .fixed_step = std::chrono::nanoseconds{1},
+              .maximum_entities = 0U,
+          }),
+        "an invalid world entity capacity is rejected");
 
     constexpr auto step = std::chrono::nanoseconds{16'666'667};
     auto created = SimulationWorld::Create({.fixed_step = step});
@@ -42,6 +47,9 @@ int SimulationWorldFailureCount()
             "a new world starts at deterministic step and time zero");
         Check(world.config().fixed_step == step,
             "the validated fixed step remains immutable");
+        Check(world.entities().Snapshot().capacity == 65'536U &&
+                  world.entities().Snapshot().alive == 0U,
+            "the world solely owns its preallocated empty entity registry");
 
         Check(world.AdvanceOneStep() == SimulationStepResult::Advanced &&
                   world.AdvanceOneStep() == SimulationStepResult::Advanced &&

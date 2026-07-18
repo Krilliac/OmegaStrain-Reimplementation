@@ -81,6 +81,11 @@ its callback supplies bounded project-owned silence and exposes lock-free health
 loading files or retail data. Components, gameplay systems, render snapshots, decoded voices, and
 mixing remain incomplete.
 
+The simulation world now solely owns a bounded, preallocated generational entity registry. Entity
+creation/reuse is deterministic for identical call sequences, stale or forged generations are
+inert, and capacity exhaustion is explicit. Component stores and gameplay systems remain future
+project-owned work; the current capacity is a synthetic host limit, not a retail population claim.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.
