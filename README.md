@@ -51,8 +51,20 @@ retail instruction blocks, or PS2 execution layer.
 - A separate direct-only scan accepts both explicit sibling container classes for every
   runtime level: 36/36 exact containers and 5,801/5,801 direct TDX members with zero errors,
   collisions, malformed textures, nested traversal, or non-TDX members. The two role classes
-  contribute 5,765 and 36 occurrences; containment establishes neither runtime ownership nor a
-  texture-to-material/cell/mesh binding.
+  contribute 5,765 and 36 occurrences. This establishes direct containment only, not retail
+  ownership, necessity, priority, or a texture-to-material/cell/mesh binding.
+- The public-safe native level-texture verifier accepts all 18 runtime levels, 36 explicit sources,
+  and 5,801 level-inventory texture occurrences with zero errors. It loads 5,913 storage blocks,
+  7,603 planes, 615,232 palette entries, and 29,562,280 owned storage bytes. Its independent
+  field maxima are Open input/items/logical-output/depth/scratch
+  `3,076,944 / 1,460 / 111,014 / 0 / 71,467`
+  and Load `3,139,344 / 5,169 / 333,232 / 0 / 65,595`; these maxima are fieldwise and are not
+  asserted to co-occur. Internal store defaults are 4 MiB input, 512 KiB logical output, 128 KiB
+  scratch, 8,192 items, 4 KiB strings, and depth one. The measured byte/item fields are rounded
+  independently to the next binary boundary above the larger Open/Load maximum; depth one is the
+  smallest nonzero headroom above measured depth zero. These values are not runtime configuration
+  or `--set` keys. The verifier emits no paths, names, hashes, offsets, payloads, per-level rows,
+  identities, or bindings.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
@@ -120,6 +132,7 @@ ctest --preset msvc-debug
 .\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-spatial-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-material-catalogs-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe level-texture-store-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --probe-only
 .\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
@@ -131,10 +144,12 @@ python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\priv
 `openomega` is the pure-native SDL3/SDL_GPU host shell. `--frames=N` is an automated smoke mode
 that opens the modern GPU backend, renders exactly `N` frames, and exits without user input.
 `--probe-only` validates the retail root and selected level, then loads the owned manifest plus one
-all-or-error `LevelContentIR` without opening a window. Its spatial meshes and role-free material
-catalogs are decoded under one shared budget while each common/cell archive is traversed once;
-their parallel manifest order asserts no mesh-to-material binding. The current MINSK view is a
-deterministic synthetic
+all-or-error `LevelContentIR` and opens an inventory-only `LevelTextureStore` without opening a
+window. The store is retained only after the existing content and debug-image gates succeed; startup
+does not call `Load`, expand display pixels, bind materials, upload to the GPU, or render textures.
+The spatial meshes and role-free material catalogs are decoded under one shared budget while each
+common/cell archive is traversed once; their parallel manifest order asserts no mesh-to-material
+binding. The current MINSK view is a deterministic synthetic
 canonical-COL wireframe contact sheet: meshes occupy source-order tiles, and each mesh is projected
 along its two largest coordinate extents. This clean-room diagnostic is not world placement or
 reconstructed geometry and makes no VUM, TDX, or other retail semantic claim. The app-owned loop

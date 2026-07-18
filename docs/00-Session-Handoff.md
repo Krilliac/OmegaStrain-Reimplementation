@@ -113,9 +113,21 @@ shipping dependencies or execution mechanisms.
 23. Measured two explicit sibling texture-container classes separately. The direct-only scanner
     accepts both roles for all 18 runtime levels: 36 exact containers and 5,801 direct TDX members
     with zero errors, collisions, malformed textures, nested traversal, or non-TDX entries. The
-    generic classes contribute 5,765 and 36 occurrences. This establishes containment, not runtime
-    ownership or necessity; native composed budgets and every texture-to-material/cell/mesh/render
-    relationship remain open.
+    generic classes contribute 5,765 and 36 occurrences. This establishes containment, not retail
+    ownership, necessity, priority, or any texture-to-material/cell/mesh/render relationship.
+24. Added the public-safe native `LevelTextureStore` and all-level verifier. It accepts 18/18 levels,
+    36 explicit sources, and 5,801 level-inventory texture occurrences with zero errors, loading
+    5,913 blocks, 7,603 planes, 615,232 palette entries, 27,101,352 plane bytes, 2,460,928 palette
+    bytes, and 29,562,280 owned bytes. Independent Open input/items/logical-output/depth/scratch
+    maxima are `3,076,944 / 1,460 / 111,014 / 0 / 71,467`; Load maxima are
+    `3,139,344 / 5,169 / 333,232 / 0 / 65,595`. Each maximum is fieldwise and is not asserted to
+    co-occur with the others. Internal defaults are 4 MiB input, 512 KiB logical output, 128 KiB
+    scratch, 8,192 items, 4 KiB strings, and depth one. The measured byte/item fields are separately
+    next-binary-rounded above the larger Open/Load maximum; depth one is the smallest nonzero
+    headroom above measured depth zero. They are not runtime configuration or `--set` keys.
+    Named-level startup now retains the locator inventory after manifest, content, and debug-image
+    success; the 18/18 aggregate probe remains valid across all 5,351 cells. Startup performs no
+    texture `Load`, material binding, display expansion, GPU upload, or rendering.
 
 ## Disc observations
 

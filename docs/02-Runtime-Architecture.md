@@ -5,7 +5,9 @@
 ```text
 OmegaApp [game thread, sole lifetime owner]
 |- PlatformService [main thread]
-|- GameDataService [owns frozen VirtualFileSystem]
+|- ContentStartupState [all-or-error level-content owner]
+|  |- GameDataService [owns frozen VirtualFileSystem]
+|  `- LevelTextureStore [optional immutable locator inventory]
 |- JobService [worker pool owner]
 |- AssetService [planned, unimplemented; game thread API; worker decode]
 |- RenderService [render thread]
@@ -45,6 +47,16 @@ offsets remain local to each call. The catalog names retain no assigned role, an
 TDX asset, placement, transform, visibility, or draw binding is asserted. A future, currently
 unimplemented `AssetService` will receive a non-owning reference; neither service will own the other.
 
+`LevelManifestIR` also owns explicit `SourceLocator` values for the level's sibling `TEX.HOG` and
+`MAPTEX.HOG` texture sources. These locators preserve source provenance only; their order assigns no
+priority or binding. `LevelTextureStore` is implemented as a standalone immutable content value, not
+as an app-owned service. It owns its canonical texture-locator inventory and a private store identity,
+but retains only a weak source identity from the `GameDataService` that opened it. It owns no service,
+VFS, HOG object, input byte span, material catalog, mesh, or renderer resource. Named-level startup
+constructs and retains the store only after manifest, `LevelContentIR`, and debug-image success. The
+service is declared earlier in the startup state and therefore outlives the bound store during reverse
+destruction; no-level startup leaves the optional store disengaged.
+
 ## Components and services
 
 Entity components are plain state: transform, renderable, skeleton pose, health, inventory,
@@ -66,12 +78,26 @@ Every public API carries a thread-affinity comment. Debug builds will add thread
 each service becomes real. Cross-thread ownership transfers use immutable packets or explicit
 queues.
 
+`LevelTextureStore::Open` is a game-thread operation and requires that neither the store nor its
+source service be moved or destroyed concurrently. After a successful Open, `size`, `HandleAt`, and
+the immutable inventory may be queried concurrently, while `Load` is reentrant on worker threads.
+Move construction transfers the complete implementation and preserves handles for the moved-to
+store; the moved-from store is unavailable. Handles are non-owning identity-plus-index values:
+expired, stale, out-of-range, or foreign-store handles fail closed. `Load` also rejects a different,
+moved-from, or expired `GameDataService`. No operation may race either object's move or destruction.
+
 ## Initial contracts
 
 - `VirtualFileSystem` mounts physical directories, ISO views, and HOG archives behind
   normalized case-insensitive game paths.
 - `GameDataService` validates the owner-supplied NTSC-U root from bounded `SYSTEM.CNF` metadata,
-  owns the frozen VFS, and maps named levels into canonical manifest and spatial-mesh values.
+  owns the frozen VFS, and maps named levels into canonical manifest and spatial-mesh values. Each
+  manifest carries the two explicit sibling texture-source locators without assigning a material,
+  cell, mesh, draw, or render relationship.
+- `LevelTextureStore` normalizes, sorts, and deduplicates the manifest's explicit texture sources,
+  resolves each source through the bound `GameDataService`, and owns a sorted, deduplicated direct
+  TDX locator inventory. Named-level startup invokes `Open` and owns the resulting value, but does not
+  call `Load`; the planned `AssetService` remains unimplemented.
 - The planned, currently unimplemented `AssetService` will map paths to typed handles, perform async
   decode, and publish immutable CPU assets before render/audio upload.
 - `ScriptService` executes only project-owned native logic or declarative mission data. Retail
@@ -192,10 +218,75 @@ future independently validated expansion result and never includes the retail de
 decoder-budget usage. Its item count covers the root, blocks, primary planes, present palette
 objects, and palette entries; its logical-output count covers the compiled-ABI storage objects,
 owned plane bytes, and four source bytes per palette entry. These counters are logical operation
-budgets rather than allocator or process-memory measurements. The Python level-topology scanner
-does not execute this native API or observe its ABI. Exact composed Open/Load maxima therefore
-remain unresolved until `LevelTextureStore` exists and a native corpus measurement validates it;
-structural topology proxies are not runtime budget evidence.
+budgets rather than allocator or process-memory measurements.
+
+## Level texture inventory and loading
+
+`LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit
+sources. It resolves the source chain, requires the terminal source to be one exact-end HOG, and
+builds the complete normalized directory before extension filtering. Any normalized collision,
+including a collision between ignored members, rejects the operation. Inventory then accepts only
+direct normalized `.TDX` members; it does not recurse into member HOGs. Identical source locators and
+identical resulting texture locators are sorted and deduplicated, so manifest order conveys no
+priority. Non-TDX members are validated by the complete directory pass and otherwise ignored.
+
+The store reports exact logical usage under its documented accounting model:
+
+- Open input is every resolved ancestor container plus each terminal texture-source HOG, once per
+  canonical source. Open items are all traversed ancestor and terminal directory entries plus one
+  item for each emitted canonical texture locator. Logical output is the compiled-ABI store,
+  implementation, identity, locator/string objects, and owned normalized string bytes. Archive depth
+  is the maximum explicit source-container edge count. Logical scratch is the deterministic maximum
+  of the pre-normalization source workspace, the canonical-source workspace plus one sequential
+  source-resolver workspace, and the canonical-source workspace plus one complete normalized
+  terminal directory. Sources and their directories are processed sequentially.
+- Load input is every resolved ancestor container plus the selected terminal TDX payload. Load items
+  are the traversed ancestor directory entries plus the measured decoder root, blocks, planes,
+  present palette objects, and palette entries. Logical output is exactly the measured owned
+  `TextureStorageIR`; archive depth is the selected locator's container depth. The current stateless
+  TDX decoder contributes zero logical scratch.
+
+These are deterministic API budgets, not allocator traffic, vector capacity, resident memory, or
+process memory. The frozen VFS, filesystem metadata, service-owned caches, HOG-parser storage,
+allocator metadata, and spare container capacity are outside these usage counters. Normalized
+resolver locator/directory work is included in the reported scratch peak; the remaining excluded
+storage stays subject to its own bounded parser, archive-size, directory-count, name, and read
+limits. Open does not decode TDX payloads, and Load does not infer
+pixels, channels, mip rank, source priority, or any texture-to-material, cell, mesh, draw, placement,
+visibility, or render relationship.
+
+The two aggregate Python scans answer different containment questions and do not execute this native
+API. `measure_level_tdx_topology.py` is extension-bounded to normalized `.TDX` members in the complete
+recursive common `DATA.HOG` graph, with `DATA.POP` manifest references used for designated cell-
+occurrence accounting; it explicitly excludes sibling texture containers. The separate
+`measure_level_texture_container_topology.py` requires the two sibling roles, treats each as one exact
+top-level HOG, validates the complete normalized directory, and measures direct TDX members only.
+Both publish structural proxies rather than compiled-ABI Open/Load usage.
+
+`omega_tool level-texture-store-verify-tree` exercises the native store across every strictly
+discovered level. The confirmed run accepts 18/18 levels, 36 explicit sources, and 5,801
+level-inventory texture occurrences with zero errors. It loads 5,913 storage blocks, 7,603 planes,
+615,232 palette entries, 27,101,352 plane bytes, 2,460,928 palette bytes, and 29,562,280 total owned
+storage bytes. The independent Open input/items/logical-output/depth/scratch maxima are
+`3,076,944 / 1,460 / 111,014 / 0 / 71,467`; the Load maxima are
+`3,139,344 / 5,169 / 333,232 / 0 / 65,595`. Each field is maximized independently across its Open or
+Load observations; no single level, texture, or operation is asserted to exhibit the complete tuple.
+Those measurements set internal defaults of 4 MiB input, 512 KiB logical output, 128 KiB scratch,
+8,192 items, 4 KiB strings, and nesting depth one. Input, output, scratch, and items are rounded
+independently to the next binary boundary above the larger Open/Load field maximum. Depth one is the
+smallest nonzero headroom above measured depth zero while retaining bounded nested-source support.
+The string limit retains the common 4 KiB safety cap. These values are implementation policy, not
+runtime configuration or `--set` keys, and do not describe a co-occurring corpus tuple.
+The aggregate texture and storage totals are level-inventory occurrences rather than unique
+whole-disc asset identities. The fixed report emits no paths, names, hashes, offsets, payloads,
+per-level rows, identities, or bindings.
+
+Startup owns `LevelManifestIR`, one `LevelContentIR`, and the inventory-only `LevelTextureStore` as
+one all-or-error content state. Store Open occurs after the synthetic debug image succeeds; startup
+does not call texture `Load`. `AssetService` remains unimplemented, and no texture locator or loaded
+storage enters `RenderFramePacket`, `RenderService`, `SimulationWorld`, material catalogs, or a
+renderer upload path. Display expansion and all ownership/binding semantics beyond this native
+level-scoped locator inventory remain explicitly unwired.
 
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
@@ -247,8 +338,9 @@ reject Windows alternate-data-stream, reserved-device, trailing-dot/space, and o
 path aliases.
 Unsupported file types under both classified and unclassified shipping roots also fail closed.
 
-Startup owns `LevelManifestIR` plus one `LevelContentIR` as an all-or-error content state. The
-material catalogs do not enter `RenderFramePacket`, `SimulationWorld`, or
+Startup owns `LevelManifestIR`, one `LevelContentIR`, and one inventory-only `LevelTextureStore` as
+an all-or-error content state. Neither material catalogs nor texture locators enter
+`RenderFramePacket`, `SimulationWorld`, or
 `SdlGpuHost`. The initial renderer consumes canonical spatial meshes only to build a deterministic
 synthetic canonical-COL wireframe contact sheet. Meshes occupy source-order tiles, and each mesh is
 projected along its two largest coordinate extents. This clean-room diagnostic is not world

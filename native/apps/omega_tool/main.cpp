@@ -1,6 +1,7 @@
 #include "omega/archive/hog_archive.h"
 
 #include "asset_commands.h"
+#include "level_texture_commands.h"
 #include "pop_commands.h"
 
 #include <algorithm>
@@ -39,6 +40,7 @@ void PrintUsage()
               << "  omega_tool level-manifest-verify-tree <root>\n"
               << "  omega_tool level-spatial-verify-tree <root>\n"
               << "  omega_tool level-material-catalogs-verify-tree <root>\n"
+              << "  omega_tool level-texture-store-verify-tree <root>\n"
               << "  omega_tool asset-metadata-verify-tree <root>\n";
 }
 
@@ -377,6 +379,8 @@ int main(const int argc, char** argv)
         return omega::tool::LevelSpatialVerifyTree(argv[2]);
     if (command == "level-material-catalogs-verify-tree")
         return omega::tool::LevelMaterialCatalogsVerifyTree(argv[2]);
+    if (command == "level-texture-store-verify-tree")
+        return omega::tool::LevelTextureStoreVerifyTree(argv[2]);
     if (command == "asset-metadata-verify-tree")
         return omega::tool::AssetMetadataVerifyTree(argv[2]);
 

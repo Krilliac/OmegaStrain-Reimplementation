@@ -14,6 +14,8 @@ std::string_view ContentStartupErrorCodeName(const ContentStartupErrorCode code)
         return "invalid-options";
     case ContentStartupErrorCode::GameData:
         return "game-data";
+    case ContentStartupErrorCode::LevelTextures:
+        return "level-textures";
     case ContentStartupErrorCode::DebugImage:
         return "debug-image";
     }
@@ -29,6 +31,7 @@ std::expected<ContentStartupState, ContentStartupError> StartContent(
             .code = ContentStartupErrorCode::InvalidOptions,
             .message = "content startup requires a data root",
             .game_data_error = std::nullopt,
+            .level_texture_error = std::nullopt,
         });
     }
 
@@ -43,6 +46,7 @@ std::expected<ContentStartupState, ContentStartupError> StartContent(
             .code = ContentStartupErrorCode::GameData,
             .message = opened.error().message,
             .game_data_error = std::move(opened.error()),
+            .level_texture_error = std::nullopt,
         });
     }
     state.game_data = std::move(*opened);
@@ -56,6 +60,7 @@ std::expected<ContentStartupState, ContentStartupError> StartContent(
             .code = ContentStartupErrorCode::GameData,
             .message = loaded.error().message,
             .game_data_error = std::move(loaded.error()),
+            .level_texture_error = std::nullopt,
         });
     }
     state.level_manifest = std::move(*loaded);
@@ -67,6 +72,7 @@ std::expected<ContentStartupState, ContentStartupError> StartContent(
             .code = ContentStartupErrorCode::GameData,
             .message = content.error().message,
             .game_data_error = std::move(content.error()),
+            .level_texture_error = std::nullopt,
         });
     }
     state.level_content = std::move(*content);
@@ -78,9 +84,22 @@ std::expected<ContentStartupState, ContentStartupError> StartContent(
             .code = ContentStartupErrorCode::DebugImage,
             .message = std::move(built_image.error()),
             .game_data_error = std::nullopt,
+            .level_texture_error = std::nullopt,
         });
     }
     state.debug_image = std::move(*built_image);
+
+    auto texture_store = content::LevelTextureStore::Open(*state.game_data, *state.level_manifest);
+    if (!texture_store)
+    {
+        return std::unexpected(ContentStartupError{
+            .code = ContentStartupErrorCode::LevelTextures,
+            .message = texture_store.error().message,
+            .game_data_error = std::nullopt,
+            .level_texture_error = std::move(texture_store.error()),
+        });
+    }
+    state.level_texture_store.emplace(std::move(*texture_store));
     return state;
 }
 } // namespace omega::runtime

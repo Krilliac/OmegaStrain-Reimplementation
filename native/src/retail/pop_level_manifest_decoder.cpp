@@ -304,6 +304,7 @@ asset::DecodeResult<asset::LevelManifestIR> DecodePopLevelManifest(
 
     asset::LevelManifestIR result{
         .data_hog_source = std::move(*normalized_source),
+        .texture_sources = {},
         .terrain_cells = {},
     };
     result.terrain_cells.reserve(terrain->records().size());

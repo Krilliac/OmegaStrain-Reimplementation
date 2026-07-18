@@ -17,11 +17,14 @@ struct LevelCellSourceIR
 };
 
 // Canonical owned manifest data. The common DATA.HOG source is stored once; each cell stores only
-// its canonical member name. Geometry, transforms, visibility, and materials are deliberately
-// absent until their source semantics are independently established.
+// its canonical member name. Texture sources are explicit owned container locations in deterministic
+// discovery order only: their positions assert no priority, cell/material/name relationship, or
+// asset binding. Geometry, transforms, visibility, and materials are deliberately absent until
+// their source semantics are independently established.
 struct LevelManifestIR
 {
     SourceLocator data_hog_source;
+    std::vector<SourceLocator> texture_sources;
     std::vector<LevelCellSourceIR> terrain_cells;
 };
 } // namespace omega::asset

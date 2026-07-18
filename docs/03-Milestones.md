@@ -15,11 +15,11 @@ Status: complete for the current NTSC-U research baseline.
 
 Status: in progress. Top-level/nested HOG indexing, VFS mounting, script-container inspection,
 asset-family fingerprinting, the POP terrain prefix, the canonical level manifest, a semantic COL
-spatial-mesh adapter, shared-budget level-spatial orchestration, a semantic TDX storage adapter, and
-a semantic VUM material-catalog adapter plus a retail-only passive render-payload descriptor are
-implemented. Bounded passive SKM and SKL descriptors plus a fixed-output retail-only SKA descriptor
-are also implemented; SKAS remains separate aggregate-only evidence. Other scene decoders remain
-incomplete.
+spatial-mesh adapter, shared-budget level-spatial orchestration, a semantic TDX storage adapter, a
+bounded level-scoped texture store and native verifier, and a semantic VUM material-catalog adapter
+plus a retail-only passive render-payload descriptor are implemented. Bounded passive SKM and SKL
+descriptors plus a fixed-output retail-only SKA descriptor are also implemented; SKAS remains
+separate aggregate-only evidence. Other scene decoders remain incomplete.
 
 - Native HOG parser validated against all 273 top-level archives and 6,677 nested spans.
 - Virtual filesystem with physical-directory and HOG mounts.
@@ -30,7 +30,9 @@ incomplete.
 - GameDataService aggregate validation: 5,351/5,351 manifest cells load as owned spatial meshes,
   and all 18 headless startup probes preserve manifest/spatial cardinality. Startup now obtains
   the spatial and material collections through one all-or-error `LevelContentIR` archive traversal
-  and shared budget; the parallel collections assert no binding. The public-safe
+  and shared budget, then opens and retains an inventory-only `LevelTextureStore` after the existing
+  debug-image gate; the parallel collections assert no binding and startup performs no texture
+  `Load`. The public-safe
   level-material catalog verifier also loads all 18 levels and 5,351/5,351 manifest-ordered
   catalogs with zero errors: 34,267 owned names, 34,589 material records, and 37,893 dense name
   references. It emits only aggregate counts and typed error categories.
@@ -44,8 +46,19 @@ incomplete.
 - Direct sibling-container scanning accepts both explicit container classes for all 18 runtime
   levels: 36 exact containers and 5,801 direct TDX members with zero errors, collisions, malformed
   textures, nested traversal, or non-TDX entries. The role classes contribute 5,765 and 36
-  occurrences; containment establishes neither runtime ownership nor a texture-to-material/cell/
-  mesh relationship. Exact native composed Open/Load item and output maxima remain pending.
+  occurrences; containment establishes neither retail ownership, necessity, priority, nor a
+  texture-to-material/cell/mesh relationship.
+- The public-safe native level-texture verifier accepts 18/18 levels, 36 explicit sources, and 5,801
+  level-inventory texture occurrences with zero errors. It loads 5,913 blocks, 7,603 planes,
+  615,232 palette entries, and 29,562,280 owned storage bytes. Independent Open
+  input/items/logical-output/depth/scratch maxima are
+  `3,076,944 / 1,460 / 111,014 / 0 / 71,467`; Load
+  maxima are `3,139,344 / 5,169 / 333,232 / 0 / 65,595`. These are fieldwise maxima, not one
+  co-occurring operation profile. Internal defaults are 4 MiB input, 512 KiB logical output,
+  128 KiB scratch, 8,192 items, 4 KiB strings, and depth one. Measured byte/item fields are
+  independently next-binary-rounded; depth one is the smallest nonzero headroom above measured
+  zero. The values are not runtime configuration or `--set` keys, and the aggregate report exposes
+  no private identity or binding.
 - Aggregate-only TDX coherence scoring accepts the same 15,248 spans and nominates low-nibble-first
   for direct four-bit `0x14` planes and the bit-3/bit-4 palette permutation for direct eight-bit
   `0x13` planes. The content-dependent scores are hypotheses, not display-layout semantics.
@@ -86,12 +99,13 @@ incomplete.
 ## M2: Native shell
 
 Status: in progress. The SDL_GPU shell, strict launch parser, owner-supplied NTSC-U data-root
-validation, headless probe, named-level manifest/spatial load, and deterministic synthetic
-canonical-COL wireframe contact sheet are implemented. The contact sheet places meshes in
-source-order tiles and projects each mesh along its two largest coordinate extents. It is a
+validation, headless probe, named-level manifest/content load plus texture-locator inventory, and
+deterministic synthetic canonical-COL wireframe contact sheet are implemented. The contact sheet
+places meshes in source-order tiles and projects each mesh along its two largest coordinate extents. It is a
 clean-room diagnostic, not world placement or reconstructed geometry, and makes no VUM, TDX, or
-other retail semantic claim. Headless named-level startup also owns the complete canonical
-spatial-mesh set.
+other retail semantic claim. Headless named-level startup owns the complete canonical spatial and
+material collections plus an inventory-only texture store. It does not load texture storage, bind
+materials, expand display pixels, upload GPU resources, or render textures.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
@@ -147,9 +161,11 @@ the two largest coordinate extents, not world placement or reconstructed geometr
 VUM, TDX, or other retail semantic claim. Startup now owns its spatial meshes and one confirmed
 semantic VUM material/name catalog per manifest cell together in `LevelContentIR`. One archive pass
 and one cumulative fail-closed budget preserve exact manifest order and cardinality without
-asserting a mesh-to-material binding. The names remain role-free and unbound: render geometry, material
-binding/parameters, display-ready texture expansion, cameras, placements, transforms, and
-visibility remain incomplete. A passive retail-only VUM descriptor preserves the proven
+asserting a mesh-to-material binding. After that content and the synthetic debug image succeed,
+startup also owns the level's direct-TDX locator inventory; it performs no texture `Load` and asserts
+no texture-to-name/material/cell/mesh/draw relationship. The names remain role-free and unbound:
+render geometry, material binding/parameters, display-ready texture expansion, cameras, placements,
+transforms, and visibility remain incomplete. A passive retail-only VUM descriptor preserves the proven
 pair/reference grammar without asserting vertices, indices, draws, or material assignments, and
 its payload does not enter the canonical level IR.
 
