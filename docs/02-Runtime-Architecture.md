@@ -113,8 +113,8 @@ The initial native build targets express the same direction:
 - `omega_core`: HOG indexing, VFS, and generic bounded infrastructure;
 - `omega_assets`: canonical owned IR values and decode contracts;
 - `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
-- `omega_retail_formats`: stateless POP/COL/VUM/TDX adapters that may depend on the first
-  two targets;
+- `omega_retail_formats`: stateless POP/COL/VUM/TDX/SKM/SKL/SKA adapters that may depend on the
+  first two targets;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
   orchestration;
 - `omega_runtime`: launch/configuration services and renderer-neutral diagnostic scene values
@@ -133,6 +133,12 @@ unassigned. TDX has a separate bounded `TextureStorageIR` adapter that owns sour
 transfer planes, and four-byte palette entries while leaving block purpose, mip meaning, channel
 order, alpha conversion, nibble order, palette permutation, swizzle, and GPU upload unassigned.
 None of these adapters exposes VU/VIF instructions or decoded pixel guesses.
+
+SKA has a separate retail-only passive descriptor rather than canonical animation IR. Its fixed
+output contains only the observed version/count words and the computed 112-byte-prefix
+counted-word extent, classified as exact or followed by zero padding. It retains no input span and
+assigns no payload, animation, timing, channel, transform, compression, or bone semantics. SKAS
+remains a separate two-candidate text-evidence family with no native descriptor.
 
 VUM catalog decoding and passive payload inspection are stateless and need no dynamic scratch.
 They share fail-closed validation of the proven prefix, counted extents, P/Q/T relationships,

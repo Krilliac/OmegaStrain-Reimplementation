@@ -46,6 +46,7 @@ add_library(omega_retail_formats STATIC
     native/src/retail/col_spatial_mesh_decoder.cpp
     native/src/retail/container_descriptors.cpp
     native/src/retail/pop_level_manifest_decoder.cpp
+    native/src/retail/ska_container_descriptor.cpp
     native/src/retail/skm_container_descriptor.cpp
     native/src/retail/skl_container_descriptor.cpp
     native/src/retail/tdx_texture_storage_decoder.cpp
@@ -266,6 +267,7 @@ if(BUILD_TESTING)
         native/tests/pop_terrain_index_tests.cpp
         native/tests/runtime_settings_tests.cpp
         native/tests/simulation_world_tests.cpp
+        native/tests/ska_container_descriptor_tests.cpp
         native/tests/skm_container_descriptor_tests.cpp
         native/tests/skl_container_descriptor_tests.cpp
         native/tests/tdx_texture_storage_decoder_tests.cpp

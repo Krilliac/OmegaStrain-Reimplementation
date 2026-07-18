@@ -17,8 +17,9 @@ Status: in progress. Top-level/nested HOG indexing, VFS mounting, script-contain
 asset-family fingerprinting, the POP terrain prefix, the canonical level manifest, a semantic COL
 spatial-mesh adapter, shared-budget level-spatial orchestration, a semantic TDX storage adapter, and
 a semantic VUM material-catalog adapter plus a retail-only passive render-payload descriptor are
-implemented. Bounded passive SKM and SKL descriptors are also implemented, and aggregate-only
-SKA/SKAS structural evidence is published; other scene decoders remain incomplete.
+implemented. Bounded passive SKM and SKL descriptors plus a fixed-output retail-only SKA descriptor
+are also implemented; SKAS remains separate aggregate-only evidence. Other scene decoders remain
+incomplete.
 
 - Native HOG parser validated against all 273 top-level archives and 6,677 nested spans.
 - Virtual filesystem with physical-directory and HOG mounts.
@@ -35,9 +36,10 @@ SKA/SKAS structural evidence is published; other scene decoders remain incomplet
   and 42,631 dense name references. Its passive payload pass validates 91,460 pairs, 38,023
   normalized targets, 134,122 middle-to-final references, and 365,840 ordered Q/P references,
   with zero errors.
-- Passive SKM and SKL native descriptors preserve only bounded structural metadata. Aggregate
-  fingerprinting separately proves a neutral counted-word extent for all 213 SKA spans and a
-  two-candidate SKAS text envelope without assigning animation semantics.
+- Passive SKM and SKL native descriptors preserve only bounded structural metadata. The passive
+  SKA descriptor implements the aggregate-proven neutral counted-word extent as fixed output while
+  the two-candidate SKAS text envelope remains separate; neither assigns animation semantics. SKA
+  is wired into the sanitized native corpus verifier, with its independent 213/213 run still pending.
 - Inspectors for ELF, scripts, textures, meshes, skeletons, animation, audio, and maps.
 - Synthetic malformed-input tests for every decoder.
 
