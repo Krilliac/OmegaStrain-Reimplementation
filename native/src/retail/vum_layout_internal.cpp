@@ -331,16 +331,17 @@ asset::DecodeResult<VumPayloadLayout> ValidateVumPayloadLayout(
 
         ++p_count;
         constexpr std::array<std::size_t, 3> p_reference_offsets{0, 8, 12};
-        for (std::size_t index = 0; index < p_reference_offsets.size(); ++index)
+        for (std::size_t reference_index = 0;
+             reference_index < p_reference_offsets.size(); ++reference_index)
         {
-            const std::size_t reference_offset = p_reference_offsets[index];
+            const std::size_t reference_offset = p_reference_offsets[reference_index];
             const std::uint32_t reference = ReadVumU32(record, reference_offset);
             if (!previous_final_boundary || reference <= *previous_final_boundary)
                 return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
                     "VUM final-payload references are not strictly increasing",
                     record_offset + reference_offset));
             previous_final_boundary = reference;
-            current_pair_references[index + 1U] = reference;
+            current_pair_references[reference_index + 1U] = reference;
         }
     }
 
