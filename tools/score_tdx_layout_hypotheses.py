@@ -4,8 +4,8 @@
 The output is deliberately anonymous and aggregate-only.  It never includes
 paths, archive entry names, hashes, dimensions from individual assets, palette
 entries, texture bytes, or rendered samples.  A lower coherence score only
-means that adjacent RGB values differ less under one named hypothesis; it does
-not establish display semantics.
+means that adjacent opaque source-channel values differ less under one named
+hypothesis; it does not establish display semantics.
 """
 
 from __future__ import annotations
@@ -77,7 +77,9 @@ class ScanLimits:
     maximum_filesystem_entries: int = 500_000
     maximum_container_bytes: int = 4 * 1024 * 1024 * 1024
     maximum_hog_entries: int = 2_000_000
+    maximum_hog_directory_bytes: int = 128 * 1024 * 1024
     maximum_nesting_depth: int = 32
+    maximum_filesystem_depth: int = 128
     maximum_tdx_spans: int = 1 << 20
     maximum_tdx_bytes: int = 64 * 1024 * 1024
     maximum_blocks_per_tdx: int = 32
@@ -99,8 +101,8 @@ class ScanBudget:
         if self.filesystem_entries > self.limits.maximum_filesystem_entries:
             raise ValueError("filesystem entry count exceeds safety limit")
 
-    def add_hog_entry(self) -> None:
-        self.hog_entries += 1
+    def add_hog_entries(self, count: int) -> None:
+        self.hog_entries += count
         if self.hog_entries > self.limits.maximum_hog_entries:
             raise ValueError("HOG entry count exceeds safety limit")
 
@@ -193,7 +195,7 @@ class FamilyAggregate:
                 "plane_ties": self.ties,
                 "hypotheses": {
                     label: {
-                        "rgb_adjacency_delta_sum": self.scores[label],
+                        "source_channel_adjacency_delta_sum": self.scores[label],
                         "plane_wins": self.wins[label],
                     }
                     for label in sorted(self.scores)
@@ -225,8 +227,8 @@ class Aggregate:
                 "asset-specific dimensions, payload data, or samples"
             ),
             "interpretation": (
-                "lower RGB adjacency-delta sums indicate only greater local coherence under a "
-                "named hypothesis; they do not establish texture semantics"
+                "lower opaque source-channel adjacency-delta sums indicate only greater local "
+                "coherence under a named hypothesis; they do not establish texture semantics"
             ),
             "totals": {
                 "tdx_spans": self.tdx_spans,
@@ -380,11 +382,18 @@ def clut_bit3_bit4_swap(index: int) -> int:
     return (index & 0xE7) | ((index & 0x08) << 1) | ((index & 0x10) >> 1)
 
 
-def palette_rgb(palette_data: bytes, entry_count: int) -> tuple[tuple[int, int, int], ...]:
+def palette_channels(
+    palette_data: bytes, entry_count: int
+) -> tuple[tuple[int, int, int, int], ...]:
     if len(palette_data) != entry_count * 4:
         raise ValueError("TDX palette read is incomplete")
     return tuple(
-        (palette_data[index], palette_data[index + 1], palette_data[index + 2])
+        (
+            palette_data[index],
+            palette_data[index + 1],
+            palette_data[index + 2],
+            palette_data[index + 3],
+        )
         for index in range(0, len(palette_data), 4)
     )
 
@@ -393,15 +402,16 @@ def adjacency_edges(width: int, height: int) -> int:
     return height * max(0, width - 1) + width * max(0, height - 1)
 
 
-def rgb_delta(
-    palette: tuple[tuple[int, int, int], ...], left: int, right: int
+def source_channel_delta(
+    palette: tuple[tuple[int, int, int, int], ...], left: int, right: int
 ) -> int:
-    left_rgb = palette[left]
-    right_rgb = palette[right]
+    left_channels = palette[left]
+    right_channels = palette[right]
     return (
-        abs(left_rgb[0] - right_rgb[0])
-        + abs(left_rgb[1] - right_rgb[1])
-        + abs(left_rgb[2] - right_rgb[2])
+        abs(left_channels[0] - right_channels[0])
+        + abs(left_channels[1] - right_channels[1])
+        + abs(left_channels[2] - right_channels[2])
+        + abs(left_channels[3] - right_channels[3])
     )
 
 
@@ -409,7 +419,7 @@ def score_indexed8(
     payload: bytes,
     width: int,
     height: int,
-    palette: tuple[tuple[int, int, int], ...],
+    palette: tuple[tuple[int, int, int, int], ...],
     swap_lookup: bool,
 ) -> int:
     if len(payload) != width * height or len(palette) != 256:
@@ -423,11 +433,15 @@ def score_indexed8(
     for row in range(height):
         row_start = row * width
         for column in range(1, width):
-            score += rgb_delta(palette, mapped(row_start + column - 1), mapped(row_start + column))
+            score += source_channel_delta(
+                palette, mapped(row_start + column - 1), mapped(row_start + column)
+            )
         if row:
             previous_start = row_start - width
             for column in range(width):
-                score += rgb_delta(palette, mapped(previous_start + column), mapped(row_start + column))
+                score += source_channel_delta(
+                    palette, mapped(previous_start + column), mapped(row_start + column)
+                )
     return score
 
 
@@ -435,7 +449,7 @@ def score_indexed4(
     payload: bytes,
     width: int,
     height: int,
-    palette: tuple[tuple[int, int, int], ...],
+    palette: tuple[tuple[int, int, int, int], ...],
     low_nibble_first: bool,
 ) -> int:
     texels = width * height
@@ -452,13 +466,13 @@ def score_indexed4(
     for row in range(height):
         row_start = row * width
         for column in range(1, width):
-            score += rgb_delta(
+            score += source_channel_delta(
                 palette, index_at(row_start + column - 1), index_at(row_start + column)
             )
         if row:
             previous_start = row_start - width
             for column in range(width):
-                score += rgb_delta(
+                score += source_channel_delta(
                     palette, index_at(previous_start + column), index_at(row_start + column)
                 )
     return score
@@ -468,11 +482,8 @@ def record_scores(
     family: FamilyAggregate,
     payload: bytes,
     plane: PlaneLayout,
-    palette: tuple[tuple[int, int, int], ...],
-    budget: ScanBudget,
+    palette: tuple[tuple[int, int, int, int], ...],
 ) -> None:
-    texels = plane.width * plane.height
-    budget.add_scored_texels(texels)
     family.scored_planes += 1
     family.adjacency_edges += adjacency_edges(plane.width, plane.height)
     if family.header_bits_per_pixel == 4 and plane.transfer_code == 0x14:
@@ -658,6 +669,7 @@ def parse_block(
             continue
         if palette is None:
             raise ValueError("scoreable indexed TDX plane has no palette")
+        budget.add_scored_texels(plane.width * plane.height)
         available_payload = min(plane.byte_count, max(0, available - plane.data_offset))
         payload = read_at(file, block_offset + plane.data_offset, available_payload)
         if available_payload < plane.byte_count:
@@ -667,8 +679,7 @@ def parse_block(
             family,
             payload,
             plane,
-            palette_rgb(raw_palette, palette.entry_count),
-            budget,
+            palette_channels(raw_palette, palette.entry_count),
         )
 
     if header.implicit_zero_suffix != uses_implicit_zero:
@@ -697,7 +708,6 @@ def walk_hog(
     budget: ScanBudget,
 ) -> None:
     for entry in directory.entries:
-        budget.add_hog_entry()
         suffix = Path(entry.name).suffix.lower()
         if suffix == ".tdx":
             score_tdx_span(file, entry, aggregate, budget)
@@ -705,35 +715,51 @@ def walk_hog(
             continue
         if depth >= budget.limits.maximum_nesting_depth:
             raise ValueError("nested HOG depth exceeds safety limit")
-        nested = parse_hog_span(file, entry.offset, entry.size)
+        nested = parse_bounded_hog_span(file, entry.offset, entry.size, budget)
         walk_hog(file, nested, depth + 1, aggregate, budget)
 
 
-def iter_corpus_files(root: Path, budget: ScanBudget) -> Iterator[Path]:
-    def walk_error(error: OSError) -> None:
-        raise error
+def parse_bounded_hog_span(
+    file: BinaryIO, base: int, span_size: int, budget: ScanBudget
+) -> HogDirectory:
+    if span_size < 20:
+        raise ValueError("span is too small for a HOG header")
+    header = read_at(file, base, 20)
+    _, count, _, _, data_offset = struct.unpack("<5I", header)
+    if count > budget.limits.maximum_hog_entries - budget.hog_entries:
+        raise ValueError("HOG entry count exceeds safety limit")
+    if data_offset > budget.limits.maximum_hog_directory_bytes:
+        raise ValueError("HOG directory metadata exceeds safety limit")
+    directory = parse_hog_span(file, base, span_size)
+    budget.add_hog_entries(len(directory.entries))
+    return directory
 
-    for directory, directory_names, file_names in os.walk(root, followlinks=False, onerror=walk_error):
-        directory_names.sort()
-        file_names.sort()
-        directory_path = Path(directory)
-        for name in directory_names:
-            path = directory_path / name
-            budget.add_filesystem_entries(1)
-            if path.is_symlink():
-                raise ValueError("corpus contains a symbolic-link directory")
-        for name in file_names:
-            path = directory_path / name
-            budget.add_filesystem_entries(1)
-            if path.is_symlink():
-                raise ValueError("corpus contains a symbolic-link file")
-            if path.suffix.lower() in {".hog", ".tdx"}:
-                yield path
+
+def iter_corpus_files(root: Path, budget: ScanBudget) -> Iterator[Path]:
+    def walk(directory: Path, depth: int) -> Iterator[Path]:
+        if depth > budget.limits.maximum_filesystem_depth:
+            raise ValueError("corpus directory depth exceeds safety limit")
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                budget.add_filesystem_entries(1)
+                is_junction = getattr(entry, "is_junction", lambda: False)()
+                if entry.is_symlink() or is_junction:
+                    raise ValueError("corpus contains a symbolic link or junction")
+                path = Path(entry.path)
+                if entry.is_dir(follow_symlinks=False):
+                    yield from walk(path, depth + 1)
+                elif entry.is_file(follow_symlinks=False) and path.suffix.lower() in {
+                    ".hog",
+                    ".tdx",
+                }:
+                    yield path
+
+    yield from walk(root, 0)
 
 
 def scan_disc(root: Path, limits: ScanLimits = ScanLimits()) -> dict[str, object]:
-    if root.is_symlink():
-        raise ValueError("corpus root must not be a symbolic link")
+    if root.is_symlink() or getattr(root, "is_junction", lambda: False)():
+        raise ValueError("corpus root must not be a symbolic link or junction")
     resolved = root.resolve()
     if not resolved.is_dir():
         raise ValueError("corpus root is not a directory")
@@ -745,7 +771,7 @@ def scan_disc(root: Path, limits: ScanLimits = ScanLimits()) -> dict[str, object
             raise ValueError("corpus container exceeds safety limit")
         with path.open("rb") as file:
             if path.suffix.lower() == ".hog":
-                directory = parse_hog_span(file, 0, size)
+                directory = parse_bounded_hog_span(file, 0, size, budget)
                 walk_hog(file, directory, 0, aggregate, budget)
             else:
                 score_tdx_span(file, Span(path.name, 0, size), aggregate, budget)
