@@ -138,6 +138,14 @@ public:
     // Redundant level reports (press while down, release while up) are accepted no-ops.
     [[nodiscard]] std::expected<void, std::string> PushEvent(InputEvent event);
 
+    // [main thread] Atomically reconciles every tracked control to the up state after focus
+    // loss, device reset, or another host event that invalidates level state. This operation
+    // bypasses the per-frame event budget and does not change accepted/rejected event counts.
+    // Each action that had at least one down control receives one sticky release edge, even
+    // when several of its controls were down; actions already up receive no edge. Any press
+    // edge produced earlier in the frame remains sticky, and repeated resets are no-ops.
+    void ResetAllControls() noexcept;
+
     // [main thread] Closes the frame and returns the owned immutable snapshot for the game
     // thread. Held reflects whether any bound control is down at this call; pressed/released
     // edges are sticky within the frame, so a press+release inside one frame reports both edges.

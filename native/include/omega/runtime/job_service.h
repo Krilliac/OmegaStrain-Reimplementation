@@ -92,7 +92,8 @@ public:
     // [any thread; instantaneous snapshot] Jobs accepted but not yet handed to a worker.
     [[nodiscard]] std::size_t pending_job_count() const;
 
-    // [any thread] Number of worker threads spawned at Create(); zero once moved-from.
+    // [any thread; immutable after Create()] Number of worker threads spawned at Create();
+    // zero once moved-from. Safe to query while the pool is draining during move-assignment.
     [[nodiscard]] std::size_t worker_count() const noexcept;
 
 private:

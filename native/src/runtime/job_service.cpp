@@ -14,7 +14,7 @@ namespace omega::runtime
 struct JobService::Impl
 {
     explicit Impl(const JobServiceConfig validated_config) noexcept
-        : config(validated_config)
+        : config(validated_config), configured_worker_count(validated_config.worker_count)
     {
     }
 
@@ -45,6 +45,7 @@ struct JobService::Impl
     void RunWorker();
 
     JobServiceConfig config;
+    const std::size_t configured_worker_count;
     std::mutex mutex;
     std::condition_variable work_available;
     std::condition_variable pool_idle;
@@ -213,6 +214,6 @@ std::size_t JobService::pending_job_count() const
 
 std::size_t JobService::worker_count() const noexcept
 {
-    return impl_ ? impl_->workers.size() : 0U;
+    return impl_ ? impl_->configured_worker_count : 0U;
 }
 } // namespace omega::runtime

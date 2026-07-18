@@ -205,6 +205,18 @@ std::expected<void, std::string> InputTracker::PushEvent(const InputEvent event)
     return {};
 }
 
+void InputTracker::ResetAllControls() noexcept
+{
+    std::fill(control_down_.begin(), control_down_.end(), std::uint8_t{0});
+    for (ActionState& state : action_states_)
+    {
+        if (state.down_count == 0U)
+            continue;
+        state.down_count = 0U;
+        state.released_edge = true;
+    }
+}
+
 InputSnapshot InputTracker::EndFrame()
 {
     InputSnapshot snapshot;

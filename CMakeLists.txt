@@ -6,6 +6,8 @@ endif()
 
 project(OmegaStrainReimplementation VERSION 0.1.0 LANGUAGES CXX)
 
+find_package(Threads REQUIRED)
+
 if(CMAKE_SIZEOF_VOID_P LESS 8)
     message(FATAL_ERROR "OpenOmega requires a 64-bit host target (x86-64 is primary; portable core may support ARM64).")
 endif()
@@ -65,7 +67,13 @@ add_library(omega_runtime STATIC
     native/src/runtime/manifest_debug_image.cpp
 )
 target_include_directories(omega_runtime PUBLIC native/include)
-target_link_libraries(omega_runtime PUBLIC omega_assets omega_content)
+target_link_libraries(omega_runtime
+    PUBLIC
+        omega_assets
+        omega_content
+    PRIVATE
+        Threads::Threads
+)
 target_compile_features(omega_runtime PUBLIC cxx_std_23)
 
 if(MSVC)

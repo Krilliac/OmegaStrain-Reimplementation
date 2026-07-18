@@ -46,7 +46,9 @@ public:
     virtual ~LogSink() = default;
 
     // [any thread; serialized by the owning service] Must not call back into the owning
-    // LogService and must not block indefinitely; every writer waits behind this call.
+    // LogService and must not block indefinitely; every writer waits behind this call. Exceptions
+    // are contained by the service, counted as sink failures, and do not prevent later sinks from
+    // receiving the same record.
     virtual void Consume(const LogRecord& record) = 0;
 
 protected:
@@ -170,9 +172,12 @@ public:
     [[nodiscard]] std::size_t max_message_bytes() const noexcept;
     [[nodiscard]] std::size_t sink_count() const noexcept;
 
-    // [any thread; thread-safe] Records delivered to sinks / dropped below the floor.
+    // [any thread; thread-safe] Records dispatched to the configured sink set / dropped below the
+    // floor. A record remains written when one sink throws because another sink may already have
+    // consumed it; sink_failure_count() reports failed individual deliveries separately.
     [[nodiscard]] std::uint64_t written_count() const noexcept;
     [[nodiscard]] std::uint64_t dropped_count() const noexcept;
+    [[nodiscard]] std::uint64_t sink_failure_count() const noexcept;
 
 private:
     struct Impl;

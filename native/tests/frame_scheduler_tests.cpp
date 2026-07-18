@@ -66,6 +66,17 @@ int FrameSchedulerFailureCount()
     Check(FrameScheduler::Create(MakeConfig(seconds{1}, 64, seconds{4})).has_value(),
         "the exact upper bounds compose into a valid configuration");
 
+    // The cumulative dropped-time diagnostic saturates instead of overflowing its signed
+    // nanosecond representation. Exercise the exact boundary directly rather than spending
+    // billions of calls reaching it through BeginFrame.
+    const nanoseconds maximum = nanoseconds::max();
+    Check(omega::runtime::detail::SaturatingAddNanoseconds(
+              maximum - nanoseconds{1}, nanoseconds{1}) == maximum,
+        "dropped-time accumulation may land exactly on the representation maximum");
+    Check(omega::runtime::detail::SaturatingAddNanoseconds(
+              maximum - nanoseconds{1}, nanoseconds{2}) == maximum,
+        "dropped-time accumulation saturates when it would exceed the maximum by one");
+
     auto scheduler = FrameScheduler::Create(MakeConfig());
     Check(scheduler.has_value(), "the reference configuration is accepted");
     if (!scheduler)
