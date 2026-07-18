@@ -201,6 +201,24 @@ counted-word extent, classified as exact or followed by zero padding. It retains
 assigns no payload, animation, timing, channel, transform, compression, or bone semantics. SKAS
 remains a separate two-candidate text-evidence family with no native descriptor.
 
+POP has a separate retail-only passive post-terrain hypothesis descriptor in
+`omega_retail_formats`. It reuses the validated terrain-prefix parser, requires the established
+ordered 19-candidate aligned-literal envelope and five exact arithmetic extents, and returns one
+fixed owned descriptor that retains no input span or payload. It is evidence scaffolding rather than
+canonical asset IR and is not consumed by content, runtime, simulation, or renderer targets. Its
+literal, observed-word, stride, and opaque-range fields carry no section, count, record, payload,
+placement, visibility, rendering, or gameplay semantics.
+
+`omega_tool pop-post-terrain-hypotheses-verify-tree` is a tool-only aggregate boundary. Directory
+traversal and file reads reject links, reparse points, special entries, identity changes, metadata
+changes, and declared limits; POP bytes are read from an opened stable handle or descriptor. The
+report exposes only typed totals and independent accepted-only logical maxima. Descriptor
+observations do not contribute to those maxima, and the report emits no paths, names, hashes,
+literal spellings, candidate offsets, observed words, strides, opaque-range sizes, per-file rows,
+identities, or bindings. The confirmed run discovers and accepts all 18 candidates with zero
+rejections or errors; independent input/items/logical-output/string/scratch maxima are
+`919360 / 1 / 168 / 26 / 80036`.
+
 VUM catalog decoding and passive payload inspection are stateless and need no dynamic scratch.
 They share fail-closed validation of the proven prefix, counted extents, P/Q/T relationships,
 middle-span families, and ordered reference grammar. Each preflights its exact owned output and

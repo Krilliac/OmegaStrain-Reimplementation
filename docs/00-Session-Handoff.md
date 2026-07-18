@@ -128,6 +128,15 @@ shipping dependencies or execution mechanisms.
     Named-level startup now retains the locator inventory after manifest, content, and debug-image
     success; the 18/18 aggregate probe remains valid across all 5,351 cells. Startup performs no
     texture `Load`, material binding, display expansion, GPU upload, or rendering.
+25. Added a retail-only passive POP post-terrain hypothesis descriptor and privacy-safe fixed-schema
+    native verifier. The descriptor fail-closed checks only the established ordered aligned-literal
+    envelope and five arithmetic extent hypotheses, retains no input span or payload, and does not
+    enter canonical asset IR. The owned-corpus verifier discovers and accepts all 18 `.POP`
+    candidates with zero rejections or errors. Independent accepted-only
+    input/items/logical-output/string/scratch maxima are `919360 / 1 / 168 / 26 / 80036`; no maximum
+    tuple is asserted to co-occur. This confirms native conformity to the published hypothesis family
+    only, not section boundaries, counts, records, payload meaning, placement, visibility, rendering,
+    or gameplay.
 
 ## Disc observations
 
@@ -160,9 +169,11 @@ shipping dependencies or execution mechanisms.
 2. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
    independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.
-3. Continue POP after the validated terrain prefix. Independently validate the five universal-
-   nonzero arithmetic candidates, including their zero-count cases and record-internal invariants,
-   before confirming any boundary; then connect consumed fields to placement or visibility behavior.
+3. Continue POP beyond the now-native guarded hypothesis envelope only through independent evidence.
+   Test record-internal invariants and controlled behavioral consumption before promoting any literal
+   to a boundary or any observed word/stride to count or record semantics; independently connect
+   consumed fields to placement or visibility behavior. Passive-descriptor acceptance is a
+   conformity check, not semantic corroboration.
 4. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools

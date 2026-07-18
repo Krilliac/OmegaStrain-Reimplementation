@@ -2,6 +2,7 @@
 
 #include "asset_commands.h"
 #include "level_texture_commands.h"
+#include "pop_post_terrain_commands.h"
 #include "pop_commands.h"
 
 #include <algorithm>
@@ -37,6 +38,7 @@ void PrintUsage()
               << "  omega_tool hog-verify-tree <root>\n"
               << "  omega_tool hog-verify-nested-tree <root>\n"
               << "  omega_tool pop-verify-tree <root>\n"
+              << "  omega_tool pop-post-terrain-hypotheses-verify-tree <root>\n"
               << "  omega_tool level-manifest-verify-tree <root>\n"
               << "  omega_tool level-spatial-verify-tree <root>\n"
               << "  omega_tool level-material-catalogs-verify-tree <root>\n"
@@ -373,6 +375,8 @@ int main(const int argc, char** argv)
         return HogVerifyNestedTree(argv[2]);
     if (command == "pop-verify-tree")
         return omega::tool::PopVerifyTree(argv[2]);
+    if (command == "pop-post-terrain-hypotheses-verify-tree")
+        return omega::tool::PopPostTerrainHypothesesVerifyTree(argv[2]);
     if (command == "level-manifest-verify-tree")
         return omega::tool::LevelManifestVerifyTree(argv[2]);
     if (command == "level-spatial-verify-tree")

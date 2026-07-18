@@ -14,12 +14,13 @@ Status: complete for the current NTSC-U research baseline.
 ## M1: Content mount and inspection
 
 Status: in progress. Top-level/nested HOG indexing, VFS mounting, script-container inspection,
-asset-family fingerprinting, the POP terrain prefix, the canonical level manifest, a semantic COL
-spatial-mesh adapter, shared-budget level-spatial orchestration, a semantic TDX storage adapter, a
-bounded level-scoped texture store and native verifier, and a semantic VUM material-catalog adapter
-plus a retail-only passive render-payload descriptor are implemented. Bounded passive SKM and SKL
-descriptors plus a fixed-output retail-only SKA descriptor are also implemented; SKAS remains
-separate aggregate-only evidence. Other scene decoders remain incomplete.
+asset-family fingerprinting, the POP terrain prefix plus a retail-only passive post-terrain
+hypothesis descriptor and fixed-schema native verifier, the canonical level manifest, a semantic
+COL spatial-mesh adapter, shared-budget level-spatial orchestration, a semantic TDX storage adapter,
+a bounded level-scoped texture store and native verifier, and a semantic VUM material-catalog
+adapter plus a retail-only passive render-payload descriptor are implemented. Bounded passive SKM
+and SKL descriptors plus a fixed-output retail-only SKA descriptor are also implemented; SKAS
+remains separate aggregate-only evidence. Other scene decoders remain incomplete.
 
 - Native HOG parser validated against all 273 top-level archives and 6,677 nested spans.
 - Virtual filesystem with physical-directory and HOG mounts.
@@ -93,6 +94,13 @@ separate aggregate-only evidence. Other scene decoders remain incomplete.
 - Bounded POP candidate-shape profiling accepts those five guarded formulas across all 18 POPs and
   measures 8,019 candidate records and 105,985 anonymous four-byte column observations. The output
   is aggregate bit-pattern classification only and assigns no field type or runtime semantics.
+- The retail-only native POP hypothesis descriptor fail-closed checks the established ordered
+  aligned-literal envelope and five arithmetic extent hypotheses while retaining only fixed owned
+  hypothesis metadata. Its fixed-schema verifier discovers and accepts all 18 owned-corpus
+  candidates with zero rejections or errors; independent accepted-only
+  input/items/logical-output/string/scratch maxima are `919360 / 1 / 168 / 26 / 80036`. It is not
+  canonical IR and confirms no section boundary, count, record, payload, placement, visibility,
+  rendering, or gameplay semantics.
 - Inspectors for ELF, scripts, textures, meshes, skeletons, animation, audio, and maps.
 - Synthetic malformed-input tests for every decoder.
 
