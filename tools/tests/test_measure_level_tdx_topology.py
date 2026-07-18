@@ -164,7 +164,7 @@ def write_level(root: Path, pop: bytes, hog: bytes, name: str = "PRIVATELEVEL") 
 
 
 class LevelTdxTopologyTests(unittest.TestCase):
-    def test_source_scope_repetition_distinctness_and_maxima(self) -> None:
+    def test_recursive_common_scope_repetition_distinctness_and_maxima(self) -> None:
         texture = make_tdx()
         nested_cell = make_hog([("CELL_DEEP.TDX", texture)])
         cell = make_hog(
@@ -203,6 +203,10 @@ class LevelTdxTopologyTests(unittest.TestCase):
         self.assertEqual(
             result["maxima"]["all_tdx_owned_storage_bytes_per_level"], 6 * 64
         )
+        self.assertIn("extension-bounded", result["scope"])
+        self.assertIn("normalized .TDX-suffixed members", result["scope"])
+        self.assertIn("recursive common DATA.HOG graph", result["scope"])
+        self.assertIn("manifest-designated cell-occurrence", result["scope"])
 
     def test_indexed_storage_counts_owned_palette_without_claiming_abi_output(self) -> None:
         packed = bytes(range(32))

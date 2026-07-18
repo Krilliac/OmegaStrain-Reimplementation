@@ -100,6 +100,49 @@ Composed runtime Open/Load maxima remain explicit measurement gaps until the bou
 `LevelTextureStore` path and a native corpus measurement exist; structural Python proxies must not
 be substituted for those runtime values.
 
+## Common-archive containment result
+
+The bounded aggregate scanner walks each runtime level's complete common DATA.HOG graph, including
+direct members and every recursively contained HOG, then records the POP-designated cell locators
+again as manifest occurrences. Across all 18 levels, it accepts 5,351 manifest cell occurrences and
+5,413 scanned archive-directory occurrences, including 44 deeper-container occurrences, with zero
+malformed inputs, normalized collisions, or other errors. It finds zero normalized `.TDX`-suffixed
+members; all 5,351 manifest cell occurrences are likewise zero-TDX within that extension-bounded
+scope. Independent structural maxima are 48,271,360 Open input bytes, 2,745 archive entries plus
+locator items, and one archive edge. They are not asserted to co-occur and are not native ABI
+budgets.
+
+This is narrow negative containment evidence only. It does not exclude texture data embedded under
+another member suffix or representation, identify an owner, connect any texture to a cell, name,
+material, mesh, or draw, or justify recursive texture discovery elsewhere. The scanner's fixed
+schema explicitly excludes sibling texture containers so its result cannot be misread as a
+whole-level texture inventory.
+
+```powershell
+python -B tools/measure_level_tdx_topology.py private/extracted-disc
+```
+
+## Explicit sibling-container result
+
+A separate bounded scanner measures only two explicit sibling container classes present beside
+each runtime level's common files. It treats each as one exact top-level HOG, validates the complete
+normalized directory before filtering, and inspects direct TDX members only. Across all 18 levels
+it accepts all 36 containers and all 5,801 directory members with zero errors, malformed textures,
+normalized collisions, or non-TDX entries. The primary class contributes 5,765 direct TDX
+occurrences and the map class contributes 36. Independent single-container maxima are 728 entries,
+3,073,600 bytes, and 1,456 structural Open directory-plus-locator items at archive depth zero; they
+are not asserted to co-occur. Native composed Open/Load item and logical-output maxima remain
+explicit measurement gaps.
+
+This establishes direct containment in the two scanned sibling classes, not runtime ownership,
+necessity, priority, or a material, cell, mesh, name, draw, placement, visibility, mip, or render
+binding. Nested containers are deliberately not traversed, class order conveys no priority, and
+the 5,801 occurrences are a level-scope inventory rather than a whole-disc ownership claim.
+
+```powershell
+python -B tools/measure_level_texture_container_topology.py private/extracted-disc
+```
+
 ## Display-layout hypothesis scoring
 
 `score_tdx_layout_hypotheses.py` is a bounded, aggregate-only experiment for the remaining indexed
