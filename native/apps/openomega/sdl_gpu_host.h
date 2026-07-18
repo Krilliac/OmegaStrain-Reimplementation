@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <string>
@@ -7,6 +8,9 @@
 
 namespace omega::runtime
 {
+class FrameScheduler;
+class InputTracker;
+class LogService;
 struct ManifestDebugImage;
 }
 
@@ -15,6 +19,10 @@ namespace omega::app
 struct RunResult
 {
     int rendered_frames = 0;
+    std::uint64_t planned_simulation_steps = 0;
+    std::uint64_t input_frames = 0;
+    std::uint64_t clamped_frame_count = 0;
+    std::uint64_t dropped_time_frame_count = 0;
     bool quit_requested = false;
 };
 
@@ -33,8 +41,11 @@ public:
     SdlGpuHost(const SdlGpuHost&) = delete;
     SdlGpuHost& operator=(const SdlGpuHost&) = delete;
 
-    // [main/render thread]
-    [[nodiscard]] std::expected<RunResult, std::string> Run(int frame_limit);
+    // [main/render thread] Runtime services are non-owning references whose lifetime is held by
+    // OmegaApp. SDL events are translated into the platform-neutral tracker before frame planning.
+    [[nodiscard]] std::expected<RunResult, std::string> Run(int frame_limit,
+        runtime::FrameScheduler& frame_scheduler, runtime::InputTracker& input,
+        runtime::LogService& log, std::uint32_t quit_action);
     [[nodiscard]] std::string_view driver_name() const noexcept;
 
 private:

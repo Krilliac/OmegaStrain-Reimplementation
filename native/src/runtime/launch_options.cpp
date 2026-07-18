@@ -1,5 +1,6 @@
 #include "omega/runtime/launch_options.h"
 
+#include <algorithm>
 #include <charconv>
 #include <system_error>
 #include <utility>
@@ -11,6 +12,17 @@ namespace
 constexpr std::string_view kFramesPrefix = "--frames=";
 constexpr std::string_view kDataRootPrefix = "--data-root=";
 constexpr std::string_view kLevelPrefix = "--level=";
+constexpr std::string_view kConfigPrefix = "--config=";
+constexpr std::string_view kSetPrefix = "--set=";
+
+[[nodiscard]] std::string_view TrimConfigBlanks(std::string_view value) noexcept
+{
+    while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+        value.remove_prefix(1U);
+    while (!value.empty() && (value.back() == ' ' || value.back() == '\t'))
+        value.remove_suffix(1U);
+    return value;
+}
 
 [[nodiscard]] bool IsSafeLevelCode(const std::string_view value) noexcept
 {
@@ -38,6 +50,7 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     bool saw_frames = false;
     bool saw_data_root = false;
     bool saw_level = false;
+    bool saw_config = false;
     bool saw_probe_only = false;
     bool saw_help = false;
 
@@ -90,6 +103,42 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
             result.level_code = std::move(normalized);
             continue;
         }
+        if (argument.starts_with(kConfigPrefix))
+        {
+            if (saw_config)
+                return std::unexpected("--config may be specified only once");
+            saw_config = true;
+            const std::string_view value = argument.substr(kConfigPrefix.size());
+            if (value.empty())
+                return std::unexpected("--config requires a path");
+            result.config_path = std::filesystem::path(value);
+            continue;
+        }
+        if (argument.starts_with(kSetPrefix))
+        {
+            if (result.config_overrides.size() >= kMaxLaunchConfigOverrides)
+                return std::unexpected("too many --set overrides");
+            const std::string_view assignment = argument.substr(kSetPrefix.size());
+            const std::size_t separator = assignment.find('=');
+            if (separator == std::string_view::npos)
+                return std::unexpected("--set requires KEY=VALUE");
+
+            const std::string_view key = TrimConfigBlanks(assignment.substr(0U, separator));
+            const std::string_view value = TrimConfigBlanks(assignment.substr(separator + 1U));
+            if (key.empty())
+                return std::unexpected("--set requires KEY=VALUE");
+
+            LaunchConfigOverride override{
+                .key = std::string(key),
+                .value = std::string(value),
+            };
+            const auto duplicate = std::ranges::find(
+                result.config_overrides, override.key, &LaunchConfigOverride::key);
+            if (duplicate != result.config_overrides.end())
+                return std::unexpected("--set key may be specified only once: " + override.key);
+            result.config_overrides.push_back(std::move(override));
+            continue;
+        }
         if (argument == "--probe-only")
         {
             if (saw_probe_only)
@@ -122,7 +171,7 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
 
 std::string_view LaunchUsage() noexcept
 {
-    return "usage: openomega [--frames=N] [--data-root=PATH [--level=CODE] "
-           "[--probe-only]]\n";
+    return "usage: openomega [--config=PATH] [--set=KEY=VALUE ...] [--frames=N] "
+           "[--data-root=PATH [--level=CODE] [--probe-only]]\n";
 }
 } // namespace omega::runtime

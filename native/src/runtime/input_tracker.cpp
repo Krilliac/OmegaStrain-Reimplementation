@@ -205,6 +205,24 @@ std::expected<void, std::string> InputTracker::PushEvent(const InputEvent event)
     return {};
 }
 
+void InputTracker::ResetDevice(const InputDevice device) noexcept
+{
+    if (!IsKnownDevice(device))
+        return;
+
+    const auto bindings = table_.bindings();
+    for (std::size_t index = 0; index < bindings.size(); ++index)
+    {
+        if (bindings[index].device != device || control_down_[index] == 0U)
+            continue;
+        control_down_[index] = 0U;
+        ActionState& state = action_states_[control_action_index_[index]];
+        --state.down_count;
+        if (state.down_count == 0U)
+            state.released_edge = true;
+    }
+}
+
 void InputTracker::ResetAllControls() noexcept
 {
     std::fill(control_down_.begin(), control_down_.end(), std::uint8_t{0});

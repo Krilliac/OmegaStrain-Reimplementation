@@ -6,14 +6,25 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace omega::runtime
 {
+inline constexpr std::size_t kMaxLaunchConfigOverrides = 256U;
+
+struct LaunchConfigOverride
+{
+    std::string key;
+    std::string value;
+};
+
 struct LaunchOptions
 {
     int frame_limit = -1;
     std::optional<std::filesystem::path> data_root;
     std::optional<std::string> level_code;
+    std::optional<std::filesystem::path> config_path;
+    std::vector<LaunchConfigOverride> config_overrides;
     bool probe_only = false;
     bool show_help = false;
 };

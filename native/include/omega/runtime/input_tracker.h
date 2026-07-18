@@ -138,6 +138,13 @@ public:
     // Redundant level reports (press while down, release while up) are accepted no-ops.
     [[nodiscard]] std::expected<void, std::string> PushEvent(InputEvent event);
 
+    // [main thread] Reconciles only controls in one physical-device class to up. This is the
+    // disconnect path for a host-owned device and preserves held controls from every other class.
+    // Invalid device enumerators are ignored. Like ResetAllControls, this bypasses event budgets,
+    // preserves earlier press edges, and emits a release only when an action loses its final
+    // down control.
+    void ResetDevice(InputDevice device) noexcept;
+
     // [main thread] Atomically reconciles every tracked control to the up state after focus
     // loss, device reset, or another host event that invalidates level state. This operation
     // bypasses the per-frame event budget and does not change accepted/rejected event counts.

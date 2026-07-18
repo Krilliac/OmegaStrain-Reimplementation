@@ -90,6 +90,7 @@ int JobServiceFailureCount();
 int ManifestDebugImageFailureCount();
 int FrameSchedulerFailureCount();
 int InputTrackerFailureCount();
+int RuntimeSettingsFailureCount();
 
 int main()
 {
@@ -313,6 +314,7 @@ int main()
     failures += ManifestDebugImageFailureCount();
     failures += FrameSchedulerFailureCount();
     failures += InputTrackerFailureCount();
+    failures += RuntimeSettingsFailureCount();
     if (failures == 0)
         std::cout << "omega_core_tests: all checks passed\n";
     return failures == 0 ? 0 : 1;

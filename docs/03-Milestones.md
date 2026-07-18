@@ -48,7 +48,11 @@ worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure
 nanosecond accumulator; the simulation step stays a caller-supplied value, never a retail
 claim), and the platform-neutral input tracking core (bounded binding table plus per-frame
 edge snapshots) are implemented as tested library services. Wiring those services into the
-SDL host shell, plus audio output, remains incomplete.
+SDL host shell is complete through an app-owned composition root: strict file/command-line
+configuration resolves their bounded settings, logging owns stderr and ring sinks, the worker
+pool drains before shutdown, SDL input is translated into neutral frame snapshots with focus-loss
+reconciliation, and steady-clock deltas drive fixed-step planning. Executing a SimulationWorld
+from those plans, plus audio output, remains incomplete.
 
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
