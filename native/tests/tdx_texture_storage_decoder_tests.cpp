@@ -258,6 +258,15 @@ int TdxTextureStorageDecoderFailureCount()
               !direct24->blocks[0].palette &&
               direct24->blocks[0].planes[0].bytes.size() == 16U * 16U * 3U,
         "TDX packed24 storage decodes without inventing a channel interpretation");
+    const auto measured_direct24 =
+        omega::retail::DecodeTdxTextureStorageMeasured(direct24_bytes);
+    const std::uint64_t direct24_output_bytes = sizeof(omega::asset::TextureStorageIR) +
+        sizeof(omega::asset::TextureStorageBlockIR) +
+        sizeof(omega::asset::TextureStoragePlaneIR) + 16U * 16U * 3U;
+    Check(measured_direct24 && direct24 && measured_direct24->storage == *direct24 &&
+              measured_direct24->decoded_items == 3U &&
+              measured_direct24->logical_output_bytes == direct24_output_bytes,
+        "measured packed TDX usage covers a plane without palette storage");
 
     const auto direct32_bytes = MakeTdx(SinglePlane(32, 16, 16, 0x00, 0x51));
     auto direct32 = omega::retail::DecodeTdxTextureStorage(direct32_bytes);
@@ -299,6 +308,17 @@ int TdxTextureStorageDecoderFailureCount()
               multi->blocks[1].planes[0].bytes[0] == std::byte{0x91} &&
               multi->blocks[1].planes[1].bytes[0] == std::byte{0xA1},
         "TDX block and plane source order is preserved without assigning frame or mip meaning");
+    constexpr std::uint64_t multi_items = 1U + 2U + 4U + 2U + 2U * 256U;
+    const std::uint64_t multi_output_bytes = sizeof(omega::asset::TextureStorageIR) +
+        2U * sizeof(omega::asset::TextureStorageBlockIR) +
+        4U * sizeof(omega::asset::TextureStoragePlaneIR) + 2U * (128U + 64U) +
+        2U * 256U * sizeof(std::array<std::byte, 4>);
+    const auto measured_multi =
+        omega::retail::DecodeTdxTextureStorageMeasured(multi_bytes);
+    Check(measured_multi && multi && measured_multi->storage == *multi &&
+              measured_multi->decoded_items == multi_items &&
+              measured_multi->logical_output_bytes == multi_output_bytes,
+        "measured TDX decode preserves wrapper output and exact cumulative budget usage");
 
     auto eight_aligned_stride_bytes = MakeTdx(FixtureSpec{
         .bits_per_pixel = 4,
@@ -420,9 +440,18 @@ int TdxTextureStorageDecoderFailureCount()
 
     auto bad_reference = direct32_bytes;
     WriteU32(bad_reference, 64, 0xFFFFFFF0U);
-    CheckError(omega::retail::DecodeTdxTextureStorage(bad_reference),
+    const auto bad_reference_legacy = omega::retail::DecodeTdxTextureStorage(bad_reference);
+    const auto bad_reference_measured =
+        omega::retail::DecodeTdxTextureStorageMeasured(bad_reference);
+    CheckError(bad_reference_legacy,
         omega::asset::DecodeErrorCode::InvalidReference,
         "TDX rejects an object pointer outside its block");
+    Check(!bad_reference_legacy && !bad_reference_measured &&
+              bad_reference_legacy.error().code == bad_reference_measured.error().code &&
+              bad_reference_legacy.error().byte_offset ==
+                  bad_reference_measured.error().byte_offset &&
+              bad_reference_legacy.error().message == bad_reference_measured.error().message,
+        "measured and compatibility TDX decoders preserve complete typed error identity");
 
     auto duplicate_object = multi_bytes;
     WriteU32(duplicate_object, 68, ReadU32(duplicate_object, 64));
@@ -535,6 +564,19 @@ int TdxTextureStorageDecoderFailureCount()
         "TDX implicit-zero reconstruction is limited to one counted block");
 
     const auto budget_bytes = MakeTdx(SinglePlane(4, 16, 16, 0x14, 0x55));
+    constexpr std::uint64_t indexed4_items = 1U + 1U + 1U + 1U + 16U;
+    const std::uint64_t indexed4_output_bytes = sizeof(omega::asset::TextureStorageIR) +
+        sizeof(omega::asset::TextureStorageBlockIR) +
+        sizeof(omega::asset::TextureStoragePlaneIR) + 128U +
+        16U * sizeof(std::array<std::byte, 4>);
+    const auto measured_budget =
+        omega::retail::DecodeTdxTextureStorageMeasured(budget_bytes);
+    const auto wrapped_budget = omega::retail::DecodeTdxTextureStorage(budget_bytes);
+    Check(measured_budget && wrapped_budget && measured_budget->storage == *wrapped_budget &&
+              measured_budget->decoded_items == indexed4_items &&
+              measured_budget->logical_output_bytes == indexed4_output_bytes,
+        "measured TDX usage matches the existing exact standalone decoder budgets");
+
     auto limits = omega::asset::DecodeLimits{};
     limits.maximum_input_bytes = budget_bytes.size();
     Check(omega::retail::DecodeTdxTextureStorage(budget_bytes, limits).has_value(),
@@ -544,28 +586,33 @@ int TdxTextureStorageDecoderFailureCount()
         omega::asset::DecodeErrorCode::LimitExceeded,
         "TDX one-below input-byte budget fails");
 
-    constexpr std::uint64_t indexed4_items = 1U + 1U + 1U + 1U + 16U;
     limits = omega::asset::DecodeLimits{};
     limits.maximum_items = indexed4_items;
     Check(omega::retail::DecodeTdxTextureStorage(budget_bytes, limits).has_value(),
         "TDX exact logical-item budget succeeds");
+    Check(omega::retail::DecodeTdxTextureStorageMeasured(budget_bytes, limits).has_value(),
+        "measured TDX exact logical-item budget succeeds");
     limits.maximum_items = indexed4_items - 1U;
     CheckError(omega::retail::DecodeTdxTextureStorage(budget_bytes, limits),
         omega::asset::DecodeErrorCode::LimitExceeded,
         "TDX one-below logical-item budget fails");
+    CheckError(omega::retail::DecodeTdxTextureStorageMeasured(budget_bytes, limits),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "measured TDX one-below logical-item budget fails");
 
-    const std::uint64_t indexed4_output_bytes = sizeof(omega::asset::TextureStorageIR) +
-        sizeof(omega::asset::TextureStorageBlockIR) +
-        sizeof(omega::asset::TextureStoragePlaneIR) + 128U +
-        16U * sizeof(std::array<std::byte, 4>);
     limits = omega::asset::DecodeLimits{};
     limits.maximum_output_bytes = indexed4_output_bytes;
     Check(omega::retail::DecodeTdxTextureStorage(budget_bytes, limits).has_value(),
         "TDX exact logical-output budget succeeds");
+    Check(omega::retail::DecodeTdxTextureStorageMeasured(budget_bytes, limits).has_value(),
+        "measured TDX exact logical-output budget succeeds");
     limits.maximum_output_bytes = indexed4_output_bytes - 1U;
     CheckError(omega::retail::DecodeTdxTextureStorage(budget_bytes, limits),
         omega::asset::DecodeErrorCode::LimitExceeded,
         "TDX one-below logical-output budget fails");
+    CheckError(omega::retail::DecodeTdxTextureStorageMeasured(budget_bytes, limits),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "measured TDX one-below logical-output budget fails");
 
     limits = omega::asset::DecodeLimits{};
     limits.maximum_scratch_bytes = 0;
