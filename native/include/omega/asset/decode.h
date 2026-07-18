@@ -10,9 +10,9 @@ namespace omega::asset
 struct DecodeLimits
 {
     // Per top-level decoder call. Composed decoders debit one shared operation context rather than
-    // resetting these maxima for every child. Seventy-two MiB bounds the confirmed whole-level
-    // spatial/material composition while individual archive reads retain their separate 64 MiB cap.
-    std::uint64_t maximum_input_bytes = 72ULL * 1024ULL * 1024ULL;
+    // resetting these maxima for every child. A composition service may opt into a separately
+    // measured larger operation limit without widening standalone decoder defaults.
+    std::uint64_t maximum_input_bytes = 64ULL * 1024ULL * 1024ULL;
     // Logical owned result: value/vector/string objects plus their character or payload bytes.
     std::uint64_t maximum_output_bytes = 256ULL * 1024ULL * 1024ULL;
     // Conservative semantic-adapter transient storage, separate from input and output. Container

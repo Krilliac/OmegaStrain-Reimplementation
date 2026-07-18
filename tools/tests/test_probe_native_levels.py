@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -215,6 +216,42 @@ class ProbeNativeLevelsTests(unittest.TestCase):
         self.assertNotIn(private_error, stdout)
         self.assertNotIn("LAUNCH01", stdout)
 
+        result, stdout, stderr, _ = self.run_cli(
+            [PRIVATE_EXECUTABLE, PRIVATE_ROOT, "--aggregate-only"],
+            actions={"LIMIT02": probe.ProbeOutputLimitExceeded()},
+            levels=["LIMIT02"],
+        )
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            stdout,
+            compact_line(aggregate_expected(levels=1, process_exit=1)),
+        )
+        self.assertEqual(stderr, "")
+        self.assertNotIn("LIMIT02", stdout)
+
+    def test_aggregate_rejects_unbounded_numeric_summary_without_traceback(self) -> None:
+        private_count = "9" * 5000
+        result, stdout, stderr, _ = self.run_cli(
+            [PRIVATE_EXECUTABLE, PRIVATE_ROOT, "--aggregate-only"],
+            actions={
+                "HUGE01": completed(
+                    stdout=(
+                        "OpenOmega level: code=HUGE01 "
+                        f"terrain_cells={private_count} spatial_meshes={private_count}\n"
+                    )
+                )
+            },
+            levels=["HUGE01"],
+        )
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            stdout,
+            compact_line(aggregate_expected(levels=1, invalid_summary=1)),
+        )
+        self.assertEqual(stderr, "")
+        self.assertNotIn(private_count, stdout)
+        self.assertNotIn("Traceback", stdout + stderr)
+
     def test_detailed_default_output_remains_compatible(self) -> None:
         levels = ["GOOD01", "TIME02", "EXIT03", "MISS04", "IDENT05", "CARD06"]
         private_stderr = "PRIVATE-DEFAULT-STDERR"
@@ -272,6 +309,26 @@ class ProbeNativeLevelsTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertNotIn(private_config_error, stdout)
         self.assertFalse(runner.calls)
+
+        for non_finite_timeout in ("nan", "inf", "-inf"):
+            with self.subTest(non_finite_timeout=non_finite_timeout):
+                result, stdout, stderr, runner = self.run_cli(
+                    [
+                        PRIVATE_EXECUTABLE,
+                        PRIVATE_ROOT,
+                        "--aggregate-only",
+                        "--timeout",
+                        non_finite_timeout,
+                    ],
+                    levels=["UNREACHED02"],
+                )
+                self.assertEqual(result, 1)
+                self.assertEqual(
+                    stdout,
+                    compact_line(aggregate_expected(levels=0, config=1)),
+                )
+                self.assertEqual(stderr, "")
+                self.assertFalse(runner.calls)
 
         private_discovery_error = "PRIVATE-DISCOVERY-MEMBER"
 
@@ -426,6 +483,100 @@ class ProbeNativeLevelsTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 probe.discover_levels(root, maximum_level_directories=1)
+
+    def test_default_runner_bounds_combined_child_output(self) -> None:
+        completed_process = probe.bounded_run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.write('A' * 100); sys.stderr.write('B' * 100)",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10.0,
+        )
+        self.assertEqual(completed_process.returncode, 0)
+        self.assertEqual(completed_process.stdout, "A" * 100)
+        self.assertEqual(completed_process.stderr, "B" * 100)
+
+        with self.assertRaises(probe.ProbeOutputLimitExceeded):
+            probe.bounded_run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import sys; sys.stdout.buffer.write("
+                        f"b'X' * {probe.MAX_PROBE_CAPTURE_BYTES + 1})"
+                    ),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10.0,
+            )
+
+        with self.assertRaises(probe.ProbeOutputLimitExceeded):
+            probe.bounded_run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import sys; "
+                        "sys.stdout.buffer.write(b'Y' * 40000); sys.stdout.flush(); "
+                        "sys.stderr.buffer.write(b'Z' * 40000); sys.stderr.flush()"
+                    ),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10.0,
+            )
+
+        with self.assertRaises(subprocess.TimeoutExpired):
+            probe.bounded_run(
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=0.2,
+            )
+
+    def test_default_runner_terminates_inherited_pipe_descendants(self) -> None:
+        descendant = "import time; time.sleep(30)"
+        overflow_parent = (
+            "import subprocess,sys,time; "
+            f"subprocess.Popen([sys.executable,'-c',{descendant!r}],"
+            "stdout=sys.stdout,stderr=sys.stderr); "
+            f"sys.stdout.buffer.write(b'Q' * {probe.MAX_PROBE_CAPTURE_BYTES + 1}); "
+            "sys.stdout.flush(); time.sleep(30)"
+        )
+        started = time.monotonic()
+        with self.assertRaises(probe.ProbeOutputLimitExceeded):
+            probe.bounded_run(
+                [sys.executable, "-c", overflow_parent],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10.0,
+            )
+        self.assertLess(time.monotonic() - started, 5.0)
+
+        timeout_parent = (
+            "import subprocess,sys,time; "
+            f"subprocess.Popen([sys.executable,'-c',{descendant!r}],"
+            "stdout=sys.stdout,stderr=sys.stderr); time.sleep(30)"
+        )
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            probe.bounded_run(
+                [sys.executable, "-c", timeout_parent],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=0.2,
+            )
+        self.assertLess(time.monotonic() - started, 5.0)
 
 
 if __name__ == "__main__":

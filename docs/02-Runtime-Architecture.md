@@ -209,8 +209,8 @@ name table and dense MTRL-to-name index relationships; passive VUM payloads rema
 `LoadLevelContent` is the startup composition boundary for those two canonical collections. It
 reads and indexes the common archive chain and each referenced cell HOG once, then decodes the
 unique COL and VUM members under one cumulative input, item, output, scratch-peak, and depth budget.
-The shared decoder input default is 72 MiB; each physical DATA.HOG, nested-HOG, and cell-HOG read
-remains independently capped at 64 MiB.
+The `GameDataService` shared-operation input default is 72 MiB; standalone decoders and each
+physical DATA.HOG, nested-HOG, and cell-HOG read retain their separate 64 MiB defaults or caps.
 The all-or-error `LevelContentIR` preserves both manifest-order collections together; their parallel
 positions assert common source order and cardinality only, not a mesh-to-material relationship.
 Startup retains that composite directly, while the synthetic diagnostic reads only its spatial

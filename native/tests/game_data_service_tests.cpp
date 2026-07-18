@@ -476,8 +476,11 @@ LoadContentWithLimits(const std::filesystem::path& root,
 
 int GameDataServiceFailureCount()
 {
-    Check(omega::asset::DecodeLimits{}.maximum_input_bytes == 72ULL * 1024ULL * 1024ULL,
-        "the default shared input budget covers confirmed whole-level composition");
+    Check(omega::asset::DecodeLimits{}.maximum_input_bytes == 64ULL * 1024ULL * 1024ULL,
+        "standalone decoders retain their narrower default input budget");
+    Check(omega::content::GameDataServiceConfig{}.decode_limits.maximum_input_bytes ==
+              72ULL * 1024ULL * 1024ULL,
+        "the service default shared input budget covers confirmed whole-level composition");
 
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
