@@ -25,8 +25,8 @@ BLOCKED_EXTENSIONS = {
     ".jpeg", ".key", ".ktx", ".lib", ".lpd", ".map", ".max", ".mec",
     ".mkv", ".mp3", ".mp4", ".nvm", ".ogg", ".p12", ".p2s", ".par",
     ".pdb", ".pem", ".pfx", ".png", ".pop", ".pss", ".psu", ".rar",
-    ".resym", ".rom", ".rom0", ".rom1", ".rom2", ".sav", ".skl",
-    ".skm", ".so", ".sps", ".sys", ".tar", ".tdx", ".tga", ".vag",
+    ".resym", ".rom", ".rom0", ".rom1", ".rom2", ".sav", ".ska",
+    ".skas", ".skl", ".skm", ".so", ".sps", ".sys", ".tar", ".tdx", ".tga", ".vag",
     ".vpk", ".vum", ".wav", ".webm", ".webp", ".xps", ".xz", ".zip",
 }
 

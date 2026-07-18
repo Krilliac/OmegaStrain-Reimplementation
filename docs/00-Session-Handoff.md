@@ -105,7 +105,9 @@ shipping dependencies or execution mechanisms.
 2. Validate TDX swizzle, nibble order, palette permutation, and channel expansion independently
    before producing display-ready pixels or GPU uploads.
 3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
-4. Add bounded SKM/SKL/SKA descriptors before actor, skeleton, or animation semantics.
+4. SKM and SKL now have bounded passive native descriptors. Add a separate SKA descriptor only
+   from the proven 112-byte-prefix counted-word envelope; keep the two-candidate SKAS text family
+   separate and assign no actor, skeleton, timing, channel, transform, or animation semantics.
 5. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools
