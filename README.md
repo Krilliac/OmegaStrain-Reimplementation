@@ -111,7 +111,7 @@ ctest --preset msvc-debug
 .\build\msvc\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --probe-only
 .\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
-python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\private\extracted-disc
+python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\private\extracted-disc --aggregate-only
 .\build\msvc\Debug\openomega.exe --frames=120
 .\build\msvc\Debug\openomega.exe --config=.\openomega.cfg --set=log.minimum_severity=debug --frames=120
 ```

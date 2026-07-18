@@ -58,7 +58,9 @@ struct GameDataServiceConfig
     std::uint64_t maximum_pop_bytes = 64ULL * 1024ULL * 1024ULL;
     std::uint64_t maximum_data_hog_bytes = 64ULL * 1024ULL * 1024ULL;
     std::uint64_t maximum_nested_hog_bytes = 64ULL * 1024ULL * 1024ULL;
-    asset::DecodeLimits decode_limits;
+    // Whole-level spatial/material composition is corpus-confirmed at 72 MiB of cumulative input;
+    // standalone asset decoders retain their narrower 64 MiB default.
+    asset::DecodeLimits decode_limits{.maximum_input_bytes = 72ULL * 1024ULL * 1024ULL};
 };
 
 // Non-hot-reloadable data-root service. OmegaApp is the sole owner; future AssetService instances
