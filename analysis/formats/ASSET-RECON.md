@@ -194,6 +194,21 @@ aligned. Neither the inspector nor semantic adapter decodes, executes, or publis
 instructions. Vertex attributes, topology, material parameters, texture binding, and coordinate
 conversion remain later research.
 
+Dynamic consumer-read evidence has a separate privacy-safe publication gate. The local oracle-only
+PCSX2 tracer has been built. Its first private smoke run ended with `savestate_load_failed` before
+selecting a runtime copy or recording an event, so there is no accepted consumer-read report or
+evidence claim yet. `tools/validate_vum_read_trace.py` accepts a private expected VUM size and
+requires an exact schema, accepted lifecycle status, strict in-span bounds, deterministic ordering,
+unique keyed rows, and consistent detail/summary cross-counts. An optional repeat input must be
+byte-identical.
+
+A report may contain only VUM-relative offset/width/count aggregates, anonymous site ranges and
+counts, VIF source-relative ranges and output counts, and lifecycle status. It must not contain
+program counters; absolute or RAM addresses; CRCs or hashes; paths or names; payload bytes or
+decoded payload data; or instructions, opcodes, registers, or equivalent executable detail. This
+gate establishes only which source-relative ranges the oracle consumed and aggregate output
+cardinality. It does not establish geometry, topology, vertex, material, packet, or draw semantics.
+
 The native aggregate verifier independently accepts and semantically decodes all 7,036 COL spans,
 decodes the proven catalog layer and passive payload grammar of all 7,036 VUM spans, and
 semantically decodes 15,248 TDX spans, with zero errors. Its extent totals exactly match this
@@ -229,10 +244,13 @@ For the first visible MINSK scene, implement in this order:
 8. VPK music after its payload codec is identified.
 
 This ordering deliberately puts scene geometry and textures ahead of actors, effects, and audio.
-The next high-value dynamic trace is an aggregate byte-read trace of the executable's `VUMS`
-consumer: VUM-relative offsets, widths, loop counts, and output counts only. Do not retain
-instructions or payload bytes. The immediate question is which proven reference partitions feed
-position and topology outputs.
+The next high-value dynamic pass is to correct the private save-state load, privately select an
+exact-primary MINSK VUM, and run the identical save state twice with the built pinned tracer. Both
+lifecycle-complete reports must pass `tools/validate_vum_read_trace.py` and be byte-identical before
+only their sanitized aggregate is published. Do not add an evidence-ledger entry or claim a
+consumer contract until a real trace passes that gate. The immediate research question remains
+which proven reference partitions are read, without assigning position, topology, or material
+meaning to the result.
 
 ## Reproduce
 

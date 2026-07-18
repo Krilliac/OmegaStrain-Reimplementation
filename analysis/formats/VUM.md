@@ -144,6 +144,39 @@ evidence scaffolding for the next clean-room proof, not canonical asset IR. The 
 preflights source records, normalized relationships, output vectors, and arithmetic before
 allocation and needs zero dynamic scratch.
 
+## Privacy-safe consumer-read trace evidence gate
+
+`tools/validate_vum_read_trace.py` is the acceptance gate for any future dynamic claim about the
+retail VUM consumer. The local oracle-only PCSX2 tracer has been built. Its first private smoke run
+ended with `savestate_load_failed` before selecting a runtime copy or recording an event. No
+consumer-read report has passed this gate, and no dynamic VUM evidence claim exists yet. The static
+catalog and passive-descriptor results above remain the only confirmed VUM contracts.
+
+A publishable trace report may expose only sanitized aggregates:
+
+- VUM-relative read offsets, widths, and counts;
+- anonymous instrumentation-site ranges and counts, without site identities;
+- VIF source-relative ranges and output counts; and
+- lifecycle status needed to prove that capture began and ended cleanly.
+
+The report schema forbids program counters; absolute, process, or emulated-RAM addresses; CRCs or
+hashes; source paths or names; payload bytes or decoded payload data; and instructions, opcodes,
+registers, or other executable detail. Fields outside the allow-list above are invalid rather than
+silently ignored.
+
+Validation receives the expected VUM span size privately; that size is a bound, not a publishable
+asset identifier. The validator enforces the exact schema, accepted lifecycle status, strict
+in-span offset and width arithmetic, deterministic ordering, unique keyed rows, and agreement
+between detail counts and their summaries. It can also compare a second report byte-for-byte, so
+two captures from the same save state must be identical before determinism is claimed.
+
+The next pass is deliberately evidence-first: correct the private save-state load; privately select
+one MINSK VUM whose primary endpoint exactly equals its containing span; run the identical save
+state twice; and require two complete, individually valid, byte-identical reports. Only the
+resulting sanitized aggregate may then be published. Until a real trace passes that process, do not
+add an evidence-ledger entry or infer geometry, topology, vertex, material, packet, or draw
+semantics.
+
 ## Render geometry gate
 
 The two payload boundaries split the post-record primary region into three bounded, nonnegative,
