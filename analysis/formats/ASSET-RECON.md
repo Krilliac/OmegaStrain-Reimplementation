@@ -149,11 +149,19 @@ nonzero tail or a computed extent beyond its physical boundary. This proves a co
 envelope only; frames, channels, bones, transforms, compression, timing, and animation meaning
 remain unassigned.
 
+The retail-only `SkaContainerDescriptor` implements exactly this proven envelope as a fixed-size
+passive result. It retains only the version word, the observed words at `0x04`, `0x08`, and `0x10`,
+and the computed logical extent with exact or zero-padded classification. It does not retain or
+interpret counted-region bytes, and combinations outside the observed word and extent ranges remain
+unsupported. `omega_tool asset-metadata-verify-tree` classifies `.ska` and emits only sanitized
+candidate, validity, extent, and aggregate logical-byte counters. Do not claim an independent native
+213/213 corpus pass until that command is rerun against the owner-supplied private extraction.
+
 SKAS is kept separate because only two distinct candidates exist. Both are printable ASCII with
 CRLF delimiters, a final CRLF, 72 lines, 5 blank lines, 67 lines containing exactly one colon, and
 1-3 trailing NUL bytes. Their physical spans are 5,132-5,156 bytes. This sample supports only a
 bounded text-shape check; labels, values, relationships, and any association with SKA are not yet
-established.
+established. No native SKAS descriptor is implied by the SKA implementation.
 
 ### VAG audio
 

@@ -105,9 +105,12 @@ shipping dependencies or execution mechanisms.
 2. Validate TDX swizzle, nibble order, palette permutation, and channel expansion independently
    before producing display-ready pixels or GPU uploads.
 3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
-4. SKM and SKL now have bounded passive native descriptors. Add a separate SKA descriptor only
-   from the proven 112-byte-prefix counted-word envelope; keep the two-candidate SKAS text family
-   separate and assign no actor, skeleton, timing, channel, transform, or animation semantics.
+4. SKM, SKL, and SKA now have bounded passive native descriptors. SKA is a fixed-output retail-only
+   view of the proven 112-byte-prefix counted-word envelope. Keep the two-candidate SKAS text family
+   separate and assign no actor, skeleton, timing, channel, transform, or animation semantics. Its
+   `omega_tool` corpus-verifier path is wired, but record no native aggregate-pass claim until an
+   owner-supplied private run reports 213 candidates, 213 valid, zero errors, 158 exact, and 55
+   zero-tailed spans.
 5. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools

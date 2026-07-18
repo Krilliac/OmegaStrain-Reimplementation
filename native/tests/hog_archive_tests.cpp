@@ -78,6 +78,7 @@ int VirtualFileSystemFailureCount();
 int PopTerrainIndexFailureCount();
 int PopLevelManifestDecoderFailureCount();
 int ContainerDescriptorFailureCount();
+int SkaContainerDescriptorFailureCount();
 int SkmContainerDescriptorFailureCount();
 int SklContainerDescriptorFailureCount();
 int ColSpatialMeshDecoderFailureCount();
@@ -305,6 +306,7 @@ int main()
     failures += PopTerrainIndexFailureCount();
     failures += PopLevelManifestDecoderFailureCount();
     failures += ContainerDescriptorFailureCount();
+    failures += SkaContainerDescriptorFailureCount();
     failures += SkmContainerDescriptorFailureCount();
     failures += SklContainerDescriptorFailureCount();
     failures += ColSpatialMeshDecoderFailureCount();
