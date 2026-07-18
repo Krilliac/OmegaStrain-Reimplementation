@@ -8,7 +8,6 @@
 
 namespace omega::runtime
 {
-class FrameScheduler;
 class InputTracker;
 class LogService;
 struct ManifestDebugImage;
@@ -16,13 +15,8 @@ struct ManifestDebugImage;
 
 namespace omega::app
 {
-struct RunResult
+struct HostEventResult
 {
-    int rendered_frames = 0;
-    std::uint64_t planned_simulation_steps = 0;
-    std::uint64_t input_frames = 0;
-    std::uint64_t clamped_frame_count = 0;
-    std::uint64_t dropped_time_frame_count = 0;
     bool quit_requested = false;
 };
 
@@ -41,11 +35,15 @@ public:
     SdlGpuHost(const SdlGpuHost&) = delete;
     SdlGpuHost& operator=(const SdlGpuHost&) = delete;
 
-    // [main/render thread] Runtime services are non-owning references whose lifetime is held by
-    // OmegaApp. SDL events are translated into the platform-neutral tracker before frame planning.
-    [[nodiscard]] std::expected<RunResult, std::string> Run(int frame_limit,
-        runtime::FrameScheduler& frame_scheduler, runtime::InputTracker& input,
-        runtime::LogService& log, std::uint32_t quit_action);
+    // [main thread] Pumps every queued SDL event, translating neutral controls into the borrowed
+    // tracker. OmegaApp owns frame closure, quit-action policy, timing, and simulation execution.
+    [[nodiscard]] HostEventResult PumpEvents(
+        runtime::InputTracker& input, runtime::LogService& log);
+
+    // [main/render thread] Renders and submits one frame. The index affects only the synthetic
+    // content-free clear color and never feeds simulation state.
+    [[nodiscard]] std::expected<void, std::string> RenderFrame(
+        std::uint64_t rendered_frame_index);
     [[nodiscard]] std::string_view driver_name() const noexcept;
 
 private:

@@ -1,6 +1,5 @@
 #include "sdl_gpu_host.h"
 
-#include "omega/runtime/frame_scheduler.h"
 #include "omega/runtime/input_tracker.h"
 #include "omega/runtime/log_service.h"
 #include "omega/runtime/manifest_debug_image.h"
@@ -8,7 +7,6 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -211,178 +209,138 @@ SdlGpuHost::~SdlGpuHost() = default;
 SdlGpuHost::SdlGpuHost(SdlGpuHost&&) noexcept = default;
 SdlGpuHost& SdlGpuHost::operator=(SdlGpuHost&&) noexcept = default;
 
-std::expected<RunResult, std::string> SdlGpuHost::Run(const int frame_limit,
-    runtime::FrameScheduler& frame_scheduler, runtime::InputTracker& input,
-    runtime::LogService& log, const std::uint32_t quit_action)
+HostEventResult SdlGpuHost::PumpEvents(
+    runtime::InputTracker& input, runtime::LogService& log)
 {
-    using Clock = std::chrono::steady_clock;
-
-    RunResult result;
-    bool running = true;
-    auto previous_frame = Clock::now();
-    while (running && (frame_limit < 0 || result.rendered_frames < frame_limit))
+    HostEventResult result;
+    SDL_Event event{};
+    while (SDL_PollEvent(&event))
     {
-        SDL_Event event{};
-        while (SDL_PollEvent(&event))
+        if (event.type == SDL_EVENT_QUIT)
         {
-            if (event.type == SDL_EVENT_QUIT)
-            {
-                running = false;
-                result.quit_requested = true;
-            }
-            else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
-            {
-                input.ResetAllControls();
-            }
-            else if (event.type == SDL_EVENT_GAMEPAD_ADDED && impl_->gamepad == nullptr)
-            {
-                impl_->gamepad = SDL_OpenGamepad(event.gdevice.which);
-                if (impl_->gamepad == nullptr)
-                {
-                    log.Warning("input", SdlError("SDL_OpenGamepad"));
-                }
-                else
-                {
-                    impl_->gamepad_id = event.gdevice.which;
-                    log.Info("input", "opened the primary SDL gamepad");
-                }
-            }
-            else if (event.type == SDL_EVENT_GAMEPAD_REMOVED && impl_->gamepad != nullptr &&
-                     event.gdevice.which == impl_->gamepad_id)
-            {
-                SDL_CloseGamepad(impl_->gamepad);
-                impl_->gamepad = nullptr;
-                impl_->gamepad_id = 0;
-                input.ResetDevice(runtime::InputDevice::GamepadButton);
-                log.Info("input", "closed the removed primary SDL gamepad");
-            }
-
-            if (const auto translated = TranslateInputEvent(event))
-            {
-                const auto accepted = input.PushEvent(*translated);
-                (void)accepted;
-            }
-        }
-
-        const runtime::InputSnapshot snapshot = input.EndFrame();
-        ++result.input_frames;
-        if (snapshot.rejected_event_count() != 0U)
-        {
-            log.Warning("input", "rejected " +
-                                     std::to_string(snapshot.rejected_event_count()) +
-                                     " host events in one frame");
-        }
-        if (snapshot.WasPressed(quit_action))
-        {
-            running = false;
             result.quit_requested = true;
         }
-        if (!running)
-            break;
-
-        const auto current_frame = Clock::now();
-        const runtime::FramePlan plan = frame_scheduler.BeginFrame(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(current_frame - previous_frame));
-        previous_frame = current_frame;
-        result.planned_simulation_steps += plan.simulation_steps;
-        if (plan.clamped_delta)
+        else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
         {
-            ++result.clamped_frame_count;
-            if (result.clamped_frame_count == 1U)
-                log.Warning("frame", "wall-time delta reached the configured clamp");
+            input.ResetAllControls();
         }
-        if (plan.dropped_time)
+        else if (event.type == SDL_EVENT_GAMEPAD_ADDED && impl_->gamepad == nullptr)
         {
-            ++result.dropped_time_frame_count;
-            if (result.dropped_time_frame_count == 1U)
-                log.Warning("frame", "fixed-step backlog exceeded the configured frame budget");
-        }
-
-        SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
-        if (commands == nullptr)
-            return std::unexpected(SdlError("SDL_AcquireGPUCommandBuffer"));
-
-        SDL_GPUTexture* swapchain = nullptr;
-        std::uint32_t width = 0;
-        std::uint32_t height = 0;
-        if (!SDL_WaitAndAcquireGPUSwapchainTexture(
-                commands, impl_->window, &swapchain, &width, &height))
-        {
-            SDL_CancelGPUCommandBuffer(commands);
-            return std::unexpected(SdlError("SDL_WaitAndAcquireGPUSwapchainTexture"));
-        }
-
-        if (swapchain != nullptr && width != 0 && height != 0 &&
-            impl_->debug_texture != nullptr)
-        {
-            std::uint32_t destination_width = width;
-            std::uint32_t destination_height = height;
-            if (static_cast<std::uint64_t>(width) * impl_->debug_height <=
-                static_cast<std::uint64_t>(height) * impl_->debug_width)
+            impl_->gamepad = SDL_OpenGamepad(event.gdevice.which);
+            if (impl_->gamepad == nullptr)
             {
-                destination_height = std::max(1U, static_cast<std::uint32_t>(
-                    static_cast<std::uint64_t>(width) * impl_->debug_height /
-                    impl_->debug_width));
+                log.Warning("input", SdlError("SDL_OpenGamepad"));
             }
             else
             {
-                destination_width = std::max(1U, static_cast<std::uint32_t>(
-                    static_cast<std::uint64_t>(height) * impl_->debug_width /
-                    impl_->debug_height));
+                impl_->gamepad_id = event.gdevice.which;
+                log.Info("input", "opened the primary SDL gamepad");
             }
-            const SDL_GPUBlitInfo blit{
-                .source = {
-                    .texture = impl_->debug_texture,
-                    .mip_level = 0,
-                    .layer_or_depth_plane = 0,
-                    .x = 0,
-                    .y = 0,
-                    .w = impl_->debug_width,
-                    .h = impl_->debug_height,
-                },
-                .destination = {
-                    .texture = swapchain,
-                    .mip_level = 0,
-                    .layer_or_depth_plane = 0,
-                    .x = (width - destination_width) / 2U,
-                    .y = (height - destination_height) / 2U,
-                    .w = destination_width,
-                    .h = destination_height,
-                },
-                .load_op = SDL_GPU_LOADOP_CLEAR,
-                .clear_color = {0.015F, 0.02F, 0.04F, 1.0F},
-                .flip_mode = SDL_FLIP_NONE,
-                .filter = SDL_GPU_FILTER_NEAREST,
-                .cycle = false,
-                .padding1 = 0,
-                .padding2 = 0,
-                .padding3 = 0,
-            };
-            SDL_BlitGPUTexture(commands, &blit);
         }
-        else if (swapchain != nullptr && width != 0 && height != 0)
+        else if (event.type == SDL_EVENT_GAMEPAD_REMOVED && impl_->gamepad != nullptr &&
+                 event.gdevice.which == impl_->gamepad_id)
         {
-            const float pulse = static_cast<float>((result.rendered_frames % 240) / 239.0);
-            SDL_GPUColorTargetInfo target{};
-            target.texture = swapchain;
-            target.clear_color = SDL_FColor{
-                0.025F + pulse * 0.025F, 0.035F, 0.065F + pulse * 0.04F, 1.0F};
-            target.load_op = SDL_GPU_LOADOP_CLEAR;
-            target.store_op = SDL_GPU_STOREOP_STORE;
-            SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
-            if (pass == nullptr)
-            {
-                SDL_CancelGPUCommandBuffer(commands);
-                return std::unexpected(SdlError("SDL_BeginGPURenderPass"));
-            }
-            SDL_EndGPURenderPass(pass);
+            SDL_CloseGamepad(impl_->gamepad);
+            impl_->gamepad = nullptr;
+            impl_->gamepad_id = 0;
+            input.ResetDevice(runtime::InputDevice::GamepadButton);
+            log.Info("input", "closed the removed primary SDL gamepad");
         }
 
-        if (!SDL_SubmitGPUCommandBuffer(commands))
-            return std::unexpected(SdlError("SDL_SubmitGPUCommandBuffer"));
-        ++result.rendered_frames;
+        if (const auto translated = TranslateInputEvent(event))
+        {
+            const auto accepted = input.PushEvent(*translated);
+            (void)accepted;
+        }
     }
     return result;
+}
+
+std::expected<void, std::string> SdlGpuHost::RenderFrame(
+    const std::uint64_t rendered_frame_index)
+{
+    SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
+    if (commands == nullptr)
+        return std::unexpected(SdlError("SDL_AcquireGPUCommandBuffer"));
+
+    SDL_GPUTexture* swapchain = nullptr;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(
+            commands, impl_->window, &swapchain, &width, &height))
+    {
+        SDL_CancelGPUCommandBuffer(commands);
+        return std::unexpected(SdlError("SDL_WaitAndAcquireGPUSwapchainTexture"));
+    }
+
+    if (swapchain != nullptr && width != 0 && height != 0 && impl_->debug_texture != nullptr)
+    {
+        std::uint32_t destination_width = width;
+        std::uint32_t destination_height = height;
+        if (static_cast<std::uint64_t>(width) * impl_->debug_height <=
+            static_cast<std::uint64_t>(height) * impl_->debug_width)
+        {
+            destination_height = std::max(1U, static_cast<std::uint32_t>(
+                static_cast<std::uint64_t>(width) * impl_->debug_height /
+                impl_->debug_width));
+        }
+        else
+        {
+            destination_width = std::max(1U, static_cast<std::uint32_t>(
+                static_cast<std::uint64_t>(height) * impl_->debug_width /
+                impl_->debug_height));
+        }
+        const SDL_GPUBlitInfo blit{
+            .source = {
+                .texture = impl_->debug_texture,
+                .mip_level = 0,
+                .layer_or_depth_plane = 0,
+                .x = 0,
+                .y = 0,
+                .w = impl_->debug_width,
+                .h = impl_->debug_height,
+            },
+            .destination = {
+                .texture = swapchain,
+                .mip_level = 0,
+                .layer_or_depth_plane = 0,
+                .x = (width - destination_width) / 2U,
+                .y = (height - destination_height) / 2U,
+                .w = destination_width,
+                .h = destination_height,
+            },
+            .load_op = SDL_GPU_LOADOP_CLEAR,
+            .clear_color = {0.015F, 0.02F, 0.04F, 1.0F},
+            .flip_mode = SDL_FLIP_NONE,
+            .filter = SDL_GPU_FILTER_NEAREST,
+            .cycle = false,
+            .padding1 = 0,
+            .padding2 = 0,
+            .padding3 = 0,
+        };
+        SDL_BlitGPUTexture(commands, &blit);
+    }
+    else if (swapchain != nullptr && width != 0 && height != 0)
+    {
+        const float pulse = static_cast<float>((rendered_frame_index % 240U) / 239.0);
+        SDL_GPUColorTargetInfo target{};
+        target.texture = swapchain;
+        target.clear_color = SDL_FColor{
+            0.025F + pulse * 0.025F, 0.035F, 0.065F + pulse * 0.04F, 1.0F};
+        target.load_op = SDL_GPU_LOADOP_CLEAR;
+        target.store_op = SDL_GPU_STOREOP_STORE;
+        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
+        if (pass == nullptr)
+        {
+            SDL_CancelGPUCommandBuffer(commands);
+            return std::unexpected(SdlError("SDL_BeginGPURenderPass"));
+        }
+        SDL_EndGPURenderPass(pass);
+    }
+
+    if (!SDL_SubmitGPUCommandBuffer(commands))
+        return std::unexpected(SdlError("SDL_SubmitGPUCommandBuffer"));
+    return {};
 }
 
 std::string_view SdlGpuHost::driver_name() const noexcept

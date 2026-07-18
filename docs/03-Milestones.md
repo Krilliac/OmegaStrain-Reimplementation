@@ -52,7 +52,9 @@ SDL host shell is complete through an app-owned composition root: strict file/co
 configuration resolves their bounded settings, logging owns stderr and ring sinks, the worker
 pool drains before shutdown, SDL input is translated into neutral frame snapshots with focus-loss
 reconciliation, and steady-clock deltas drive fixed-step planning. Executing a SimulationWorld
-from those plans, plus audio output, remains incomplete.
+from those plans is now wired through `OmegaApp`: every planned step advances an owned,
+platform-neutral deterministic world clock before rendering, with fail-closed representation
+limits. Components, gameplay systems, render snapshots, and audio output remain incomplete.
 
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.

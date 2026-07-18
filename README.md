@@ -99,7 +99,10 @@ python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\priv
 that opens the modern GPU backend, renders exactly `N` frames, and exits without user input.
 `--probe-only` validates the retail root and selected level, then loads matching owned manifest and
 spatial-mesh state without opening a window. The current MINSK view is still a synthetic
-manifest-coverage grid, not reconstructed world geometry.
+manifest-coverage grid, not reconstructed world geometry. The app-owned loop converts steady-clock
+deltas into bounded fixed-step plans and executes each step against a platform-neutral deterministic
+`SimulationWorld`; the configured default remains a synthetic-shell timing value, not a retail-rate
+claim.
 
 The optional project-owned configuration file uses strict `lower_snake_case` dotted keys and
 `key = value` lines. `--set=KEY=VALUE` applies one validated command-line override per key. Current

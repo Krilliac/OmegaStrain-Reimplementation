@@ -9,6 +9,7 @@
 #include "omega/runtime/job_service.h"
 #include "omega/runtime/log_service.h"
 #include "omega/runtime/runtime_settings.h"
+#include "omega/simulation/simulation_world.h"
 
 #include <cstdint>
 #include <expected>
@@ -18,6 +19,17 @@
 
 namespace omega::app
 {
+struct RunResult
+{
+    int rendered_frames = 0;
+    std::uint64_t planned_simulation_steps = 0;
+    std::uint64_t executed_simulation_steps = 0;
+    std::uint64_t input_frames = 0;
+    std::uint64_t clamped_frame_count = 0;
+    std::uint64_t dropped_time_frame_count = 0;
+    bool quit_requested = false;
+};
+
 // Non-hot-reloadable native composition root. It is the sole owner of service lifetimes; SDL and
 // service dependencies receive only non-owning references whose lifetime is guaranteed here.
 class OmegaApp final
@@ -49,7 +61,9 @@ private:
         std::unique_ptr<runtime::LogService> log,
         std::unique_ptr<runtime::JobService> jobs,
         std::unique_ptr<runtime::FrameScheduler> frame_scheduler,
-        std::unique_ptr<runtime::InputTracker> input, std::unique_ptr<SdlGpuHost> host) noexcept;
+        std::unique_ptr<runtime::InputTracker> input,
+        std::unique_ptr<simulation::SimulationWorld> simulation,
+        std::unique_ptr<SdlGpuHost> host) noexcept;
 
     // Declaration order is ownership order; destruction is the required reverse order.
     std::unique_ptr<runtime::ConfigStore> config_;
@@ -60,6 +74,7 @@ private:
     std::unique_ptr<runtime::JobService> jobs_;
     std::unique_ptr<runtime::FrameScheduler> frame_scheduler_;
     std::unique_ptr<runtime::InputTracker> input_;
+    std::unique_ptr<simulation::SimulationWorld> simulation_;
     std::unique_ptr<SdlGpuHost> host_;
 };
 } // namespace omega::app
