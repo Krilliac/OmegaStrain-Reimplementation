@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iostream>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace
@@ -25,6 +26,11 @@ int SimulationWorldFailureCount()
     using omega::simulation::SimulationWorld;
     using omega::simulation::SimulationWorldConfig;
 
+    static_assert(!std::is_copy_constructible_v<SimulationWorld>);
+    static_assert(!std::is_copy_assignable_v<SimulationWorld>);
+    static_assert(std::is_nothrow_move_constructible_v<SimulationWorld>);
+    static_assert(std::is_nothrow_move_assignable_v<SimulationWorld>);
+
     Check(!SimulationWorld::Create({.fixed_step = std::chrono::nanoseconds::zero()}),
         "a zero fixed step is rejected");
     Check(!SimulationWorld::Create({.fixed_step = std::chrono::nanoseconds{-1}}),
@@ -34,6 +40,11 @@ int SimulationWorldFailureCount()
               .maximum_entities = 0U,
           }),
         "an invalid world entity capacity is rejected");
+    Check(!SimulationWorld::Create({
+              .fixed_step = std::chrono::nanoseconds{1},
+              .maximum_entities = omega::simulation::EntityRegistry::kMaximumCapacity + 1U,
+          }),
+        "a world entity capacity above the registry hard limit is rejected");
 
     constexpr auto step = std::chrono::nanoseconds{16'666'667};
     auto created = SimulationWorld::Create({.fixed_step = step});
@@ -90,6 +101,35 @@ int SimulationWorldFailureCount()
         Check(unchanged.completed_steps == full.completed_steps &&
                   unchanged.simulated_time == full.simulated_time,
             "representation exhaustion is atomic and leaves state unchanged");
+    }
+
+    auto move_source = SimulationWorld::Create({
+        .fixed_step = std::chrono::microseconds{250},
+        .maximum_entities = 2U,
+    });
+    Check(move_source.has_value(), "a movable world with bounded identity storage constructs");
+    if (move_source)
+    {
+        const auto entity = move_source->entities().CreateEntity();
+        Check(entity.has_value(), "the world owns an identity before transfer");
+        SimulationWorld moved = std::move(*move_source);
+        Check(entity && moved.entities().IsAlive(*entity) &&
+                  moved.config().maximum_entities == 2U &&
+                  moved.Snapshot().completed_steps == 0U,
+            "world move construction transfers the registry, configuration, and clock");
+
+        auto destination = SimulationWorld::Create({
+            .fixed_step = std::chrono::seconds{1},
+            .maximum_entities = 1U,
+        });
+        Check(destination.has_value(), "the world move-assignment destination constructs");
+        if (destination && entity)
+        {
+            *destination = std::move(moved);
+            Check(destination->entities().IsAlive(*entity) &&
+                      destination->config().fixed_step == std::chrono::microseconds{250},
+                "world move assignment transfers entity ownership and immutable configuration");
+        }
     }
     return failures;
 }

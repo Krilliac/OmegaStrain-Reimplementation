@@ -8,6 +8,9 @@
 
 namespace omega::simulation
 {
+// EntityId is a non-owning, registry-scoped value rather than a capability
+// token. Identical values may be alive in two independent registries; callers
+// must use a handle only with the SimulationWorld that issued it.
 struct EntityId
 {
     std::uint32_t index = std::numeric_limits<std::uint32_t>::max();
@@ -33,22 +36,29 @@ struct EntityRegistrySnapshot
     std::uint32_t alive = 0;
     std::uint32_t reusable = 0;
     std::uint32_t retired = 0;
+
+    [[nodiscard]] friend constexpr bool operator==(
+        const EntityRegistrySnapshot&, const EntityRegistrySnapshot&) = default;
 };
 
 // Project-owned deterministic entity-identity storage. This is game state, not
 // a lifecycle service: SimulationWorld is its sole owner, and future component
-// stores key their plain data by EntityId. The registry is non-hot-reloadable
-// initially and performs no allocation after Create().
+// stores key their plain data by EntityId. The registry is app-owned,
+// non-hot-reloadable host state: no vtable, pointer, or storage view crosses a
+// reload boundary. It performs no allocation after Create().
 class EntityRegistry final
 {
   public:
     static constexpr std::uint32_t kMaximumCapacity = 1U << 20U;
 
-    // [game thread, startup] Allocates all slot/free-list storage up front.
+    // [any thread; reentrant, startup] Allocates all slot/free-list storage up front.
     [[nodiscard]] static std::expected<EntityRegistry, std::string> Create(std::uint32_t capacity);
 
-    EntityRegistry(EntityRegistry&&) noexcept = default;
-    EntityRegistry& operator=(EntityRegistry&&) noexcept = default;
+    // [game thread, lifecycle] Transfers all storage without allocation. The
+    // moved-from registry becomes an inert zero-capacity value that may be
+    // queried, destroyed, or move-assigned.
+    EntityRegistry(EntityRegistry&& other) noexcept;
+    EntityRegistry& operator=(EntityRegistry&& other) noexcept;
     EntityRegistry(const EntityRegistry&) = delete;
     EntityRegistry& operator=(const EntityRegistry&) = delete;
 

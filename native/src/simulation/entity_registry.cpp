@@ -29,6 +29,29 @@ EntityRegistry::EntityRegistry(const std::uint32_t capacity) : slots_(capacity)
         free_indices_.push_back(index - 1U);
 }
 
+EntityRegistry::EntityRegistry(EntityRegistry&& other) noexcept
+    : slots_(std::move(other.slots_)), free_indices_(std::move(other.free_indices_)),
+      alive_count_(std::exchange(other.alive_count_, 0U)),
+      retired_count_(std::exchange(other.retired_count_, 0U))
+{
+    other.slots_.clear();
+    other.free_indices_.clear();
+}
+
+EntityRegistry& EntityRegistry::operator=(EntityRegistry&& other) noexcept
+{
+    if (this == &other)
+        return *this;
+
+    slots_ = std::move(other.slots_);
+    free_indices_ = std::move(other.free_indices_);
+    alive_count_ = std::exchange(other.alive_count_, 0U);
+    retired_count_ = std::exchange(other.retired_count_, 0U);
+    other.slots_.clear();
+    other.free_indices_.clear();
+    return *this;
+}
+
 std::expected<EntityId, EntityCreateError> EntityRegistry::CreateEntity() noexcept
 {
     if (free_indices_.empty())
