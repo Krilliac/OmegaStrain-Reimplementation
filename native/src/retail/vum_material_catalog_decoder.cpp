@@ -24,6 +24,8 @@ struct CatalogLayout
     std::uint32_t name_count = 0;
     std::uint32_t material_count = 0;
     std::uint32_t names_end = 0;
+    std::uint64_t decoded_items = 0;
+    std::uint64_t logical_output_bytes = 0;
 };
 
 [[nodiscard]] asset::DecodeError Error(const asset::DecodeErrorCode code,
@@ -231,19 +233,24 @@ struct CatalogLayout
         .name_count = name_count,
         .material_count = material_count,
         .names_end = names_end,
+        .decoded_items = items,
+        .logical_output_bytes = output_bytes,
     };
 }
 } // namespace
 
-asset::DecodeResult<asset::MaterialCatalogIR> DecodeVumMaterialCatalog(
+asset::DecodeResult<DecodedVumMaterialCatalog> DecodeVumMaterialCatalogMeasured(
     const std::span<const std::byte> bytes, const asset::DecodeLimits limits)
 {
     auto layout = ParseLayout(bytes, limits);
     if (!layout)
         return std::unexpected(layout.error());
 
-    asset::MaterialCatalogIR result;
-    result.names.reserve(layout->name_count);
+    DecodedVumMaterialCatalog decoded{
+        .decoded_items = layout->decoded_items,
+        .logical_output_bytes = layout->logical_output_bytes,
+    };
+    decoded.catalog.names.reserve(layout->name_count);
     std::uint64_t name_start = kNameRegionOffset;
     for (std::uint64_t offset = kNameRegionOffset; offset < layout->names_end; ++offset)
     {
@@ -251,14 +258,14 @@ asset::DecodeResult<asset::MaterialCatalogIR> DecodeVumMaterialCatalog(
             continue;
         if (offset != name_start)
         {
-            result.names.emplace_back(
+            decoded.catalog.names.emplace_back(
                 reinterpret_cast<const char*>(bytes.data() + name_start),
                 static_cast<std::size_t>(offset - name_start));
         }
         name_start = offset + 1U;
     }
 
-    result.materials.reserve(layout->material_count);
+    decoded.catalog.materials.reserve(layout->material_count);
     for (std::uint64_t index = 0; index < layout->material_count; ++index)
     {
         const std::uint64_t record_offset =
@@ -271,8 +278,17 @@ asset::DecodeResult<asset::MaterialCatalogIR> DecodeVumMaterialCatalog(
         for (std::size_t slot = 0; slot < active_count; ++slot)
             material.name_indices[slot] =
                 ReadU32(bytes, static_cast<std::size_t>(record_offset + 56U + slot * 4U));
-        result.materials.push_back(material);
+        decoded.catalog.materials.push_back(material);
     }
-    return result;
+    return decoded;
+}
+
+asset::DecodeResult<asset::MaterialCatalogIR> DecodeVumMaterialCatalog(
+    const std::span<const std::byte> bytes, const asset::DecodeLimits limits)
+{
+    auto decoded = DecodeVumMaterialCatalogMeasured(bytes, limits);
+    if (!decoded)
+        return std::unexpected(decoded.error());
+    return std::move(decoded->catalog);
 }
 } // namespace omega::retail

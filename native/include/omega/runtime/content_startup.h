@@ -1,6 +1,7 @@
 #pragma once
 
 #include "omega/asset/level_ir.h"
+#include "omega/asset/level_material_catalogs_ir.h"
 #include "omega/asset/level_spatial_ir.h"
 #include "omega/content/game_data_service.h"
 #include "omega/runtime/debug_image.h"
@@ -35,6 +36,7 @@ struct ContentStartupState
     std::optional<content::GameDataService> game_data;
     std::optional<asset::LevelManifestIR> level_manifest;
     std::optional<asset::LevelSpatialIR> level_spatial;
+    std::optional<asset::LevelMaterialCatalogsIR> level_material_catalogs;
     std::optional<DebugImage> debug_image;
 };
 

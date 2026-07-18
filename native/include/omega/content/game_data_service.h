@@ -2,6 +2,7 @@
 
 #include "omega/asset/decode.h"
 #include "omega/asset/level_ir.h"
+#include "omega/asset/level_material_catalogs_ir.h"
 #include "omega/asset/level_spatial_ir.h"
 
 #include <cstdint>
@@ -89,6 +90,12 @@ public:
     // retail offsets, and byte spans remain local to this call.
     [[nodiscard]] std::expected<asset::LevelSpatialIR, GameDataError> LoadLevelSpatial(
         const asset::LevelManifestIR& manifest) const;
+
+    // [any worker thread after Open(); thread-safe] Resolves the manifest's common archive and
+    // every cell HOG, then returns the unique VUM member's owned semantic material/name catalog per
+    // terrain cell. Output follows manifest order; names retain no assigned role or asset binding.
+    [[nodiscard]] std::expected<asset::LevelMaterialCatalogsIR, GameDataError>
+    LoadLevelMaterialCatalogs(const asset::LevelManifestIR& manifest) const;
 
 private:
     struct Impl;
