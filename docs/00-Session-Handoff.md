@@ -82,6 +82,11 @@ shipping dependencies or execution mechanisms.
     ties; the direct eight-bit family favors the bit-3/bit-4 palette permutation on 145 planes
     versus 7, with 10 ties. These content-dependent scores are candidate selection only and do not
     confirm nibble order, palette order, channel meaning, swizzle, or display-ready pixels.
+19. Added a bounded POP layout hypothesis scorer. Across all 18 POPs, five marker-relative `+4`
+    word/fixed-stride tuples fit every bounded nonzero occurrence tested: `INL:`/36, `PNT:`/88,
+    `DIR:`/44, `ENV:`/76, and `INV:`/84 bytes. Zero words supply no stride evidence, and these
+    arithmetic fits do not yet confirm markers, counts, records, section boundaries, placement,
+    visibility, or field meanings.
 
 ## Disc observations
 
@@ -119,9 +124,9 @@ shipping dependencies or execution mechanisms.
 2. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
    independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.
-3. Continue POP after the validated terrain prefix. First prove a candidate marker's header/count
-   relationship and exact bounded extent, then connect consumed fields independently to placement
-   or visibility behavior.
+3. Continue POP after the validated terrain prefix. Independently validate the five universal-
+   nonzero arithmetic candidates, including their zero-count cases and record-internal invariants,
+   before confirming any boundary; then connect consumed fields to placement or visibility behavior.
 4. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools

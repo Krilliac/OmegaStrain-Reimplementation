@@ -114,8 +114,14 @@ file-size, cumulative-input, actual-read, per-file and cumulative terrain-record
 candidate-span, field-probe, hypothesis-count, and serialized-output budgets. Links, junctions,
 Windows reparse points, special filesystem entries, file-identity races, malformed POP candidates,
 and budget violations fail the entire run and suppress every structural aggregate. Output contains
-no paths, names, hashes, raw words, payload bytes, or per-file fingerprints. Only synthetic tests
-have exercised this tool; it adds no section, placement, or visibility contract.
+no paths, names, hashes, raw words, payload bytes, or per-file fingerprints.
+
+The owned-corpus run accepts all 18 POPs with zero errors and tests 1,443 bounded nonzero candidate
+count words across 342 marker spans. Five marker-relative `+4` word/stride tuples fit every nonzero
+occurrence tested: `INL:`/36 bytes (18/18), `PNT:`/88 bytes (17/17), `DIR:`/44 bytes (18/18),
+`ENV:`/76 bytes (18/18), and `INV:`/84 bytes (16/16). Zero words are deliberately excluded from
+stride evidence. These exact arithmetic fits nominate the next structural proof only; they do not
+confirm markers, counts, records, boundaries, placement, visibility, or any field semantics.
 
 ## Reproduce
 
