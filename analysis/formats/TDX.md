@@ -120,6 +120,14 @@ paths, archive names, hashes, asset-specific dimensions, payload data, or sample
 python -B tools/score_tdx_layout_hypotheses.py private/extracted-disc
 ```
 
+The owned-corpus run accepts all 15,248 TDX spans with zero errors and scores 2,176 direct indexed
+planes. For the 2,014 four-bit `0x14` planes, low-nibble-first has the lower aggregate delta
+(93,917,821 versus 109,066,377), with 1,765 plane wins, 139 losses, and 110 ties. For the 162
+eight-bit `0x13` planes, the bit-3/bit-4 palette permutation has the lower aggregate delta (554,076
+versus 658,936), with 145 plane wins, 7 losses, and 10 ties. These are content-dependent coherence
+results only. They nominate hypotheses for independent behavioral validation; they do not confirm
+nibble order, palette order, channel meaning, swizzle, later-plane purpose, or display-ready pixels.
+
 ## Native validation
 
 The aggregate verifier streams one asset at a time and discards each decoded value after updating

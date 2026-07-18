@@ -77,6 +77,11 @@ shipping dependencies or execution mechanisms.
     with zero errors and finds the same 19 aligned literal-tag candidates exactly once per file and
     in one shared order: 342 aggregate hits. These are candidate markers only; section headers,
     counts, extents, placement, visibility, and all other field semantics remain unassigned.
+18. Added a bounded, aggregate-only TDX display-layout hypothesis scorer. Across 15,248 spans, the
+    direct four-bit family favors low-nibble-first coherence on 1,765 planes versus 139, with 110
+    ties; the direct eight-bit family favors the bit-3/bit-4 palette permutation on 145 planes
+    versus 7, with 10 ties. These content-dependent scores are candidate selection only and do not
+    confirm nibble order, palette order, channel meaning, swizzle, or display-ready pixels.
 
 ## Disc observations
 
@@ -111,7 +116,8 @@ shipping dependencies or execution mechanisms.
    opcodes, or registers. No accepted report or evidence claim exists yet: add no evidence-ledger
    entry and infer no geometry, topology, vertex, packet, or material semantics until a real
    deterministic trace passes the gate.
-2. Validate TDX swizzle, nibble order, palette permutation, and channel expansion independently
+2. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
+   independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.
 3. Continue POP after the validated terrain prefix. First prove a candidate marker's header/count
    relationship and exact bounded extent, then connect consumed fields independently to placement
