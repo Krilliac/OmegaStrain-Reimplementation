@@ -126,6 +126,40 @@ so each tuple fits all 18 occurrences. The zero cases add no stride evidence. Th
 fits nominate the next structural proof only; they do not confirm markers, counts, records,
 boundaries, placement, visibility, or any field semantics.
 
+## Candidate record-shape profiling
+
+`tools/profile_pop_candidate_record_shapes.py` is a privacy-safe follow-up experiment over the
+proven TER-to-GOB validator and its ordered aligned-marker inventory. It accepts exactly five fixed
+arithmetic candidates and does not search for additional layouts:
+
+| Literal candidate | Candidate count-word delta | Candidate fixed stride |
+| --- | ---: | ---: |
+| `INL:` | +4 bytes | 36 bytes |
+| `PNT:` | +4 bytes | 88 bytes |
+| `DIR:` | +4 bytes | 44 bytes |
+| `ENV:` | +4 bytes | 76 bytes |
+| `INV:` | +4 bytes | 84 bytes |
+
+Every candidate must occur exactly once in each accepted POP, and `marker + 8 + count * stride`
+must equal the next ordered candidate-marker offset (or EOF). A zero count is accepted only when
+that candidate extent is empty. These are arithmetic guards, not decoded section, count, record, or
+field contracts.
+
+For each literal and four-byte record column, the report contains only aggregate record and column
+counts; zero/nonzero bit-pattern counts; IEEE-754 finite/nonfinite bit-pattern counts; the count
+below the fixed neutral unsigned threshold 4096; and distinct-bit-pattern cardinality capped by a
+declared per-column limit. IEEE-754 classification operates on bits and does not assign a floating-
+point, integer, coordinate, identifier, or other numeric field type.
+
+The profiler streams bounded chunks and independently caps traversal, depth, path metadata,
+individual and cumulative input, actual reads, terrain records, marker hits, formula occurrences,
+candidate records, column observations, retained distinct patterns, and serialized output. Links,
+junctions, reparse points, special entries, identity races, malformed candidates, formula
+mismatches, and budget violations fail the entire run and suppress all structural output. It emits
+no paths, names, hashes, raw words or values, extrema, payload bytes, per-file records, or
+fingerprints. This branch exercises the profiler only with synthetic fixtures; it adds no new
+owned-corpus result or runtime contract.
+
 ## Reproduce
 
 ```powershell
@@ -137,7 +171,9 @@ python -B .\tools\fingerprint_assets.py `
 .\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
 python -B .\tools\scan_pop_post_terrain.py .\private\extracted-disc --pretty
 python -B .\tools\score_pop_section_layout_hypotheses.py .\private\extracted-disc --pretty
+python -B .\tools\profile_pop_candidate_record_shapes.py .\private\extracted-disc --pretty
 ```
 
 The Python reports are metadata-only. The native commands emit aggregate counts only. Review the
-post-TER scanner output privately before publishing any aggregate or evidence-ledger entry.
+post-TER scanner and profiler output privately before publishing any aggregate or evidence-ledger
+entry.
