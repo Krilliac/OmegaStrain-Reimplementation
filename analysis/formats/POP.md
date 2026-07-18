@@ -67,15 +67,15 @@ missing, duplicate, unsafe, or malformed references.
 ## Post-TER marker envelope
 
 `tools/scan_pop_post_terrain.py` is a bounded research scanner for the opaque bytes beginning at
-the exact `GOB:` offset returned by the proven terrain parser. It does not decode a `GOB`, `SND`,
-`ACL`, `INL`, `NPC`, or other later section. It inventories only four-byte-aligned occurrences of
-the literal marker spellings already published in `ASSET-RECON.md`; such an occurrence remains a
-candidate marker and may be coincidental payload data.
+the exact `GOB:` offset derived under the proven terrain-prefix contract. It does not decode a
+`GOB`, `SND`, `ACL`, `INL`, `NPC`, or other later section. It inventories only four-byte-aligned
+occurrences of the literal marker spellings already present in public reconstruction tooling and
+evidence; such an occurrence remains a candidate marker and may be coincidental payload data.
 
 The scanner:
 
-- streams each POP through fixed-size windows and bounds file count, individual and cumulative
-  bytes, terrain records, terrain-name length, and marker hits;
+- streams each POP through fixed-size windows and bounds traversal entries, file count, individual
+  and cumulative bytes, terrain records, terrain-name length, and marker hits;
 - requires the validated header, complete terrain records, and exact `GOB:` boundary before
   examining later bytes;
 - suppresses all structural aggregates and exits unsuccessfully if any candidate is malformed,

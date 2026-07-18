@@ -25,8 +25,8 @@ SCOPE = (
     "payload bytes, executable data, or per-file fingerprints"
 )
 
-# These are inventory labels already published in analysis/formats/ASSET-RECON.md.
-# Their spelling is the only property this scanner assigns to them.
+# These inventory labels already exist in public reconstruction tooling and
+# evidence. Their spelling is the only property this scanner assigns to them.
 PUBLISHED_LITERAL_TAGS: tuple[bytes, ...] = (
     b"TER:",
     b"GOB:",
@@ -60,6 +60,7 @@ _UINT64_MAX = (1 << 64) - 1
 @dataclass(frozen=True)
 class ScanLimits:
     maximum_files: int = 4096
+    maximum_walk_entries: int = 1 << 20
     maximum_file_bytes: int = 64 * 1024 * 1024
     maximum_total_bytes: int = 4 * 1024 * 1024 * 1024
     maximum_terrain_records: int = 1 << 20
@@ -85,6 +86,7 @@ class ScanFailure(ValueError):
 def _validate_limits(limits: ScanLimits) -> None:
     values = (
         limits.maximum_files,
+        limits.maximum_walk_entries,
         limits.maximum_file_bytes,
         limits.maximum_total_bytes,
         limits.maximum_terrain_records,
@@ -95,6 +97,7 @@ def _validate_limits(limits: ScanLimits) -> None:
         raise ScanFailure("limit_exceeded")
     if (
         limits.maximum_files == 0
+        or limits.maximum_walk_entries == 0
         or limits.maximum_file_bytes < 16
         or limits.maximum_total_bytes < 16
         or limits.maximum_name_bytes == 0
@@ -158,6 +161,11 @@ def _align_up_4(value: int) -> int:
     if value < 0 or value > _UINT64_MAX - 3:
         raise ScanFailure("limit_exceeded")
     return (value + 3) & ~3
+
+
+def _is_link_like(path: Path) -> bool:
+    """Reject links and Windows junctions before they can escape the scan root."""
+    return path.is_symlink() or path.is_junction()
 
 
 def _read_terrain_prefix(
@@ -267,21 +275,29 @@ def scan_pop_stream(
     )
 
 
-def _iter_pop_paths(root: Path) -> Iterator[Path]:
+def _iter_pop_paths(root: Path, maximum_walk_entries: int) -> Iterator[Path]:
     def raise_walk_error(error: OSError) -> None:
         raise error
 
+    walk_entries = 0
     for directory, subdirectories, filenames in os.walk(
         root, topdown=True, onerror=raise_walk_error, followlinks=False
     ):
-        subdirectories[:] = sorted(
-            name
-            for name in subdirectories
-            if not (Path(directory) / name).is_symlink()
-        )
+        entries_here = len(subdirectories) + len(filenames)
+        if walk_entries > maximum_walk_entries - entries_here:
+            raise ScanFailure("limit_exceeded")
+        walk_entries += entries_here
+        directory_path = Path(directory)
+        ordered_subdirectories = sorted(subdirectories)
+        if any(_is_link_like(directory_path / name) for name in ordered_subdirectories):
+            raise ScanFailure("unsafe_input")
+        subdirectories[:] = ordered_subdirectories
         for filename in sorted(filenames):
             if Path(filename).suffix.casefold() == ".pop":
-                yield Path(directory) / filename
+                path = directory_path / filename
+                if _is_link_like(path):
+                    raise ScanFailure("unsafe_input")
+                yield path
 
 
 class _Aggregate:
@@ -389,7 +405,7 @@ def scan_root(root: Path, limits: ScanLimits = ScanLimits()) -> dict[str, object
     except ScanFailure as exc:
         return _failure_result(0, 0, collections.Counter({exc.category: 1}))
     try:
-        root_is_safe = root.is_dir() and not root.is_symlink()
+        root_is_safe = root.is_dir() and not _is_link_like(root)
     except OSError:
         return _failure_result(0, 0, collections.Counter({"io_error": 1}))
     if not root_is_safe:
@@ -400,36 +416,46 @@ def scan_root(root: Path, limits: ScanLimits = ScanLimits()) -> dict[str, object
     files_discovered = 0
     total_bytes = 0
     try:
-        candidates = _iter_pop_paths(root)
+        candidates = _iter_pop_paths(root, limits.maximum_walk_entries)
         for path in candidates:
             files_discovered += 1
             if files_discovered > limits.maximum_files:
                 errors["limit_exceeded"] += 1
                 break
-            if path.is_symlink():
-                errors["unsafe_input"] += 1
-                continue
             try:
+                path_stat = os.stat(path, follow_symlinks=False)
+                if not stat.S_ISREG(path_stat.st_mode):
+                    raise ScanFailure("unsafe_input")
                 with path.open("rb") as stream:
                     file_stat = os.fstat(stream.fileno())
-                    if not stat.S_ISREG(file_stat.st_mode):
+                    if (
+                        not stat.S_ISREG(file_stat.st_mode)
+                        or (file_stat.st_dev, file_stat.st_ino)
+                        != (path_stat.st_dev, path_stat.st_ino)
+                    ):
                         raise ScanFailure("unsafe_input")
                     file_bytes = file_stat.st_size
                     if file_bytes < 0 or total_bytes > limits.maximum_total_bytes - file_bytes:
                         raise ScanFailure("limit_exceeded")
                     total_bytes += file_bytes
                     envelope = scan_pop_stream(stream, file_bytes, limits)
-                    if os.fstat(stream.fileno()).st_size != file_bytes:
+                    final_stat = os.fstat(stream.fileno())
+                    if (final_stat.st_size, final_stat.st_mtime_ns) != (
+                        file_bytes,
+                        file_stat.st_mtime_ns,
+                    ):
                         raise ScanFailure("unsafe_input")
                 aggregate.add(envelope)
             except ScanFailure as exc:
                 errors[exc.category] += 1
             except OSError:
                 errors["io_error"] += 1
+    except ScanFailure as exc:
+        errors[exc.category] += 1
     except OSError:
         errors["io_error"] += 1
 
-    if files_discovered == 0:
+    if files_discovered == 0 and not errors:
         errors["no_candidates"] += 1
     if errors:
         return _failure_result(files_discovered, aggregate.files, errors)

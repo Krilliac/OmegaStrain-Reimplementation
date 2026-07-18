@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -207,6 +208,59 @@ class PopPostTerrainAggregateTests(unittest.TestCase):
         self.assertTrue(result["errors"])
         self.assertNotIn("literal_marker_occurrences", result)
         self.assertNotIn("candidate_marker_transitions", result)
+
+    def test_walk_entry_budget_prevents_unbounded_non_candidate_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "first.txt").write_text("not a candidate", encoding="utf-8")
+            (root / "second.txt").write_text("not a candidate", encoding="utf-8")
+
+            result = scanner.scan_root(
+                root,
+                scanner.ScanLimits(maximum_walk_entries=1),
+            )
+
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["errors"], {"limit_exceeded": 1})
+        self.assertNotIn("literal_marker_occurrences", result)
+
+    def test_link_like_subtree_fails_closed_instead_of_escaping_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "valid.POP").write_bytes(_make_pop())
+            linked = root / "linked"
+            linked.mkdir()
+            (linked / "outside.POP").write_bytes(_make_pop(post_gob=b"SND:"))
+
+            original_is_junction = Path.is_junction
+
+            def emulate_junction(path: Path) -> bool:
+                return path == linked or original_is_junction(path)
+
+            with mock.patch.object(Path, "is_junction", emulate_junction):
+                result = scanner.scan_root(root)
+
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["errors"], {"unsafe_input": 1})
+        self.assertNotIn("literal_marker_occurrences", result)
+
+    def test_link_like_candidate_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            linked = root / "linked.POP"
+            linked.write_bytes(_make_pop(post_gob=b"SND:"))
+
+            original_is_symlink = Path.is_symlink
+
+            def emulate_symlink(path: Path) -> bool:
+                return path == linked or original_is_symlink(path)
+
+            with mock.patch.object(Path, "is_symlink", emulate_symlink):
+                result = scanner.scan_root(root)
+
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["errors"], {"unsafe_input": 1})
+        self.assertNotIn("literal_marker_occurrences", result)
 
     def test_empty_root_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
