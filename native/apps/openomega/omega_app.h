@@ -1,6 +1,8 @@
 #pragma once
 
+#include "sdl_audio_service.h"
 #include "sdl_gpu_host.h"
+#include "sdl_platform_service.h"
 
 #include "omega/runtime/config_service.h"
 #include "omega/runtime/content_startup.h"
@@ -27,6 +29,8 @@ struct RunResult
     std::uint64_t input_frames = 0;
     std::uint64_t clamped_frame_count = 0;
     std::uint64_t dropped_time_frame_count = 0;
+    std::uint64_t audio_callback_count = 0;
+    std::uint64_t audio_frames_provided = 0;
     bool quit_requested = false;
 };
 
@@ -50,6 +54,9 @@ public:
     // [game/main/render thread]
     [[nodiscard]] std::expected<RunResult, std::string> Run(int frame_limit);
     [[nodiscard]] std::string_view driver_name() const noexcept;
+    [[nodiscard]] std::string_view audio_driver_name() const noexcept;
+    [[nodiscard]] int audio_sample_rate() const noexcept;
+    [[nodiscard]] int audio_channel_count() const noexcept;
 
 private:
     static constexpr std::uint32_t kQuitAction = 1U;
@@ -63,6 +70,8 @@ private:
         std::unique_ptr<runtime::FrameScheduler> frame_scheduler,
         std::unique_ptr<runtime::InputTracker> input,
         std::unique_ptr<simulation::SimulationWorld> simulation,
+        std::unique_ptr<SdlPlatformService> platform,
+        std::unique_ptr<SdlAudioService> audio,
         std::unique_ptr<SdlGpuHost> host) noexcept;
 
     // Declaration order is ownership order; destruction is the required reverse order.
@@ -75,6 +84,8 @@ private:
     std::unique_ptr<runtime::FrameScheduler> frame_scheduler_;
     std::unique_ptr<runtime::InputTracker> input_;
     std::unique_ptr<simulation::SimulationWorld> simulation_;
+    std::unique_ptr<SdlPlatformService> platform_;
+    std::unique_ptr<SdlAudioService> audio_;
     std::unique_ptr<SdlGpuHost> host_;
 };
 } // namespace omega::app

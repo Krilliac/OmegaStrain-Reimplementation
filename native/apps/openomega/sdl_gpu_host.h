@@ -15,6 +15,8 @@ struct ManifestDebugImage;
 
 namespace omega::app
 {
+class SdlPlatformService;
+
 struct HostEventResult
 {
     bool quit_requested = false;
@@ -26,6 +28,7 @@ class SdlGpuHost final
 public:
     // [main/render thread] The debug image is uploaded during creation and is not retained.
     [[nodiscard]] static std::expected<SdlGpuHost, std::string> Create(
+        const SdlPlatformService& platform,
         const runtime::ManifestDebugImage* debug_image, bool debug_device);
 
     // [main/render thread, after GPU idle]

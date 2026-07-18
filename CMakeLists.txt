@@ -177,12 +177,30 @@ if(OMEGA_BUILD_RUNTIME)
     )
     FetchContent_MakeAvailable(SDL3)
 
+    add_library(omega_sdl_backend STATIC
+        native/apps/openomega/sdl_audio_service.cpp
+        native/apps/openomega/sdl_gpu_host.cpp
+        native/apps/openomega/sdl_platform_service.cpp
+    )
+    target_include_directories(omega_sdl_backend PUBLIC native/apps/openomega)
+    target_link_libraries(omega_sdl_backend
+        PUBLIC
+            SDL3::SDL3
+        PRIVATE
+            omega_runtime
+    )
+    target_compile_features(omega_sdl_backend PUBLIC cxx_std_23)
+    if(MSVC)
+        target_compile_options(omega_sdl_backend PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+    else()
+        target_compile_options(omega_sdl_backend PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+    endif()
+
     add_executable(openomega
         native/apps/openomega/main.cpp
         native/apps/openomega/omega_app.cpp
-        native/apps/openomega/sdl_gpu_host.cpp
     )
-    target_link_libraries(openomega PRIVATE omega_runtime omega_simulation SDL3::SDL3)
+    target_link_libraries(openomega PRIVATE omega_runtime omega_simulation omega_sdl_backend)
     target_compile_definitions(openomega PRIVATE
         $<$<CONFIG:Debug>:OMEGA_GPU_DEBUG=1>
     )
@@ -195,6 +213,23 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    if(TARGET omega_sdl_backend)
+        add_executable(omega_sdl_audio_tests
+            native/tests/sdl_audio_service_tests.cpp
+        )
+        target_link_libraries(omega_sdl_audio_tests PRIVATE omega_sdl_backend Threads::Threads)
+        if(MSVC)
+            target_compile_options(omega_sdl_audio_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+        else()
+            target_compile_options(omega_sdl_audio_tests PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+        endif()
+        add_test(NAME omega_sdl_audio_tests COMMAND omega_sdl_audio_tests)
+        set_tests_properties(omega_sdl_audio_tests PROPERTIES
+            ENVIRONMENT "SDL_AUDIO_DRIVER=dummy"
+            TIMEOUT 5
+        )
+    endif()
+
     add_executable(omega_core_tests
         native/tests/col_spatial_mesh_decoder_tests.cpp
         native/tests/config_service_tests.cpp

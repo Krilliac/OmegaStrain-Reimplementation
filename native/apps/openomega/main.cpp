@@ -96,7 +96,10 @@ int main(const int argc, char** argv)
         std::cerr << app.error() << '\n';
         return EXIT_FAILURE;
     }
-    std::cout << "OpenOmega native shell: GPU driver=" << app->driver_name() << '\n';
+    std::cout << "OpenOmega native shell: GPU driver=" << app->driver_name()
+              << " audio_driver=" << app->audio_driver_name()
+              << " audio_format=f32/" << app->audio_sample_rate() << "Hz/"
+              << app->audio_channel_count() << "ch\n";
 
     auto run = app->Run(options->frame_limit);
     if (!run)
@@ -107,7 +110,9 @@ int main(const int argc, char** argv)
     std::cout << "OpenOmega native shell: rendered_frames=" << run->rendered_frames
               << " planned_simulation_steps=" << run->planned_simulation_steps
               << " executed_simulation_steps=" << run->executed_simulation_steps
-              << " input_frames=" << run->input_frames << '\n';
+              << " input_frames=" << run->input_frames
+              << " audio_callbacks=" << run->audio_callback_count
+              << " audio_frames_provided=" << run->audio_frames_provided << '\n';
     if (options->frame_limit >= 0 && run->rendered_frames != options->frame_limit)
     {
         std::cerr << "runtime loop ended before the requested frame limit\n";

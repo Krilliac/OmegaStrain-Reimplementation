@@ -24,7 +24,9 @@ not raw pointers or `shared_ptr` ownership graphs.
 
 The initial composition root now owns the validated configuration store, content startup state,
 stderr/ring log sinks, logging service, worker pool, fixed-step scheduler, input tracker,
-`SimulationWorld`, and SDL GPU host in that order. The host is created last and destroyed first.
+`SimulationWorld`, SDL process-global platform service, SDL audio service, and SDL GPU host in that
+order. The host is created last and destroyed first; audio stops before the platform service calls
+the process-global SDL shutdown.
 `OmegaApp::Run` owns the steady clock, closes immutable input frames, asks the scheduler for a
 bounded plan, executes every planned world step, then submits one render frame. The SDL host only
 pumps events and renders; no SDL type crosses into the platform-neutral runtime or simulation
@@ -71,6 +73,10 @@ queues.
   step/simulated-time state. The composition root supplies the scheduler's validated step; its
   current default is a synthetic-shell value, while the retail tick rate remains evidence-driven.
 - `RenderService` receives scene snapshots and exposes no retail-format details.
+- `AudioService` owns a system-default SDL playback stream. Its first callback supplies bounded,
+  frame-aligned project-owned silence from a fixed buffer and publishes only lock-free diagnostic
+  counters. The 48 kHz stereo F32 source format is a native engineering choice, not a retail claim;
+  decoded voices and mixing remain future clean-room work.
 
 ## Hot reload
 
@@ -101,9 +107,10 @@ The initial native build targets express the same direction:
 - `omega_retail_formats`: stateless POP/COL/VUM/TDX adapters that may depend on the first
   two targets;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
-  orchestration; and
+  orchestration;
 - `omega_runtime`: launch/configuration services and renderer-neutral diagnostic scene values
-  consumed by the composition root and SDL host.
+  consumed by the composition root and SDL host; and
+- `omega_sdl_backend`: the non-hot-reloadable SDL platform, audio, input translation, and GPU leaf.
 
 VUM has a bounded semantic adapter that returns owned source-order names plus one-to-three dense
 name indices per material. A separate retail-only passive descriptor preserves only the three

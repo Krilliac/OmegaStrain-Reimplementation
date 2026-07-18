@@ -28,6 +28,9 @@ retail instruction blocks, or PS2 execution layer.
   5,351 records, including 4,144 with nonzero alignment bytes that are safely skipped.
 - The native host validates an owner-supplied NTSC-U data root, loads MINSK as 299 canonical
   manifest cells, and renders a deterministic synthetic coverage grid through SDL_GPU/D3D12.
+- The native host opens and resumes the system-default SDL playback stream as 48 kHz stereo F32;
+  its fixed-buffer callback supplies project-owned silence until clean-room audio decode and
+  mixing land, with a deterministic dummy-device test covering the callback boundary.
 - The native content service resolves all 5,351 manifest cells across all 18 levels into 5,351
   owned spatial meshes with zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices,
   1,239,980 triangles/references, and 2,137 normalized empty meshes.
@@ -102,7 +105,9 @@ spatial-mesh state without opening a window. The current MINSK view is still a s
 manifest-coverage grid, not reconstructed world geometry. The app-owned loop converts steady-clock
 deltas into bounded fixed-step plans and executes each step against a platform-neutral deterministic
 `SimulationWorld`; the configured default remains a synthetic-shell timing value, not a retail-rate
-claim.
+claim. The app also owns a non-hot-reloadable SDL audio service whose callback never reads files,
+logs, blocks, or touches retail data; the current silent stream proves device lifecycle and thread
+plumbing without embedding or guessing proprietary audio.
 
 The optional project-owned configuration file uses strict `lower_snake_case` dotted keys and
 `key = value` lines. `--set=KEY=VALUE` applies one validated command-line override per key. Current

@@ -54,7 +54,10 @@ pool drains before shutdown, SDL input is translated into neutral frame snapshot
 reconciliation, and steady-clock deltas drive fixed-step planning. Executing a SimulationWorld
 from those plans is now wired through `OmegaApp`: every planned step advances an owned,
 platform-neutral deterministic world clock before rendering, with fail-closed representation
-limits. Components, gameplay systems, render snapshots, and audio output remain incomplete.
+limits. The app also owns the SDL process lifetime and a resumed system-default playback stream;
+its callback supplies bounded project-owned silence and exposes lock-free health counters without
+loading files or retail data. Components, gameplay systems, render snapshots, decoded voices, and
+mixing remain incomplete.
 
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.

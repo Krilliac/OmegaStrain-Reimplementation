@@ -46,10 +46,10 @@ jobs:
       - name: Check out source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      # OMEGA_BUILD_RUNTIME=OFF is deliberate: the SDL3 runtime shell remains a
-      # Windows-verified target for now; Linux CI guards the portable core + tests.
+      # Build the complete SDL3 runtime in supported headless-console mode so Linux compiles every
+      # native platform leaf and runs the dummy-device audio test without a display server.
       - name: Configure
-        run: cmake -S . -B build/linux -DCMAKE_BUILD_TYPE=Debug -DOMEGA_BUILD_RUNTIME=OFF
+        run: cmake -S . -B build/linux -DCMAKE_BUILD_TYPE=Debug -DOMEGA_BUILD_RUNTIME=ON -DSDL_UNIX_CONSOLE_BUILD=ON
 
       - name: Build
         run: cmake --build build/linux --parallel 4
