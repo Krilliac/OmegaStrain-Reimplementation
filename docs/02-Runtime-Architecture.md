@@ -188,6 +188,15 @@ assets use a narrowly allowlisted implicit-zero suffix normalization backed by c
 twins; this diagnostic provenance is not part of renderer-neutral IR. Render code consumes only a
 future independently validated expansion result and never includes the retail decoder header.
 
+`DecodeTdxTextureStorageMeasured` returns that same owned storage together with exact standalone
+decoder-budget usage. Its item count covers the root, blocks, primary planes, present palette
+objects, and palette entries; its logical-output count covers the compiled-ABI storage objects,
+owned plane bytes, and four source bytes per palette entry. These counters are logical operation
+budgets rather than allocator or process-memory measurements. The Python level-topology scanner
+does not execute this native API or observe its ABI. Exact composed Open/Load maxima therefore
+remain unresolved until `LevelTextureStore` exists and a native corpus measurement validates it;
+structural topology proxies are not runtime budget evidence.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a
