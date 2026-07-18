@@ -79,6 +79,7 @@ int PopTerrainIndexFailureCount();
 int PopLevelManifestDecoderFailureCount();
 int ContainerDescriptorFailureCount();
 int SkmContainerDescriptorFailureCount();
+int SklContainerDescriptorFailureCount();
 int ColSpatialMeshDecoderFailureCount();
 int TdxTextureStorageDecoderFailureCount();
 int VumMaterialCatalogDecoderFailureCount();
@@ -305,6 +306,7 @@ int main()
     failures += PopLevelManifestDecoderFailureCount();
     failures += ContainerDescriptorFailureCount();
     failures += SkmContainerDescriptorFailureCount();
+    failures += SklContainerDescriptorFailureCount();
     failures += ColSpatialMeshDecoderFailureCount();
     failures += TdxTextureStorageDecoderFailureCount();
     failures += VumMaterialCatalogDecoderFailureCount();

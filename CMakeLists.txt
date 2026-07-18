@@ -47,6 +47,7 @@ add_library(omega_retail_formats STATIC
     native/src/retail/container_descriptors.cpp
     native/src/retail/pop_level_manifest_decoder.cpp
     native/src/retail/skm_container_descriptor.cpp
+    native/src/retail/skl_container_descriptor.cpp
     native/src/retail/tdx_texture_storage_decoder.cpp
     native/src/retail/vum_layout_internal.cpp
     native/src/retail/vum_material_catalog_decoder.cpp
@@ -266,6 +267,7 @@ if(BUILD_TESTING)
         native/tests/runtime_settings_tests.cpp
         native/tests/simulation_world_tests.cpp
         native/tests/skm_container_descriptor_tests.cpp
+        native/tests/skl_container_descriptor_tests.cpp
         native/tests/tdx_texture_storage_decoder_tests.cpp
         native/tests/virtual_file_system_tests.cpp
         native/tests/vum_material_catalog_decoder_tests.cpp

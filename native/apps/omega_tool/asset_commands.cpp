@@ -3,6 +3,7 @@
 #include "omega/archive/hog_archive.h"
 #include "omega/retail/col_spatial_mesh_decoder.h"
 #include "omega/retail/container_descriptors.h"
+#include "omega/retail/skl_container_descriptor.h"
 #include "omega/retail/skm_container_descriptor.h"
 #include "omega/retail/tdx_texture_storage_decoder.h"
 #include "omega/retail/vum_material_catalog_decoder.h"
@@ -47,6 +48,7 @@ enum class InputKind
     Vum,
     Tdx,
     Skm,
+    Skl,
 };
 
 struct FormatStats
@@ -117,6 +119,15 @@ struct SkmStructuralStats
     std::uint64_t logical_bytes = 0;
 };
 
+struct SklStructuralStats
+{
+    std::uint64_t records = 0;
+    std::uint64_t logical_bytes = 0;
+    std::uint64_t carriage_return_assets = 0;
+    std::uint64_t carriage_return_line_feed_assets = 0;
+    std::uint64_t unterminated_final_assets = 0;
+};
+
 struct VerificationStats
 {
     std::uint64_t filesystem_entries = 0;
@@ -134,14 +145,17 @@ struct VerificationStats
     FormatStats vum;
     FormatStats tdx;
     FormatStats skm;
+    FormatStats skl;
     ExtentStats col_extents;
     ExtentStats vum_extents;
     ExtentStats tdx_extents;
     ExtentStats skm_extents;
+    ExtentStats skl_extents;
     ColSemanticStats col_semantic;
     VumSemanticStats vum_semantic;
     TdxSemanticStats tdx_semantic;
     SkmStructuralStats skm_structural;
+    SklStructuralStats skl_structural;
     bool stopped_at_safety_limit = false;
 };
 
@@ -160,6 +174,8 @@ struct VerificationStats
         return InputKind::Tdx;
     if (extension == ".skm")
         return InputKind::Skm;
+    if (extension == ".skl")
+        return InputKind::Skl;
     return InputKind::Other;
 }
 
@@ -397,6 +413,29 @@ void StopAtSafetyLimit(VerificationStats& stats, const std::string_view message)
         descriptor.logical_extent.observed_bytes, stats, "SKM logical byte count");
 }
 
+[[nodiscard]] bool RecordSklStructure(
+    const retail::SklContainerDescriptor& descriptor, VerificationStats& stats)
+{
+    if (!AddSemanticCounter(stats.skl_structural.records, descriptor.records.size(), stats,
+            "SKL record count") ||
+        !AddSemanticCounter(stats.skl_structural.logical_bytes,
+            descriptor.logical_extent.observed_bytes, stats, "SKL logical byte count"))
+        return false;
+
+    auto& line_ending_assets =
+        descriptor.line_ending == retail::SklLineEnding::CarriageReturn
+        ? stats.skl_structural.carriage_return_assets
+        : stats.skl_structural.carriage_return_line_feed_assets;
+    if (!AddSemanticCounter(line_ending_assets, 1, stats, "SKL line-ending family count"))
+        return false;
+    if (!descriptor.records.empty() && descriptor.records.back().terminator_region.size == 0)
+    {
+        return AddSemanticCounter(stats.skl_structural.unterminated_final_assets, 1, stats,
+            "SKL unterminated-final-record count");
+    }
+    return true;
+}
+
 [[nodiscard]] bool AddIndexedEntries(
     VerificationStats& stats, const std::uint64_t amount)
 {
@@ -429,6 +468,8 @@ void StopAtSafetyLimit(VerificationStats& stats, const std::string_view message)
         return stats.vum;
     if (kind == InputKind::Skm)
         return stats.skm;
+    if (kind == InputKind::Skl)
+        return stats.skl;
     return stats.tdx;
 }
 
@@ -550,6 +591,21 @@ void InspectAssetRange(const std::filesystem::path& backing_path,
             return;
         ++stats.skm.valid;
         RecordExtent(stats.skm_extents, descriptor->logical_extent.relation);
+        return;
+    }
+    if (kind == InputKind::Skl)
+    {
+        auto descriptor = retail::InspectSklContainer(*bytes);
+        if (!descriptor)
+        {
+            ++stats.skl.errors;
+            PrintAssetError(backing_path, entry_name, descriptor.error().message);
+            return;
+        }
+        if (!RecordSklStructure(*descriptor, stats))
+            return;
+        ++stats.skl.valid;
+        RecordExtent(stats.skl_extents, descriptor->logical_extent.relation);
         return;
     }
 
@@ -757,8 +813,8 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         return 1;
     }
 
-    const std::uint64_t asset_errors =
-        stats.col.errors + stats.vum.errors + stats.tdx.errors + stats.skm.errors;
+    const std::uint64_t asset_errors = stats.col.errors + stats.vum.errors + stats.tdx.errors +
+                                       stats.skm.errors + stats.skl.errors;
     const std::uint64_t total_errors = stats.hog_errors + stats.safety_errors + asset_errors;
     std::cout << std::format(
         "{{\"top_level_hogs\":{},\"top_level_hog_valid\":{},\"nested_hogs\":{},"
@@ -786,6 +842,10 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         "\"skm\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
         "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{},"
         "\"chunks\":{},\"qwords\":{},\"logical_bytes\":{}}},"
+        "\"skl\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
+        "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{},"
+        "\"records\":{},\"logical_bytes\":{},\"cr\":{},\"crlf\":{},"
+        "\"unterminated_final\":{}}},"
         "\"errors\":{}}}\n",
         stats.top_level_hogs, stats.top_level_hog_valid, stats.nested_hogs,
         stats.nested_hog_valid, stats.nested_hog_bytes, stats.indexed_entries,
@@ -818,9 +878,15 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         stats.skm.candidates, stats.skm.valid, stats.skm.errors, stats.skm_extents.exact,
         stats.skm_extents.zero_padded_tail, stats.skm_extents.nonzero_tail,
         stats.skm_extents.exceeds_input, stats.skm_structural.chunks,
-        stats.skm_structural.qwords, stats.skm_structural.logical_bytes, total_errors);
+        stats.skm_structural.qwords, stats.skm_structural.logical_bytes,
+        stats.skl.candidates, stats.skl.valid, stats.skl.errors, stats.skl_extents.exact,
+        stats.skl_extents.zero_padded_tail, stats.skl_extents.nonzero_tail,
+        stats.skl_extents.exceeds_input, stats.skl_structural.records,
+        stats.skl_structural.logical_bytes, stats.skl_structural.carriage_return_assets,
+        stats.skl_structural.carriage_return_line_feed_assets,
+        stats.skl_structural.unterminated_final_assets, total_errors);
     if (stats.asset_candidates == 0)
-        std::cerr << "no COL, VUM, TDX, or SKM assets were found\n";
+        std::cerr << "no COL, VUM, TDX, SKM, or SKL assets were found\n";
     return total_errors == 0 && stats.asset_candidates != 0 &&
             !stats.stopped_at_safety_limit
         ? 0
