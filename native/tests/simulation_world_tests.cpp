@@ -40,7 +40,8 @@ int SimulationWorldFailureCount()
     static_assert(!std::is_copy_constructible_v<SimulationWorld>);
     static_assert(!std::is_copy_assignable_v<SimulationWorld>);
     static_assert(std::is_nothrow_move_constructible_v<SimulationWorld>);
-    static_assert(std::is_nothrow_move_assignable_v<SimulationWorld>);
+    static_assert(!std::is_move_assignable_v<SimulationWorld>);
+    static_assert(std::is_nothrow_destructible_v<SimulationWorld>);
     static_assert(!HasMutableEntityRegistryAccessor<SimulationWorld>);
     static_assert(!HasConstEntityRegistryAccessor<SimulationWorld>);
     static_assert(noexcept(std::declval<SimulationWorld&>().CreateEntity()));
@@ -230,24 +231,17 @@ int SimulationWorldFailureCount()
     {
         const auto entity = move_source->CreateEntity();
         Check(entity.has_value(), "the world owns an identity before transfer");
+        Check(move_source->AdvanceOneStep() == SimulationStepResult::Advanced &&
+                  move_source->AdvanceOneStep() == SimulationStepResult::Advanced,
+            "the move source owns non-default deterministic clock state");
         SimulationWorld moved = std::move(*move_source);
         Check(entity && moved.IsAlive(*entity) &&
+                  moved.config().fixed_step == std::chrono::microseconds{250} &&
                   moved.config().maximum_entities == 2U &&
-                  moved.Snapshot().completed_steps == 0U,
+                  moved.Snapshot().completed_steps == 2U &&
+                  moved.Snapshot().simulated_time == std::chrono::microseconds{500} &&
+                  moved.Snapshot().alive_entities == 1U,
             "world move construction transfers the registry, configuration, and clock");
-
-        auto destination = SimulationWorld::Create({
-            .fixed_step = std::chrono::seconds{1},
-            .maximum_entities = 1U,
-        });
-        Check(destination.has_value(), "the world move-assignment destination constructs");
-        if (destination && entity)
-        {
-            *destination = std::move(moved);
-            Check(destination->IsAlive(*entity) &&
-                      destination->config().fixed_step == std::chrono::microseconds{250},
-                "world move assignment transfers entity ownership and immutable configuration");
-        }
     }
     return failures;
 }

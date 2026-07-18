@@ -44,18 +44,23 @@ public:
         const SimulationWorldConfig& config);
 
     // [game thread, lifecycle] Transfers world ownership without allocation.
-    // A moved-from world may only be destroyed or move-assigned.
+    // A moved-from world may only be destroyed.
     SimulationWorld(SimulationWorld&&) noexcept = default;
-    SimulationWorld& operator=(SimulationWorld&&) noexcept = default;
+    SimulationWorld& operator=(SimulationWorld&&) noexcept = delete;
     SimulationWorld(const SimulationWorld&) = delete;
     SimulationWorld& operator=(const SimulationWorld&) = delete;
+
+    // [game thread, lifecycle] Releases all world-owned state. Component stores
+    // declared after the registry are destroyed before the registry itself.
+    ~SimulationWorld() noexcept = default;
 
     // [game thread] Returns the next deterministic identity or
     // CapacityExhausted. All identity storage was allocated during Create().
     [[nodiscard]] std::expected<EntityId, EntityCreateError> CreateEntity() noexcept;
 
-    // [game thread, lifecycle] This is the sole world-owned entity destruction
-    // path. An exact live generation is destroyed; every other handle is inert.
+    // [game thread, lifecycle] This is the sole in-place world-owned entity
+    // destruction path. An exact live generation is destroyed; every other
+    // handle is inert.
     // Future direct component stores must erase this exact generation in
     // deterministic declaration order before the registry advances it.
     [[nodiscard]] EntityDestroyResult DestroyEntity(EntityId entity) noexcept;
