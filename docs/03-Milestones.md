@@ -40,8 +40,12 @@ implemented; other scene decoders remain incomplete.
 ## M2: Native shell
 
 Status: in progress. The SDL_GPU shell, strict launch parser, owner-supplied NTSC-U data-root
-validation, headless probe, named-level manifest load, and synthetic debug view are implemented.
-Headless named-level startup also owns the complete canonical spatial-mesh set.
+validation, headless probe, named-level manifest/spatial load, and deterministic synthetic
+canonical-COL wireframe contact sheet are implemented. The contact sheet places meshes in
+source-order tiles and projects each mesh along its two largest coordinate extents. It is a
+clean-room diagnostic, not world placement or reconstructed geometry, and makes no VUM, TDX, or
+other retail semantic claim. Headless named-level startup also owns the complete canonical
+spatial-mesh set.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
@@ -66,11 +70,13 @@ mixing remain incomplete.
 ## M3: First level scene
 
 Status: in progress. Native `--level=MINSK` selection, canonical manifest/spatial loading, and
-renderer-neutral texture storage decoding are complete; the current grid is diagnostic only.
-VUM material catalogs are decoded, but render geometry, material binding/parameters, display-ready
-texture expansion, cameras, placements, transforms, and visibility remain incomplete. A passive
-retail-only VUM descriptor now preserves the proven pair/reference grammar without asserting
-vertices, indices, draws, or material assignments.
+renderer-neutral texture storage decoding are complete; the current synthetic canonical-COL
+wireframe contact sheet is diagnostic only. It uses source-order tiles and a per-mesh projection of
+the two largest coordinate extents, not world placement or reconstructed geometry, and makes no
+VUM, TDX, or other retail semantic claim. VUM material catalogs are decoded, but render geometry,
+material binding/parameters, display-ready texture expansion, cameras, placements, transforms, and
+visibility remain incomplete. A passive retail-only VUM descriptor now preserves the proven
+pair/reference grammar without asserting vertices, indices, draws, or material assignments.
 
 - Decode and render MINSK geometry, textures, materials, cameras, and static objects.
 - Match coordinate system, transforms, visibility, and representative frames against PCSX2.

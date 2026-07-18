@@ -1,5 +1,7 @@
 #include "omega/runtime/content_startup.h"
 
+#include "omega/runtime/spatial_debug_image.h"
+
 #include <utility>
 
 namespace omega::runtime
@@ -69,7 +71,7 @@ std::expected<ContentStartupState, ContentStartupError> StartContent(
     }
     state.level_spatial = std::move(*spatial);
 
-    auto built_image = BuildManifestDebugImage(*state.level_manifest);
+    auto built_image = BuildSpatialDebugImage(*state.level_spatial);
     if (!built_image)
     {
         return std::unexpected(ContentStartupError{

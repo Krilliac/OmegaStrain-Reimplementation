@@ -2,9 +2,9 @@
 
 #include "sdl_platform_service.h"
 
+#include "omega/runtime/debug_image.h"
 #include "omega/runtime/input_tracker.h"
 #include "omega/runtime/log_service.h"
-#include "omega/runtime/manifest_debug_image.h"
 
 #include <SDL3/SDL.h>
 
@@ -96,7 +96,7 @@ struct SdlGpuHost::Impl
 
 std::expected<SdlGpuHost, std::string> SdlGpuHost::Create(
     const SdlPlatformService& platform,
-    const runtime::ManifestDebugImage* debug_image, const bool debug_device)
+    const runtime::DebugImage* debug_image, const bool debug_device)
 {
     if (!platform.ready())
         return std::unexpected("SDL platform service is not ready");
@@ -129,7 +129,7 @@ std::expected<SdlGpuHost, std::string> SdlGpuHost::Create(
         debug_image->pixels().size() !=
             static_cast<std::uint64_t>(debug_image->width) * debug_image->height * 4U ||
         debug_image->pixels().size() > std::numeric_limits<std::uint32_t>::max())
-        return std::unexpected("manifest debug image has invalid RGBA8 dimensions");
+        return std::unexpected("debug image has invalid RGBA8 dimensions");
 
     const SDL_GPUTextureCreateInfo texture_info{
         .type = SDL_GPU_TEXTURETYPE_2D,

@@ -87,7 +87,7 @@ int LaunchOptionsFailureCount();
 int LogServiceFailureCount();
 int ConfigServiceFailureCount();
 int JobServiceFailureCount();
-int ManifestDebugImageFailureCount();
+int SpatialDebugImageFailureCount();
 int FrameSchedulerFailureCount();
 int InputTrackerFailureCount();
 int RuntimeSettingsFailureCount();
@@ -312,7 +312,7 @@ int main()
     failures += LogServiceFailureCount();
     failures += ConfigServiceFailureCount();
     failures += JobServiceFailureCount();
-    failures += ManifestDebugImageFailureCount();
+    failures += SpatialDebugImageFailureCount();
     failures += FrameSchedulerFailureCount();
     failures += InputTrackerFailureCount();
     failures += RuntimeSettingsFailureCount();

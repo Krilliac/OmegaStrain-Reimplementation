@@ -3,8 +3,8 @@
 #include "omega/asset/level_ir.h"
 #include "omega/asset/level_spatial_ir.h"
 #include "omega/content/game_data_service.h"
+#include "omega/runtime/debug_image.h"
 #include "omega/runtime/launch_options.h"
-#include "omega/runtime/manifest_debug_image.h"
 
 #include <expected>
 #include <optional>
@@ -35,7 +35,7 @@ struct ContentStartupState
     std::optional<content::GameDataService> game_data;
     std::optional<asset::LevelManifestIR> level_manifest;
     std::optional<asset::LevelSpatialIR> level_spatial;
-    std::optional<ManifestDebugImage> debug_image;
+    std::optional<DebugImage> debug_image;
 };
 
 // [game thread, startup] Owns the validated data service and canonical level state. SDL and GPU

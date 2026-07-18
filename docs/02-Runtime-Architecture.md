@@ -152,9 +152,11 @@ must not include retail-format headers. A source-include dependency check will t
 into a CI enforcement boundary as more targets appear. The existing terrain-prefix parser remains
 in `omega_core` temporarily; new semantic adapters enter through `omega_retail_formats`.
 
-Startup owns both `LevelManifestIR` and `LevelSpatialIR`. The initial synthetic manifest grid still
-consumes only the manifest; its tile positions are not retail world coordinates and are never
-claimed as decoded geometry.
+Startup owns both `LevelManifestIR` and `LevelSpatialIR`. The initial renderer consumes canonical
+spatial meshes only to build a deterministic synthetic canonical-COL wireframe contact sheet.
+Meshes occupy source-order tiles, and each mesh is projected along its two largest coordinate
+extents. This clean-room diagnostic is not world placement or reconstructed geometry and makes no
+VUM, TDX, or other retail semantic claim.
 
 The runtime contains no MIPS execution path. This boundary is permanent and documented in
 `docs/adr/0001-pure-native-runtime.md`.

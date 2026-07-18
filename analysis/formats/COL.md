@@ -62,6 +62,19 @@ decoder scratch peak. HOG input/copy/parser workspace remains independently boun
 caps and fixed parser safety limits. Archive/source depth and spatial edge depth compose; the default
 maximum of nine admits the observed eight-edge COL maximum beneath one cell-HOG edge.
 
+## Synthetic diagnostic consumer
+
+`BuildSpatialDebugImage` consumes only the canonical owned `LevelSpatialIR`. It places meshes in
+source-order tiles, independently fits each mesh by projecting its two largest coordinate extents,
+and rasterizes undirected triangle edges into a bounded renderer-neutral RGBA8 image. The builder
+validates finite vertices, triangle indices, aggregate counts, conservative raster work, dimensions,
+and output bytes before allocating the image.
+
+This contact sheet is a clean-room diagnostic, not reconstructed scene geometry. Tile position,
+projection axes, scale, color, and the omission of acceleration-tree data make no claim about retail
+world placement, coordinate conversion, camera, visibility, winding, collision response, materials,
+VUM payloads, or TDX pixels. The SDL GPU leaf receives only the generic owned image contract.
+
 ## Aggregate native validation
 
 `build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc` independently
