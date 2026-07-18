@@ -114,6 +114,43 @@ class PopSectionLayoutHypothesisTests(unittest.TestCase):
         self.assertTrue(result["complete"])
         self.assertEqual(result["candidate_layout_hypotheses"], [])
         self.assertEqual(result["totals"]["bounded_nonzero_count_probes"], 0)
+        self.assertEqual(result["totals"]["bounded_zero_count_probes"], 1)
+
+    def test_zero_count_supports_extent_only_after_nonzero_stride_evidence(self) -> None:
+        nonzero = _make_pop(_exact_span(2, 8, b"SND:"))
+        empty = _make_pop(struct.pack("<I", 0) + b"SND:")
+        result = _scan_files({"nonzero.POP": nonzero, "empty.POP": empty})
+
+        hypothesis = next(
+            item
+            for item in result["candidate_layout_hypotheses"]
+            if item["literal_marker"] == "GOB:"
+            and item["candidate_count_field_delta_bytes"] == 4
+            and item["candidate_fixed_record_stride_bytes"] == 8
+        )
+        self.assertEqual(hypothesis["bounded_nonzero_count_occurrences_tested"], 1)
+        self.assertEqual(hypothesis["zero_count_occurrences_tested"], 1)
+        self.assertEqual(hypothesis["zero_count_empty_extent_matches"], 1)
+        self.assertEqual(hypothesis["bounded_count_occurrences_tested"], 2)
+        self.assertEqual(hypothesis["candidate_extent_exact_matches_including_zero"], 2)
+        self.assertEqual(hypothesis["candidate_extent_mismatches_including_zero"], 0)
+
+    def test_zero_count_with_opaque_extent_is_an_including_zero_mismatch(self) -> None:
+        nonzero = _make_pop(_exact_span(2, 8, b"SND:"))
+        nonempty = _make_pop(struct.pack("<I", 0) + b"JUNK" + b"SND:")
+        result = _scan_files({"nonzero.POP": nonzero, "nonempty.POP": nonempty})
+
+        hypothesis = next(
+            item
+            for item in result["candidate_layout_hypotheses"]
+            if item["literal_marker"] == "GOB:"
+            and item["candidate_count_field_delta_bytes"] == 4
+            and item["candidate_fixed_record_stride_bytes"] == 8
+        )
+        self.assertEqual(hypothesis["zero_count_occurrences_tested"], 1)
+        self.assertEqual(hypothesis["zero_count_empty_extent_matches"], 0)
+        self.assertEqual(hypothesis["candidate_extent_exact_matches_including_zero"], 1)
+        self.assertEqual(hypothesis["candidate_extent_mismatches_including_zero"], 1)
 
     def test_opaque_words_above_candidate_count_cap_are_not_decoded(self) -> None:
         result = _scan_files({

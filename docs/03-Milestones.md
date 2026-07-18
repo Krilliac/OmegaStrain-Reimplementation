@@ -48,8 +48,9 @@ incomplete.
   literal-tag candidates exactly once per file in one shared order, for 342 aggregate hits. The
   literals are not yet decoded section boundaries and assign no placement or visibility semantics.
 - Aggregate POP layout scoring finds five marker-relative `+4` word/fixed-stride tuples that fit
-  every bounded nonzero occurrence tested (`INL:`/36, `PNT:`/88, `DIR:`/44, `ENV:`/76, and
-  `INV:`/84 bytes). They remain arithmetic hypotheses, not decoded sections or field semantics.
+  all 18 occurrences each (`INL:`/36, `PNT:`/88, `DIR:`/44, `ENV:`/76, and `INV:`/84 bytes).
+  Zero-count instances validate only the predicted empty extent. The tuples remain arithmetic
+  hypotheses, not decoded sections or field semantics.
 - Inspectors for ELF, scripts, textures, meshes, skeletons, animation, audio, and maps.
 - Synthetic malformed-input tests for every decoder.
 

@@ -103,11 +103,12 @@ remaining opaque extent by that candidate count yields a four-byte-aligned fixed
 than 256 bytes, the tuple of literal spelling, marker-relative field offset, and stride receives one
 exact-match score.
 
-The report includes only tuples with at least one exact arithmetic match, together with their
-bounded nonzero tests, exact matches, and mismatches. Zero words provide no stride evidence and are
-excluded rather than making every stride match vacuously. A match does not establish that the
-literal is a boundary, the word is a count, the opaque values are records, or the stride has any
-runtime meaning.
+The report includes only tuples with at least one exact nonzero arithmetic match, together with
+their bounded nonzero tests, exact matches, and mismatches. Zero words provide no stride evidence
+and never create a tuple. For a tuple established by nonzero evidence, the report separately counts
+whether zero-word occurrences have exactly the empty extent predicted by that candidate formula.
+A match does not establish that the literal is a boundary, the word is a count, the opaque values
+are records, or the stride has any runtime meaning.
 
 The scorer streams files and applies independent traversal-entry, directory-depth, path-metadata,
 file-size, cumulative-input, actual-read, per-file and cumulative terrain-record, name, marker,
@@ -119,9 +120,11 @@ no paths, names, hashes, raw words, payload bytes, or per-file fingerprints.
 The owned-corpus run accepts all 18 POPs with zero errors and tests 1,443 bounded nonzero candidate
 count words across 342 marker spans. Five marker-relative `+4` word/stride tuples fit every nonzero
 occurrence tested: `INL:`/36 bytes (18/18), `PNT:`/88 bytes (17/17), `DIR:`/44 bytes (18/18),
-`ENV:`/76 bytes (18/18), and `INV:`/84 bytes (16/16). Zero words are deliberately excluded from
-stride evidence. These exact arithmetic fits nominate the next structural proof only; they do not
-confirm markers, counts, records, boundaries, placement, visibility, or any field semantics.
+`ENV:`/76 bytes (18/18), and `INV:`/84 bytes (16/16). Separate zero-word accounting finds the empty
+extent predicted by the same candidate formula in the remaining one `PNT:` and two `INV:` spans,
+so each tuple fits all 18 occurrences. The zero cases add no stride evidence. These exact arithmetic
+fits nominate the next structural proof only; they do not confirm markers, counts, records,
+boundaries, placement, visibility, or any field semantics.
 
 ## Reproduce
 
