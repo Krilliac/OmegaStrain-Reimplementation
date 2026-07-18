@@ -8,6 +8,7 @@ instructions, names, or paths to a report without also changing this policy.
 
 from __future__ import annotations
 
+import heapq
 import json
 import math
 import re
@@ -240,6 +241,53 @@ def _checked_u64_add(left: int, right: int) -> int:
     return result
 
 
+def _validate_interval_execution_feasibility(
+    observed_offsets: list[int],
+    execution_capacities: list[int],
+    site_intervals: list[tuple[int, int, int, int]],
+) -> None:
+    """Require site execution demands to fit the EE capacities in their ranges.
+
+    Each anonymous site's executions may be distributed across observed offsets
+    between its inclusive minimum and maximum. Earliest-deadline-first is a
+    complete feasibility test for these preemptible interval demands, and it
+    stays O((offsets + sites) log sites) for the tracer's bounded aggregates.
+    """
+
+    if len(observed_offsets) != len(execution_capacities):
+        raise _fail("anonymous-site interval accounting is inconsistent")
+    pending = sorted(site_intervals)
+    active: list[tuple[int, int, int]] = []
+    pending_index = 0
+
+    for offset, capacity in zip(observed_offsets, execution_capacities, strict=True):
+        while pending_index < len(pending) and pending[pending_index][0] <= offset:
+            _minimum, maximum, ordinal, execution_count = pending[pending_index]
+            heapq.heappush(active, (maximum, ordinal, execution_count))
+            pending_index += 1
+
+        if active and active[0][0] < offset:
+            raise _fail("anonymous-site ranges exceed their shared EE executions")
+        remaining_capacity = capacity
+        while remaining_capacity:
+            if not active:
+                raise _fail("EE executions cannot be assigned to anonymous-site ranges")
+            maximum, ordinal, remaining_demand = heapq.heappop(active)
+            if maximum < offset:
+                raise _fail("anonymous-site ranges exceed their shared EE executions")
+            assigned = min(remaining_capacity, remaining_demand)
+            remaining_capacity -= assigned
+            remaining_demand -= assigned
+            if remaining_demand:
+                heapq.heappush(active, (maximum, ordinal, remaining_demand))
+
+        if active and active[0][0] <= offset:
+            raise _fail("anonymous-site ranges exceed their shared EE executions")
+
+    if pending_index != len(pending) or active:
+        raise _fail("anonymous-site ranges exceed their shared EE executions")
+
+
 def _validate_ee_reads(
     rows: list[object], expected_size: int
 ) -> tuple[dict[tuple[int, int], int], dict[int, int], int]:
@@ -288,9 +336,12 @@ def _validate_anonymous_sites(
     required_extrema_counts: dict[tuple[int, int], int] = {}
     previous_order: tuple[int, int, int, int, int] | None = None
     ee_offsets_per_width: dict[int, list[int]] = {}
+    ee_execution_counts_per_width: dict[int, list[int]] = {}
     ee_execution_prefixes_per_width: dict[int, list[int]] = {}
+    site_intervals_per_width: dict[int, list[tuple[int, int, int, int]]] = {}
     for (relative_offset, width), execution_count in ee_reads.items():
         ee_offsets_per_width.setdefault(width, []).append(relative_offset)
+        ee_execution_counts_per_width.setdefault(width, []).append(execution_count)
         prefixes = ee_execution_prefixes_per_width.setdefault(width, [0])
         prefixes.append(prefixes[-1] + execution_count)
 
@@ -372,12 +423,21 @@ def _validate_anonymous_sites(
             site_per_width.get(width, 0), execution_count
         )
         site_total = _checked_u64_add(site_total, execution_count)
+        site_intervals_per_width.setdefault(width, []).append(
+            (minimum, maximum, ordinal, execution_count)
+        )
 
     for key, required_count in required_extrema_counts.items():
         if required_count > ee_reads[key]:
             raise _fail("anonymous site extrema require more executions than EE reads")
     if site_per_width != ee_per_width or site_total != ee_total:
         raise _fail("anonymous-site execution totals do not match EE reads")
+    for width, observed_offsets in ee_offsets_per_width.items():
+        _validate_interval_execution_feasibility(
+            observed_offsets,
+            ee_execution_counts_per_width[width],
+            site_intervals_per_width.get(width, []),
+        )
 
 
 def _validate_vif_chunks(rows: list[object], expected_size: int) -> None:
