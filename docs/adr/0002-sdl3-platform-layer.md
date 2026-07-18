@@ -12,6 +12,8 @@ modern Direct3D 12, Vulkan, or Metal-style APIs.
 
 Gameplay, simulation, retail-format decoders, and asset types never include SDL headers.
 `PlatformService`, `InputService`, `AudioService`, and `RenderService` own the SDL-facing code.
+The app-owned platform service owns SDL's process-global lifetime. Audio and GPU/input leaves use
+ref-counted subsystem initialization and shut down before the platform service calls `SDL_Quit`.
 
 ## Reasons
 

@@ -1,5 +1,7 @@
 #include "sdl_gpu_host.h"
 
+#include "sdl_platform_service.h"
+
 #include "omega/runtime/input_tracker.h"
 #include "omega/runtime/log_service.h"
 #include "omega/runtime/manifest_debug_image.h"
@@ -76,11 +78,11 @@ struct SdlGpuHost::Impl
         }
         if (window != nullptr)
             SDL_DestroyWindow(window);
-        if (sdl_initialized)
-            SDL_Quit();
+        if (subsystems_initialized)
+            SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
     }
 
-    bool sdl_initialized = false;
+    bool subsystems_initialized = false;
     bool window_claimed = false;
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;
@@ -93,14 +95,16 @@ struct SdlGpuHost::Impl
 };
 
 std::expected<SdlGpuHost, std::string> SdlGpuHost::Create(
+    const SdlPlatformService& platform,
     const runtime::ManifestDebugImage* debug_image, const bool debug_device)
 {
+    if (!platform.ready())
+        return std::unexpected("SDL platform service is not ready");
+
     auto impl = std::make_unique<Impl>();
-    if (!SDL_SetAppMetadata("OpenOmega", "0.1.0", "io.github.krilliac.openomega"))
-        return std::unexpected(SdlError("SDL_SetAppMetadata"));
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO))
-        return std::unexpected(SdlError("SDL_Init"));
-    impl->sdl_initialized = true;
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
+        return std::unexpected(SdlError("SDL_InitSubSystem(video/gamepad)"));
+    impl->subsystems_initialized = true;
 
     impl->window = SDL_CreateWindow("OpenOmega - native runtime", 1280, 720,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);

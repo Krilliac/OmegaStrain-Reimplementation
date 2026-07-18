@@ -88,8 +88,25 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     auto simulation =
         std::make_unique<simulation::SimulationWorld>(std::move(*created_simulation));
 
+    auto created_platform = SdlPlatformService::Create();
+    if (!created_platform)
+    {
+        log->Error("startup", "SDL platform service: " + created_platform.error());
+        return std::unexpected("SDL platform service: " + created_platform.error());
+    }
+    auto platform = std::make_unique<SdlPlatformService>(std::move(*created_platform));
+
+    auto created_audio = SdlAudioService::Create(*platform);
+    if (!created_audio)
+    {
+        log->Error("startup", "SDL audio service: " + created_audio.error());
+        return std::unexpected("SDL audio service: " + created_audio.error());
+    }
+    auto audio = std::make_unique<SdlAudioService>(std::move(*created_audio));
+
     auto created_host = SdlGpuHost::Create(
-        content_owner->debug_image ? &*content_owner->debug_image : nullptr, debug_device);
+        *platform, content_owner->debug_image ? &*content_owner->debug_image : nullptr,
+        debug_device);
     if (!created_host)
     {
         log->Error("startup", "SDL/GPU host: " + created_host.error());
@@ -97,11 +114,13 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     }
     auto host = std::make_unique<SdlGpuHost>(std::move(*created_host));
     log->Info("startup", "runtime services ready with " +
-                             std::to_string(jobs->worker_count()) + " workers");
+                             std::to_string(jobs->worker_count()) + " workers and " +
+                             std::string(audio->driver_name()) + " audio");
 
     return OmegaApp(std::move(config_owner), std::move(content_owner), std::move(stderr_sink),
         std::move(ring_sink), std::move(log), std::move(jobs), std::move(frame_scheduler),
-        std::move(input), std::move(simulation), std::move(host));
+        std::move(input), std::move(simulation), std::move(platform), std::move(audio),
+        std::move(host));
 }
 
 OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
@@ -112,12 +131,15 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<runtime::FrameScheduler> frame_scheduler,
     std::unique_ptr<runtime::InputTracker> input,
     std::unique_ptr<simulation::SimulationWorld> simulation,
+    std::unique_ptr<SdlPlatformService> platform,
+    std::unique_ptr<SdlAudioService> audio,
     std::unique_ptr<SdlGpuHost> host) noexcept
     : config_(std::move(config)), content_(std::move(content)),
       stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)),
       log_(std::move(log)), jobs_(std::move(jobs)),
       frame_scheduler_(std::move(frame_scheduler)), input_(std::move(input)),
-      simulation_(std::move(simulation)), host_(std::move(host))
+      simulation_(std::move(simulation)), platform_(std::move(platform)),
+      audio_(std::move(audio)), host_(std::move(host))
 {
 }
 
@@ -199,9 +221,27 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
             return std::unexpected(rendered.error());
         }
         ++result.rendered_frames;
+
+        if (audio_->Snapshot().callback_failures != 0U)
+        {
+            jobs_->WaitForIdle();
+            constexpr std::string_view error =
+                "audio callback failed to provide playback data";
+            log_->Error("audio", error);
+            return std::unexpected(std::string(error));
+        }
     }
 
     jobs_->WaitForIdle();
+    const AudioServiceSnapshot audio = audio_->Snapshot();
+    if (audio.callback_failures != 0U)
+    {
+        constexpr std::string_view error = "audio callback failed to provide playback data";
+        log_->Error("audio", error);
+        return std::unexpected(std::string(error));
+    }
+    result.audio_callback_count = audio.callback_count;
+    result.audio_frames_provided = audio.provided_frames;
     log_->Info("runtime", "host loop ended after " +
                               std::to_string(result.rendered_frames) + " rendered frames and " +
                               std::to_string(result.executed_simulation_steps) +
@@ -212,5 +252,20 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
 std::string_view OmegaApp::driver_name() const noexcept
 {
     return host_->driver_name();
+}
+
+std::string_view OmegaApp::audio_driver_name() const noexcept
+{
+    return audio_->driver_name();
+}
+
+int OmegaApp::audio_sample_rate() const noexcept
+{
+    return SdlAudioService::kSampleRate;
+}
+
+int OmegaApp::audio_channel_count() const noexcept
+{
+    return SdlAudioService::kChannelCount;
 }
 } // namespace omega::app
