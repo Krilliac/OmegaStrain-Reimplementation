@@ -22,6 +22,7 @@ struct SimulationState
 {
     std::uint64_t completed_steps = 0;
     std::chrono::nanoseconds simulated_time{0};
+    std::uint32_t alive_entities = 0;
 };
 
 enum class SimulationStepResult : std::uint8_t

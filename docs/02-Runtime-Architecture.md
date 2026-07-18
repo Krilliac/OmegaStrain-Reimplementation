@@ -29,7 +29,9 @@ stderr/ring log sinks, logging service, worker pool, fixed-step scheduler, input
 SDL GPU host in that order. The host is created last and destroyed first; audio and input stop
 before the platform service calls the process-global SDL shutdown.
 `OmegaApp::Run` owns the steady clock, closes immutable input frames, asks the scheduler for a
-bounded plan, executes every planned world step, then submits one render frame.
+bounded plan, executes every planned world step, copies the clock and live-entity aggregate into an
+owned renderer-neutral `RenderFramePacket`, then submits one render frame. The current host consumes
+the packet synchronously; it contains no component pointers, retail views, SDL types, or vtables.
 `SdlInputService::PumpEvents` is the sole process-global event-queue consumer. `SdlGpuHost` owns
 only video, window, GPU, and rendering resources; no SDL type crosses into the platform-neutral
 runtime or simulation libraries.
@@ -79,7 +81,9 @@ queues.
   plain registry-scoped values: they do not own the world, and an identical numeric value in another
   world is a different identity. Borrowed registry references remain on the game thread and are
   invalidated when their world moves or is destroyed.
-- `RenderService` receives scene snapshots and exposes no retail-format details.
+- `RenderService` receives owned renderer-neutral frame packets and exposes no retail-format
+  details. The initial packet carries only host frame index, deterministic simulation clock, and
+  live-entity count; future scene values must enter as independently owned canonical state.
 - `SdlInputService` is an app-owned, non-hot-reloadable main-thread leaf. It owns the ref-counted
   SDL gamepad subsystem, pumps the global SDL event queue, and owns at most one primary gamepad.
   Button events are accepted only when their instance ID matches that primary. Window focus loss
