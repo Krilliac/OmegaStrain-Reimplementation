@@ -126,6 +126,58 @@ def document_with_read(offset: int, width: int, count: int = 1) -> dict[str, Any
     return document
 
 
+def synthetic_two_row_cross_count_document() -> dict[str, Any]:
+    """Return a wholly synthetic two-row cross-count fixture unrelated to any capture."""
+
+    first_offset = EXPECTED_SIZE // 2
+    second_offset = EXPECTED_SIZE * 3 // 4
+    first_width = 4
+    second_width = 8
+    first_count = 3
+    second_count = 5
+    return {
+        "schema": "omega-vum-read-trace-v1",
+        "status": "complete",
+        "stop_reason": "maximum_frames",
+        "selected_copy_count": 2,
+        "frame_count": 17,
+        "matching_event_observed": True,
+        "ee_reads": [
+            {
+                "relative_offset": first_offset,
+                "width": first_width,
+                "execution_count": first_count,
+            },
+            {
+                "relative_offset": second_offset,
+                "width": second_width,
+                "execution_count": second_count,
+            },
+        ],
+        "anonymous_sites": [
+            {
+                "anonymous_site": 0,
+                "width": first_width,
+                "execution_count": first_count,
+                "distinct_relative_offset_count": 1,
+                "minimum_relative_offset": first_offset,
+                "maximum_relative_offset": first_offset,
+                "loop_candidate_heuristic": False,
+            },
+            {
+                "anonymous_site": 1,
+                "width": second_width,
+                "execution_count": second_count,
+                "distinct_relative_offset_count": 1,
+                "minimum_relative_offset": second_offset,
+                "maximum_relative_offset": second_offset,
+                "loop_candidate_heuristic": False,
+            },
+        ],
+        "vif1_unpack_chunks": [],
+    }
+
+
 def compact_json(document: dict[str, Any]) -> bytes:
     return json.dumps(document, separators=(",", ":"), sort_keys=False).encode("utf-8")
 
@@ -786,6 +838,37 @@ class VumReadTraceValidatorTests(unittest.TestCase):
         validator.validate_repeat(raw, raw, EXPECTED_SIZE)
         with self.assertRaises(validator.TraceValidationError):
             validator.validate_repeat(raw, raw + b"\n", EXPECTED_SIZE)
+
+    def test_synthetic_two_row_repeat_and_cross_count_rejections(self) -> None:
+        document = synthetic_two_row_cross_count_document()
+        raw = compact_json(document)
+        self.assertEqual(validator.validate_repeat(raw, raw, EXPECTED_SIZE), document)
+
+        execution_misassignment = copy.deepcopy(document)
+        first_site, second_site = execution_misassignment["anonymous_sites"]
+        first_site["execution_count"], second_site["execution_count"] = (
+            second_site["execution_count"],
+            first_site["execution_count"],
+        )
+        self.assertEqual(
+            sum(row["execution_count"] for row in execution_misassignment["ee_reads"]),
+            sum(
+                row["execution_count"]
+                for row in execution_misassignment["anonymous_sites"]
+            ),
+        )
+        self.assert_invalid(execution_misassignment)
+
+        selected_count_mismatch = copy.deepcopy(document)
+        selected_count_mismatch["selected_copy_count"] += 1
+        self.assertEqual(
+            validator.validate_trace_document(selected_count_mismatch, EXPECTED_SIZE),
+            selected_count_mismatch,
+        )
+        with self.assertRaises(validator.TraceValidationError):
+            validator.validate_repeat(
+                raw, compact_json(selected_count_mismatch), EXPECTED_SIZE
+            )
 
     def run_cli(self, raw: bytes) -> tuple[int, str, str]:
         with tempfile.TemporaryDirectory() as temporary_directory:

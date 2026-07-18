@@ -88,6 +88,20 @@ shipping dependencies or execution mechanisms.
     zero `INV:` instances have the predicted empty extent but add no stride evidence. These
     arithmetic fits do not yet confirm markers, counts, records, section boundaries, placement,
     visibility, or field meanings.
+20. Completed the first bounded privacy-safe VUM consumer trace. One selected runtime copy produced
+    one complete 120-frame pair; strict validation accepted both validated reports, and the repeat
+    was byte-identical. Each report contains two EE-read aggregate rows, two anonymous-site rows,
+    and zero VIF1 chunk rows. The post-run containment audit found no retained runtime copy,
+    executable surface, reparse point, owner-input copy, or emulator/build process. This evidence
+    is header-only: both EE rows remain confined to separate slots of the already-opaque
+    header-vector block, and no accepted row reaches counts, records, metadata, payload, or tail
+    data. It assigns no geometry, topology, vertex, material, packet, draw, placement, visibility,
+    or gameplay semantics.
+21. Added all-or-error `LevelContentIR` startup composition. `GameDataService` now traverses each
+    common/nested archive and manifest-referenced cell once while decoding its unique COL and VUM
+    members under one shared operation budget. The C-only headless probe accepts all 18 levels and
+    all 5,351 manifest cells with zero errors. Parallel spatial/material positions preserve source
+    order and cardinality only; they assert no binding, placement, visibility, or render semantics.
 
 ## Disc observations
 
@@ -109,19 +123,14 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Correct the private save-state load for the built oracle-only PCSX2 VUM tracer. Its first smoke
-   run ended with `savestate_load_failed` before selecting a runtime copy or recording an event, so
-   no report has passed the gate. Privately select an exact-primary MINSK VUM, run the identical
-   save state twice, and validate both complete reports with `tools/validate_vum_read_trace.py`,
-   including a byte-identical repeat comparison. The validator receives expected VUM size privately
-   and enforces strict bounds, exact schema and lifecycle status, deterministic ordering, unique
-   keyed rows, and detail/summary cross-counts. Publish only VUM-relative offset/width/count
-   aggregates, anonymous site ranges/counts, VIF source-relative ranges/output counts, and
-   lifecycle status. Reports must contain no PCs;
-   absolute or RAM addresses; CRCs or hashes; paths or names; payload bytes/data; or instructions,
-   opcodes, or registers. No accepted report or evidence claim exists yet: add no evidence-ledger
-   entry and infer no geometry, topology, vertex, packet, or material semantics until a real
-   deterministic trace passes the gate.
+1. Use the accepted deterministic VUM trace only as a structural baseline. Collect additional
+   bounded pairs through controlled comparisons that change one research condition at a time,
+   require strict validation and byte-identical repeats, and compare only sanitized relative
+   ranges and counts. Keep sites anonymous and bounds private. Promote no relationship without
+   cross-capture stability plus independent corroboration, and infer no geometry, topology,
+   vertex, material, packet, draw, placement, visibility, or gameplay semantics from the current
+   header-only aggregate rows or the absence of VIF1 chunks. A zero VIF1 count does not rule out
+   copied buffers or consumption outside the bounded observation window.
 2. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
    independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.

@@ -3,6 +3,8 @@
 #include "pop_commands.h"
 
 #include <algorithm>
+#include <array>
+#include <barrier>
 #include <bit>
 #include <chrono>
 #include <cstddef>
@@ -14,6 +16,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -455,10 +458,27 @@ LoadMaterialCatalogsWithLimits(const std::filesystem::path& root,
         return std::unexpected(service.error());
     return service->LoadLevelMaterialCatalogs(manifest);
 }
+
+std::expected<omega::asset::LevelContentIR, omega::content::GameDataError>
+LoadContentWithLimits(const std::filesystem::path& root,
+    const omega::asset::LevelManifestIR& manifest, const omega::asset::DecodeLimits limits,
+    const std::uint64_t maximum_nested_hog_bytes = 64ULL * 1024ULL * 1024ULL)
+{
+    omega::content::GameDataServiceConfig config{.root = root};
+    config.maximum_nested_hog_bytes = maximum_nested_hog_bytes;
+    config.decode_limits = limits;
+    auto service = omega::content::GameDataService::Open(std::move(config));
+    if (!service)
+        return std::unexpected(service.error());
+    return service->LoadLevelContent(manifest);
+}
 } // namespace
 
 int GameDataServiceFailureCount()
 {
+    Check(omega::asset::DecodeLimits{}.maximum_input_bytes == 72ULL * 1024ULL * 1024ULL,
+        "the default shared input budget covers confirmed whole-level composition");
+
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
         ("openomega-game-data-tests-" + std::to_string(nonce));
@@ -557,17 +577,18 @@ int GameDataServiceFailureCount()
     startup_options.level_code = "MINSK";
     startup_options.probe_only = true;
     auto startup = omega::runtime::StartContent(startup_options);
-    Check(startup && startup->game_data && startup->level_manifest && startup->level_spatial &&
-              startup->level_material_catalogs && startup->debug_image,
+    Check(startup && startup->game_data && startup->level_manifest && startup->level_content &&
+              startup->debug_image,
         "the exact non-SDL startup path owns validated manifest, spatial, material, and debug data");
-    if (startup && startup->level_manifest && startup->level_spatial &&
-        startup->level_material_catalogs && startup->debug_image)
+    if (startup && startup->level_manifest && startup->level_content && startup->debug_image)
     {
         Check(startup->level_manifest->terrain_cells.size() == 2 &&
-                  startup->level_spatial->terrain_cells.size() == 2 &&
-                  startup->level_material_catalogs->terrain_cells.size() == 2 &&
-                  startup->level_material_catalogs->terrain_cells[0].names[0] == "BASE.TDX" &&
-                  startup->level_material_catalogs->terrain_cells[1].names[0] == "CELL.TDX" &&
+                  startup->level_content->spatial.terrain_cells.size() == 2 &&
+                  startup->level_content->material_catalogs.terrain_cells.size() == 2 &&
+                  startup->level_content->material_catalogs.terrain_cells[0].names[0] ==
+                      "BASE.TDX" &&
+                  startup->level_content->material_catalogs.terrain_cells[1].names[0] ==
+                      "CELL.TDX" &&
                   startup->debug_image->width != 0 && startup->debug_image->height != 0,
             "application startup composes matching manifest-order canonical cardinalities");
 
@@ -586,12 +607,11 @@ int GameDataServiceFailureCount()
 
         auto changed_geometry_startup = omega::runtime::StartContent(startup_options);
         Check(changed_geometry_startup && changed_geometry_startup->level_manifest &&
-                  changed_geometry_startup->level_spatial &&
-                  changed_geometry_startup->level_material_catalogs &&
+                  changed_geometry_startup->level_content &&
                   changed_geometry_startup->debug_image,
             "startup rebuilds the synthetic diagnostic from changed canonical spatial geometry");
         if (changed_geometry_startup && changed_geometry_startup->level_manifest &&
-            changed_geometry_startup->level_material_catalogs &&
+            changed_geometry_startup->level_content &&
             changed_geometry_startup->debug_image)
         {
             const std::vector<std::byte> changed_debug_pixels(
@@ -609,8 +629,8 @@ int GameDataServiceFailureCount()
                                left.data_hog_entry == right.data_hog_entry;
                     });
             Check(same_manifest_records &&
-                      *changed_geometry_startup->level_material_catalogs ==
-                          *startup->level_material_catalogs &&
+                      changed_geometry_startup->level_content->material_catalogs ==
+                          startup->level_content->material_catalogs &&
                       (changed_geometry_startup->debug_image->width !=
                               startup->debug_image->width ||
                           changed_geometry_startup->debug_image->height !=
@@ -630,14 +650,14 @@ int GameDataServiceFailureCount()
                   MakeSpatialDataHog(changed_material_cell_a, spatial_fixture.cell_b)),
             "same-manifest fixture with only one canonical material catalog changed is written");
         auto changed_material_startup = omega::runtime::StartContent(startup_options);
-        Check(changed_material_startup && changed_material_startup->level_spatial &&
-                  changed_material_startup->level_material_catalogs &&
+        Check(changed_material_startup && changed_material_startup->level_content &&
                   changed_material_startup->debug_image &&
-                  *changed_material_startup->level_spatial == *startup->level_spatial &&
-                  *changed_material_startup->level_material_catalogs !=
-                      *startup->level_material_catalogs &&
-                  changed_material_startup->level_material_catalogs->terrain_cells[1].names[0] ==
-                      "NEXT.TDX" &&
+                  changed_material_startup->level_content->spatial ==
+                      startup->level_content->spatial &&
+                  changed_material_startup->level_content->material_catalogs !=
+                      startup->level_content->material_catalogs &&
+                  changed_material_startup->level_content->material_catalogs.terrain_cells[1]
+                          .names[0] == "NEXT.TDX" &&
                   changed_material_startup->debug_image->width == startup->debug_image->width &&
                   changed_material_startup->debug_image->height == startup->debug_image->height &&
                   std::equal(changed_material_startup->debug_image->pixels().begin(),
@@ -705,6 +725,81 @@ int GameDataServiceFailureCount()
                     "valid material source archive is restored after ownership proof");
             }
 
+            auto content = spatial_service->LoadLevelContent(*spatial_manifest);
+            Check(content && content->spatial.terrain_cells.size() == 2 &&
+                      content->material_catalogs.terrain_cells.size() == 2 &&
+                      content->spatial.terrain_cells[0].vertices[1].x == 2.0F &&
+                      content->spatial.terrain_cells[1].vertices[1].x == 1.0F &&
+                      content->material_catalogs.terrain_cells[0].names[0] == "BASE.TDX" &&
+                      content->material_catalogs.terrain_cells[1].names[0] == "CELL.TDX",
+                "single-pass level content preserves both canonical collections in manifest order");
+            if (content)
+            {
+                const omega::asset::LevelContentIR owned = *content;
+                Check(WriteText(root / "GAMEDATA" / "MINSK" / "DATA.HOG", "replaced"),
+                    "single-pass content source archive is replaced after decoding");
+                Check(owned.spatial.terrain_cells[0].vertices[1] ==
+                          omega::asset::Float3IR{2.0F, 0.0F, 0.0F} &&
+                          owned.material_catalogs.terrain_cells[1].materials[1]
+                                  .name_indices[2] == 1,
+                    "single-pass level content owns meshes and catalogs after source replacement");
+                Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG",
+                          spatial_fixture.data_hog),
+                    "valid content source archive is restored after ownership proof");
+            }
+
+            std::array<bool, 4> concurrent_results{};
+            {
+                std::barrier start_line(static_cast<std::ptrdiff_t>(concurrent_results.size()));
+                std::vector<std::jthread> workers;
+                workers.reserve(concurrent_results.size());
+                for (std::size_t worker = 0; worker < concurrent_results.size(); ++worker)
+                {
+                    workers.emplace_back([&, worker] {
+                        start_line.arrive_and_wait();
+                        bool matches = true;
+                        for (std::size_t repetition = 0; repetition < 8; ++repetition)
+                        {
+                            auto loaded_content =
+                                spatial_service->LoadLevelContent(*spatial_manifest);
+                            if (!loaded_content || !content || *loaded_content != *content)
+                                matches = false;
+                        }
+                        concurrent_results[worker] = matches;
+                    });
+                }
+            }
+            Check(std::ranges::all_of(concurrent_results, [](const bool value) { return value; }),
+                "immutable single-pass level content loads agree across concurrent worker bursts");
+
+            auto empty_manifest = *spatial_manifest;
+            empty_manifest.terrain_cells.clear();
+            auto empty_limits = omega::asset::DecodeLimits{};
+            empty_limits.maximum_nesting_depth = 0;
+            auto empty_content =
+                LoadContentWithLimits(root, empty_manifest, empty_limits);
+            Check(empty_content && empty_content->spatial.terrain_cells.empty() &&
+                      empty_content->material_catalogs.terrain_cells.empty(),
+                "empty level content needs no cell archive depth and returns paired empty state");
+
+            auto nested_manifest = *spatial_manifest;
+            nested_manifest.data_hog_source.hog_entries = {"INNER.HOG"};
+            const auto nested_source = MakeHog(
+                {HogMember{.name = "INNER.HOG", .payload = spatial_fixture.data_hog}});
+            Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG", nested_source),
+                "single-pass nested source-chain fixture is written");
+            auto nested_content = spatial_service->LoadLevelContent(nested_manifest);
+            Check(nested_content && content && *nested_content == *content,
+                "single-pass content resolves a non-empty container-only source chain");
+            auto nested_limits = omega::asset::DecodeLimits{};
+            nested_limits.maximum_nesting_depth = 1;
+            CheckDecodeError(LoadContentWithLimits(root, nested_manifest, nested_limits),
+                omega::asset::DecodeErrorCode::LimitExceeded,
+                "source chain plus cell edge rejects a one-below combined depth budget");
+            Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG",
+                      spatial_fixture.data_hog),
+                "direct single-pass source archive is restored after nested-chain coverage");
+
             auto repeated_manifest = *spatial_manifest;
             repeated_manifest.terrain_cells[1].data_hog_entry =
                 repeated_manifest.terrain_cells[0].data_hog_entry;
@@ -714,6 +809,14 @@ int GameDataServiceFailureCount()
                       repeated_materials->terrain_cells[0] ==
                           repeated_materials->terrain_cells[1],
                 "repeated manifest references preserve cardinality instead of deduplicating");
+            auto repeated_content = spatial_service->LoadLevelContent(repeated_manifest);
+            Check(repeated_content && repeated_content->spatial.terrain_cells.size() == 2 &&
+                      repeated_content->material_catalogs.terrain_cells.size() == 2 &&
+                      repeated_content->spatial.terrain_cells[0] ==
+                          repeated_content->spatial.terrain_cells[1] &&
+                      repeated_content->material_catalogs.terrain_cells[0] ==
+                          repeated_content->material_catalogs.terrain_cells[1],
+                "single-pass loading preserves repeated manifest cardinality without deduplication");
 
             const auto duplicate_outer_names = MakeHog(
                 {HogMember{.name = "CeLlA.HoG", .payload = spatial_fixture.cell_a},
@@ -728,6 +831,9 @@ int GameDataServiceFailureCount()
             CheckDecodeError(spatial_service->LoadLevelMaterialCatalogs(*spatial_manifest),
                 omega::asset::DecodeErrorCode::DuplicateReference,
                 "material loading rejects case-colliding outer HOG names before cell lookup");
+            CheckDecodeError(spatial_service->LoadLevelContent(*spatial_manifest),
+                omega::asset::DecodeErrorCode::DuplicateReference,
+                "single-pass loading rejects case-colliding outer HOG names before cell lookup");
 
             const auto no_col_cell = MakeCellHog(
                 "CeLlA.vUm", spatial_fixture.vum_a, std::vector<HogMember>{});
@@ -737,6 +843,9 @@ int GameDataServiceFailureCount()
             CheckDecodeError(spatial_service->LoadLevelSpatial(*spatial_manifest),
                 omega::asset::DecodeErrorCode::InvalidReference,
                 "a cell archive with zero COL members has a typed invalid-reference error");
+            CheckDecodeError(spatial_service->LoadLevelContent(*spatial_manifest),
+                omega::asset::DecodeErrorCode::InvalidReference,
+                "single-pass content requires exactly one COL member per cell");
 
             const auto two_col_cell = MakeCellHog("CeLlA.vUm", spatial_fixture.vum_a,
                 {HogMember{.name = "aLpHa.CoL", .payload = spatial_fixture.col_a},
@@ -747,6 +856,9 @@ int GameDataServiceFailureCount()
             CheckDecodeError(spatial_service->LoadLevelSpatial(*spatial_manifest),
                 omega::asset::DecodeErrorCode::DuplicateReference,
                 "a cell archive with two COL members has a typed duplicate-reference error");
+            CheckDecodeError(spatial_service->LoadLevelContent(*spatial_manifest),
+                omega::asset::DecodeErrorCode::DuplicateReference,
+                "single-pass content rejects multiple COL members per cell");
 
             auto malformed_cell = spatial_fixture.cell_a;
             WriteU32(malformed_cell, 0x08, 0x15);
@@ -759,6 +871,9 @@ int GameDataServiceFailureCount()
             CheckError(spatial_service->LoadLevelMaterialCatalogs(*spatial_manifest),
                 omega::content::GameDataErrorCode::MalformedArchive,
                 "material loading preserves the malformed nested-HOG error category");
+            CheckError(spatial_service->LoadLevelContent(*spatial_manifest),
+                omega::content::GameDataErrorCode::MalformedArchive,
+                "single-pass content preserves the malformed nested-HOG error category");
 
             auto nonzero_tail_cell = spatial_fixture.cell_a;
             nonzero_tail_cell.back() = std::byte{0x7E};
@@ -783,6 +898,9 @@ int GameDataServiceFailureCount()
             CheckDecodeError(spatial_service->LoadLevelSpatial(*spatial_manifest),
                 omega::asset::DecodeErrorCode::UnsupportedVariant,
                 "typed COL decoder failures survive the level-spatial service boundary");
+            CheckDecodeError(spatial_service->LoadLevelContent(*spatial_manifest),
+                omega::asset::DecodeErrorCode::UnsupportedVariant,
+                "typed COL decoder failures survive the single-pass content boundary");
 
             const auto no_vum_cell = MakeHog(
                 {HogMember{.name = "aLpHa.CoL", .payload = spatial_fixture.col_a}}, 11U);
@@ -792,6 +910,9 @@ int GameDataServiceFailureCount()
             CheckDecodeError(spatial_service->LoadLevelMaterialCatalogs(*spatial_manifest),
                 omega::asset::DecodeErrorCode::InvalidReference,
                 "a cell archive with zero VUM members has a typed invalid-reference error");
+            CheckDecodeError(spatial_service->LoadLevelContent(*spatial_manifest),
+                omega::asset::DecodeErrorCode::InvalidReference,
+                "single-pass content requires exactly one VUM member per cell");
             const auto failed_material_startup = omega::runtime::StartContent(startup_options);
             Check(!failed_material_startup &&
                       failed_material_startup.error().code ==
@@ -813,6 +934,9 @@ int GameDataServiceFailureCount()
             CheckDecodeError(spatial_service->LoadLevelMaterialCatalogs(*spatial_manifest),
                 omega::asset::DecodeErrorCode::DuplicateReference,
                 "a cell archive with two VUM members has a typed duplicate-reference error");
+            CheckDecodeError(spatial_service->LoadLevelContent(*spatial_manifest),
+                omega::asset::DecodeErrorCode::DuplicateReference,
+                "single-pass content rejects multiple VUM members per cell");
 
             const auto colliding_vum_names = MakeHog(
                 {HogMember{.name = "CeLlA.vUm", .payload = spatial_fixture.vum_a},
@@ -834,6 +958,9 @@ int GameDataServiceFailureCount()
             CheckDecodeError(spatial_service->LoadLevelMaterialCatalogs(*spatial_manifest),
                 omega::asset::DecodeErrorCode::Truncated,
                 "typed VUM decoder failures survive the level-material service boundary");
+            CheckDecodeError(spatial_service->LoadLevelContent(*spatial_manifest),
+                omega::asset::DecodeErrorCode::Truncated,
+                "typed VUM decoder failures survive the single-pass content boundary");
 
             Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG",
                       spatial_fixture.data_hog),
@@ -975,6 +1102,72 @@ int GameDataServiceFailureCount()
                 LoadMaterialCatalogsWithLimits(root, *spatial_manifest, limits),
                 omega::asset::DecodeErrorCode::LimitExceeded,
                 "one-below level-material archive depth budget fails");
+
+            limits = omega::asset::DecodeLimits{};
+            Check(LoadContentWithLimits(root, *spatial_manifest, limits,
+                      spatial_fixture.cell_a.size())
+                      .has_value(),
+                "single-pass content accepts the exact cell-HOG byte cap");
+            CheckDecodeError(
+                LoadContentWithLimits(root, *spatial_manifest, limits,
+                    spatial_fixture.cell_a.size() - 1U),
+                omega::asset::DecodeErrorCode::LimitExceeded,
+                "single-pass content rejects a one-below cell-HOG byte cap");
+
+            const std::uint64_t content_input_bytes = spatial_fixture.data_hog.size() +
+                spatial_fixture.cell_a.size() + spatial_fixture.col_a.size() +
+                spatial_fixture.vum_a.size() + spatial_fixture.cell_b.size() +
+                spatial_fixture.col_b.size() + spatial_fixture.vum_b.size();
+            Check(content_input_bytes == 4108U,
+                "two-cell fixture pins single-pass cumulative parser and decoder input work");
+            limits = omega::asset::DecodeLimits{};
+            limits.maximum_input_bytes = content_input_bytes;
+            Check(LoadContentWithLimits(root, *spatial_manifest, limits).has_value(),
+                "exact shared single-pass content input budget succeeds");
+            limits.maximum_input_bytes = content_input_bytes - 1U;
+            CheckDecodeError(LoadContentWithLimits(root, *spatial_manifest, limits),
+                omega::asset::DecodeErrorCode::LimitExceeded,
+                "one-below shared single-pass content input budget fails");
+
+            constexpr std::uint64_t content_items = 44;
+            limits = omega::asset::DecodeLimits{};
+            limits.maximum_items = content_items;
+            Check(LoadContentWithLimits(root, *spatial_manifest, limits).has_value(),
+                "exact shared single-pass content item budget succeeds");
+            limits.maximum_items = content_items - 1U;
+            CheckDecodeError(LoadContentWithLimits(root, *spatial_manifest, limits),
+                omega::asset::DecodeErrorCode::LimitExceeded,
+                "one-below shared single-pass content item budget fails");
+
+            constexpr std::uint64_t content_output_bytes =
+                sizeof(omega::asset::LevelContentIR) +
+                2U * (mesh_output_bytes + catalog_output_bytes);
+            limits = omega::asset::DecodeLimits{};
+            limits.maximum_output_bytes = content_output_bytes;
+            Check(LoadContentWithLimits(root, *spatial_manifest, limits).has_value(),
+                "exact shared logical single-pass content output budget succeeds");
+            limits.maximum_output_bytes = content_output_bytes - 1U;
+            CheckDecodeError(LoadContentWithLimits(root, *spatial_manifest, limits),
+                omega::asset::DecodeErrorCode::LimitExceeded,
+                "one-below shared logical single-pass content output budget fails");
+
+            limits = omega::asset::DecodeLimits{};
+            limits.maximum_scratch_bytes = exact_scratch_bytes;
+            Check(LoadContentWithLimits(root, *spatial_manifest, limits).has_value(),
+                "single-pass content uses the exact peak COL scratch budget");
+            limits.maximum_scratch_bytes = exact_scratch_bytes - 1U;
+            CheckDecodeError(LoadContentWithLimits(root, *spatial_manifest, limits),
+                omega::asset::DecodeErrorCode::LimitExceeded,
+                "single-pass content rejects one-below peak scratch budget");
+
+            limits = omega::asset::DecodeLimits{};
+            limits.maximum_nesting_depth = 1;
+            Check(LoadContentWithLimits(root, *spatial_manifest, limits).has_value(),
+                "single-pass content fits the exact cell archive and leaf decoder depth");
+            limits.maximum_nesting_depth = 0;
+            CheckDecodeError(LoadContentWithLimits(root, *spatial_manifest, limits),
+                omega::asset::DecodeErrorCode::LimitExceeded,
+                "single-pass content rejects one-below archive depth");
         }
     }
 

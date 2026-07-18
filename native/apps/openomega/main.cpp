@@ -69,11 +69,12 @@ int main(const int argc, char** argv)
                   << omega::content::RetailBuildName(content.game_data->identity().build)
                   << " executable=" << content.game_data->identity().boot_executable << '\n';
 
-        if (content.level_manifest && content.level_spatial)
+        if (content.level_manifest && content.level_content)
         {
             std::cout << "OpenOmega level: code=" << *options->level_code
                        << " terrain_cells=" << content.level_manifest->terrain_cells.size()
-                       << " spatial_meshes=" << content.level_spatial->terrain_cells.size()
+                       << " spatial_meshes="
+                       << content.level_content->spatial.terrain_cells.size()
                        << " view=synthetic-spatial-wireframe\n";
         }
     }

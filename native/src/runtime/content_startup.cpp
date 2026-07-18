@@ -60,30 +60,18 @@ std::expected<ContentStartupState, ContentStartupError> StartContent(
     }
     state.level_manifest = std::move(*loaded);
 
-    auto spatial = state.game_data->LoadLevelSpatial(*state.level_manifest);
-    if (!spatial)
+    auto content = state.game_data->LoadLevelContent(*state.level_manifest);
+    if (!content)
     {
         return std::unexpected(ContentStartupError{
             .code = ContentStartupErrorCode::GameData,
-            .message = spatial.error().message,
-            .game_data_error = std::move(spatial.error()),
+            .message = content.error().message,
+            .game_data_error = std::move(content.error()),
         });
     }
-    state.level_spatial = std::move(*spatial);
+    state.level_content = std::move(*content);
 
-    auto material_catalogs =
-        state.game_data->LoadLevelMaterialCatalogs(*state.level_manifest);
-    if (!material_catalogs)
-    {
-        return std::unexpected(ContentStartupError{
-            .code = ContentStartupErrorCode::GameData,
-            .message = material_catalogs.error().message,
-            .game_data_error = std::move(material_catalogs.error()),
-        });
-    }
-    state.level_material_catalogs = std::move(*material_catalogs);
-
-    auto built_image = BuildSpatialDebugImage(*state.level_spatial);
+    auto built_image = BuildSpatialDebugImage(state.level_content->spatial);
     if (!built_image)
     {
         return std::unexpected(ContentStartupError{

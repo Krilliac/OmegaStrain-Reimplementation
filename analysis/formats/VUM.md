@@ -147,10 +147,17 @@ allocation and needs zero dynamic scratch.
 ## Privacy-safe consumer-read trace evidence gate
 
 `tools/validate_vum_read_trace.py` is the acceptance gate for any future dynamic claim about the
-retail VUM consumer. The local oracle-only PCSX2 tracer has been built. Its first private smoke run
-ended with `savestate_load_failed` before selecting a runtime copy or recording an event. No
-consumer-read report has passed this gate, and no dynamic VUM evidence claim exists yet. The static
-catalog and passive-descriptor results above remain the only confirmed VUM contracts.
+retail VUM consumer. The first bounded capture pair now passes that gate: one complete 120-frame
+pair selected one runtime copy, strict validation accepted both validated reports, and the repeat
+was byte-identical. Each accepted report contains two EE-read aggregate rows, two anonymous-site
+rows, and zero VIF1 chunk rows. These counts confirm only a deterministic bounded consumer-read
+observation; they do not identify a consumed structure or assign runtime meaning.
+
+Both EE-read rows fall in separate slots of the already-opaque homogeneous header-vector block.
+No accepted row reaches the scalar/count words, endpoint words, record preamble, name/material
+records, metadata, payload, or tail. The accepted pair is therefore header-only evidence; the
+absence of a direct VIF1 row does not rule out copied buffers or consumption outside the bounded
+observation window.
 
 A publishable trace report may expose only sanitized aggregates:
 
@@ -170,12 +177,16 @@ in-span offset and width arithmetic, deterministic ordering, unique keyed rows, 
 between detail counts and their summaries. It can also compare a second report byte-for-byte, so
 two captures from the same save state must be identical before determinism is claimed.
 
-The next pass is deliberately evidence-first: correct the private save-state load; privately select
-one MINSK VUM whose primary endpoint exactly equals its containing span; run the identical save
-state twice; and require two complete, individually valid, byte-identical reports. Only the
-resulting sanitized aggregate may then be published. Until a real trace passes that process, do not
-add an evidence-ledger entry or infer geometry, topology, vertex, material, packet, or draw
-semantics.
+The isolated runner also passed its post-run containment audit: no retained runtime copy,
+executable surface, reparse point, owner-input copy, or emulator/build process remained.
+
+The next pass is evidence-driven interpretation rather than capture repair. Treat the accepted
+pair as a structural baseline only. Add controlled, independently repeatable pairs that change one
+research condition at a time, compare only sanitized relative ranges and counts, and promote a
+relationship only after cross-capture stability and independent corroboration. Keep sites
+anonymous and bounds private. Do not infer geometry, topology, vertex, material, packet, draw,
+placement, visibility, or gameplay semantics from row counts, offsets, widths, or the absence of
+VIF1 chunks.
 
 ## Render geometry gate
 
