@@ -308,6 +308,9 @@ if(BUILD_TESTING)
     add_test(NAME omega_tool_rejects_empty_level_material_catalogs_tree
         COMMAND omega_tool level-material-catalogs-verify-tree
             "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_empty_level_material_catalogs_signature
+        COMMAND omega_tool level-material-catalogs-verify-tree
+            "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_asset_metadata_tree
         COMMAND omega_tool asset-metadata-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     set_tests_properties(
@@ -321,7 +324,7 @@ if(BUILD_TESTING)
         PROPERTIES WILL_FAIL TRUE
     )
     set_tests_properties(
-        omega_tool_rejects_empty_level_material_catalogs_tree
+        omega_tool_empty_level_material_catalogs_signature
         PROPERTIES PASS_REGULAR_EXPRESSION "\"catalogs\":0"
     )
 endif()
