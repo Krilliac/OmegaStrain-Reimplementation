@@ -64,6 +64,33 @@ stored once on the manifest; each terrain cell stores only its canonical member 
 The native corpus command resolves all 5,351 records across all 18 level manifests with zero
 missing, duplicate, unsafe, or malformed references.
 
+## Post-TER marker envelope
+
+`tools/scan_pop_post_terrain.py` is a bounded research scanner for the opaque bytes beginning at
+the exact `GOB:` offset returned by the proven terrain parser. It does not decode a `GOB`, `SND`,
+`ACL`, `INL`, `NPC`, or other later section. It inventories only four-byte-aligned occurrences of
+the literal marker spellings already published in `ASSET-RECON.md`; such an occurrence remains a
+candidate marker and may be coincidental payload data.
+
+The scanner:
+
+- streams each POP through fixed-size windows and bounds file count, individual and cumulative
+  bytes, terrain records, terrain-name length, and marker hits;
+- requires the validated header, complete terrain records, and exact `GOB:` boundary before
+  examining later bytes;
+- suppresses all structural aggregates and exits unsuccessfully if any candidate is malformed,
+  truncated, unsafe, unreadable, or over budget;
+- emits only corpus totals/ranges, literal-tag occurrence and ordinal counts, candidate transition
+  counts/ranges, and the number of distinct ordered sequences; and
+- emits no paths, asset names, hashes, payload bytes, executable data, or per-file fingerprints.
+
+Only synthetic coverage has exercised this scanner so far. No post-TER corpus result or format
+claim is established by its presence. Before any candidate marker can become a section boundary,
+private evidence must establish its header/count relationship and exact bounded extent across the
+corpus, disprove marker-shaped payload coincidences, and independently connect the consumed fields
+to placement or visibility behavior. Until then, no post-TER native decoder or canonical IR should
+be added.
+
 ## Reproduce
 
 ```powershell
@@ -73,6 +100,8 @@ python -B .\tools\fingerprint_assets.py `
 
 .\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
+python -B .\tools\scan_pop_post_terrain.py .\private\extracted-disc --pretty
 ```
 
-The Python report is metadata-only. The native command emits aggregate counts only.
+The Python reports are metadata-only. The native commands emit aggregate counts only. Review the
+post-TER scanner output privately before publishing any aggregate or evidence-ledger entry.
