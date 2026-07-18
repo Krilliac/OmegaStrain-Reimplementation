@@ -86,6 +86,20 @@ Reproduce the privacy-safe proof without emitting paths, names, hashes, or paylo
 python -B tools/prove_tdx_zero_suffix.py private/extracted-disc
 ```
 
+## Native measured decode usage
+
+`DecodeTdxTextureStorageMeasured` returns the same owned `TextureStorageIR` as the compatibility
+decoder together with the exact standalone operation-budget counters used by that decode.
+`decoded_items` counts the texture root, blocks, primary planes, present palette objects, and
+palette entries. `logical_output_bytes` counts the compiled-ABI root, block, and plane objects,
+owned plane payloads, and one four-byte array per palette entry. These are logical budget values,
+not allocator, vector-capacity, resident-memory, or process-memory measurements.
+
+The aggregate topology scanner does not execute this native API or observe C++ object sizes.
+Composed runtime Open/Load maxima remain explicit measurement gaps until the bounded
+`LevelTextureStore` path and a native corpus measurement exist; structural Python proxies must not
+be substituted for those runtime values.
+
 ## Display-layout hypothesis scoring
 
 `score_tdx_layout_hypotheses.py` is a bounded, aggregate-only experiment for the remaining indexed
