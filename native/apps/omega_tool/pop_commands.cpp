@@ -445,6 +445,16 @@ struct LevelSpatialStats
     std::uint64_t empty_meshes = 0;
 };
 
+struct LevelMaterialCatalogStats
+{
+    std::uint64_t valid_levels = 0;
+    std::uint64_t terrain_cells = 0;
+    std::uint64_t catalogs = 0;
+    std::uint64_t names = 0;
+    std::uint64_t materials = 0;
+    std::uint64_t name_references = 0;
+};
+
 [[nodiscard]] std::expected<std::string, std::string> NormalizeDiscoveredLevelCode(
     const std::filesystem::path& directory)
 {
@@ -654,6 +664,32 @@ void PrintGameDataError(const std::string_view level, const std::string_view sta
     aggregate = next;
     return true;
 }
+
+[[nodiscard]] bool RecordLevelMaterialCatalogStats(
+    const asset::LevelManifestIR& manifest,
+    const asset::LevelMaterialCatalogsIR& catalogs,
+    LevelMaterialCatalogStats& aggregate)
+{
+    LevelMaterialCatalogStats next = aggregate;
+    if (!Add(next.valid_levels, 1U) ||
+        !Add(next.terrain_cells, manifest.terrain_cells.size()) ||
+        !Add(next.catalogs, catalogs.terrain_cells.size()))
+        return false;
+
+    for (const auto& catalog : catalogs.terrain_cells)
+    {
+        if (!Add(next.names, catalog.names.size()) ||
+            !Add(next.materials, catalog.materials.size()))
+            return false;
+        for (const auto& material : catalog.materials)
+        {
+            if (!Add(next.name_references, material.name_count))
+                return false;
+        }
+    }
+    aggregate = next;
+    return true;
+}
 } // namespace
 
 int LevelSpatialVerifyTree(const std::filesystem::path& root)
@@ -724,6 +760,78 @@ int LevelSpatialVerifyTree(const std::filesystem::path& root)
         stats.triangle_references, stats.empty_meshes);
     if (discovery->codes.empty())
         std::cerr << "no level DATA.POP files were found\n";
+    return error_count == 0 && !discovery->codes.empty() &&
+            stats.valid_levels == discovery->codes.size()
+        ? 0
+        : 2;
+}
+
+int LevelMaterialCatalogsVerifyTree(const std::filesystem::path& root)
+{
+    auto discovery = DiscoverLevelCodes(root);
+    if (!discovery)
+    {
+        std::cerr << "game-data: discover: " << discovery.error() << '\n';
+        std::cout << "{\"levels\":0,\"valid\":0,\"errors\":1,"
+                     "\"terrain_cells\":0,\"catalogs\":0,\"names\":0,"
+                     "\"materials\":0,\"name_references\":0}\n";
+        return 1;
+    }
+
+    std::uint64_t error_count = discovery->errors.size();
+    // Discovery details may contain an internal normalized level code. This public aggregate pass
+    // deliberately publishes only a generic category and the final error count.
+    for (std::size_t index = 0; index < discovery->errors.size(); ++index)
+        std::cerr << "game-data: discover: level-entry-error\n";
+
+    LevelMaterialCatalogStats stats;
+    auto service = content::GameDataService::Open(
+        content::GameDataServiceConfig{.root = root});
+    if (!service)
+    {
+        ++error_count;
+        PrintGameDataError({}, "open", service.error());
+    }
+    else
+    {
+        for (const auto& code : discovery->codes)
+        {
+            auto manifest = service->LoadLevelManifest(code);
+            if (!manifest)
+            {
+                ++error_count;
+                PrintGameDataError({}, "manifest", manifest.error());
+                continue;
+            }
+            auto catalogs = service->LoadLevelMaterialCatalogs(*manifest);
+            if (!catalogs)
+            {
+                ++error_count;
+                PrintGameDataError({}, "materials", catalogs.error());
+                continue;
+            }
+            if (catalogs->terrain_cells.size() != manifest->terrain_cells.size())
+            {
+                ++error_count;
+                std::cerr << "game-data: materials: terrain-cell-count-mismatch\n";
+                continue;
+            }
+            if (!RecordLevelMaterialCatalogStats(*manifest, *catalogs, stats))
+            {
+                ++error_count;
+                std::cerr << "game-data: aggregate: counter-overflow\n";
+                break;
+            }
+        }
+    }
+
+    std::cout << std::format(
+        "{{\"levels\":{},\"valid\":{},\"errors\":{},\"terrain_cells\":{},"
+        "\"catalogs\":{},\"names\":{},\"materials\":{},\"name_references\":{}}}\n",
+        discovery->codes.size(), stats.valid_levels, error_count, stats.terrain_cells,
+        stats.catalogs, stats.names, stats.materials, stats.name_references);
+    if (discovery->codes.empty())
+        std::cerr << "no levels were found\n";
     return error_count == 0 && !discovery->codes.empty() &&
             stats.valid_levels == discovery->codes.size()
         ? 0
