@@ -92,11 +92,14 @@ shipping dependencies or execution mechanisms.
     one complete 120-frame pair; strict validation accepted both validated reports, and the repeat
     was byte-identical. Each report contains two EE-read aggregate rows, two anonymous-site rows,
     and zero VIF1 chunk rows. The post-run containment audit found no retained runtime copy,
-    executable surface, reparse point, owner-input copy, or emulator/build process. This evidence
-    is header-only: both EE rows remain confined to separate slots of the already-opaque
-    header-vector block, and no accepted row reaches counts, records, metadata, payload, or tail
-    data. It assigns no geometry, topology, vertex, material, packet, draw, placement, visibility,
-    or gameplay semantics.
+    executable surface, reparse point, owner-input copy, or emulator/build process. An independently
+    guarded second ranked trial reproduced those aggregates exactly: one capture with four accepted
+    aggregate rows, split evenly between EE-read and anonymous-site rows, zero VIF1 rows, and zero
+    aggregate-count deltas. Both accepted trials are header-only: their EE-read rows remain confined
+    to the already-opaque header-vector block, and no accepted row reaches counts, records, metadata,
+    payload, VIF, or tail data. This repeated observation does not exclude copied buffers or activity
+    outside the bounded observation window and assigns no geometry, topology, vertex, material,
+    packet, draw, placement, visibility, or gameplay semantics.
 21. Added all-or-error `LevelContentIR` startup composition. `GameDataService` now traverses each
     common/nested archive and manifest-referenced cell once while decoding its unique COL and VUM
     members under one shared operation budget. The C-only headless probe accepts all 18 levels and

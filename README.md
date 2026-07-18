@@ -52,14 +52,17 @@ retail instruction blocks, or PS2 execution layer.
   A separate retail-only passive descriptor validates 91,460 payload pairs, 38,023 normalized
   targets, 134,122 middle-to-final references, and 365,840 ordered Q/P references without
   exposing payload bytes, render geometry, or console instructions.
-- The privacy-safe VUM consumer trace has one strict-validator-accepted complete 120-frame pair
+- The first privacy-safe VUM consumer trace has one strict-validator-accepted complete 120-frame pair
   from one selected runtime copy. Its repeat is byte-identical; each validated report contains two
   EE-read aggregate rows, two anonymous-site rows, and zero VIF1 chunk rows. Post-run containment
   auditing found no retained runtime copy, executable surface, reparse point, owner-input copy, or
-  emulator/build process. Both EE rows remain confined to separate slots of the already-opaque
-  header-vector block; no accepted row reaches counts, records, metadata, payload, or tail data.
-  This confirms deterministic bounded header-only observation and assigns no
-  geometry, topology, vertex, material, packet, draw, placement, visibility, or gameplay semantics.
+  emulator/build process. An independently guarded second ranked trial reproduced those aggregates
+  exactly: one capture with four accepted aggregate rows, split evenly between EE-read and
+  anonymous-site rows, zero VIF1 rows, and zero aggregate-count deltas. In both trials, the EE-read
+  rows remain confined to the already-opaque header-vector block; no accepted row reaches counts,
+  records, metadata, payload, VIF, or tail data. This repeated header-only observation does not
+  exclude copied buffers or activity outside the bounded observation window and assigns no geometry,
+  topology, vertex, material, packet, draw, placement, visibility, or gameplay semantics.
 
 ## Quick start
 
