@@ -118,10 +118,13 @@ Status: in progress. Native `--level=MINSK` selection, canonical manifest/spatia
 renderer-neutral texture storage decoding are complete; the current synthetic canonical-COL
 wireframe contact sheet is diagnostic only. It uses source-order tiles and a per-mesh projection of
 the two largest coordinate extents, not world placement or reconstructed geometry, and makes no
-VUM, TDX, or other retail semantic claim. VUM material catalogs are decoded, but render geometry,
-material binding/parameters, display-ready texture expansion, cameras, placements, transforms, and
-visibility remain incomplete. A passive retail-only VUM descriptor now preserves the proven
-pair/reference grammar without asserting vertices, indices, draws, or material assignments.
+VUM, TDX, or other retail semantic claim. Startup now owns one confirmed semantic VUM
+material/name catalog per manifest cell in exact manifest order and cardinality, under a cumulative
+fail-closed level budget. The names remain role-free and unbound: render geometry, material
+binding/parameters, display-ready texture expansion, cameras, placements, transforms, and
+visibility remain incomplete. A passive retail-only VUM descriptor preserves the proven
+pair/reference grammar without asserting vertices, indices, draws, or material assignments, and
+its payload does not enter the canonical level IR.
 
 - Decode and render MINSK geometry, textures, materials, cameras, and static objects.
 - Match coordinate system, transforms, visibility, and representative frames against PCSX2.

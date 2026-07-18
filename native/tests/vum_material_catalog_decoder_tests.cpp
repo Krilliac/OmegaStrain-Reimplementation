@@ -118,6 +118,9 @@ void CheckError(const omega::asset::DecodeResult<Value>& result,
 int VumMaterialCatalogDecoderFailureCount()
 {
     auto bytes = MakeVumCatalog();
+    constexpr std::uint64_t catalog_output_bytes =
+        sizeof(omega::asset::MaterialCatalogIR) + 2U * sizeof(std::string) +
+        2U * sizeof(omega::asset::MaterialCatalogEntryIR) + 18U;
     const auto catalog = omega::retail::DecodeVumMaterialCatalog(bytes);
     Check(catalog && catalog->names == std::vector<std::string>{"BASE.TDX", "DETAIL.TDX"},
         "VUM catalog owns the declared source-order name table");
@@ -127,6 +130,12 @@ int VumMaterialCatalogDecoderFailureCount()
               catalog->materials[1].name_count == 3 &&
               catalog->materials[1].name_indices == std::array<std::uint32_t, 3>{1, 0, 1},
         "VUM catalog publishes all proven dense MTRL-to-name relationships");
+
+    const auto measured = omega::retail::DecodeVumMaterialCatalogMeasured(bytes);
+    Check(measured && catalog && measured->catalog == *catalog &&
+              measured->decoded_items == 12U &&
+              measured->logical_output_bytes == catalog_output_bytes,
+        "measured VUM catalog decode preserves canonical output and exact shared-budget usage");
 
     auto ownership_bytes = bytes;
     auto owned_catalog = omega::retail::DecodeVumMaterialCatalog(ownership_bytes);
@@ -291,14 +300,12 @@ int VumMaterialCatalogDecoderFailureCount()
         omega::asset::DecodeErrorCode::LimitExceeded,
         "VUM catalog rejects one item below its exact decoded item count");
 
-    constexpr std::uint64_t output_bytes = sizeof(omega::asset::MaterialCatalogIR) +
-        2U * sizeof(std::string) + 2U * sizeof(omega::asset::MaterialCatalogEntryIR) + 18U;
     limits = omega::asset::DecodeLimits{};
-    limits.maximum_output_bytes = output_bytes;
+    limits.maximum_output_bytes = catalog_output_bytes;
     limits.maximum_scratch_bytes = 0;
     Check(omega::retail::DecodeVumMaterialCatalog(bytes, limits).has_value(),
         "VUM catalog accepts exact output and zero-scratch limits");
-    limits.maximum_output_bytes = output_bytes - 1U;
+    limits.maximum_output_bytes = catalog_output_bytes - 1U;
     CheckError(omega::retail::DecodeVumMaterialCatalog(bytes, limits),
         omega::asset::DecodeErrorCode::LimitExceeded,
         "VUM catalog rejects one byte below its exact owned-output limit");

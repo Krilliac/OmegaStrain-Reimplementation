@@ -38,10 +38,12 @@ only video, window, GPU, and rendering resources; no SDL type crosses into the p
 runtime or simulation libraries.
 
 `GameDataService` is the implemented startup boundary. It owns its VFS, freezes mounts during
-`Open()`, and returns only canonical owned IR. It now resolves each manifest cell HOG and its unique
-COL member into one `SpatialMeshIR` in manifest order; HOG objects, byte spans, and retail offsets
-remain local to the call. Future `AssetService` code receives a non-owning reference; neither
-service owns the other.
+`Open()`, and returns only canonical owned IR. It resolves each manifest cell HOG and its unique COL
+member into one `SpatialMeshIR`, and separately resolves the unique VUM member into one semantic
+`MaterialCatalogIR`, both in manifest order and cardinality. HOG objects, byte spans, and retail
+offsets remain local to each call. The catalog names retain no assigned role, and no COL triangle,
+TDX asset, placement, transform, visibility, or draw binding is asserted. Future `AssetService`
+code receives a non-owning reference; neither service owns the other.
 
 ## Components and services
 
@@ -195,6 +197,15 @@ directory/count/name limits. The default depth is nine: one cell HOG edge plus t
 eight-edge COL tree. The returned `LevelSpatialIR` has the same order and cardinality as
 `LevelManifestIR::terrain_cells`; provenance remains in the manifest.
 
+`LoadLevelMaterialCatalogs` traverses the same immutable archive chain and requires exactly one VUM
+member in every referenced cell HOG. Normalized archive-name collisions fail before member
+selection, and zero or multiple VUM members fail closed. One shared operation budget cumulatively
+debits outer, nested, cell-HOG, and selected VUM input work plus every archive directory and exact
+catalog item/output cost; it never resets limits per cell. VUM semantic scratch is zero and archive
+depth ends at the cell-HOG edge. The fully owned `LevelMaterialCatalogsIR` preserves manifest order,
+cardinality, and repeated references without deduplication. It exposes only the already-confirmed
+name table and dense MTRL-to-name index relationships; passive VUM payloads remain retail-only.
+
 Tools may link retail adapters. Renderer and simulation targets must consume canonical assets and
 must not include retail-format headers. The native source-dependency CI gate scans every native
 C/C++ source, header, test, tool, and common source fragment after BOM removal, escaped-newline
@@ -211,11 +222,12 @@ reject Windows alternate-data-stream, reserved-device, trailing-dot/space, and o
 path aliases.
 Unsupported file types under both classified and unclassified shipping roots also fail closed.
 
-Startup owns both `LevelManifestIR` and `LevelSpatialIR`. The initial renderer consumes canonical
-spatial meshes only to build a deterministic synthetic canonical-COL wireframe contact sheet.
-Meshes occupy source-order tiles, and each mesh is projected along its two largest coordinate
-extents. This clean-room diagnostic is not world placement or reconstructed geometry and makes no
-VUM, TDX, or other retail semantic claim.
+Startup owns `LevelManifestIR`, `LevelSpatialIR`, and `LevelMaterialCatalogsIR` as one all-or-error
+content state. The material catalogs do not enter `RenderFramePacket`, `SimulationWorld`, or
+`SdlGpuHost`. The initial renderer consumes canonical spatial meshes only to build a deterministic
+synthetic canonical-COL wireframe contact sheet. Meshes occupy source-order tiles, and each mesh is
+projected along its two largest coordinate extents. This clean-room diagnostic is not world
+placement or reconstructed geometry and makes no VUM, TDX, or other retail semantic claim.
 
 The runtime contains no MIPS execution path. This boundary is permanent and documented in
 `docs/adr/0001-pure-native-runtime.md`.
