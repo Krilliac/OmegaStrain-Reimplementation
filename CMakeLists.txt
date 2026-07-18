@@ -37,6 +37,7 @@ target_include_directories(omega_assets INTERFACE native/include)
 target_compile_features(omega_assets INTERFACE cxx_std_23)
 
 add_library(omega_simulation STATIC
+    native/src/simulation/entity_registry.cpp
     native/src/simulation/simulation_world.cpp
 )
 target_include_directories(omega_simulation PUBLIC native/include)
@@ -255,6 +256,7 @@ if(BUILD_TESTING)
         native/tests/col_spatial_mesh_decoder_tests.cpp
         native/tests/config_service_tests.cpp
         native/tests/container_descriptor_tests.cpp
+        native/tests/entity_registry_tests.cpp
         native/tests/frame_scheduler_tests.cpp
         native/tests/game_data_service_tests.cpp
         native/tests/hog_archive_tests.cpp

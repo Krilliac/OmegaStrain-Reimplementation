@@ -1,6 +1,7 @@
 #include "omega/simulation/simulation_world.h"
 
 #include <limits>
+#include <utility>
 
 namespace omega::simulation
 {
@@ -9,11 +10,15 @@ std::expected<SimulationWorld, std::string> SimulationWorld::Create(
 {
     if (config.fixed_step <= std::chrono::nanoseconds::zero())
         return std::unexpected("simulation fixed step must be positive");
-    return SimulationWorld(config);
+    auto entities = EntityRegistry::Create(config.maximum_entities);
+    if (!entities)
+        return std::unexpected("entity registry: " + entities.error());
+    return SimulationWorld(config, std::move(*entities));
 }
 
-SimulationWorld::SimulationWorld(const SimulationWorldConfig& config) noexcept
-    : config_(config)
+SimulationWorld::SimulationWorld(
+    const SimulationWorldConfig& config, EntityRegistry entities) noexcept
+    : config_(config), entities_(std::move(entities))
 {
 }
 
@@ -36,5 +41,15 @@ SimulationState SimulationWorld::Snapshot() const noexcept
 const SimulationWorldConfig& SimulationWorld::config() const noexcept
 {
     return config_;
+}
+
+EntityRegistry& SimulationWorld::entities() noexcept
+{
+    return entities_;
+}
+
+const EntityRegistry& SimulationWorld::entities() const noexcept
+{
+    return entities_;
 }
 } // namespace omega::simulation
