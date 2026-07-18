@@ -157,8 +157,22 @@ candidate records, column observations, retained distinct patterns, and serializ
 junctions, reparse points, special entries, identity races, malformed candidates, formula
 mismatches, and budget violations fail the entire run and suppress all structural output. It emits
 no paths, names, hashes, raw words or values, extrema, payload bytes, per-file records, or
-fingerprints. This branch exercises the profiler only with synthetic fixtures; it adds no new
-owned-corpus result or runtime contract.
+fingerprints.
+
+The owned-corpus pass accepts all 18 POPs and all 90 guarded candidate occurrences with zero errors.
+It profiles 8,019 candidate records and 105,985 opaque four-byte column observations:
+
+| Literal candidate | Candidate records | Four-byte columns | Zero bit patterns | Nonfinite IEEE-754 bit patterns | Raw unsigned patterns below 4096 | Columns whose distinct-pattern count exceeded the 4,096 cap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `INL:` | 5,351 | 9 | 163 | 0 | 16,085 | 4 |
+| `PNT:` | 2,358 | 22 | 9,691 | 7,074 | 19,111 | 0 |
+| `DIR:` | 43 | 11 | 41 | 43 | 170 | 0 |
+| `ENV:` | 65 | 19 | 181 | 338 | 298 | 0 |
+| `INV:` | 202 | 21 | 1,128 | 942 | 2,504 | 0 |
+
+These are bit-pattern shape measurements only. They strengthen the exact arithmetic envelope and
+bound later experiments, but do not turn any literal, count word, record, or column into a decoded
+contract and do not identify numeric types, placement, direction, visibility, or gameplay meaning.
 
 ## Reproduce
 

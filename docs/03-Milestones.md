@@ -51,6 +51,9 @@ incomplete.
   all 18 occurrences each (`INL:`/36, `PNT:`/88, `DIR:`/44, `ENV:`/76, and `INV:`/84 bytes).
   Zero-count instances validate only the predicted empty extent. The tuples remain arithmetic
   hypotheses, not decoded sections or field semantics.
+- Bounded POP candidate-shape profiling accepts those five guarded formulas across all 18 POPs and
+  measures 8,019 candidate records and 105,985 anonymous four-byte column observations. The output
+  is aggregate bit-pattern classification only and assigns no field type or runtime semantics.
 - Inspectors for ELF, scripts, textures, meshes, skeletons, animation, audio, and maps.
 - Synthetic malformed-input tests for every decoder.
 
