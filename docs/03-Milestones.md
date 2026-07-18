@@ -32,6 +32,9 @@ incomplete.
 - TDX aggregate validation: 15,248/15,248 textures normalize to 15,442 owned blocks and 17,960
   primary planes containing 285,521,272 owned bytes, including 4,112 duplicate-proven implicit
   zero bytes, with zero errors.
+- Aggregate-only TDX coherence scoring accepts the same 15,248 spans and nominates low-nibble-first
+  for direct four-bit `0x14` planes and the bit-3/bit-4 palette permutation for direct eight-bit
+  `0x13` planes. The content-dependent scores are hypotheses, not display-layout semantics.
 - VUM aggregate validation: 7,036/7,036 catalogs normalize to 38,793 owned names, 38,899 materials,
   and 42,631 dense name references. Its passive payload pass validates 91,460 pairs, 38,023
   normalized targets, 134,122 middle-to-final references, and 365,840 ordered Q/P references,
