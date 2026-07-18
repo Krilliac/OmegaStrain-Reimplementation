@@ -38,6 +38,25 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python -B tools/check_dco.py "$BASE_SHA..$HEAD_SHA"
 
+  linux-native:
+    name: Linux x86-64 native build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      # OMEGA_BUILD_RUNTIME=OFF is deliberate: the SDL3 runtime shell remains a
+      # Windows-verified target for now; Linux CI guards the portable core + tests.
+      - name: Configure
+        run: cmake -S . -B build/linux -DCMAKE_BUILD_TYPE=Debug -DOMEGA_BUILD_RUNTIME=OFF
+
+      - name: Build
+        run: cmake --build build/linux --parallel 4
+
+      - name: Test
+        run: ctest --test-dir build/linux --output-on-failure
+
   windows-native:
     name: Windows x86-64 native build
     runs-on: windows-latest

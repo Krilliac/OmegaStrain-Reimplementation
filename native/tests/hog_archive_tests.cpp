@@ -84,7 +84,12 @@ int VumMaterialCatalogDecoderFailureCount();
 int VumRenderPayloadDescriptorFailureCount();
 int GameDataServiceFailureCount();
 int LaunchOptionsFailureCount();
+int LogServiceFailureCount();
+int ConfigServiceFailureCount();
+int JobServiceFailureCount();
 int ManifestDebugImageFailureCount();
+int FrameSchedulerFailureCount();
+int InputTrackerFailureCount();
 
 int main()
 {
@@ -302,7 +307,12 @@ int main()
     failures += VumRenderPayloadDescriptorFailureCount();
     failures += GameDataServiceFailureCount();
     failures += LaunchOptionsFailureCount();
+    failures += LogServiceFailureCount();
+    failures += ConfigServiceFailureCount();
+    failures += JobServiceFailureCount();
     failures += ManifestDebugImageFailureCount();
+    failures += FrameSchedulerFailureCount();
+    failures += InputTrackerFailureCount();
     if (failures == 0)
         std::cout << "omega_core_tests: all checks passed\n";
     return failures == 0 ? 0 : 1;

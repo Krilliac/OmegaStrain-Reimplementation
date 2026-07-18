@@ -42,8 +42,13 @@ implemented; other scene decoders remain incomplete.
 Status: in progress. The SDL_GPU shell, strict launch parser, owner-supplied NTSC-U data-root
 validation, headless probe, named-level manifest load, and synthetic debug view are implemented.
 Headless named-level startup also owns the complete canonical spatial-mesh set.
-Logging/configuration services, jobs, real input handling, audio output, and a frame scheduler
-remain incomplete.
+The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
+(strict bounded key/value grammar with typed lookups and overrides), job service (bounded
+worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
+nanosecond accumulator; the simulation step stays a caller-supplied value, never a retail
+claim), and the platform-neutral input tracking core (bounded binding table plus per-frame
+edge snapshots) are implemented as tested library services. Wiring those services into the
+SDL host shell, plus audio output, remains incomplete.
 
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
