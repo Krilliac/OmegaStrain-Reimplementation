@@ -30,15 +30,23 @@ enum class SimulationStepResult : std::uint8_t
     RepresentationExhausted,
 };
 
-// Deterministic game-thread state boundary. This first implementation owns only the canonical
-// simulation clock; components and systems will enter behind this API without making the SDL host
-// or frame scheduler depend on gameplay state.
+// App-owned, non-hot-reloadable deterministic game-thread state boundary. This
+// first implementation owns only the canonical simulation clock and entity
+// identity storage; components and systems will enter behind this API without
+// making the SDL host or frame scheduler depend on gameplay state.
 class SimulationWorld final
 {
 public:
     // [any thread; reentrant] Validates a positive fixed step and returns an empty world.
     [[nodiscard]] static std::expected<SimulationWorld, std::string> Create(
         const SimulationWorldConfig& config);
+
+    // [game thread, lifecycle] Transfers world ownership without allocation.
+    // A moved-from world may only be destroyed or move-assigned.
+    SimulationWorld(SimulationWorld&&) noexcept = default;
+    SimulationWorld& operator=(SimulationWorld&&) noexcept = default;
+    SimulationWorld(const SimulationWorld&) = delete;
+    SimulationWorld& operator=(const SimulationWorld&) = delete;
 
     // [game thread] Advances exactly one fixed step. If either diagnostic representation is full,
     // returns RepresentationExhausted and leaves the complete state unchanged.
@@ -50,7 +58,9 @@ public:
     // [game thread; immutable after Create()]
     [[nodiscard]] const SimulationWorldConfig& config() const noexcept;
 
-    // [game thread] Returns the world-owned identity store used by future component systems.
+    // [game thread] Returns a borrowed reference to the world-owned identity
+    // store used by future component systems. The reference is invalidated by
+    // moving or destroying this world and must not cross a hot-reload boundary.
     [[nodiscard]] EntityRegistry& entities() noexcept;
     [[nodiscard]] const EntityRegistry& entities() const noexcept;
 

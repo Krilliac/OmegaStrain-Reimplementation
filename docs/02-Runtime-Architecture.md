@@ -12,7 +12,8 @@ OmegaApp [game thread, sole lifetime owner]
 |- AudioService [game thread API; audio callback]
 |- SdlInputService [main thread; SDL event/gamepad owner]
 |- ScriptService [game thread]
-|- SimulationWorld [game thread]
+|- SimulationWorld [game thread; non-hot-reloadable owner]
+|  `- EntityRegistry [world-owned identity component]
 |- UiService [game thread build; render thread consume]
 `- NetworkService [game thread API; I/O worker]
 ```
@@ -74,7 +75,10 @@ queues.
   step/simulated-time state plus a preallocated bounded `EntityRegistry`. Generational entity IDs
   reject stale handles, and the registry allocates only during world creation. The composition root
   supplies the scheduler's validated step; its current default and entity capacity are synthetic-
-  shell values, while retail timing and population limits remain evidence-driven.
+  shell values, while retail timing and population limits remain evidence-driven. Entity IDs are
+  plain registry-scoped values: they do not own the world, and an identical numeric value in another
+  world is a different identity. Borrowed registry references remain on the game thread and are
+  invalidated when their world moves or is destroyed.
 - `RenderService` receives scene snapshots and exposes no retail-format details.
 - `SdlInputService` is an app-owned, non-hot-reloadable main-thread leaf. It owns the ref-counted
   SDL gamepad subsystem, pumps the global SDL event queue, and owns at most one primary gamepad.
@@ -94,7 +98,9 @@ queues.
 Research builds may hot-reload decoded assets, internal scripts, and mission compatibility
 tables at frame boundaries. Platform, renderer, input device/event pump, audio device, and network
 transport are non-hot-reloadable initially. The validated retail-data root and its frozen mount
-table are also non-hot-reloadable. No vtable pointer crosses a reloadable boundary.
+table, `SimulationWorld`, and its `EntityRegistry` are also non-hot-reloadable. Entity IDs may be
+copied as plain data, but registry storage and borrowed references never cross a reloadable
+boundary. No vtable pointer crosses a reloadable boundary.
 
 ## Dependency direction
 
