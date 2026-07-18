@@ -89,9 +89,19 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Trace the retail VUM consumer at the aggregate byte-read level: record only VUM-relative read
-   offsets, widths, loop counts, and output counts. Establish positions, topology, and material
-   binding independently before adding render-mesh IR; do not retain instructions or payload bytes.
+1. Correct the private save-state load for the built oracle-only PCSX2 VUM tracer. Its first smoke
+   run ended with `savestate_load_failed` before selecting a runtime copy or recording an event, so
+   no report has passed the gate. Privately select an exact-primary MINSK VUM, run the identical
+   save state twice, and validate both complete reports with `tools/validate_vum_read_trace.py`,
+   including a byte-identical repeat comparison. The validator receives expected VUM size privately
+   and enforces strict bounds, exact schema and lifecycle status, deterministic ordering, unique
+   keyed rows, and detail/summary cross-counts. Publish only VUM-relative offset/width/count
+   aggregates, anonymous site ranges/counts, VIF source-relative ranges/output counts, and
+   lifecycle status. Reports must contain no PCs;
+   absolute or RAM addresses; CRCs or hashes; paths or names; payload bytes/data; or instructions,
+   opcodes, or registers. No accepted report or evidence claim exists yet: add no evidence-ledger
+   entry and infer no geometry, topology, vertex, packet, or material semantics until a real
+   deterministic trace passes the gate.
 2. Validate TDX swizzle, nibble order, palette permutation, and channel expansion independently
    before producing display-ready pixels or GPU uploads.
 3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.
