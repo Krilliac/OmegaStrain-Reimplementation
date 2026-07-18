@@ -92,6 +92,31 @@ and exact bounded extent, disprove marker-shaped payload coincidences, and indep
 the consumed fields to placement or visibility behavior. Until then, no post-TER native decoder or
 canonical IR should be added.
 
+## Candidate layout hypothesis scoring
+
+`tools/score_pop_section_layout_hypotheses.py` is a second bounded, aggregate-only experiment. It
+uses the terrain-prefix validator and aligned literal-marker inventory above; therefore it derives
+no candidate marker before the proven `GOB:` boundary. For each marker-to-next-marker (or EOF)
+span, it probes only the first eight aligned four-byte field positions following the literal. A
+bounded nonzero word is treated as a candidate count, never as a decoded field. If dividing the
+remaining opaque extent by that candidate count yields a four-byte-aligned fixed stride no larger
+than 256 bytes, the tuple of literal spelling, marker-relative field offset, and stride receives one
+exact-match score.
+
+The report includes only tuples with at least one exact arithmetic match, together with their
+bounded nonzero tests, exact matches, and mismatches. Zero words provide no stride evidence and are
+excluded rather than making every stride match vacuously. A match does not establish that the
+literal is a boundary, the word is a count, the opaque values are records, or the stride has any
+runtime meaning.
+
+The scorer streams files and applies independent traversal-entry, directory-depth, path-metadata,
+file-size, cumulative-input, actual-read, per-file and cumulative terrain-record, name, marker,
+candidate-span, field-probe, hypothesis-count, and serialized-output budgets. Links, junctions,
+Windows reparse points, special filesystem entries, file-identity races, malformed POP candidates,
+and budget violations fail the entire run and suppress every structural aggregate. Output contains
+no paths, names, hashes, raw words, payload bytes, or per-file fingerprints. Only synthetic tests
+have exercised this tool; it adds no section, placement, or visibility contract.
+
 ## Reproduce
 
 ```powershell
@@ -102,6 +127,7 @@ python -B .\tools\fingerprint_assets.py `
 .\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
 python -B .\tools\scan_pop_post_terrain.py .\private\extracted-disc --pretty
+python -B .\tools\score_pop_section_layout_hypotheses.py .\private\extracted-disc --pretty
 ```
 
 The Python reports are metadata-only. The native commands emit aggregate counts only. Review the
