@@ -87,10 +87,11 @@ std::vector<std::byte> MakeVumCatalog()
     WriteMaterial(bytes, kSecondMaterial, {1, 0, 1});
     WriteU32(bytes, kMetadataT + 8U, kMetadataQ);
     WriteU32(bytes, kMetadataQ + 4U, kPayloadA);
-    WriteU32(bytes, kMetadataQ + 12U, kPayloadB + 4U);
-    WriteU32(bytes, kMetadataP, kPayloadB + 8U);
-    WriteU32(bytes, kMetadataP + 8U, kPayloadB + 12U);
-    WriteU32(bytes, kMetadataP + 12U, kPayloadB + 16U);
+    WriteU32(bytes, kPayloadA + 4U, kPayloadB + 16U);
+    WriteU32(bytes, kMetadataQ + 12U, kPayloadB + 32U);
+    WriteU32(bytes, kMetadataP, kPayloadB + 36U);
+    WriteU32(bytes, kMetadataP + 8U, kPayloadB + 40U);
+    WriteU32(bytes, kMetadataP + 12U, kPayloadB + 44U);
     std::fill(bytes.begin() + kPrimaryEnd, bytes.end(), std::byte{0xA5});
     return bytes;
 }

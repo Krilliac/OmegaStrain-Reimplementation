@@ -37,8 +37,9 @@ retail instruction blocks, or PS2 execution layer.
   guessing pixel or channel layout.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
-  It validates 220,943 bounded metadata records without exposing render packets or console
-  instructions.
+  A separate retail-only passive descriptor validates 91,460 payload pairs, 38,023 normalized
+  targets, 134,122 middle-to-final references, and 365,840 ordered Q/P references without
+  exposing payload bytes, render geometry, or console instructions.
 
 ## Quick start
 

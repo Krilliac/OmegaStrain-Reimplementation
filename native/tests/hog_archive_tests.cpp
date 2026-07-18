@@ -81,6 +81,7 @@ int ContainerDescriptorFailureCount();
 int ColSpatialMeshDecoderFailureCount();
 int TdxTextureStorageDecoderFailureCount();
 int VumMaterialCatalogDecoderFailureCount();
+int VumRenderPayloadDescriptorFailureCount();
 int GameDataServiceFailureCount();
 int LaunchOptionsFailureCount();
 int ManifestDebugImageFailureCount();
@@ -298,6 +299,7 @@ int main()
     failures += ColSpatialMeshDecoderFailureCount();
     failures += TdxTextureStorageDecoderFailureCount();
     failures += VumMaterialCatalogDecoderFailureCount();
+    failures += VumRenderPayloadDescriptorFailureCount();
     failures += GameDataServiceFailureCount();
     failures += LaunchOptionsFailureCount();
     failures += ManifestDebugImageFailureCount();

@@ -5,6 +5,7 @@
 #include "omega/retail/container_descriptors.h"
 #include "omega/retail/tdx_texture_storage_decoder.h"
 #include "omega/retail/vum_material_catalog_decoder.h"
+#include "omega/retail/vum_render_payload_descriptor.h"
 
 #include <algorithm>
 #include <cctype>
@@ -97,6 +98,14 @@ struct VumSemanticStats
     std::uint64_t names = 0;
     std::uint64_t materials = 0;
     std::uint64_t name_references = 0;
+    std::uint64_t payload_pairs = 0;
+    std::uint64_t targeted_pairs = 0;
+    std::uint64_t middle_references = 0;
+    std::uint64_t final_references = 0;
+    std::uint64_t middle_span_16 = 0;
+    std::uint64_t middle_span_256 = 0;
+    std::uint64_t middle_span_480 = 0;
+    std::uint64_t middle_span_704 = 0;
 };
 
 struct VerificationStats
@@ -307,9 +316,12 @@ void StopAtSafetyLimit(VerificationStats& stats, const std::string_view message)
     return true;
 }
 
-[[nodiscard]] bool RecordVumSemantics(
-    const asset::MaterialCatalogIR& catalog, VerificationStats& stats)
+[[nodiscard]] bool RecordVumSemantics(const asset::MaterialCatalogIR& catalog,
+    const retail::VumRenderPayloadDescriptor& payload, VerificationStats& stats)
 {
+    std::uint64_t middle_references = payload.pairs.size();
+    for (const auto& pair : payload.pairs)
+        middle_references += pair.middle_payload_structural_group_count != 0;
     if (!AddSemanticCounter(
             stats.vum_semantic.names, catalog.names.size(), stats, "VUM catalog name count") ||
         !AddSemanticCounter(stats.vum_semantic.materials, catalog.materials.size(), stats,
@@ -320,6 +332,37 @@ void StopAtSafetyLimit(VerificationStats& stats, const std::string_view message)
         if (!AddSemanticCounter(stats.vum_semantic.name_references, material.name_count, stats,
                 "VUM material name-reference count"))
             return false;
+    }
+    if (!AddSemanticCounter(stats.vum_semantic.payload_pairs, payload.pairs.size(), stats,
+            "VUM render-payload pair count") ||
+        !AddSemanticCounter(stats.vum_semantic.targeted_pairs,
+            payload.targeted_pair_indices.size(), stats,
+            "VUM targeted render-payload pair count") ||
+        !AddSemanticCounter(stats.vum_semantic.middle_references, middle_references, stats,
+            "VUM middle-to-final payload reference count") ||
+        !AddSemanticCounter(stats.vum_semantic.final_references,
+            payload.pairs.size() * 4U, stats, "VUM final-payload reference count"))
+        return false;
+    for (const auto& pair : payload.pairs)
+    {
+        switch (pair.middle_payload_bytes)
+        {
+        case 16:
+            ++stats.vum_semantic.middle_span_16;
+            break;
+        case 256:
+            ++stats.vum_semantic.middle_span_256;
+            break;
+        case 480:
+            ++stats.vum_semantic.middle_span_480;
+            break;
+        case 704:
+            ++stats.vum_semantic.middle_span_704;
+            break;
+        default:
+            StopAtSafetyLimit(stats, "VUM descriptor exposed an unsupported middle span");
+            return false;
+        }
     }
     return true;
 }
@@ -449,7 +492,14 @@ void InspectAssetRange(const std::filesystem::path& backing_path,
             PrintAssetError(backing_path, entry_name, catalog.error().message);
             return;
         }
-        if (!RecordVumSemantics(*catalog, stats))
+        auto payload = retail::InspectVumRenderPayload(*bytes);
+        if (!payload)
+        {
+            ++stats.vum.errors;
+            PrintAssetError(backing_path, entry_name, payload.error().message);
+            return;
+        }
+        if (!RecordVumSemantics(*catalog, *payload, stats))
             return;
         ++stats.vum.valid;
         RecordExtent(stats.vum_extents, descriptor->primary_extent.relation);
@@ -674,7 +724,11 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         "\"direct_leaf_roots\":{},\"maximum_edge_depth\":{}}},"
         "\"vum\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
         "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{},"
-        "\"names\":{},\"materials\":{},\"name_references\":{}}},"
+        "\"names\":{},\"materials\":{},\"name_references\":{},"
+        "\"payload_pairs\":{},\"targeted_pairs\":{},\"middle_references\":{},"
+        "\"final_references\":{},"
+        "\"middle_span_16\":{},\"middle_span_256\":{},"
+        "\"middle_span_480\":{},\"middle_span_704\":{}}},"
         "\"tdx\":{{\"candidates\":{},\"valid\":{},\"errors\":{},\"exact\":{},"
         "\"zero_tail\":{},\"nonzero_tail\":{},\"exceeds\":{},"
         "\"indexed_4\":{},\"indexed_8\":{},\"packed_24\":{},\"packed_32\":{},"
@@ -696,6 +750,11 @@ int AssetMetadataVerifyTree(const std::filesystem::path& root)
         stats.vum_extents.zero_padded_tail, stats.vum_extents.nonzero_tail,
         stats.vum_extents.exceeds_input, stats.vum_semantic.names,
         stats.vum_semantic.materials, stats.vum_semantic.name_references,
+        stats.vum_semantic.payload_pairs, stats.vum_semantic.targeted_pairs,
+        stats.vum_semantic.middle_references, stats.vum_semantic.final_references,
+        stats.vum_semantic.middle_span_16,
+        stats.vum_semantic.middle_span_256, stats.vum_semantic.middle_span_480,
+        stats.vum_semantic.middle_span_704,
         stats.tdx.candidates, stats.tdx.valid, stats.tdx.errors,
         stats.tdx_extents.exact, stats.tdx_extents.zero_padded_tail, stats.tdx_extents.nonzero_tail,
         stats.tdx_extents.exceeds_input, stats.tdx_semantic.indexed_4,

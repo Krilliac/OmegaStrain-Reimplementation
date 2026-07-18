@@ -181,8 +181,12 @@ observed tree is eight edges and 2,678 spans use a direct leaf root.
 All 7,036 VUM files begin `VUMS`. The material/name contract is documented in `VUM.md`.
 `DecodeVumMaterialCatalog` owns the printable NUL-separated name table and the proven one-to-three
 dense, in-range name references from every fixed 92-byte `MTRL` record while omitting
-usage codes and render-payload words. The corpus contains 38,793 names, 38,899 material records,
-and 42,631 active references. The word at offset `0x58` equals the directory span in 6,989 files.
+usage codes and render-payload words. `InspectVumRenderPayload` is a separate retail-only passive
+descriptor: it owns bounded region metadata, pair span classes, normalized T targets, and opaque
+final-region-relative references, but no payload byte, packet word, geometry, draw, or material
+assignment. The corpus contains 38,793 names, 38,899 material records, 42,631 active references,
+91,460 Q/P pairs, 38,023 T targets, 134,122 middle-to-final references, and 365,840 ordered Q/P
+references. The word at offset `0x58` equals the directory span in 6,989 files.
 Forty-seven files have additional nonzero data after that boundary, so this is a primary section
 boundary rather than a universal file length. All 306 MINSK world/map VUMs are in the exact group.
 The three words at `0x50`, `0x54`, and `0x58` are ordered corpus-wide; only the last is 16-byte
@@ -191,8 +195,9 @@ instructions. Vertex attributes, topology, material parameters, texture binding,
 conversion remain later research.
 
 The native aggregate verifier independently accepts and semantically decodes all 7,036 COL spans,
-decodes the proven catalog layer of all 7,036 VUM spans, and semantically decodes 15,248 TDX spans,
-with zero errors. Its extent totals exactly match this report: COL has 7,036 nonzero tails
+decodes the proven catalog layer and passive payload grammar of all 7,036 VUM spans, and
+semantically decodes 15,248 TDX spans, with zero errors. Its extent totals exactly match this
+report: COL has 7,036 nonzero tails
 after the described table region; VUM has 6,989 exact primary boundaries and 47 nonzero tails;
 TDX has 11,277 exact, 3,909 zero-tail, zero nonzero-tail, and 62 duplicate-proven implicit-zero
 suffix relations after applying the full counted-block extent. Its canonical storage totals are
@@ -215,7 +220,8 @@ For the first visible MINSK scene, implement in this order:
 
 1. Span-aware nested HOG reading with verified zero-tail acceptance.
 2. POP `TER:` parsing and name-to-`DATA.HOG` resolution.
-3. Consume canonical COL spatial meshes, then decode VUM material and render-geometry packets.
+3. Consume canonical COL spatial meshes and VUM materials; use the passive VUM descriptor only as
+   a research boundary until render geometry is independently proven.
 4. Consume canonical TDX storage through a separately validated pixel-expansion policy.
 5. POP visibility/placement sections needed to assemble and cull cells.
 6. SKM/SKL for characters and weapons.
@@ -223,8 +229,10 @@ For the first visible MINSK scene, implement in this order:
 8. VPK music after its payload codec is identified.
 
 This ordering deliberately puts scene geometry and textures ahead of actors, effects, and audio.
-The next high-value static/dynamic trace is the executable's `VUMS` consumer, especially reads of
-the offset-`0x58` boundary and material-table offsets.
+The next high-value dynamic trace is an aggregate byte-read trace of the executable's `VUMS`
+consumer: VUM-relative offsets, widths, loop counts, and output counts only. Do not retain
+instructions or payload bytes. The immediate question is which proven reference partitions feed
+position and topology outputs.
 
 ## Reproduce
 
