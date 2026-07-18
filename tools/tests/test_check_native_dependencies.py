@@ -181,6 +181,15 @@ constexpr int separated = 1'048'576;
             ("omega//runtime/example.h", "empty or dot include-path segments"),
             ("omega/runtime/example.h ", "non-canonical include path"),
             ("omega/unknown/example.h", "unclassified project include"),
+            ("carrier.h:payload", "Windows-unsafe include-path characters"),
+            ("carrier.h.", "Windows-aliased trailing dots or spaces"),
+            ("directory./carrier.h", "Windows-aliased trailing dots or spaces"),
+            ("CON", "Windows reserved device include paths"),
+            ("nul.txt", "Windows reserved device include paths"),
+            ("COM1.hpp", "Windows reserved device include paths"),
+            ("LPT².log", "Windows reserved device include paths"),
+            ("question?.h", "Windows-unsafe include-path characters"),
+            ("pipe|name.h", "Windows-unsafe include-path characters"),
         )
         for include, message in cases:
             with self.subTest(include=include):
@@ -247,6 +256,21 @@ constexpr int separated = 1'048'576;
                     "native/src/runtime/example.cpp", source, message
                 )
 
+    def test_newlines_and_multiline_comments_cannot_split_module_tokens(self) -> None:
+        cases = (
+            ("import\nexample;\n", "C++ module imports"),
+            ("import/* split\n */example;\n", "C++ module imports"),
+            ("import\n:partition;\n", "C++ module imports"),
+            ("module\nexample;\n", "C++ module declarations"),
+            ("module\n;\n", "C++ module declarations"),
+            ("export\nmodule\nexample;\n", "C++ module declarations"),
+        )
+        for source, message in cases:
+            with self.subTest(source=source):
+                self.assert_rejected(
+                    "native/src/runtime/example.cpp", source, message
+                )
+
     def test_unmapped_shipping_source_paths_fail_closed(self) -> None:
         for relative_path in (
             "native/src/new_module/example.cpp",
@@ -268,6 +292,50 @@ constexpr int separated = 1'048'576;
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("unsupported file type", errors[0])
 
+    def test_unknown_file_types_in_unclassified_shipping_paths_fail_closed(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/src/new_module/example.mm": "opaque\n",
+                "native/include/omega/new_module/example.generated": "opaque\n",
+                "native/apps/new_app/example.shader": "opaque\n",
+            }
+        )
+        self.assertEqual(checked, 0)
+        self.assertEqual(len(errors), 3, errors)
+        self.assertTrue(
+            all("unclassified shipping native path" in error for error in errors)
+        )
+
+    def test_unknown_nonshipping_test_and_tool_files_remain_out_of_scope(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/tests/fixture.data": "opaque\n",
+                "native/apps/omega_tool/fixture.data": "opaque\n",
+            }
+        )
+        self.assertEqual(checked, 0)
+        self.assertEqual(errors, [])
+
+    def test_pop_terrain_index_uses_its_cmake_core_ownership(self) -> None:
+        relative = Path("native/include/omega/asset/pop_terrain_index.h")
+        rule = gate.module_rule(relative)
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule.name, "omega_core")
+        self.assertEqual(
+            gate._project_header_module("omega/asset/pop_terrain_index.h"),
+            "omega_core",
+        )
+        checked, errors = self.check_source(
+            relative.as_posix(), '#include "omega/archive/archive_reader.h"\n'
+        )
+        self.assertEqual(checked, 1)
+        self.assertEqual(errors, [])
+        self.assert_rejected(
+            "native/include/omega/asset/example.h",
+            '#include "omega/archive/archive_reader.h"\n',
+            "omega_assets includes forbidden dependency",
+        )
+
     def test_unresolved_local_shipping_headers_fail_closed(self) -> None:
         self.assert_rejected(
             "native/src/runtime/example.cpp",
@@ -284,6 +352,62 @@ constexpr int separated = 1'048'576;
         )
         self.assertEqual(checked, 2)
         self.assertEqual(errors, [])
+
+    def test_local_headers_require_exact_on_disk_spelling(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/src/runtime/example.cpp": '#include "Example_Internal.h"\n',
+                "native/src/runtime/example_internal.h": "#pragma once\n",
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("exact on-disk spelling", errors[0])
+
+    def test_local_windows_filesystem_aliases_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "native/src/runtime/example.cpp"
+            canonical = source.with_name("example_internal_long_header.h")
+            alias = source.with_name("EXAMPL~1.H")
+            source.parent.mkdir(parents=True)
+            source.write_text("constexpr int example = 0;\n", encoding="utf-8")
+            canonical.write_text("#pragma once\n", encoding="utf-8")
+            original_stat = os.stat
+
+            def resolve_short_alias(path: os.PathLike[str] | str, *args, **kwargs):
+                target = canonical if Path(path) == alias else path
+                return original_stat(target, *args, **kwargs)
+
+            with mock.patch.object(
+                gate.os, "stat", side_effect=resolve_short_alias
+            ):
+                resolved, error = gate._resolve_local_include(
+                    root, source, alias.name
+                )
+
+        self.assertIsNone(resolved)
+        self.assertIn("exact on-disk spelling", error)
+
+    @unittest.skipUnless(os.name == "nt", "NTFS alternate streams are Windows-only")
+    def test_ntfs_alternate_stream_cannot_bypass_the_pcsx2_ban(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "native/src/runtime/example.cpp"
+            carrier = source.with_name("carrier.h")
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                '#include "carrier.h:payload"\n', encoding="utf-8", newline=""
+            )
+            carrier.write_text("#pragma once\n", encoding="utf-8", newline="")
+            Path(f"{carrier}:payload").write_text(
+                '#include "PCSX2/VMManager.h"\n', encoding="utf-8", newline=""
+            )
+            checked, errors = gate.check_tree(root)
+
+        self.assertEqual(checked, 2)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("Windows-unsafe include-path characters", errors[0])
 
     def test_link_like_source_entries_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

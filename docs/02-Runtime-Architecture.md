@@ -197,8 +197,12 @@ platform-neutral modules, and rejects PCSX2-named headers globally. Unclassified
 C++ module/import syntax, module-source suffixes, links, reparse points, special files, and files
 that change while being read fail closed. This is a source-level boundary: CMake link edges and the
 contents of generated headers remain build/review responsibilities. The existing terrain-prefix
-parser remains in `omega_core` temporarily; new semantic adapters enter through
-`omega_retail_formats`.
+parser header is classified as `omega_core` alongside its implementation, matching the target that
+contains the implementation despite the header's legacy `omega/asset` path; new semantic adapters
+enter through `omega_retail_formats`. Canonical local includes require exact on-disk spelling and
+reject Windows alternate-data-stream, reserved-device, trailing-dot/space, and other non-portable
+path aliases.
+Unsupported file types under both classified and unclassified shipping roots also fail closed.
 
 Startup owns both `LevelManifestIR` and `LevelSpatialIR`. The initial renderer consumes canonical
 spatial meshes only to build a deterministic synthetic canonical-COL wireframe contact sheet.
