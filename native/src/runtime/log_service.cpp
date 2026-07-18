@@ -141,6 +141,7 @@ struct LogService::Impl
     std::uint64_t next_sequence = 0;
     std::atomic<std::uint64_t> written{0};
     std::atomic<std::uint64_t> dropped{0};
+    std::atomic<std::uint64_t> sink_failures{0};
 };
 
 std::expected<LogService, std::string> LogService::Create(LogServiceConfig config)
@@ -210,7 +211,18 @@ void LogService::Write(const LogSeverity severity, const std::string_view catego
         record.ticks_since_start = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - impl.start);
         for (LogSink* const sink : impl.sinks)
-            sink->Consume(record);
+        {
+            try
+            {
+                sink->Consume(record);
+            }
+            catch (...)
+            {
+                // Sink implementations are extension points. A faulty sink cannot unwind through
+                // concurrent writers or prevent the remaining sinks from observing this sequence.
+                impl.sink_failures.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
     }
     impl.written.fetch_add(1, std::memory_order_relaxed);
 }
@@ -268,5 +280,10 @@ std::uint64_t LogService::written_count() const noexcept
 std::uint64_t LogService::dropped_count() const noexcept
 {
     return impl_ ? impl_->dropped.load(std::memory_order_relaxed) : 0U;
+}
+
+std::uint64_t LogService::sink_failure_count() const noexcept
+{
+    return impl_ ? impl_->sink_failures.load(std::memory_order_relaxed) : 0U;
 }
 } // namespace omega::runtime

@@ -360,23 +360,50 @@ int JobServiceFailureCount()
                 break;
             JobService& facade = *destination;
             std::atomic<bool> job_started{false};
+            std::atomic<bool> begin_drain_probe{false};
+            std::atomic<bool> shutdown_observed{false};
             std::atomic<std::uint64_t> rejections{0};
-            const auto submitted = facade.Submit([&facade, &job_started, &rejections] {
-                job_started.store(true);
-                for (int attempt = 0; attempt < 4'096; ++attempt)
+            std::atomic<std::uint64_t> wrong_worker_counts{0};
+            const auto submitted = facade.Submit(
+                [&facade, &job_started, &begin_drain_probe, &shutdown_observed, &rejections,
+                    &wrong_worker_counts]
                 {
-                    if (!facade.Submit([] {}).has_value())
-                        rejections.fetch_add(1U);
+                    job_started.store(true);
+                    while (!begin_drain_probe.load())
+                        std::this_thread::yield();
+
+                    while (!shutdown_observed.load())
+                    {
+                        auto probe = facade.Submit([] {});
+                        if (!probe)
+                        {
+                            if (probe.error() ==
+                                "job service is shutting down and rejects new jobs")
+                                shutdown_observed.store(true);
+                            rejections.fetch_add(1U);
+                            std::this_thread::yield();
+                        }
+                    }
+                    for (int sample = 0; sample < 4'096; ++sample)
+                    {
+                        if (facade.worker_count() != 2U)
+                            wrong_worker_counts.fetch_add(1U);
+                    }
                 }
-            });
+            );
             Check(submitted.has_value(), "the drain-race job is accepted");
             while (!job_started.load())
                 std::this_thread::yield();
+            begin_drain_probe.store(true);
             facade = std::move(*incoming); // drains while the job hammers Submit()
             Check(facade.worker_count() == 1U,
                 "the drain-race assignment installs the incoming single-worker pool");
+            Check(shutdown_observed.load(),
+                "the drain-race job observes the documented shutdown rejection");
+            Check(wrong_worker_counts.load() == 0U,
+                "worker_count remains the immutable configured count throughout draining");
             if (round == 0)
-                Check(rejections.load() <= 4'096U,
+                Check(rejections.load() > 0U,
                     "drain-time submissions resolve to accept or reject, never a crash");
         }
     }

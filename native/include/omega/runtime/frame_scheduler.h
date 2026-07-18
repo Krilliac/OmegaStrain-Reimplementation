@@ -16,6 +16,23 @@ inline constexpr std::chrono::nanoseconds kMaximumSimulationStep{std::chrono::se
 inline constexpr std::uint32_t kMaximumStepsPerFrame = 64;
 inline constexpr std::chrono::nanoseconds kMaximumFrameDelta{std::chrono::seconds{4}};
 
+namespace detail
+{
+// Internal arithmetic helper kept here so representation-limit behavior can be tested exactly
+// without driving a scheduler through billions of synthetic overload frames.
+[[nodiscard]] constexpr std::chrono::nanoseconds SaturatingAddNanoseconds(
+    const std::chrono::nanoseconds left, const std::chrono::nanoseconds right) noexcept
+{
+    if (right > std::chrono::nanoseconds::zero() &&
+        left > std::chrono::nanoseconds::max() - right)
+        return std::chrono::nanoseconds::max();
+    if (right < std::chrono::nanoseconds::zero() &&
+        left < std::chrono::nanoseconds::min() - right)
+        return std::chrono::nanoseconds::min();
+    return left + right;
+}
+} // namespace detail
+
 // Fixed-step accumulator configuration. Every field is required and validated; there is no
 // meaningful default. In particular `simulation_step` is deliberately zero-initialized to an
 // invalid value: per docs/02, SimulationWorld uses a measured fixed step and the retail tick
@@ -78,6 +95,7 @@ public:
     [[nodiscard]] std::uint64_t total_planned_steps() const noexcept;
 
     // [game thread] Total whole-step time discarded by the anti-death-spiral drop policy.
+    // Saturates at nanoseconds::max() if the diagnostic counter exhausts its representation.
     [[nodiscard]] std::chrono::nanoseconds total_dropped_time() const noexcept;
 
     // [game thread] The validated, immutable configuration.

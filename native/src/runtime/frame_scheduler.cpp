@@ -53,7 +53,8 @@ FramePlan FrameScheduler::BeginFrame(const std::chrono::nanoseconds elapsed) noe
     {
         planned = budget;
         plan.dropped_time = true;
-        total_dropped_time_ += std::chrono::nanoseconds{(available - budget) * step};
+        const std::chrono::nanoseconds dropped{(available - budget) * step};
+        total_dropped_time_ = detail::SaturatingAddNanoseconds(total_dropped_time_, dropped);
     }
 
     // Whole steps leave the accumulator (executed or dropped); the sub-step remainder stays.

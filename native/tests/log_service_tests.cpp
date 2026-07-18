@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -42,6 +43,17 @@ struct CaptureSink final : LogSink
     void Consume(const LogRecord& record) override
     {
         records.push_back(record);
+    }
+};
+
+struct ThrowingSink final : LogSink
+{
+    std::uint64_t attempts = 0;
+
+    void Consume(const LogRecord&) override
+    {
+        ++attempts;
+        throw std::runtime_error("synthetic sink failure");
     }
 };
 
@@ -268,6 +280,29 @@ int LogServiceFailureCount()
         }
     }
 
+    // --- Faulty sink containment ----------------------------------------------------------
+    {
+        ThrowingSink throwing;
+        CaptureSink capture;
+        LogServiceConfig config = ConfigWith(&throwing);
+        config.sinks.push_back(&capture);
+        auto service = LogService::Create(std::move(config));
+        Check(service.has_value(),
+            "a service with a potentially throwing extension sink is created");
+        if (service)
+        {
+            service->Info("sink", "first");
+            service->Info("sink", "second");
+            Check(throwing.attempts == 2U && service->sink_failure_count() == 2U,
+                "each throwing sink delivery is contained and counted");
+            Check(capture.records.size() == 2U && capture.records[0].sequence == 0U &&
+                      capture.records[1].sequence == 1U,
+                "a throwing sink does not block later sinks or create sequence gaps");
+            Check(service->written_count() == 2U && service->dropped_count() == 0U,
+                "partially delivered records keep coherent written and dropped accounting");
+        }
+    }
+
     // --- Deterministic stderr line format -------------------------------------------------
     {
         LogRecord record;
@@ -317,8 +352,9 @@ int LogServiceFailureCount()
                 source->Error("core", "after move via overload");
                 Check((*ring)->consumed_count() == 0,
                     "a moved-from service delivers nothing to the old sinks");
-                Check(source->written_count() == 0 && source->dropped_count() == 0,
-                    "a moved-from service reports zero written and dropped records");
+                Check(source->written_count() == 0 && source->dropped_count() == 0 &&
+                          source->sink_failure_count() == 0,
+                    "a moved-from service reports zero written, dropped, and failed deliveries");
                 Check(source->sink_count() == 0 && source->max_category_bytes() == 0 &&
                           source->max_message_bytes() == 0 &&
                           source->minimum_severity() == LogSeverity::Info,

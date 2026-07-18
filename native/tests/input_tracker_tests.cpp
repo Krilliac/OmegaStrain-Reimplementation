@@ -267,6 +267,58 @@ void BudgetAndRejectionChecks()
         "malformed-device rejections are counted, never silently dropped");
 }
 
+void ResetAllControlsChecks()
+{
+    InputTracker tracker = MakeTracker(3U);
+    Check(Push(tracker, InputDevice::Keyboard, 7U, true) &&
+              Push(tracker, InputDevice::GamepadButton, 7U, true) &&
+              Push(tracker, InputDevice::Keyboard, 44U, true),
+        "controls for two actions are held before a host-state reset");
+    const InputSnapshot held = tracker.EndFrame();
+    Check(held.IsHeld(kFire) && held.IsHeld(kJump),
+        "the pre-reset snapshot captures both held actions");
+
+    Check(Push(tracker, InputDevice::Keyboard, 500U, true) &&
+              Push(tracker, InputDevice::Keyboard, 501U, true) &&
+              Push(tracker, InputDevice::Keyboard, 502U, true),
+        "unbound events exhaust the reset frame's event budget");
+    Check(!Push(tracker, InputDevice::MouseButton, 1U, true),
+        "the reset frame is demonstrably over its event budget");
+    tracker.ResetAllControls();
+    const InputSnapshot reset = tracker.EndFrame();
+    Check(!reset.IsHeld(kFire) && reset.WasReleased(kFire) &&
+              !reset.IsHeld(kJump) && reset.WasReleased(kJump),
+        "one atomic reset releases every action that had a down control");
+    Check(!reset.IsHeld(kCrouch) && !reset.WasReleased(kCrouch),
+        "the reset does not invent an edge for an action that was already up");
+    Check(reset.accepted_event_count() == 3U && reset.rejected_event_count() == 1U &&
+              tracker.total_rejected_event_count() == 1U,
+        "the reset bypasses the event budget without changing event counters");
+
+    tracker.ResetAllControls();
+    const InputSnapshot repeated = tracker.EndFrame();
+    Check(!repeated.WasReleased(kFire) && !repeated.WasReleased(kJump) &&
+              repeated.accepted_event_count() == 0U && repeated.rejected_event_count() == 0U,
+        "a repeated reset is edge-free and does not consume the next frame budget");
+
+    Check(Push(tracker, InputDevice::Keyboard, 7U, false) &&
+              Push(tracker, InputDevice::GamepadButton, 7U, false) &&
+              Push(tracker, InputDevice::Keyboard, 44U, false),
+        "late physical releases after the reset are accepted as level no-ops");
+    const InputSnapshot late_releases = tracker.EndFrame();
+    Check(!late_releases.WasReleased(kFire) && !late_releases.WasReleased(kJump),
+        "late host releases cannot duplicate reset-generated release edges");
+
+    InputTracker same_frame = MakeTracker(1U);
+    Check(Push(same_frame, InputDevice::MouseButton, 1U, true),
+        "a press is accepted before a same-frame reset");
+    same_frame.ResetAllControls();
+    const InputSnapshot tap = same_frame.EndFrame();
+    Check(!tap.IsHeld(kCrouch) && tap.WasPressed(kCrouch) && tap.WasReleased(kCrouch) &&
+              tap.accepted_event_count() == 1U,
+        "a same-frame reset preserves the press edge and adds one release edge");
+}
+
 void SnapshotValueChecks()
 {
     InputTracker tracker = MakeTracker(16U);
@@ -332,6 +384,7 @@ int InputTrackerFailureCount()
     EdgeMatrixChecks();
     MultiBindingChecks();
     BudgetAndRejectionChecks();
+    ResetAllControlsChecks();
     SnapshotValueChecks();
     DeterminismChecks();
     return failures;
