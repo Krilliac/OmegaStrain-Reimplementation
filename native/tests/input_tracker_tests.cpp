@@ -319,6 +319,36 @@ void ResetAllControlsChecks()
         "a same-frame reset preserves the press edge and adds one release edge");
 }
 
+void ResetDeviceChecks()
+{
+    InputTracker tracker = MakeTracker(8U);
+    Check(Push(tracker, InputDevice::Keyboard, 7U, true) &&
+              Push(tracker, InputDevice::GamepadButton, 7U, true) &&
+              Push(tracker, InputDevice::MouseButton, 1U, true),
+        "three device classes can hold two actions before a scoped reset");
+    (void)tracker.EndFrame();
+
+    tracker.ResetDevice(InputDevice::GamepadButton);
+    const InputSnapshot gamepad_reset = tracker.EndFrame();
+    Check(gamepad_reset.IsHeld(kFire) && !gamepad_reset.WasReleased(kFire),
+        "disconnecting a gamepad preserves a keyboard binding for the same action");
+    Check(gamepad_reset.IsHeld(kCrouch) && !gamepad_reset.WasReleased(kCrouch),
+        "disconnecting a gamepad preserves held mouse controls");
+
+    tracker.ResetDevice(static_cast<InputDevice>(99));
+    tracker.ResetDevice(InputDevice::Keyboard);
+    const InputSnapshot keyboard_reset = tracker.EndFrame();
+    Check(!keyboard_reset.IsHeld(kFire) && keyboard_reset.WasReleased(kFire),
+        "an action releases when its final device-scoped control resets");
+    Check(keyboard_reset.IsHeld(kCrouch) && !keyboard_reset.WasReleased(kCrouch),
+        "invalid and keyboard resets do not disturb mouse state");
+
+    tracker.ResetDevice(InputDevice::MouseButton);
+    const InputSnapshot mouse_reset = tracker.EndFrame();
+    Check(!mouse_reset.IsHeld(kCrouch) && mouse_reset.WasReleased(kCrouch),
+        "the remaining device class can be reconciled independently");
+}
+
 void SnapshotValueChecks()
 {
     InputTracker tracker = MakeTracker(16U);
@@ -385,6 +415,7 @@ int InputTrackerFailureCount()
     MultiBindingChecks();
     BudgetAndRejectionChecks();
     ResetAllControlsChecks();
+    ResetDeviceChecks();
     SnapshotValueChecks();
     DeterminismChecks();
     return failures;

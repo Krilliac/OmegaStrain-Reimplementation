@@ -65,6 +65,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/launch_options.cpp
     native/src/runtime/log_service.cpp
     native/src/runtime/manifest_debug_image.cpp
+    native/src/runtime/runtime_settings.cpp
 )
 target_include_directories(omega_runtime PUBLIC native/include)
 target_link_libraries(omega_runtime
@@ -159,6 +160,7 @@ if(OMEGA_BUILD_RUNTIME)
 
     add_executable(openomega
         native/apps/openomega/main.cpp
+        native/apps/openomega/omega_app.cpp
         native/apps/openomega/sdl_gpu_host.cpp
     )
     target_link_libraries(openomega PRIVATE omega_runtime SDL3::SDL3)
@@ -188,6 +190,7 @@ if(BUILD_TESTING)
         native/tests/manifest_debug_image_tests.cpp
         native/tests/pop_level_manifest_decoder_tests.cpp
         native/tests/pop_terrain_index_tests.cpp
+        native/tests/runtime_settings_tests.cpp
         native/tests/tdx_texture_storage_decoder_tests.cpp
         native/tests/virtual_file_system_tests.cpp
         native/tests/vum_material_catalog_decoder_tests.cpp

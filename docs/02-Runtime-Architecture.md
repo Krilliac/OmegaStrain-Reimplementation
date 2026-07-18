@@ -22,6 +22,12 @@ Services never own the app or one another. Dependencies are constructor referenc
 lifetime is guaranteed by the app. Long-lived asset references are typed generation handles,
 not raw pointers or `shared_ptr` ownership graphs.
 
+The initial composition root now owns the validated configuration store, content startup state,
+stderr/ring log sinks, logging service, worker pool, fixed-step scheduler, input tracker, and SDL
+GPU host in that order. The host is created last and destroyed first. It borrows the scheduler,
+input tracker, and logger only while `OmegaApp::Run` is active; no SDL type crosses into the
+platform-neutral runtime library.
+
 `GameDataService` is the implemented startup boundary. It owns its VFS, freezes mounts during
 `Open()`, and returns only canonical owned IR. It now resolves each manifest cell HOG and its unique
 COL member into one `SpatialMeshIR` in manifest order; HOG objects, byte spans, and retail offsets

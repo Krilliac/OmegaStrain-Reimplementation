@@ -92,6 +92,7 @@ ctest --preset msvc-debug
 .\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
 python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\private\extracted-disc
 .\build\msvc\Debug\openomega.exe --frames=120
+.\build\msvc\Debug\openomega.exe --config=.\openomega.cfg --set=log.minimum_severity=debug --frames=120
 ```
 
 `openomega` is the pure-native SDL3/SDL_GPU host shell. `--frames=N` is an automated smoke mode
@@ -99,6 +100,13 @@ that opens the modern GPU backend, renders exactly `N` frames, and exits without
 `--probe-only` validates the retail root and selected level, then loads matching owned manifest and
 spatial-mesh state without opening a window. The current MINSK view is still a synthetic
 manifest-coverage grid, not reconstructed world geometry.
+
+The optional project-owned configuration file uses strict `lower_snake_case` dotted keys and
+`key = value` lines. `--set=KEY=VALUE` applies one validated command-line override per key. Current
+keys are `log.minimum_severity`, `log.ring_capacity`, `jobs.worker_count`,
+`jobs.max_pending_jobs`, `frame.simulation_step_ns`, `frame.max_steps_per_frame`,
+`frame.max_delta_ns`, and `input.max_events_per_frame`. Frame defaults are synthetic host-shell
+engineering values, not claims about the retail tick rate.
 
 Architecture and completion criteria are versioned in
 [`docs/02-Runtime-Architecture.md`](docs/02-Runtime-Architecture.md) and

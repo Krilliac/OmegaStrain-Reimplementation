@@ -1,13 +1,19 @@
 #include "sdl_gpu_host.h"
 
+#include "omega/runtime/frame_scheduler.h"
+#include "omega/runtime/input_tracker.h"
+#include "omega/runtime/log_service.h"
 #include "omega/runtime/manifest_debug_image.h"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
+#include <string>
 #include <utility>
 
 namespace omega::app
@@ -20,12 +26,47 @@ namespace
     return std::string(operation) + ": " +
            (detail != nullptr && detail[0] != '\0' ? detail : "unknown SDL error");
 }
+
+[[nodiscard]] std::optional<runtime::InputEvent> TranslateInputEvent(
+    const SDL_Event& event) noexcept
+{
+    switch (event.type)
+    {
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_UP:
+        if (event.key.repeat)
+            return std::nullopt;
+        return runtime::InputEvent{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(event.key.scancode),
+            .pressed = event.type == SDL_EVENT_KEY_DOWN,
+        };
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        return runtime::InputEvent{
+            .device = runtime::InputDevice::MouseButton,
+            .code = event.button.button,
+            .pressed = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN,
+        };
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+    case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        return runtime::InputEvent{
+            .device = runtime::InputDevice::GamepadButton,
+            .code = event.gbutton.button,
+            .pressed = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN,
+        };
+    default:
+        return std::nullopt;
+    }
+}
 } // namespace
 
 struct SdlGpuHost::Impl
 {
     ~Impl()
     {
+        if (gamepad != nullptr)
+            SDL_CloseGamepad(gamepad);
         if (device != nullptr)
         {
             SDL_WaitForGPUIdle(device);
@@ -45,6 +86,8 @@ struct SdlGpuHost::Impl
     bool window_claimed = false;
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;
+    SDL_Gamepad* gamepad = nullptr;
+    SDL_JoystickID gamepad_id = 0;
     SDL_GPUTexture* debug_texture = nullptr;
     std::uint32_t debug_width = 0;
     std::uint32_t debug_height = 0;
@@ -168,10 +211,15 @@ SdlGpuHost::~SdlGpuHost() = default;
 SdlGpuHost::SdlGpuHost(SdlGpuHost&&) noexcept = default;
 SdlGpuHost& SdlGpuHost::operator=(SdlGpuHost&&) noexcept = default;
 
-std::expected<RunResult, std::string> SdlGpuHost::Run(const int frame_limit)
+std::expected<RunResult, std::string> SdlGpuHost::Run(const int frame_limit,
+    runtime::FrameScheduler& frame_scheduler, runtime::InputTracker& input,
+    runtime::LogService& log, const std::uint32_t quit_action)
 {
+    using Clock = std::chrono::steady_clock;
+
     RunResult result;
     bool running = true;
+    auto previous_frame = Clock::now();
     while (running && (frame_limit < 0 || result.rendered_frames < frame_limit))
     {
         SDL_Event event{};
@@ -182,9 +230,73 @@ std::expected<RunResult, std::string> SdlGpuHost::Run(const int frame_limit)
                 running = false;
                 result.quit_requested = true;
             }
+            else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
+            {
+                input.ResetAllControls();
+            }
+            else if (event.type == SDL_EVENT_GAMEPAD_ADDED && impl_->gamepad == nullptr)
+            {
+                impl_->gamepad = SDL_OpenGamepad(event.gdevice.which);
+                if (impl_->gamepad == nullptr)
+                {
+                    log.Warning("input", SdlError("SDL_OpenGamepad"));
+                }
+                else
+                {
+                    impl_->gamepad_id = event.gdevice.which;
+                    log.Info("input", "opened the primary SDL gamepad");
+                }
+            }
+            else if (event.type == SDL_EVENT_GAMEPAD_REMOVED && impl_->gamepad != nullptr &&
+                     event.gdevice.which == impl_->gamepad_id)
+            {
+                SDL_CloseGamepad(impl_->gamepad);
+                impl_->gamepad = nullptr;
+                impl_->gamepad_id = 0;
+                input.ResetDevice(runtime::InputDevice::GamepadButton);
+                log.Info("input", "closed the removed primary SDL gamepad");
+            }
+
+            if (const auto translated = TranslateInputEvent(event))
+            {
+                const auto accepted = input.PushEvent(*translated);
+                (void)accepted;
+            }
+        }
+
+        const runtime::InputSnapshot snapshot = input.EndFrame();
+        ++result.input_frames;
+        if (snapshot.rejected_event_count() != 0U)
+        {
+            log.Warning("input", "rejected " +
+                                     std::to_string(snapshot.rejected_event_count()) +
+                                     " host events in one frame");
+        }
+        if (snapshot.WasPressed(quit_action))
+        {
+            running = false;
+            result.quit_requested = true;
         }
         if (!running)
             break;
+
+        const auto current_frame = Clock::now();
+        const runtime::FramePlan plan = frame_scheduler.BeginFrame(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(current_frame - previous_frame));
+        previous_frame = current_frame;
+        result.planned_simulation_steps += plan.simulation_steps;
+        if (plan.clamped_delta)
+        {
+            ++result.clamped_frame_count;
+            if (result.clamped_frame_count == 1U)
+                log.Warning("frame", "wall-time delta reached the configured clamp");
+        }
+        if (plan.dropped_time)
+        {
+            ++result.dropped_time_frame_count;
+            if (result.dropped_time_frame_count == 1U)
+                log.Warning("frame", "fixed-step backlog exceeded the configured frame budget");
+        }
 
         SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
         if (commands == nullptr)

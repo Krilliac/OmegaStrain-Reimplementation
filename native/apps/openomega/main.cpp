@@ -1,7 +1,8 @@
-#include "sdl_gpu_host.h"
+#include "omega_app.h"
 
 #include "omega/runtime/content_startup.h"
 #include "omega/runtime/launch_options.h"
+#include "omega/runtime/runtime_settings.h"
 
 #include <cstddef>
 #include <cstdlib>
@@ -42,6 +43,19 @@ int main(const int argc, char** argv)
         return EXIT_SUCCESS;
     }
 
+    auto config = omega::runtime::LoadRuntimeConfig(*options);
+    if (!config)
+    {
+        std::cerr << config.error() << '\n';
+        return EXIT_FAILURE;
+    }
+    auto settings = omega::runtime::ResolveRuntimeSettings(*config);
+    if (!settings)
+    {
+        std::cerr << "runtime configuration: " << settings.error() << '\n';
+        return EXIT_FAILURE;
+    }
+
     auto startup = omega::runtime::StartContent(*options);
     if (!startup)
     {
@@ -75,22 +89,24 @@ int main(const int argc, char** argv)
 #else
     constexpr bool debug_device = false;
 #endif
-    auto host = omega::app::SdlGpuHost::Create(
-        content.debug_image ? &*content.debug_image : nullptr, debug_device);
-    if (!host)
+    auto app = omega::app::OmegaApp::Create(
+        std::move(*config), *settings, std::move(content), debug_device);
+    if (!app)
     {
-        std::cerr << host.error() << '\n';
+        std::cerr << app.error() << '\n';
         return EXIT_FAILURE;
     }
-    std::cout << "OpenOmega native shell: GPU driver=" << host->driver_name() << '\n';
+    std::cout << "OpenOmega native shell: GPU driver=" << app->driver_name() << '\n';
 
-    auto run = host->Run(options->frame_limit);
+    auto run = app->Run(options->frame_limit);
     if (!run)
     {
         std::cerr << "runtime loop: " << run.error() << '\n';
         return EXIT_FAILURE;
     }
-    std::cout << "OpenOmega native shell: rendered_frames=" << run->rendered_frames << '\n';
+    std::cout << "OpenOmega native shell: rendered_frames=" << run->rendered_frames
+              << " planned_simulation_steps=" << run->planned_simulation_steps
+              << " input_frames=" << run->input_frames << '\n';
     if (options->frame_limit >= 0 && run->rendered_frames != options->frame_limit)
     {
         std::cerr << "runtime loop ended before the requested frame limit\n";
