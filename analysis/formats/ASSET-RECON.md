@@ -154,8 +154,9 @@ passive result. It retains only the version word, the observed words at `0x04`, 
 and the computed logical extent with exact or zero-padded classification. It does not retain or
 interpret counted-region bytes, and combinations outside the observed word and extent ranges remain
 unsupported. `omega_tool asset-metadata-verify-tree` classifies `.ska` and emits only sanitized
-candidate, validity, extent, and aggregate logical-byte counters. Do not claim an independent native
-213/213 corpus pass until that command is rerun against the owner-supplied private extraction.
+candidate, validity, extent, and aggregate logical-byte counters. The independent native corpus pass
+accepts all 213 owner-supplied spans with zero errors: 158 exact, 55 zero-padded, and 2,180,832
+aggregate logical bytes.
 
 SKAS is kept separate because only two distinct candidates exist. Both are printable ASCII with
 CRLF delimiters, a final CRLF, 72 lines, 5 blank lines, 67 lines containing exactly one colon, and
