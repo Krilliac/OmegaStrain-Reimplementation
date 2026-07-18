@@ -598,6 +598,50 @@ class VumReadTraceValidatorTests(unittest.TestCase):
             with self.subTest(label=label):
                 self.assert_invalid(document)
 
+    def test_overlapping_anonymous_ranges_cannot_overbook_shared_ee_capacity(self) -> None:
+        document = complete_document()
+        document["ee_reads"] = [
+            {"relative_offset": offset, "width": 1, "execution_count": 2}
+            for offset in range(5)
+        ]
+        document["anonymous_sites"] = [
+            {
+                "anonymous_site": 0,
+                "width": 1,
+                "execution_count": 3,
+                "distinct_relative_offset_count": 2,
+                "minimum_relative_offset": 0,
+                "maximum_relative_offset": 2,
+                "loop_candidate_heuristic": True,
+            },
+            {
+                "anonymous_site": 1,
+                "width": 1,
+                "execution_count": 3,
+                "distinct_relative_offset_count": 2,
+                "minimum_relative_offset": 0,
+                "maximum_relative_offset": 2,
+                "loop_candidate_heuristic": True,
+            },
+            {
+                "anonymous_site": 2,
+                "width": 1,
+                "execution_count": 4,
+                "distinct_relative_offset_count": 2,
+                "minimum_relative_offset": 3,
+                "maximum_relative_offset": 4,
+                "loop_candidate_heuristic": True,
+            },
+        ]
+        document["vif1_unpack_chunks"] = []
+        validator.validate_trace_document(document, EXPECTED_SIZE)
+
+        impossible = copy.deepcopy(document)
+        impossible["anonymous_sites"][0]["execution_count"] = 4
+        impossible["anonymous_sites"][1]["execution_count"] = 4
+        impossible["anonymous_sites"][2]["execution_count"] = 2
+        self.assert_invalid(impossible)
+
     def test_vif_width_order_duplicates_alignment_bounds_and_counts(self) -> None:
         valid = complete_document()
         valid["vif1_unpack_chunks"] = [
