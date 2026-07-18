@@ -79,16 +79,20 @@ queues.
   reject stale handles, and the registry allocates only during world creation. The composition root
   supplies the scheduler's validated step; its current default and entity capacity are synthetic-
   shell values, while retail timing and population limits remain evidence-driven. Entity IDs are
-  plain registry-scoped values: they do not own the world, and an identical numeric value in another
-  world is a different identity. Borrowed registry references remain on the game thread and are
-  invalidated when their world moves or is destroyed.
+  plain world-scoped values: they do not own the world, and an identical numeric value in another
+  world is a different identity even though the value itself cannot distinguish those worlds.
+  `CreateEntity`, `DestroyEntity`, `IsAlive`, and the aggregate value-returning `EntitySnapshot`
+  form the lifecycle facade; no mutable registry reference escapes world ownership. `DestroyEntity`
+  is reserved as the sole removal path so future direct component stores can erase the exact
+  generation in deterministic declaration order before registry reuse.
 - `ComponentStore<T>` is the reusable header-only foundation for future direct `SimulationWorld`
   members; no speculative gameplay component is instantiated yet. Creation allocates one optional
   sparse slot per possible entity index and captures a caller-bounded maximum occupancy, after which
   store access is allocation-free and game-thread-only. Every lookup or mutation receives the
-  issuing registry and validates the exact live generation. World lifecycle code erases components
-  before destroying an entity; if that ordering is violated, the payload remains occupied but
-  inaccessible until exact-generation `EraseRetained`, `Clear`, or reuse of that same sparse slot.
+  issuing registry and validates the exact live generation. Future world lifecycle code erases
+  components before destroying an entity; if that ordering is violated, the payload remains
+  occupied but inaccessible until exact-generation `EraseRetained`, `Clear`, or reuse of that same
+  sparse slot.
   Insertion never scans unrelated slots: unrelated retained payloads consume bounded capacity and
   fail closed until explicit cleanup. Because `EntityId` has no registry token, a same-capacity
   foreign registry with the same live numeric handle cannot be distinguished; world ownership, not
@@ -117,8 +121,8 @@ tables at frame boundaries. Platform, renderer, input device/event pump, audio d
 transport are non-hot-reloadable initially. The validated retail-data root and its frozen mount
 table, `SimulationWorld`, its `EntityRegistry`, and future direct `ComponentStore<T>` members are
 also non-hot-reloadable. Entity IDs may be copied as plain data, but registry/component storage and
-borrowed references never cross a reloadable boundary. No vtable pointer crosses a reloadable
-boundary.
+borrowed component references never cross a reloadable boundary. No vtable pointer crosses a
+reloadable boundary.
 
 ## Dependency direction
 

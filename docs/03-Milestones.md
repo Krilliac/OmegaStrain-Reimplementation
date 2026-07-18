@@ -89,14 +89,17 @@ loading files or retail data. Concrete components, gameplay systems, render scen
 decoded voices, and mixing remain incomplete.
 
 The simulation world now solely owns a bounded, preallocated generational entity registry. Entity
-creation/reuse is deterministic for identical call sequences, stale or forged generations are
-inert, and capacity exhaustion is explicit. A reusable header-only `ComponentStore<T>` foundation
-now provides bounded startup allocation, exact-generation access, constant-time same-slot
-replacement of stale payloads, explicit exact-generation retained cleanup, inert moved-from
-behavior, and aggregate-only snapshots for future direct world-owned stores. Unrelated retained
-payloads are not swept during insertion and fail capacity closed until cleanup. No speculative
-gameplay component is instantiated; concrete components and systems remain future project-owned
-work. Entity and component capacities are synthetic host limits, not retail population claims.
+creation/reuse is deterministic for identical call sequences, stale or nonmatching generations are
+inert, and capacity exhaustion is explicit. The world now exposes creation, destruction, liveness,
+and aggregate identity snapshots without releasing a mutable registry reference; destruction is
+the reserved coordination point for future direct component cleanup. A reusable header-only
+`ComponentStore<T>` foundation provides bounded startup allocation, exact-generation access,
+constant-time same-slot replacement of stale payloads, explicit exact-generation retained cleanup,
+inert moved-from behavior, and aggregate-only snapshots for future direct world-owned stores.
+Unrelated retained payloads are not swept during insertion and fail capacity closed until cleanup.
+No speculative gameplay component is instantiated; concrete components and systems remain future
+project-owned work. Entity and component capacities are synthetic host limits, not retail
+population claims.
 
 Each rendered frame now crosses an explicit owned `RenderFramePacket` boundary containing the host
 frame index, deterministic world clock, and live-entity count. The SDL host consumes it

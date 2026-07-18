@@ -22,6 +22,31 @@ SimulationWorld::SimulationWorld(
 {
 }
 
+std::expected<EntityId, EntityCreateError> SimulationWorld::CreateEntity() noexcept
+{
+    return entities_.CreateEntity();
+}
+
+EntityDestroyResult SimulationWorld::DestroyEntity(const EntityId entity) noexcept
+{
+    if (!entities_.IsAlive(entity))
+        return EntityDestroyResult::NotAlive;
+
+    // Future direct component stores erase this exact generation here, in
+    // member declaration order, before the registry makes the slot reusable.
+    return entities_.DestroyEntity(entity);
+}
+
+bool SimulationWorld::IsAlive(const EntityId entity) const noexcept
+{
+    return entities_.IsAlive(entity);
+}
+
+EntityRegistrySnapshot SimulationWorld::EntitySnapshot() const noexcept
+{
+    return entities_.Snapshot();
+}
+
 SimulationStepResult SimulationWorld::AdvanceOneStep() noexcept
 {
     if (state_.completed_steps == std::numeric_limits<std::uint64_t>::max() ||
@@ -36,22 +61,12 @@ SimulationStepResult SimulationWorld::AdvanceOneStep() noexcept
 SimulationState SimulationWorld::Snapshot() const noexcept
 {
     SimulationState snapshot = state_;
-    snapshot.alive_entities = entities_.Snapshot().alive;
+    snapshot.alive_entities = EntitySnapshot().alive;
     return snapshot;
 }
 
 const SimulationWorldConfig& SimulationWorld::config() const noexcept
 {
     return config_;
-}
-
-EntityRegistry& SimulationWorld::entities() noexcept
-{
-    return entities_;
-}
-
-const EntityRegistry& SimulationWorld::entities() const noexcept
-{
-    return entities_;
 }
 } // namespace omega::simulation
