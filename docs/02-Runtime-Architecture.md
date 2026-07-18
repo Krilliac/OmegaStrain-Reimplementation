@@ -83,8 +83,11 @@ queues.
   world is a different identity even though the value itself cannot distinguish those worlds.
   `CreateEntity`, `DestroyEntity`, `IsAlive`, and the aggregate value-returning `EntitySnapshot`
   form the lifecycle facade; no mutable registry reference escapes world ownership. `DestroyEntity`
-  is reserved as the sole removal path so future direct component stores can erase the exact
-  generation in deterministic declaration order before registry reuse.
+  is reserved as the sole in-place removal path so future direct component stores can erase the
+  exact generation in deterministic declaration order before registry reuse. A world may transfer
+  complete ownership by move construction, but move assignment is deleted so a live destination
+  cannot be replaced outside that lifecycle facade. Whole-world destruction releases future stores
+  in reverse member order before the registry.
 - `ComponentStore<T>` is the reusable header-only foundation for future direct `SimulationWorld`
   members; no speculative gameplay component is instantiated yet. Creation allocates one optional
   sparse slot per possible entity index and captures a caller-bounded maximum occupancy, after which
