@@ -86,6 +86,39 @@ Reproduce the privacy-safe proof without emitting paths, names, hashes, or paylo
 python -B tools/prove_tdx_zero_suffix.py private/extracted-disc
 ```
 
+## Display-layout hypothesis scoring
+
+`score_tdx_layout_hypotheses.py` is a bounded, aggregate-only experiment for the remaining indexed
+display-layout questions. It stratifies every primary plane by both header bit depth and that
+plane's transfer-element code. For direct indexed transfer rectangles, it compares only these
+explicit source-order hypotheses:
+
+- four-bit `0x14`: low-nibble-first versus high-nibble-first, with an identity palette; and
+- eight-bit `0x13`: identity palette lookup versus the bit-3/bit-4 lookup permutation.
+
+The score is the summed absolute RGB delta between horizontal and vertical neighbors; lower means
+only that one hypothesis produces smoother local color adjacency. It is evidence, not a semantic
+assignment. Each direct plane uses its own transfer-object dimensions, so later source-order planes
+are not forced through the top-level dimensions or assigned a mip rank.
+
+Indexed planes with transfer code `0x00` are counted in separate `4/0x00` and `8/0x00` families but
+are deliberately not scored. Their object rectangle describes a packed 32-bit upload for visibly
+pre-swizzled data, not display texel dimensions. Treating upload-order adjacency as display
+coherence would produce a misleading comparison. Palette permutation and nibble order also remain
+hypotheses until corroborated independently.
+
+Aggregate delta sums naturally weight larger planes, so the report also includes per-plane wins
+and ties. Proven implicit-zero reconstructions are counted separately because synthesized zeros can
+affect adjacency. The metric is content-dependent and cannot by itself validate palette order,
+nibble order, or the purpose of later planes.
+
+The tool streams HOG and standalone TDX spans, rejects malformed or over-budget input, and emits no
+paths, archive names, hashes, asset-specific dimensions, payload data, or samples:
+
+```powershell
+python -B tools/score_tdx_layout_hypotheses.py private/extracted-disc
+```
+
 ## Native validation
 
 The aggregate verifier streams one asset at a time and discards each decoded value after updating
