@@ -189,10 +189,16 @@ eight-edge COL tree. The returned `LevelSpatialIR` has the same order and cardin
 `LevelManifestIR::terrain_cells`; provenance remains in the manifest.
 
 Tools may link retail adapters. Renderer and simulation targets must consume canonical assets and
-must not include retail-format headers. The native source-dependency CI gate enforces that boundary,
-keeps SDL/OS/GPU headers out of platform-neutral runtime, simulation, and asset modules, and rejects
-any PCSX2 header from shipping native modules. The existing terrain-prefix parser remains in
-`omega_core` temporarily; new semantic adapters enter through `omega_retail_formats`.
+must not include retail-format headers. The native source-dependency CI gate scans every native
+C/C++ source, header, test, tool, and common source fragment after BOM removal, escaped-newline
+splicing, and comment/string handling. It requires literal canonical include paths, enforces an
+explicit shipping-module edge allowlist, admits only allowlisted C/C++ standard headers to
+platform-neutral modules, and rejects PCSX2-named headers globally. Unclassified shipping paths,
+C++ module/import syntax, module-source suffixes, links, reparse points, special files, and files
+that change while being read fail closed. This is a source-level boundary: CMake link edges and the
+contents of generated headers remain build/review responsibilities. The existing terrain-prefix
+parser remains in `omega_core` temporarily; new semantic adapters enter through
+`omega_retail_formats`.
 
 Startup owns both `LevelManifestIR` and `LevelSpatialIR`. The initial renderer consumes canonical
 spatial meshes only to build a deterministic synthetic canonical-COL wireframe contact sheet.

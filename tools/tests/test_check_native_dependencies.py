@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
+import stat
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -11,109 +14,342 @@ from tools import check_native_dependencies as gate  # noqa: E402
 
 
 class NativeDependencyGateTests(unittest.TestCase):
-    def check_source(self, relative_path: str, source: str) -> tuple[int, list[str]]:
+    def check_sources(
+        self, sources: dict[str, str | bytes]
+    ) -> tuple[int, list[str]]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            path = root / relative_path
-            path.parent.mkdir(parents=True)
-            path.write_text(source, encoding="utf-8", newline="")
+            for relative_path, source in sources.items():
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if isinstance(source, bytes):
+                    path.write_bytes(source)
+                else:
+                    path.write_text(source, encoding="utf-8", newline="")
             return gate.check_tree(root)
 
-    def test_platform_neutral_runtime_accepts_canonical_dependencies(self) -> None:
-        checked, errors = self.check_source(
+    def check_source(
+        self, relative_path: str, source: str | bytes
+    ) -> tuple[int, list[str]]:
+        return self.check_sources({relative_path: source})
+
+    def assert_rejected(
+        self, relative_path: str, source: str | bytes, message: str
+    ) -> None:
+        checked, errors = self.check_source(relative_path, source)
+        self.assertEqual(checked, 1)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn(message, errors[0])
+
+    def test_explicit_allowed_module_edges(self) -> None:
+        cases = (
+            ("native/src/archive/example.cpp", "omega/asset/decode.h"),
+            ("native/src/simulation/example.cpp", "omega/asset/decode.h"),
+            ("native/src/retail/example.cpp", "omega/archive/archive_reader.h"),
+            ("native/src/content/example.cpp", "omega/retail/pop_level_manifest_decoder.h"),
+            ("native/src/runtime/example.cpp", "omega/content/game_data_service.h"),
+            ("native/apps/openomega/sdl_example.cpp", "omega/runtime/render_frame_packet.h"),
+            ("native/apps/openomega/example.cpp", "omega/simulation/simulation_world.h"),
+        )
+        for relative_path, include in cases:
+            with self.subTest(relative_path=relative_path, include=include):
+                checked, errors = self.check_source(
+                    relative_path, f'#include "{include}"\n'
+                )
+                self.assertEqual(checked, 1)
+                self.assertEqual(errors, [])
+
+    def test_explicit_forbidden_module_edges(self) -> None:
+        cases = (
+            ("native/src/archive/example.cpp", "omega/runtime/frame_scheduler.h"),
+            ("native/src/simulation/example.cpp", "omega/runtime/frame_scheduler.h"),
+            ("native/src/retail/example.cpp", "omega/content/game_data_service.h"),
+            ("native/src/content/example.cpp", "omega/simulation/simulation_world.h"),
+            ("native/src/runtime/example.cpp", "omega/simulation/simulation_world.h"),
+            ("native/src/runtime/example.cpp", "omega/retail/pop_level_manifest_decoder.h"),
+            ("native/apps/openomega/sdl_example.cpp", "omega/simulation/simulation_world.h"),
+            ("native/apps/openomega/example.cpp", "omega/retail/pop_level_manifest_decoder.h"),
+        )
+        for relative_path, include in cases:
+            with self.subTest(relative_path=relative_path, include=include):
+                self.assert_rejected(
+                    relative_path,
+                    f'#include "{include}"\n',
+                    "includes forbidden dependency",
+                )
+
+    def test_runtime_cannot_reach_simulation(self) -> None:
+        self.assert_rejected(
             "native/src/runtime/example.cpp",
-            '#include "omega/runtime/example.h"\n#include "omega/content/game_data_service.h"\n',
+            '#include "omega/simulation/simulation_world.h"\n',
+            "omega_runtime includes forbidden dependency",
+        )
+
+    def test_platform_neutral_modules_accept_standard_headers(self) -> None:
+        source = "".join(
+            f"#include <{header}>\n"
+            for header in ("algorithm", "cstdint", "expected", "filesystem", "vector")
+        )
+        checked, errors = self.check_source(
+            "native/include/omega/simulation/example.h", source
         )
         self.assertEqual(checked, 1)
         self.assertEqual(errors, [])
 
-    def test_runtime_cannot_include_retail_formats(self) -> None:
-        _, errors = self.check_source(
-            "native/include/omega/runtime/example.h",
-            '#include "omega/retail/tdx_texture_storage_decoder.h"\n',
-        )
-        self.assertEqual(len(errors), 1)
-        self.assertIn("omega_runtime includes forbidden dependency", errors[0])
-
-    def test_simulation_cannot_reach_runtime_content_or_retail(self) -> None:
-        for include in (
-            "omega/runtime/frame_scheduler.h",
-            "omega/content/game_data_service.h",
-            "omega/retail/pop_level_manifest_decoder.h",
-        ):
-            with self.subTest(include=include):
-                _, errors = self.check_source(
-                    "native/src/simulation/example.cpp", f'#include "{include}"\n'
-                )
-                self.assertEqual(len(errors), 1)
-                self.assertIn("omega_simulation includes forbidden dependency", errors[0])
-
-    def test_platform_headers_are_rejected_from_neutral_modules(self) -> None:
-        for include in (
+    def test_platform_neutral_modules_reject_unapproved_external_headers(self) -> None:
+        headers = (
             "SDL3/SDL.h",
             "windows.h",
+            "winsock2.h",
             "d3d12.h",
             "DirectXMath.h",
             "vulkan/vulkan.h",
             "Metal/Metal.h",
-        ):
-            with self.subTest(include=include):
-                _, errors = self.check_source(
-                    "native/include/omega/simulation/example.h", f"#include <{include}>\n"
-                )
-                self.assertEqual(len(errors), 1)
-                self.assertIn("includes platform header", errors[0])
-
-    def test_sdl_leaf_accepts_sdl_but_not_retail(self) -> None:
+            "X11/Xlib.h",
+            "GL/gl.h",
+            "unistd.h",
+            "pthread.h",
+        )
+        source = "".join(f"#include <{header}>\n" for header in headers)
         checked, errors = self.check_source(
-            "native/apps/openomega/sdl_example.cpp",
-            "#include <SDL3/SDL.h>\n#include \"omega/runtime/render_frame_packet.h\"\n",
+            "native/include/omega/simulation/example.h", source
+        )
+        self.assertEqual(checked, 1)
+        self.assertEqual(len(errors), len(headers), errors)
+        self.assertTrue(
+            all("includes unapproved external header" in error for error in errors)
+        )
+
+    def test_bom_splices_comments_and_digraphs_cannot_hide_pcsx2(self) -> None:
+        cases: tuple[str | bytes, ...] = (
+            b'\xef\xbb\xbf#include "pcsx2/VMManager.h"\n',
+            '#inc\\\nlude "pcsx2/VMManager.h"\n',
+            '#include "pcsx2/\\\nVMManager.h"\n',
+            '#/**/include "pcsx2/VMManager.h"\n',
+            '%: include "pcsx2/VMManager.h"\n',
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                self.assert_rejected(
+                    "native/src/runtime/example.cpp",
+                    source,
+                    "includes forbidden PCSX2 header",
+                )
+
+    def test_comments_strings_and_raw_strings_do_not_create_false_includes(self) -> None:
+        source = r'''
+// #include "pcsx2/VMManager.h"
+/*
+#include "pcsx2/VMManager.h"
+import forbidden.module;
+*/
+constexpr auto ordinary = "#include \"pcsx2/VMManager.h\"";
+constexpr auto raw = R"tag(
+#include "pcsx2/VMManager.h"
+export module forbidden.module;
+)tag";
+constexpr int separated = 1'048'576;
+'''
+        checked, errors = self.check_source(
+            "native/src/runtime/example.cpp", source
         )
         self.assertEqual(checked, 1)
         self.assertEqual(errors, [])
 
-        _, errors = self.check_source(
-            "native/apps/openomega/sdl_example.cpp",
-            '#include "omega/retail/vum_render_payload_descriptor.h"\n',
+    def test_nonliteral_and_malformed_include_operands_fail_closed(self) -> None:
+        cases = (
+            ('#define HEADER "vector"\n#include HEADER\n', "non-literal include"),
+            ('#include MAKE_HEADER("vector")\n', "non-literal include"),
+            ('#include_next HEADER\n', "non-literal include"),
+            ('#include <vector> trailing\n', "tokens after a literal include"),
+            ('#include "unterminated\n', "unterminated quoted literal"),
         )
-        self.assertEqual(len(errors), 1)
-        self.assertIn("omega_sdl_backend includes forbidden dependency", errors[0])
+        for source, message in cases:
+            with self.subTest(source=source):
+                self.assert_rejected(
+                    "native/src/runtime/example.cpp", source, message
+                )
 
-    def test_pcsx2_headers_are_rejected_from_shipping_modules(self) -> None:
+    def test_include_paths_must_be_canonical_and_relative(self) -> None:
+        cases = (
+            ("omega/runtime/../retail/example.h", "dot include-path segments"),
+            ("../../include/omega/retail/example.h", "dot include-path segments"),
+            ("Omega/Retail/example.h", "canonical lowercase"),
+            (r"omega\retail\example.h", "backslashes"),
+            ("/omega/runtime/example.h", "absolute include paths"),
+            ("C:/omega/runtime/example.h", "absolute include paths"),
+            ("omega//runtime/example.h", "empty or dot include-path segments"),
+            ("omega/runtime/example.h ", "non-canonical include path"),
+            ("omega/unknown/example.h", "unclassified project include"),
+        )
+        for include, message in cases:
+            with self.subTest(include=include):
+                self.assert_rejected(
+                    "native/src/runtime/example.cpp",
+                    f'#include "{include}"\n',
+                    message,
+                )
+
+    def test_pcsx2_ban_is_global_and_casefolded(self) -> None:
+        cases = (
+            ("native/src/archive/example.cpp", "PCSX2/VMManager.h"),
+            ("native/tests/example.cpp", "PcSx2/VMManager.h"),
+            ("native/apps/omega_tool/example.cpp", r"pcsx2\VMManager.h"),
+        )
+        for relative_path, include in cases:
+            with self.subTest(relative_path=relative_path, include=include):
+                self.assert_rejected(
+                    relative_path,
+                    f'#include "{include}"\n',
+                    "includes forbidden PCSX2 header",
+                )
+
+    def test_tests_and_tools_are_scanned_but_do_not_receive_shipping_edges(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/tests/example.cpp": '#include "omega/retail/example.h"\n',
+                "native/apps/omega_tool/example.cpp": '#include "omega/simulation/example.h"\n',
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(errors, [])
+
+    def test_source_fragments_are_scanned(self) -> None:
+        for suffix in (".inc", ".inl", ".ipp", ".tpp", ".def"):
+            with self.subTest(suffix=suffix):
+                self.assert_rejected(
+                    f"native/src/runtime/example{suffix}",
+                    '#include "pcsx2/VMManager.h"\n',
+                    "includes forbidden PCSX2 header",
+                )
+
+    def test_cpp_module_source_suffixes_are_rejected(self) -> None:
+        for suffix in (".ccm", ".cppm", ".cxxm", ".ixx", ".mpp", ".mxx"):
+            with self.subTest(suffix=suffix):
+                self.assert_rejected(
+                    f"native/src/runtime/example{suffix}",
+                    "export module example;\n",
+                    "C++ module source suffix is unsupported",
+                )
+
+    def test_cpp_module_and_import_syntax_is_rejected(self) -> None:
+        cases = (
+            ("import example;\n", "C++ module imports"),
+            ("export import example;\n", "C++ module imports"),
+            ("import <vector>;\n", "C++ module imports"),
+            ("module;\n", "C++ module declarations"),
+            ("export module example;\n", "C++ module declarations"),
+            ('#import "example.h"\n', "preprocessor imports"),
+        )
+        for source, message in cases:
+            with self.subTest(source=source):
+                self.assert_rejected(
+                    "native/src/runtime/example.cpp", source, message
+                )
+
+    def test_unmapped_shipping_source_paths_fail_closed(self) -> None:
         for relative_path in (
-            "native/src/archive/example.cpp",
-            "native/src/retail/example.cpp",
-            "native/src/content/example.cpp",
-            "native/src/runtime/example.cpp",
-            "native/apps/openomega/sdl_example.cpp",
+            "native/src/new_module/example.cpp",
+            "native/include/omega/new_module/example.h",
+            "native/apps/new_app/example.cpp",
         ):
             with self.subTest(relative_path=relative_path):
-                _, errors = self.check_source(relative_path, '#include "pcsx2/VMManager.h"\n')
-                self.assertEqual(len(errors), 1)
-                self.assertIn("includes forbidden PCSX2 header", errors[0])
+                self.assert_rejected(
+                    relative_path,
+                    "constexpr int example = 0;\n",
+                    "unclassified shipping native source path",
+                )
 
-    def test_content_can_use_retail_adapter_but_not_reverse_dependency(self) -> None:
+    def test_unknown_file_types_in_shipping_modules_fail_closed(self) -> None:
         checked, errors = self.check_source(
-            "native/src/content/example.cpp",
-            '#include "omega/retail/pop_level_manifest_decoder.h"\n',
-        )
-        self.assertEqual(checked, 1)
-        self.assertEqual(errors, [])
-
-        _, errors = self.check_source(
-            "native/src/retail/example.cpp",
-            '#include "omega/content/game_data_service.h"\n',
-        )
-        self.assertEqual(len(errors), 1)
-        self.assertIn("omega_retail_formats includes forbidden dependency", errors[0])
-
-    def test_comments_and_tools_are_outside_the_shipping_gate(self) -> None:
-        checked, errors = self.check_source(
-            "native/apps/omega_tool/example.cpp",
-            '// #include "omega/retail/example.h"\n#include "omega/retail/example.h"\n',
+            "native/src/runtime/example.generated", "opaque\n"
         )
         self.assertEqual(checked, 0)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("unsupported file type", errors[0])
+
+    def test_unresolved_local_shipping_headers_fail_closed(self) -> None:
+        self.assert_rejected(
+            "native/src/runtime/example.cpp",
+            '#include "missing_local_header.h"\n',
+            "includes unresolved local header",
+        )
+
+    def test_resolved_local_headers_follow_module_edges(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/src/runtime/example.cpp": '#include "example_internal.h"\n',
+                "native/src/runtime/example_internal.h": "#pragma once\n",
+            }
+        )
+        self.assertEqual(checked, 2)
         self.assertEqual(errors, [])
+
+    def test_link_like_source_entries_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "native/src/runtime/example.cpp"
+            path.parent.mkdir(parents=True)
+            path.write_text("constexpr int example = 0;\n", encoding="utf-8")
+            original = gate._path_is_link_like
+
+            def mark_source_as_link(candidate: Path, value: os.stat_result) -> bool:
+                return candidate == path or original(candidate, value)
+
+            with mock.patch.object(
+                gate, "_path_is_link_like", side_effect=mark_source_as_link
+            ):
+                checked, errors = gate.check_tree(root)
+        self.assertEqual(checked, 0)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("unsafe or special native file entry", errors[0])
+
+    def test_reparse_attribute_is_treated_as_link_like(self) -> None:
+        value = mock.Mock(
+            st_mode=stat.S_IFREG | 0o644,
+            st_file_attributes=gate._REPARSE_POINT_ATTRIBUTE,
+        )
+        self.assertTrue(gate._stat_is_reparse(value))
+        self.assertTrue(gate._path_is_link_like(Path("not-a-real-source.cpp"), value))
+
+    def test_special_source_entries_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "native/src/runtime/example.cpp"
+            path.parent.mkdir(parents=True)
+            path.write_text("constexpr int example = 0;\n", encoding="utf-8")
+            original = gate._safe_stat
+
+            def mark_source_as_fifo(candidate: Path) -> tuple[os.stat_result | None, str | None]:
+                value, error = original(candidate)
+                if candidate == path and value is not None:
+                    fields = list(value)
+                    fields[0] = stat.S_IFIFO | 0o644
+                    return os.stat_result(fields), error
+                return value, error
+
+            with mock.patch.object(gate, "_safe_stat", side_effect=mark_source_as_fifo):
+                checked, errors = gate.check_tree(root)
+        self.assertEqual(checked, 0)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("unsafe or special native file entry", errors[0])
+
+    def test_changed_source_snapshot_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "example.cpp"
+            path.write_text("constexpr int example = 0;\n", encoding="utf-8")
+            original_fstat = os.fstat
+
+            def changed_size(file_descriptor: int) -> os.stat_result:
+                value = original_fstat(file_descriptor)
+                fields = list(value)
+                fields[6] = value.st_size + 1
+                return os.stat_result(fields)
+
+            with mock.patch.object(gate.os, "fstat", side_effect=changed_size):
+                source, error = gate._read_source_stably(path)
+        self.assertIsNone(source)
+        self.assertEqual(error, "native source changed before opening")
 
     def test_missing_native_root_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

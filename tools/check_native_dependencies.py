@@ -1,201 +1,799 @@
 #!/usr/bin/env python3
-"""Enforce the native source dependency boundaries documented by the project."""
+"""Enforce native source dependency boundaries with fail-closed token scanning."""
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import stat
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
-SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
-INCLUDE_PATTERN = re.compile(r'^\s*#\s*include\s*[<"]([^">]+)[">]')
+SOURCE_SUFFIXES = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".h",
+    ".hh",
+    ".hpp",
+    ".hxx",
+    ".inc",
+    ".inl",
+    ".ipp",
+    ".tpp",
+    ".def",
+}
+MODULE_SUFFIXES = {".ccm", ".cppm", ".cxxm", ".ixx", ".mpp", ".mxx"}
+MAXIMUM_SOURCE_BYTES = 5 * 1024 * 1024
+
+_DIRECTIVE_PATTERN = re.compile(
+    r"^[ \t\v\f]*(?:#|%:)[ \t\v\f]*([A-Za-z_][A-Za-z_0-9]*)(.*)$"
+)
+_LINE_SPLICE_PATTERN = re.compile(r"\\(?:\r\n|\n|\r)")
+_MODULE_IMPORT_PATTERN = re.compile(
+    r"\bimport[ \t\v\f]+(?=[:<\"A-Za-z_])"
+)
+_MODULE_DECLARATION_PATTERN = re.compile(
+    r"(?:^|[;{}])[ \t\v\f]*(?:export[ \t\v\f]+)?module"
+    r"(?:[ \t\v\f]+(?=[:A-Za-z_])|[ \t\v\f]*;)"
+)
+_REPARSE_POINT_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
+# Platform-neutral modules accept only the standard C/C++ library headers in
+# this allowlist, canonical project headers, and same/allowed-module local
+# headers. Adding any external dependency therefore requires an explicit review.
+STANDARD_LIBRARY_HEADERS = frozenset(
+    {
+        "algorithm",
+        "any",
+        "array",
+        "assert.h",
+        "atomic",
+        "barrier",
+        "bit",
+        "bitset",
+        "cassert",
+        "cctype",
+        "cerrno",
+        "cfenv",
+        "cfloat",
+        "charconv",
+        "chrono",
+        "cinttypes",
+        "ciso646",
+        "climits",
+        "clocale",
+        "cmath",
+        "codecvt",
+        "compare",
+        "complex",
+        "concepts",
+        "condition_variable",
+        "coroutine",
+        "csetjmp",
+        "csignal",
+        "cstdarg",
+        "cstddef",
+        "cstdint",
+        "cstdio",
+        "cstdlib",
+        "cstring",
+        "ctime",
+        "cuchar",
+        "cwchar",
+        "cwctype",
+        "deque",
+        "errno.h",
+        "exception",
+        "execution",
+        "expected",
+        "fenv.h",
+        "filesystem",
+        "float.h",
+        "format",
+        "forward_list",
+        "fstream",
+        "functional",
+        "future",
+        "generator",
+        "initializer_list",
+        "iomanip",
+        "ios",
+        "iosfwd",
+        "iostream",
+        "istream",
+        "iterator",
+        "latch",
+        "limits",
+        "limits.h",
+        "list",
+        "locale",
+        "locale.h",
+        "map",
+        "math.h",
+        "mdspan",
+        "memory",
+        "memory_resource",
+        "mutex",
+        "new",
+        "numbers",
+        "numeric",
+        "optional",
+        "ostream",
+        "print",
+        "queue",
+        "random",
+        "ranges",
+        "ratio",
+        "regex",
+        "scoped_allocator",
+        "semaphore",
+        "set",
+        "setjmp.h",
+        "shared_mutex",
+        "signal.h",
+        "source_location",
+        "span",
+        "spanstream",
+        "sstream",
+        "stack",
+        "stacktrace",
+        "stdarg.h",
+        "stdexcept",
+        "stddef.h",
+        "stdfloat",
+        "stdint.h",
+        "stdio.h",
+        "stdlib.h",
+        "stop_token",
+        "streambuf",
+        "string",
+        "string.h",
+        "string_view",
+        "syncstream",
+        "system_error",
+        "thread",
+        "time.h",
+        "tuple",
+        "type_traits",
+        "typeindex",
+        "typeinfo",
+        "uchar.h",
+        "unordered_map",
+        "unordered_set",
+        "utility",
+        "valarray",
+        "variant",
+        "vector",
+        "version",
+        "wchar.h",
+        "wctype.h",
+    }
+)
 
 
 @dataclass(frozen=True)
 class ModuleRule:
     path_prefix: str
     name: str
-    forbidden_omega_prefixes: tuple[str, ...]
+    allowed_omega_modules: frozenset[str]
     platform_neutral: bool = False
 
 
-# Longest path prefixes must come first. Tests and omega_tool intentionally sit
-# outside this table: they are verification/inspection clients rather than
-# shipping runtime libraries.
+_CORE_EDGES = frozenset({"omega_core", "omega_assets"})
+_ASSET_EDGES = frozenset({"omega_assets"})
+_SIMULATION_EDGES = frozenset({"omega_simulation", "omega_assets", "omega_core"})
+_RETAIL_EDGES = frozenset({"omega_retail_formats", "omega_assets", "omega_core"})
+_CONTENT_EDGES = frozenset(
+    {"omega_content", "omega_retail_formats", "omega_assets", "omega_core"}
+)
+_RUNTIME_EDGES = frozenset(
+    {"omega_runtime", "omega_content", "omega_assets", "omega_core"}
+)
+_SDL_EDGES = frozenset({"omega_sdl_backend", "omega_runtime"})
+_APP_EDGES = frozenset(
+    {"openomega", "omega_sdl_backend", "omega_runtime", "omega_simulation"}
+)
+
+
+# Longest prefixes must come first. Tests and omega_tool receive global lexical,
+# path, module-syntax, PCSX2, and filesystem safety checks, but intentionally do
+# not receive shipping-library module-edge restrictions.
 MODULE_RULES = (
-    ModuleRule(
-        "native/apps/openomega/sdl_",
-        "omega_sdl_backend",
-        ("omega/retail/",),
-    ),
-    ModuleRule(
-        "native/apps/openomega/",
-        "openomega",
-        ("omega/retail/",),
-    ),
+    ModuleRule("native/apps/openomega/sdl_", "omega_sdl_backend", _SDL_EDGES),
+    ModuleRule("native/apps/openomega/", "openomega", _APP_EDGES),
     ModuleRule(
         "native/include/omega/simulation/",
         "omega_simulation",
-        ("omega/content/", "omega/retail/", "omega/runtime/"),
+        _SIMULATION_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
         "native/src/simulation/",
         "omega_simulation",
-        ("omega/content/", "omega/retail/", "omega/runtime/"),
+        _SIMULATION_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
         "native/include/omega/runtime/",
         "omega_runtime",
-        ("omega/retail/",),
+        _RUNTIME_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
         "native/src/runtime/",
         "omega_runtime",
-        ("omega/retail/",),
+        _RUNTIME_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
         "native/include/omega/content/",
         "omega_content",
-        ("omega/runtime/", "omega/simulation/"),
+        _CONTENT_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
         "native/src/content/",
         "omega_content",
-        ("omega/runtime/", "omega/simulation/"),
+        _CONTENT_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
         "native/include/omega/retail/",
         "omega_retail_formats",
-        ("omega/content/", "omega/runtime/", "omega/simulation/"),
+        _RETAIL_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
         "native/src/retail/",
         "omega_retail_formats",
-        ("omega/content/", "omega/runtime/", "omega/simulation/"),
+        _RETAIL_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
         "native/include/omega/asset/",
         "omega_assets",
-        ("omega/content/", "omega/retail/", "omega/runtime/", "omega/simulation/"),
+        _ASSET_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
         "native/include/omega/archive/",
         "omega_core",
-        ("omega/content/", "omega/retail/", "omega/runtime/", "omega/simulation/"),
+        _CORE_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
         "native/include/omega/vfs/",
         "omega_core",
-        ("omega/content/", "omega/retail/", "omega/runtime/", "omega/simulation/"),
+        _CORE_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
-        "native/src/archive/",
-        "omega_core",
-        ("omega/content/", "omega/retail/", "omega/runtime/", "omega/simulation/"),
-        platform_neutral=True,
+        "native/src/archive/", "omega_core", _CORE_EDGES, platform_neutral=True
     ),
     ModuleRule(
-        "native/src/asset/",
-        "omega_core",
-        ("omega/content/", "omega/retail/", "omega/runtime/", "omega/simulation/"),
-        platform_neutral=True,
+        "native/src/asset/", "omega_core", _CORE_EDGES, platform_neutral=True
     ),
     ModuleRule(
-        "native/src/vfs/",
-        "omega_core",
-        ("omega/content/", "omega/retail/", "omega/runtime/", "omega/simulation/"),
-        platform_neutral=True,
+        "native/src/vfs/", "omega_core", _CORE_EDGES, platform_neutral=True
     ),
 )
 
-PCSX2_INCLUDE_PATTERN = re.compile(r"(?:^|[/_-])pcsx2(?:[/_.-]|$)", re.IGNORECASE)
-PLATFORM_INCLUDE_PREFIXES = (
-    "sdl",
-    "windows.h",
-    "d3d",
-    "dxgi",
-    "directx",
-    "vulkan/",
-    "metal/",
-    "cocoa/",
+PROJECT_HEADER_MODULES = (
+    ("omega/simulation/", "omega_simulation"),
+    ("omega/runtime/", "omega_runtime"),
+    ("omega/content/", "omega_content"),
+    ("omega/retail/", "omega_retail_formats"),
+    ("omega/asset/", "omega_assets"),
+    ("omega/archive/", "omega_core"),
+    ("omega/vfs/", "omega_core"),
 )
+
+GLOBAL_ONLY_PREFIXES = ("native/tests/", "native/apps/omega_tool/")
+_RAW_STRING_PREFIXES = ("u8R\"", "uR\"", "UR\"", "LR\"", "R\"")
+
+
+@dataclass(frozen=True)
+class IncludeDirective:
+    line_number: int
+    delimiter: str
+    path: str
+
+
+@dataclass(frozen=True)
+class SourceScan:
+    includes: tuple[IncludeDirective, ...]
+    errors: tuple[tuple[int, str], ...]
+
+
+class SourceParseFailure(ValueError):
+    def __init__(self, line_number: int, message: str) -> None:
+        super().__init__(message)
+        self.line_number = line_number
+        self.message = message
 
 
 def module_rule(relative_path: Path) -> ModuleRule | None:
-    normalized = relative_path.as_posix()
+    normalized = relative_path.as_posix().casefold()
     for rule in MODULE_RULES:
         if normalized.startswith(rule.path_prefix):
             return rule
     return None
 
 
-def check_include(rule: ModuleRule, relative_path: Path, line_number: int, include: str) -> str | None:
-    if PCSX2_INCLUDE_PATTERN.search(include):
-        return (
-            f"{relative_path.as_posix()}:{line_number}: {rule.name} includes forbidden "
-            f"PCSX2 header <{include}>"
-        )
-    if any(include.startswith(prefix) for prefix in rule.forbidden_omega_prefixes):
-        return (
-            f"{relative_path.as_posix()}:{line_number}: {rule.name} includes forbidden "
-            f"dependency <{include}>"
-        )
-    include_lower = include.lower()
-    if rule.platform_neutral and any(
-        include_lower.startswith(prefix) for prefix in PLATFORM_INCLUDE_PREFIXES
+def _is_global_only(relative_path: Path) -> bool:
+    normalized = relative_path.as_posix().casefold()
+    return any(normalized.startswith(prefix) for prefix in GLOBAL_ONLY_PREFIXES)
+
+
+def _project_header_module(include_lower: str) -> str | None:
+    for prefix, module in PROJECT_HEADER_MODULES:
+        if include_lower.startswith(prefix):
+            return module
+    return None
+
+
+def _stat_is_reparse(value: os.stat_result) -> bool:
+    attributes = getattr(value, "st_file_attributes", 0) or 0
+    return bool(attributes & _REPARSE_POINT_ATTRIBUTE)
+
+
+def _path_is_link_like(path: Path, value: os.stat_result) -> bool:
+    is_junction = getattr(path, "is_junction", lambda: False)()
+    return stat.S_ISLNK(value.st_mode) or is_junction or _stat_is_reparse(value)
+
+
+def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    return (left.st_dev, left.st_ino) == (right.st_dev, right.st_ino)
+
+
+def _same_snapshot(left: os.stat_result, right: os.stat_result) -> bool:
+    # On Windows, pathlib/os.stat and fstat can expose slightly different
+    # st_ctime values for the same unchanged file handle.  Identity, kind,
+    # size, and last-write time are the stable cross-handle race boundary.
+    return (
+        _same_identity(left, right)
+        and left.st_mode == right.st_mode
+        and left.st_size == right.st_size
+        and left.st_mtime_ns == right.st_mtime_ns
+    )
+
+
+def _replace_non_newlines(buffer: list[str], start: int, end: int) -> None:
+    for index in range(start, end):
+        if buffer[index] not in "\r\n":
+            buffer[index] = " "
+
+
+def _is_digit_separator(source: str, index: int) -> bool:
+    """Return whether an apostrophe belongs to a preprocessing number."""
+    if (
+        source[index] != "'"
+        or index == 0
+        or index + 1 >= len(source)
+        or not source[index - 1].isalnum()
+        or not source[index + 1].isalnum()
     ):
-        return (
-            f"{relative_path.as_posix()}:{line_number}: {rule.name} includes platform header "
-            f"<{include}>"
+        return False
+    token_start = index - 1
+    while token_start > 0 and (
+        source[token_start - 1].isalnum() or source[token_start - 1] in "._"
+    ):
+        token_start -= 1
+    token = source[token_start:index]
+    return bool(token) and (
+        token[0].isdigit() or (token.startswith(".") and token[1:2].isdigit())
+    )
+
+
+def _raw_string_end(source: str, start: int, line_number: int) -> int | None:
+    if start and (source[start - 1].isalnum() or source[start - 1] == "_"):
+        return None
+    for prefix in _RAW_STRING_PREFIXES:
+        if not source.startswith(prefix, start):
+            continue
+        delimiter_start = start + len(prefix)
+        open_parenthesis = source.find("(", delimiter_start, delimiter_start + 17)
+        if open_parenthesis < 0:
+            continue
+        delimiter = source[delimiter_start:open_parenthesis]
+        if len(delimiter) > 16 or any(
+            character.isspace() or character in "()\\" for character in delimiter
+        ):
+            continue
+        terminator = ")" + delimiter + '"'
+        close = source.find(terminator, open_parenthesis + 1)
+        if close < 0:
+            raise SourceParseFailure(line_number, "unterminated raw string literal")
+        return close + len(terminator)
+    return None
+
+
+def _sanitize_source(source: str) -> str:
+    # Translation phase 2 removes escaped physical newlines before comments and
+    # preprocessing directives are recognized.
+    source = _LINE_SPLICE_PATTERN.sub("", source)
+    buffer = list(source)
+    index = 0
+    line_number = 1
+    while index < len(source):
+        if source.startswith("//", index):
+            end = source.find("\n", index + 2)
+            if end < 0:
+                end = len(source)
+            _replace_non_newlines(buffer, index, end)
+            index = end
+            continue
+        if source.startswith("/*", index):
+            end = source.find("*/", index + 2)
+            if end < 0:
+                raise SourceParseFailure(line_number, "unterminated block comment")
+            end += 2
+            _replace_non_newlines(buffer, index, end)
+            line_number += source.count("\n", index, end)
+            index = end
+            continue
+
+        raw_end = _raw_string_end(source, index, line_number)
+        if raw_end is not None:
+            _replace_non_newlines(buffer, index, raw_end)
+            line_number += source.count("\n", index, raw_end)
+            index = raw_end
+            continue
+
+        character = source[index]
+        if character == "'" and _is_digit_separator(source, index):
+            index += 1
+            continue
+        if character in {'"', "'"}:
+            quote = character
+            cursor = index + 1
+            while cursor < len(source):
+                if source[cursor] in "\r\n":
+                    raise SourceParseFailure(line_number, "unterminated quoted literal")
+                if source[cursor] == "\\":
+                    cursor += 2
+                    continue
+                if cursor < len(source) and source[cursor] == quote:
+                    cursor += 1
+                    break
+                cursor += 1
+            else:
+                raise SourceParseFailure(line_number, "unterminated quoted literal")
+            index = cursor
+            continue
+        if character == "\n":
+            line_number += 1
+        index += 1
+    return "".join(buffer)
+
+
+def _blank_ordinary_literals(line: str) -> str:
+    buffer = list(line)
+    index = 0
+    while index < len(line):
+        if line[index] == "'" and _is_digit_separator(line, index):
+            index += 1
+            continue
+        if line[index] not in {'"', "'"}:
+            index += 1
+            continue
+        quote = line[index]
+        cursor = index + 1
+        while cursor < len(line):
+            if line[cursor] == "\\":
+                cursor += 2
+                continue
+            if cursor < len(line) and line[cursor] == quote:
+                cursor += 1
+                break
+            cursor += 1
+        _replace_non_newlines(buffer, index, min(cursor, len(buffer)))
+        index = cursor
+    return "".join(buffer)
+
+
+def _parse_literal_include(body: str) -> tuple[str, str] | str:
+    operand = body.strip(" \t\v\f")
+    if not operand or operand[0] not in {'"', "<"}:
+        return "non-literal include operands are forbidden"
+    opener = operand[0]
+    closer = '"' if opener == '"' else ">"
+    close = operand.find(closer, 1)
+    if close < 0:
+        return "unterminated literal include operand"
+    include = operand[1:close]
+    if not include:
+        return "empty include paths are forbidden"
+    if operand[close + 1 :].strip(" \t\v\f"):
+        return "tokens after a literal include operand are forbidden"
+    return opener, include
+
+
+def scan_source(source: str) -> SourceScan:
+    try:
+        sanitized = _sanitize_source(source)
+    except SourceParseFailure as exc:
+        return SourceScan((), ((exc.line_number, exc.message),))
+
+    includes: list[IncludeDirective] = []
+    errors: list[tuple[int, str]] = []
+    for line_number, line in enumerate(sanitized.splitlines(), start=1):
+        directive = _DIRECTIVE_PATTERN.match(line)
+        if directive is not None:
+            name = directive.group(1)
+            if name in {"include", "include_next"}:
+                parsed = _parse_literal_include(directive.group(2))
+                if isinstance(parsed, str):
+                    errors.append((line_number, parsed))
+                else:
+                    delimiter, include = parsed
+                    includes.append(IncludeDirective(line_number, delimiter, include))
+            elif name == "import":
+                errors.append((line_number, "preprocessor imports are unsupported"))
+            continue
+
+        code = _blank_ordinary_literals(line)
+        if _MODULE_IMPORT_PATTERN.search(code):
+            errors.append((line_number, "C++ module imports are unsupported"))
+        if _MODULE_DECLARATION_PATTERN.search(code):
+            errors.append((line_number, "C++ module declarations are unsupported"))
+    return SourceScan(tuple(includes), tuple(errors))
+
+
+def _normalize_include_path(include: str) -> tuple[str, str, str | None]:
+    if not include or include != include.strip():
+        return include, include.casefold(), "non-canonical include path"
+    had_backslash = "\\" in include
+    normalized = include.replace("\\", "/")
+    lower = normalized.casefold()
+    if had_backslash:
+        return normalized, lower, "backslashes in include paths are forbidden"
+    if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
+        return normalized, lower, "absolute include paths are forbidden"
+    parts = normalized.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        return normalized, lower, "empty or dot include-path segments are forbidden"
+    return normalized, lower, None
+
+
+def _format_error(relative_path: Path, line_number: int, message: str) -> str:
+    return f"{relative_path.as_posix()}:{line_number}: {message}"
+
+
+def check_include(
+    rule: ModuleRule | None,
+    relative_path: Path,
+    line_number: int,
+    include: str,
+    *,
+    delimiter: str = '"',
+    root: Path | None = None,
+    source_path: Path | None = None,
+) -> str | None:
+    normalized, include_lower, path_error = _normalize_include_path(include)
+    if "pcsx2" in include_lower:
+        owner = rule.name if rule is not None else "native source"
+        return _format_error(
+            relative_path,
+            line_number,
+            f"{owner} includes forbidden PCSX2 header <{include}>",
+        )
+    if path_error is not None:
+        return _format_error(relative_path, line_number, path_error)
+
+    if include_lower.startswith("omega/"):
+        if normalized != include_lower:
+            return _format_error(
+                relative_path,
+                line_number,
+                "project include paths must use canonical lowercase spelling",
+            )
+        destination = _project_header_module(include_lower)
+        if destination is None:
+            return _format_error(
+                relative_path, line_number, f"unclassified project include <{include}>"
+            )
+        if rule is not None and destination not in rule.allowed_omega_modules:
+            return _format_error(
+                relative_path,
+                line_number,
+                f"{rule.name} includes forbidden dependency <{include}>",
+            )
+        return None
+
+    if delimiter == '"' and root is not None and source_path is not None:
+        local_path = source_path.parent.joinpath(*PurePosixPath(normalized).parts)
+        try:
+            local_relative = local_path.relative_to(root)
+        except ValueError:
+            return _format_error(
+                relative_path, line_number, "local include escapes the repository root"
+            )
+        if local_path.exists():
+            destination_rule = module_rule(local_relative)
+            if rule is not None:
+                if destination_rule is None:
+                    return _format_error(
+                        relative_path,
+                        line_number,
+                        f"{rule.name} includes an unclassified local dependency <{include}>",
+                    )
+                if destination_rule.name not in rule.allowed_omega_modules:
+                    return _format_error(
+                        relative_path,
+                        line_number,
+                        f"{rule.name} includes forbidden dependency <{include}>",
+                    )
+            return None
+        if rule is not None:
+            return _format_error(
+                relative_path,
+                line_number,
+                f"{rule.name} includes unresolved local header <{include}>",
+            )
+        return None
+
+    if rule is not None and rule.platform_neutral:
+        if delimiter == "<" and normalized in STANDARD_LIBRARY_HEADERS:
+            return None
+        return _format_error(
+            relative_path,
+            line_number,
+            f"{rule.name} includes unapproved external header <{include}>",
         )
     return None
+
+
+def _read_source_stably(path: Path) -> tuple[str | None, str | None]:
+    try:
+        before = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or _path_is_link_like(path, before):
+            return None, "native source is not a regular non-link file"
+        if before.st_size < 0 or before.st_size > MAXIMUM_SOURCE_BYTES:
+            return None, f"native source exceeds {MAXIMUM_SOURCE_BYTES} bytes"
+        with path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or _stat_is_reparse(opened)
+                or not _same_snapshot(before, opened)
+            ):
+                return None, "native source changed before opening"
+            data = stream.read(MAXIMUM_SOURCE_BYTES + 1)
+            final = os.fstat(stream.fileno())
+            if not _same_snapshot(opened, final):
+                return None, "native source changed while being read"
+        if len(data) > MAXIMUM_SOURCE_BYTES:
+            return None, f"native source exceeds {MAXIMUM_SOURCE_BYTES} bytes"
+        return data.decode("utf-8-sig"), None
+    except UnicodeDecodeError:
+        return None, "native source is not UTF-8 text"
+    except OSError:
+        return None, "native source could not be read safely"
 
 
 def check_file(root: Path, path: Path) -> list[str]:
     relative_path = path.relative_to(root)
     rule = module_rule(relative_path)
-    if rule is None:
-        return []
+    source, read_error = _read_source_stably(path)
+    if read_error is not None or source is None:
+        return [_format_error(relative_path, 1, read_error or "source read failed")]
 
-    errors: list[str] = []
-    with path.open("r", encoding="utf-8", newline="") as source:
-        for line_number, line in enumerate(source, start=1):
-            match = INCLUDE_PATTERN.match(line)
-            if match is None:
-                continue
-            error = check_include(rule, relative_path, line_number, match.group(1))
-            if error is not None:
-                errors.append(error)
+    scan = scan_source(source)
+    errors = [
+        _format_error(relative_path, line_number, message)
+        for line_number, message in scan.errors
+    ]
+    for include in scan.includes:
+        error = check_include(
+            rule,
+            relative_path,
+            include.line_number,
+            include.path,
+            delimiter=include.delimiter,
+            root=root,
+            source_path=path,
+        )
+        if error is not None:
+            errors.append(error)
     return errors
+
+
+def _safe_stat(path: Path) -> tuple[os.stat_result | None, str | None]:
+    try:
+        value = os.stat(path, follow_symlinks=False)
+        if _path_is_link_like(path, value):
+            return None, "links, junctions, and reparse points are forbidden under native/"
+    except OSError:
+        return None, "filesystem entry could not be inspected safely"
+    return value, None
 
 
 def check_tree(root: Path) -> tuple[int, list[str]]:
     native_root = root / "native"
-    if not native_root.is_dir():
-        return 0, [f"native source root is missing: {native_root}"]
+    native_stat, root_error = _safe_stat(native_root)
+    if root_error is not None or native_stat is None:
+        if not native_root.exists():
+            return 0, [f"native source root is missing: {native_root}"]
+        return 0, [f"native source root is unsafe: {native_root}"]
+    if not stat.S_ISDIR(native_stat.st_mode):
+        return 0, [f"native source root is not a directory: {native_root}"]
 
     checked = 0
     errors: list[str] = []
-    for path in sorted(native_root.rglob("*")):
-        if not path.is_file() or path.is_symlink() or path.suffix.lower() not in SOURCE_SUFFIXES:
-            continue
-        if module_rule(path.relative_to(root)) is None:
-            continue
-        checked += 1
-        errors.extend(check_file(root, path))
+
+    def raise_walk_error(error: OSError) -> None:
+        raise error
+
+    try:
+        for directory, subdirectories, filenames in os.walk(
+            native_root, topdown=True, onerror=raise_walk_error, followlinks=False
+        ):
+            directory_path = Path(directory)
+            directory_before, directory_error = _safe_stat(directory_path)
+            if directory_error is not None or directory_before is None:
+                errors.append(f"{directory_path.relative_to(root).as_posix()}: unsafe directory")
+                subdirectories[:] = []
+                continue
+
+            safe_subdirectories: list[str] = []
+            for name in sorted(subdirectories):
+                path = directory_path / name
+                value, entry_error = _safe_stat(path)
+                if entry_error is not None or value is None or not stat.S_ISDIR(value.st_mode):
+                    errors.append(
+                        f"{path.relative_to(root).as_posix()}: unsafe native directory entry"
+                    )
+                    continue
+                safe_subdirectories.append(name)
+            subdirectories[:] = safe_subdirectories
+
+            for name in sorted(filenames):
+                path = directory_path / name
+                relative_path = path.relative_to(root)
+                value, entry_error = _safe_stat(path)
+                if entry_error is not None or value is None or not stat.S_ISREG(value.st_mode):
+                    errors.append(
+                        f"{relative_path.as_posix()}: unsafe or special native file entry"
+                    )
+                    continue
+
+                suffix = path.suffix.casefold()
+                if suffix in MODULE_SUFFIXES:
+                    checked += 1
+                    errors.append(
+                        f"{relative_path.as_posix()}: C++ module source suffix is unsupported"
+                    )
+                    continue
+                if suffix in SOURCE_SUFFIXES:
+                    checked += 1
+                    if module_rule(relative_path) is None and not _is_global_only(relative_path):
+                        errors.append(
+                            f"{relative_path.as_posix()}: unclassified shipping native source path"
+                        )
+                    errors.extend(check_file(root, path))
+                    continue
+                if module_rule(relative_path) is not None:
+                    errors.append(
+                        f"{relative_path.as_posix()}: unsupported file type in a shipping native module"
+                    )
+
+            directory_after, final_error = _safe_stat(directory_path)
+            if (
+                final_error is not None
+                or directory_after is None
+                or not _same_snapshot(directory_before, directory_after)
+            ):
+                errors.append(
+                    f"{directory_path.relative_to(root).as_posix()}: native directory changed during scan"
+                )
+    except OSError:
+        errors.append("native source tree could not be traversed safely")
     return checked, errors
 
 
