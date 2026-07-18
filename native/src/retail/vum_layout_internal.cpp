@@ -261,9 +261,11 @@ asset::DecodeResult<VumPayloadLayout> ValidateVumPayloadLayout(
             ++t_count;
             const std::uint32_t target = ReadVumU32(record, 8);
             if (target <= record_offset ||
-                (target - materials_end) % kVumMetadataRecordBytes != 0)
+                !IsRecordStart(target, materials_end, metadata_end,
+                    static_cast<std::uint32_t>(kVumMetadataRecordBytes)))
                 return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
-                    "VUM metadata T record does not target a forward record", record_offset + 8U));
+                    "VUM metadata T record does not target a forward metadata record",
+                    record_offset + 8U));
             const auto target_record = bytes.subspan(target, kVumMetadataRecordBytes);
             if (ClassifyMetadataRecord(target_record, materials_end, metadata_end,
                     middle_payload_begin, final_payload_begin, primary_end) !=
