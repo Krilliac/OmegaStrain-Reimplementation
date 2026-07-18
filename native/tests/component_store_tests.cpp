@@ -505,12 +505,15 @@ int ComponentStoreFailureCount()
                 Check(tracked.has_value(), "the tracked component store constructs");
                 if (tracked)
                 {
-                    Check(tracked->Store(*lifecycle_registry, *entity, TrackedValue{17}) ==
-                              ComponentStoreWriteResult::Inserted &&
+                    const auto inserted =
+                        tracked->Store(*lifecycle_registry, *entity, TrackedValue{17});
+                    Check(inserted == ComponentStoreWriteResult::Inserted &&
                               TrackedValue::alive == 1,
                         "insertion retains exactly one owned component value");
-                    Check(tracked->Store(*lifecycle_registry, *entity, TrackedValue{23}) ==
-                              ComponentStoreWriteResult::Replaced && TrackedValue::alive == 1,
+                    const auto replaced_result =
+                        tracked->Store(*lifecycle_registry, *entity, TrackedValue{23});
+                    Check(replaced_result == ComponentStoreWriteResult::Replaced &&
+                              TrackedValue::alive == 1,
                         "replacement neither leaks nor duplicates component lifetime");
                     const TrackedValue* const replaced =
                         tracked->Find(*lifecycle_registry, *entity);
@@ -522,8 +525,9 @@ int ComponentStoreFailureCount()
                     moved.Clear();
                     Check(TrackedValue::alive == 0,
                         "clear deterministically destroys every retained component value");
-                    Check(moved.Store(*lifecycle_registry, *entity, TrackedValue{31}) ==
-                              ComponentStoreWriteResult::Inserted &&
+                    const auto reused =
+                        moved.Store(*lifecycle_registry, *entity, TrackedValue{31});
+                    Check(reused == ComponentStoreWriteResult::Inserted &&
                               TrackedValue::alive == 1,
                         "cleared startup storage remains reusable without lifetime imbalance");
                 }
