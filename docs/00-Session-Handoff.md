@@ -105,6 +105,17 @@ shipping dependencies or execution mechanisms.
     members under one shared operation budget. The C-only headless probe accepts all 18 levels and
     all 5,351 manifest cells with zero errors. Parallel spatial/material positions preserve source
     order and cardinality only; they assert no binding, placement, visibility, or render semantics.
+22. Bounded the former level-TDX topology question to its actual common-archive scope. The
+    aggregate scanner accepts all 18 runtime levels, 5,351 manifest cell occurrences, and 5,413
+    scanned DATA.HOG-graph directory occurrences with zero errors and finds zero normalized
+    `.TDX`-suffixed members. This extension-bounded negative result does not exclude another
+    representation or establish ownership or a texture-to-cell/material/mesh binding.
+23. Measured two explicit sibling texture-container classes separately. The direct-only scanner
+    accepts both roles for all 18 runtime levels: 36 exact containers and 5,801 direct TDX members
+    with zero errors, collisions, malformed textures, nested traversal, or non-TDX entries. The
+    generic classes contribute 5,765 and 36 occurrences. This establishes containment, not runtime
+    ownership or necessity; native composed budgets and every texture-to-material/cell/mesh/render
+    relationship remain open.
 
 ## Disc observations
 

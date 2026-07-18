@@ -37,6 +37,15 @@ incomplete.
 - TDX aggregate validation: 15,248/15,248 textures normalize to 15,442 owned blocks and 17,960
   primary planes containing 285,521,272 owned bytes, including 4,112 duplicate-proven implicit
   zero bytes, with zero errors.
+- Bounded common-archive containment scanning accepts all 18 runtime levels, 5,351 manifest cell
+  occurrences, and 5,413 scanned archive-directory occurrences with zero errors and finds zero
+  normalized `.TDX`-suffixed members. This extension-bounded result does not exclude another
+  representation or assign a texture owner or binding.
+- Direct sibling-container scanning accepts both explicit container classes for all 18 runtime
+  levels: 36 exact containers and 5,801 direct TDX members with zero errors, collisions, malformed
+  textures, nested traversal, or non-TDX entries. The role classes contribute 5,765 and 36
+  occurrences; containment establishes neither runtime ownership nor a texture-to-material/cell/
+  mesh relationship. Exact native composed Open/Load item and output maxima remain pending.
 - Aggregate-only TDX coherence scoring accepts the same 15,248 spans and nominates low-nibble-first
   for direct four-bit `0x14` planes and the bit-3/bit-4 palette permutation for direct eight-bit
   `0x13` planes. The content-dependent scores are hypotheses, not display-layout semantics.

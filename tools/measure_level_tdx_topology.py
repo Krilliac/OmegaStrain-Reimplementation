@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Measure level-scoped TDX archive topology without exporting retail identity.
+"""Measure extension-bounded TDX containment in the common level archive graph.
 
 The report is deliberately fixed-schema and aggregate-only.  It never emits
 paths, archive/member names, hashes, payload bytes, per-level rows, or inferred
-catalog/material bindings.  Archive containment is the only relationship this
-tool measures.
+catalog/material bindings.  It scans each level's complete recursive common
+DATA.HOG graph.  DATA.POP references designate cell-container occurrences for
+separate accounting; they do not bound common-graph traversal.  Candidates are
+recognized only by a normalized ``.TDX`` suffix, and sibling texture containers
+are excluded.  Archive containment is the only relationship this tool measures.
 
 Exact runtime logical-output and item budgets are intentionally not reported:
-this Python scan does not execute the native measured TDX decoder or observe its
-ABI, and LevelTextureStore is not yet implemented.  Fixed ``measurement_gaps``
-flags keep those absent metrics explicit without guessing ABI-dependent
-``sizeof`` values.
+this Python scan does not execute the native measured TDX decoder or the native
+level-texture runtime path, and it does not observe C++ object sizes.  Fixed
+``measurement_gaps`` flags keep those absent metrics explicit without guessing
+ABI-dependent ``sizeof`` values.
 """
 
 from __future__ import annotations
@@ -268,8 +271,11 @@ class Aggregate:
         return {
             "schema_version": 1,
             "scope": (
-                "fixed aggregate level TDX containment topology only; no paths, names, "
-                "hashes, payloads, per-level rows, or catalog bindings"
+                "fixed aggregate extension-bounded containment of normalized "
+                ".TDX-suffixed members in the recursive common DATA.HOG graph, with "
+                "manifest-designated cell-occurrence accounting from DATA.POP; sibling "
+                "texture containers are excluded; no paths, names, hashes, payloads, "
+                "per-level rows, or catalog bindings"
             ),
             "totals": totals,
             "maxima": {key: int(self.maxima[key]) for key in MAXIMUM_FIELDS},

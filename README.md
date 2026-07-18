@@ -44,6 +44,15 @@ retail instruction blocks, or PS2 execution layer.
   15,442 source-order blocks, 17,960 primary planes, 285,521,272 primary bytes, 15,190 palette
   blocks, and zero errors. It normalizes 4,112 duplicate-proven implicit zero bytes without
   guessing pixel or channel layout.
+- A bounded common-archive containment scan accepts all 18 runtime levels, 5,351 manifest cell
+  occurrences, and 5,413 scanned archive-directory occurrences with zero errors and finds zero
+  normalized `.TDX`-suffixed members. This extension-bounded negative result does not exclude
+  embedded texture data or assign ownership or a texture-to-cell/material/mesh relationship.
+- A separate direct-only scan accepts both explicit sibling container classes for every
+  runtime level: 36/36 exact containers and 5,801/5,801 direct TDX members with zero errors,
+  collisions, malformed textures, nested traversal, or non-TDX members. The two role classes
+  contribute 5,765 and 36 occurrences; containment establishes neither runtime ownership nor a
+  texture-to-material/cell/mesh binding.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
