@@ -14,6 +14,8 @@ struct ObservedByteRange
 {
     std::uint64_t offset = 0;
     std::uint64_t size = 0;
+
+    bool operator==(const ObservedByteRange&) const = default;
 };
 
 enum class ObservedExtentRelation

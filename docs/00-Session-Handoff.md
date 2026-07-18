@@ -53,11 +53,11 @@ shipping dependencies or execution mechanisms.
     bytes, and packed sample families without claiming display-ready pixels. Aggregate verification
     covers 15,248 textures, 15,442 blocks, 17,960 primary planes, 285,521,272 owned primary bytes,
     and 4,112 duplicate-proven implicit zero bytes with zero errors.
-14. Added an owned VUM material catalog and bounded post-material metadata validator. Aggregate
-    verification covers 7,036 catalogs, 38,793 names, 38,899 materials, 42,631 dense name
-    references, and 220,943 validated-and-discarded P/Q/T metadata records with zero errors. Render
-    payload bodies, topology, vertex attributes, usage-code meaning, and material binding remain
-    unassigned.
+14. Added an owned VUM material catalog plus a separate retail-only passive render-payload
+    descriptor. Aggregate verification covers 7,036 catalogs, 38,793 names, 38,899 materials,
+    42,631 dense name references, 91,460 Q/P pairs, 38,023 normalized T targets, 134,122
+    middle-to-final references, and 365,840 ordered Q/P final references with zero errors. Payload
+    bytes, topology, vertex attributes, usage-code meaning, and material binding remain unassigned.
 
 ## Disc observations
 
@@ -79,8 +79,9 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Continue VUM render-payload research from the proven P/Q/T boundaries; establish positions,
-   topology, and material binding before adding render-mesh IR.
+1. Trace the retail VUM consumer at the aggregate byte-read level: record only VUM-relative read
+   offsets, widths, loop counts, and output counts. Establish positions, topology, and material
+   binding independently before adding render-mesh IR; do not retain instructions or payload bytes.
 2. Validate TDX swizzle, nibble order, palette permutation, and channel expansion independently
    before producing display-ready pixels or GPU uploads.
 3. Continue POP after the validated terrain prefix, beginning with placement and visibility data.

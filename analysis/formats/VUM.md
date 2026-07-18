@@ -4,9 +4,10 @@
 
 This document records aggregate structural contracts independently reproduced across the owned
 NTSC-U corpus. It contains no retail payload bytes, names, paths, code, or executable
-instructions. The native adapter currently exposes only the proven material/name relationship.
-Geometry packets, vertex attributes, topology, transforms, material parameters, texture binding,
-and the optional trailing region remain unassigned.
+instructions. Native adapters expose the proven material/name relationship plus a separate
+retail-only passive render-payload descriptor. Geometry packets, vertex attributes, topology,
+transforms, material parameters, texture binding, and the optional trailing region remain
+unassigned.
 
 State: **confirmed** for all 7,036 observed VUM spans.
 
@@ -79,8 +80,41 @@ records in three structurally distinct families:
 Per file there are exactly `n` P, `n` Q, and `m` T records. T records form one contiguous block;
 removing that block leaves exact `Q,P,Q,P,...` ordering. Q middle-payload references start at
 payload boundary A, increase strictly, and partition that region into subspans of 16, 256, 480, or
-704 bytes. These are validated as passive boundaries and relationships only. Opaque record words
-and both payload bodies are discarded at the adapter boundary.
+704 bytes. Every T record targets a distinct forward Q record, target order is strictly
+increasing, and no Q is targeted more than once.
+
+Each Q/P pair contributes four strictly increasing references into the final payload, in the
+observed order Q fourth word, then P first, third, and fourth words. The ordering continues across
+adjacent pairs, so all 365,840 such references are unique within their source asset. The final
+reference leaves exactly 4, 8, 12, or 16 bytes before the primary endpoint. These are validated as
+passive references and relationships only; their rendering and target meanings remain unassigned.
+
+## Middle- and final-payload evidence
+
+Across all 91,460 Q partitions, middle-payload span sizes are distributed as follows:
+
+| Bytes | Count | Structural group value |
+| ---: | ---: | ---: |
+| 16 | 48,798 | compact family |
+| 256 | 35,408 | 1 |
+| 480 | 3,556 | 2 |
+| 704 | 3,698 | 3 |
+
+Every grouped size follows `32 + 224 * group`, for group values one through three. In every
+nonempty file, the set of those group values exactly equals the set of active-name counts in its
+MTRL records. This is a file-level structural correlation only; no per-pair material binding has
+been established.
+
+Compact spans contain one final-payload reference at relative byte 4. Grouped spans contain two
+at relative bytes 116 and 244. All 134,122 are 16-byte aligned, strictly inside the final payload,
+unique within their file, and disjoint from the four Q/P references. The complete per-pair order
+is `compact-reference, Q, P0, P2, P3` for compact spans and
+`grouped-reference-0, Q, P0, grouped-reference-1, P2, P3` for grouped spans. This combined order
+continues strictly across pairs, and its first reference is always 16 bytes into the final region.
+
+Q/P references partition the remainder into variable-width sections, but their contents remain
+unassigned. Q span size does not determine the matching final-region envelope, and Q/P opaque
+words do not form simple material-index ranges.
 
 ## Canonical adapter
 
@@ -96,12 +130,32 @@ preflights the exact logical output and root/name/material item counts before al
 name is independently bounded by `maximum_string_bytes`. Parsing needs no dynamic scratch
 storage. Unsupported reserved layouts and characters fail closed.
 
+## Passive render-payload descriptor
+
+`InspectVumRenderPayload` returns an owned retail-only `VumRenderPayloadDescriptor`. It preserves
+the three bounded regions, source-order Q/P pairs, each pair's middle-payload byte count and
+neutral group count, all middle-to-final references, the four Q/P final-region-relative
+references, and source-order T targets normalized to pair ordinals.
+
+It retains no input span or payload byte and exposes no packet word, opcode, register,
+microprogram, renderer object, vertex, index, triangle, draw, or material assignment. The
+descriptor remains under `omega::retail`; renderer and simulation code must not include it. It is
+evidence scaffolding for the next clean-room proof, not canonical asset IR. The inspector
+preflights source records, normalized relationships, output vectors, and arithmetic before
+allocation and needs zero dynamic scratch.
+
 ## Render geometry gate
 
 The two payload boundaries split the post-record primary region into three bounded, nonnegative,
 16-byte-aligned sections. The metadata-record region now has the exact contract above, but no
 all-corpus header-only formula determines the middle or final payload byte length. Whole-region
 float and fixed-stride tests also do not support interpreting either payload as a flat vertex table.
+
+The flat-position hypothesis fails decisively: none of 884,718 middle-region 16-byte candidates
+has a homogeneous position word. No tested final-region fixed-stride family covers the corpus;
+the best 16-byte candidate reaches exact header extrema in only 5,411 of 6,517 nonempty files.
+The paired COL mesh is not a substitute either: only two of 4,320 nonempty COL/VUM siblings have
+equal bounds, and only 105 of 949,762 COL vertices recur in any paired final payload.
 
 A future native render adapter will emit only owned positions and triangle indices after packet
 topology and position semantics are independently proven. It will not expose or execute MIPS,
@@ -118,10 +172,13 @@ build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-dis
 ```
 
 The confirmed baseline is 7,036 catalogs, 38,793 owned names, 38,899 material records, 42,631
-dense name references, and zero errors. The same pass validates all 220,943 P/Q/T metadata records
-before discarding their opaque words and payload references.
+dense name references, 91,460 passive payload pairs, 38,023 normalized T targets, 134,122
+middle-to-final references, 365,840 ordered Q/P final references, and zero errors. The same pass
+validates all 220,943 P/Q/T metadata records without retaining payload bytes or opaque words.
 
 Synthetic regressions cover ownership, opaque-field immunity, nonzero trailing data, truncation,
 boundary order/alignment, count/extent contradictions, string grammar and limits, fixed-record
-magic/reserved bytes, dense name-reference families and bounds, P/Q/T metadata relationships, and
+magic/reserved bytes, dense name-reference families and bounds, P/Q/T metadata relationships,
+midstream target-block normalization, duplicate/decreasing targets, middle-span families,
+combined reference ordering, final suffix size, the empty family, hostile counts, and
 exact/one-below input, item, and output budgets.

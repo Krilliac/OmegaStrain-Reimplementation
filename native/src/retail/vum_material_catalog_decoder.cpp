@@ -1,5 +1,7 @@
 #include "omega/retail/vum_material_catalog_decoder.h"
 
+#include "vum_layout_internal.h"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -13,20 +15,9 @@ namespace omega::retail
 {
 namespace
 {
-constexpr std::uint64_t kHeaderBytes = 92;
-constexpr std::uint64_t kPreambleFixedBytes = 20;
-constexpr std::uint64_t kNameRegionOffset = kHeaderBytes + kPreambleFixedBytes;
-constexpr std::uint64_t kMaterialRecordBytes = 92;
-constexpr std::uint64_t kMetadataRecordBytes = 16;
+constexpr std::uint64_t kNameRegionOffset = detail::kVumNameRegionOffset;
+constexpr std::uint64_t kMaterialRecordBytes = detail::kVumMaterialRecordBytes;
 constexpr std::uint32_t kInactiveWord = 0xFFFFFFFFU;
-
-enum class MetadataRecordKind
-{
-    P,
-    Q,
-    T,
-    Unknown,
-};
 
 struct CatalogLayout
 {
@@ -48,10 +39,7 @@ struct CatalogLayout
 [[nodiscard]] std::uint32_t ReadU32(
     const std::span<const std::byte> bytes, const std::size_t offset) noexcept
 {
-    return std::to_integer<std::uint32_t>(bytes[offset]) |
-           (std::to_integer<std::uint32_t>(bytes[offset + 1]) << 8U) |
-           (std::to_integer<std::uint32_t>(bytes[offset + 2]) << 16U) |
-           (std::to_integer<std::uint32_t>(bytes[offset + 3]) << 24U);
+    return detail::ReadVumU32(bytes, offset);
 }
 
 [[nodiscard]] float ReadF32(
@@ -91,165 +79,6 @@ struct CatalogLayout
     return {};
 }
 
-[[nodiscard]] bool InRangeAligned(const std::uint32_t value, const std::uint32_t begin,
-    const std::uint32_t end, const std::uint32_t alignment) noexcept
-{
-    return value >= begin && value < end && value % alignment == 0;
-}
-
-[[nodiscard]] bool StrictlyInsideAligned(const std::uint32_t value,
-    const std::uint32_t begin, const std::uint32_t end,
-    const std::uint32_t alignment) noexcept
-{
-    return value > begin && value < end && value % alignment == 0;
-}
-
-[[nodiscard]] bool IsRecordStart(const std::uint32_t value, const std::uint32_t begin,
-    const std::uint32_t end, const std::uint32_t stride) noexcept
-{
-    return value >= begin && value < end && (value - begin) % stride == 0;
-}
-
-[[nodiscard]] MetadataRecordKind ClassifyMetadataRecord(
-    const std::span<const std::byte> record, const std::uint32_t metadata_begin,
-    const std::uint32_t metadata_end, const std::uint32_t payload_a,
-    const std::uint32_t payload_b, const std::uint32_t primary_end) noexcept
-{
-    const std::array<std::uint32_t, 4> words{
-        ReadU32(record, 0), ReadU32(record, 4), ReadU32(record, 8), ReadU32(record, 12)};
-    if (IsRecordStart(words[2], metadata_begin, metadata_end, 16))
-        return MetadataRecordKind::T;
-    if (InRangeAligned(words[1], payload_a, payload_b, 16) &&
-        StrictlyInsideAligned(words[3], payload_b, primary_end, 4))
-        return MetadataRecordKind::Q;
-    if (StrictlyInsideAligned(words[0], payload_b, primary_end, 4) &&
-        StrictlyInsideAligned(words[2], payload_b, primary_end, 4) &&
-        StrictlyInsideAligned(words[3], payload_b, primary_end, 4))
-        return MetadataRecordKind::P;
-    return MetadataRecordKind::Unknown;
-}
-
-[[nodiscard]] bool IsObservedQSpan(const std::uint32_t bytes) noexcept
-{
-    return bytes == 16 || bytes == 256 || bytes == 480 || bytes == 704;
-}
-
-[[nodiscard]] asset::DecodeResult<std::uint64_t> ValidatePayloadMetadata(
-    const std::span<const std::byte> bytes, const std::uint32_t materials_end,
-    const std::uint32_t payload_a, const std::uint32_t payload_b,
-    const std::uint32_t primary_end)
-{
-    const std::uint32_t paired_count_word = ReadU32(bytes, 12);
-    const std::uint32_t target_count = ReadU32(bytes, 16);
-    if (paired_count_word == 0 || paired_count_word % 2U == 0)
-        return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-            "VUM metadata paired-record count is outside the observed odd family", 12));
-    const std::uint64_t pair_count = (paired_count_word - 1U) / 2U;
-    std::uint64_t metadata_record_count = 0;
-    if (!Add(pair_count * 2U, target_count, metadata_record_count))
-        return std::unexpected(Error(asset::DecodeErrorCode::Overflow,
-            "VUM metadata record count overflows", 12));
-    std::uint64_t metadata_bytes = 0;
-    std::uint64_t metadata_end_u64 = 0;
-    if (!Multiply(metadata_record_count, kMetadataRecordBytes, metadata_bytes) ||
-        !Add(materials_end, metadata_bytes, metadata_end_u64) ||
-        metadata_end_u64 > payload_a)
-        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-            "VUM metadata count contradicts its bounded record region", 12));
-    const std::uint32_t metadata_end = static_cast<std::uint32_t>(metadata_end_u64);
-    const std::uint32_t alignment_bytes = payload_a - metadata_end;
-    if (alignment_bytes > 12U ||
-        !std::ranges::all_of(bytes.subspan(metadata_end, alignment_bytes),
-            [](const std::byte value) { return value == std::byte{0}; }))
-        return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-            "VUM metadata alignment suffix is outside the observed zero layout",
-            metadata_end));
-
-    std::uint64_t p_count = 0;
-    std::uint64_t q_count = 0;
-    std::uint64_t t_count = 0;
-    std::uint64_t non_t_ordinal = 0;
-    bool inside_t_block = false;
-    bool after_t_block = false;
-    std::optional<std::uint32_t> previous_q_payload;
-    for (std::uint64_t index = 0; index < metadata_record_count; ++index)
-    {
-        const std::uint32_t record_offset = static_cast<std::uint32_t>(
-            materials_end + index * kMetadataRecordBytes);
-        const auto record = bytes.subspan(record_offset, kMetadataRecordBytes);
-        const MetadataRecordKind kind = ClassifyMetadataRecord(
-            record, materials_end, metadata_end, payload_a, payload_b, primary_end);
-        if (kind == MetadataRecordKind::Unknown)
-            return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-                "VUM metadata record is outside the observed P/Q/T families", record_offset));
-
-        if (kind == MetadataRecordKind::T)
-        {
-            if (after_t_block)
-                return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-                    "VUM metadata T records are not contiguous", record_offset));
-            inside_t_block = true;
-            ++t_count;
-            const std::uint32_t target = ReadU32(record, 8);
-            if (target <= record_offset ||
-                (target - materials_end) % kMetadataRecordBytes != 0)
-                return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
-                    "VUM metadata T record does not target a forward record", record_offset + 8U));
-            const auto target_record = bytes.subspan(target, kMetadataRecordBytes);
-            if (ClassifyMetadataRecord(target_record, materials_end, metadata_end,
-                    payload_a, payload_b, primary_end) != MetadataRecordKind::Q)
-                return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
-                    "VUM metadata T record does not target a Q record", record_offset + 8U));
-            continue;
-        }
-
-        if (inside_t_block)
-            after_t_block = true;
-        const MetadataRecordKind expected = non_t_ordinal % 2U == 0
-            ? MetadataRecordKind::Q
-            : MetadataRecordKind::P;
-        if (kind != expected)
-            return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-                "VUM metadata records do not preserve Q/P alternation", record_offset));
-        ++non_t_ordinal;
-
-        if (kind == MetadataRecordKind::P)
-        {
-            ++p_count;
-            continue;
-        }
-        ++q_count;
-        const std::uint32_t q_payload = ReadU32(record, 4);
-        if (!previous_q_payload)
-        {
-            if (q_payload != payload_a)
-                return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
-                    "VUM first Q record does not start the middle payload partition",
-                    record_offset + 4U));
-        }
-        else if (q_payload <= *previous_q_payload ||
-                 !IsObservedQSpan(q_payload - *previous_q_payload))
-            return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-                "VUM Q record uses an unsupported middle-payload span", record_offset + 4U));
-        previous_q_payload = q_payload;
-    }
-
-    if (p_count != pair_count || q_count != pair_count || t_count != target_count)
-        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-            "VUM metadata P/Q/T counts contradict their header counts", 12));
-    if (previous_q_payload)
-    {
-        if (payload_b <= *previous_q_payload ||
-            !IsObservedQSpan(payload_b - *previous_q_payload))
-            return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-                "VUM final Q record uses an unsupported middle-payload span", payload_b));
-    }
-    else if (payload_a != payload_b)
-        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-            "VUM empty Q family does not have an empty middle payload", payload_a));
-    return metadata_record_count;
-}
-
 [[nodiscard]] bool IsObservedUsageFamily(const std::span<const std::byte> record,
     const std::uint32_t active_count) noexcept
 {
@@ -266,55 +95,12 @@ struct CatalogLayout
 [[nodiscard]] asset::DecodeResult<CatalogLayout> ParseLayout(
     const std::span<const std::byte> bytes, const asset::DecodeLimits limits)
 {
-    if (bytes.size() > limits.maximum_input_bytes)
-        return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
-            "VUM catalog input exceeds decoder byte limit"));
-    if (bytes.size() < kNameRegionOffset)
-        return std::unexpected(Error(asset::DecodeErrorCode::Truncated,
-            "VUM catalog input is shorter than its observed preamble", bytes.size()));
-    if (bytes.size() % 16U != 0)
-        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-            "VUM catalog container span is not 16-byte aligned"));
-    if (bytes[0] != std::byte{'V'} || bytes[1] != std::byte{'U'} ||
-        bytes[2] != std::byte{'M'} || bytes[3] != std::byte{'S'})
-        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-            "VUM catalog input does not use the observed VUMS prefix", 0));
-
-    const std::uint32_t names_end = ReadU32(bytes, 80);
-    const std::uint32_t materials_end = ReadU32(bytes, 84);
-    const std::uint32_t primary_end = ReadU32(bytes, 88);
-    if (names_end < kNameRegionOffset || names_end % 4U != 0 ||
-        materials_end % 4U != 0 || primary_end % 16U != 0 ||
-        names_end > materials_end || materials_end > primary_end)
-        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-            "VUM catalog boundaries are out of order or misaligned", 80));
-    if (primary_end > bytes.size())
-        return std::unexpected(Error(asset::DecodeErrorCode::Truncated,
-            "VUM catalog primary boundary extends past the input", bytes.size()));
-
-    const std::uint32_t payload_a = ReadU32(bytes, 92);
-    const std::uint32_t payload_b = ReadU32(bytes, 96);
-    if (payload_a % 16U != 0 || payload_b % 16U != 0 ||
-        payload_a < materials_end || payload_a > payload_b || payload_b > primary_end)
-        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-            "VUM catalog payload boundaries are out of order or misaligned", 92));
-    if (ReadU32(bytes, 100) != 0 || ReadU32(bytes, 104) != 0 ||
-        ReadU32(bytes, 108) != 0)
-        return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-            "VUM catalog preamble uses an unsupported reserved-word layout", 100));
-
-    const std::uint32_t name_count = ReadU32(bytes, 20);
-    const std::uint32_t material_count = ReadU32(bytes, 24);
-    if (name_count == 0 || material_count == 0)
-        return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-            "VUM catalog is outside the observed nonempty name/material family", 20));
-    std::uint64_t material_bytes = 0;
-    if (!Multiply(material_count, kMaterialRecordBytes, material_bytes))
-        return std::unexpected(Error(asset::DecodeErrorCode::Overflow,
-            "VUM catalog material table size overflows", 24));
-    if (material_bytes != static_cast<std::uint64_t>(materials_end) - names_end)
-        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-            "VUM catalog material count contradicts its fixed table extent", 24));
+    auto payload_layout = detail::ValidateVumPayloadLayout(bytes, limits);
+    if (!payload_layout)
+        return std::unexpected(payload_layout.error());
+    const std::uint32_t name_count = payload_layout->name_count;
+    const std::uint32_t material_count = payload_layout->material_count;
+    const std::uint32_t names_end = payload_layout->names_end;
 
     if (names_end == kNameRegionOffset || bytes[names_end - 1U] != std::byte{0})
         return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
@@ -399,11 +185,6 @@ struct CatalogLayout
                 "VUM catalog active-reference count overflows", record_offset + 88U));
     }
 
-    auto metadata_record_count = ValidatePayloadMetadata(
-        bytes, materials_end, payload_a, payload_b, primary_end);
-    if (!metadata_record_count)
-        return std::unexpected(metadata_record_count.error());
-
     std::uint64_t items = 1;
     auto item_result = Accumulate(items, name_count, limits.maximum_items,
         "VUM catalog item count overflows", "VUM catalog items exceed decoder limit");
@@ -417,7 +198,7 @@ struct CatalogLayout
         "VUM catalog item count overflows", "VUM catalog items exceed decoder limit");
     if (!item_result)
         return std::unexpected(item_result.error());
-    item_result = Accumulate(items, *metadata_record_count, limits.maximum_items,
+    item_result = Accumulate(items, payload_layout->metadata_record_count, limits.maximum_items,
         "VUM catalog item count overflows", "VUM catalog items exceed decoder limit");
     if (!item_result)
         return std::unexpected(item_result.error());

@@ -87,10 +87,11 @@ std::vector<std::byte> MakeVumCatalog()
     WriteMaterial(bytes, kSecondMaterial, {1, 0, 1});
     WriteU32(bytes, kMetadataT + 8U, kMetadataQ);
     WriteU32(bytes, kMetadataQ + 4U, kPayloadA);
-    WriteU32(bytes, kMetadataQ + 12U, kPayloadB + 4U);
-    WriteU32(bytes, kMetadataP, kPayloadB + 8U);
-    WriteU32(bytes, kMetadataP + 8U, kPayloadB + 12U);
-    WriteU32(bytes, kMetadataP + 12U, kPayloadB + 16U);
+    WriteU32(bytes, kPayloadA + 4U, kPayloadB + 16U);
+    WriteU32(bytes, kMetadataQ + 12U, kPayloadB + 32U);
+    WriteU32(bytes, kMetadataP, kPayloadB + 36U);
+    WriteU32(bytes, kMetadataP + 8U, kPayloadB + 40U);
+    WriteU32(bytes, kMetadataP + 12U, kPayloadB + 44U);
     std::fill(bytes.begin() + kPrimaryEnd, bytes.end(), std::byte{0xA5});
     return bytes;
 }
@@ -239,6 +240,19 @@ int VumMaterialCatalogDecoderFailureCount()
     CheckError(omega::retail::DecodeVumMaterialCatalog(bad),
         omega::asset::DecodeErrorCode::InvalidReference,
         "VUM metadata rejects a T reference that does not target Q");
+    bad = bytes;
+    constexpr std::uint32_t metadata_end = kMetadataP + 16U;
+    WriteU32(bad, kMetadataT + 8U, metadata_end);
+    WriteU32(bad, metadata_end + 4U, kPayloadA);
+    WriteU32(bad, metadata_end + 12U, kPayloadB + 32U);
+    CheckError(omega::retail::DecodeVumMaterialCatalog(bad),
+        omega::asset::DecodeErrorCode::UnsupportedVariant,
+        "VUM metadata rejects a Q-like T target beyond the metadata region");
+    bad = bytes;
+    WriteU32(bad, kMetadataT + 8U, kMaterialsEnd + 8U * 16U);
+    CheckError(omega::retail::DecodeVumMaterialCatalog(bad),
+        omega::asset::DecodeErrorCode::UnsupportedVariant,
+        "VUM metadata rejects a T target whose record would extend past the input");
     bad = bytes;
     WriteU32(bad, kMetadataQ + 4U, kPayloadA + 32U);
     CheckError(omega::retail::DecodeVumMaterialCatalog(bad),
