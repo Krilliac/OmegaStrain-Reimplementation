@@ -1,5 +1,6 @@
 #include "omega/content/game_data_service.h"
 #include "omega/runtime/content_startup.h"
+#include "pop_commands.h"
 
 #include <algorithm>
 #include <bit>
@@ -10,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -67,6 +69,56 @@ struct HogMember
     std::string_view name;
     std::vector<std::byte> payload;
 };
+
+class StreamCapture final
+{
+public:
+    explicit StreamCapture(std::ostream& stream)
+        : stream_(stream), original_(stream.rdbuf(buffer_.rdbuf()))
+    {
+    }
+
+    ~StreamCapture()
+    {
+        if (active_)
+            stream_.rdbuf(original_);
+    }
+
+    StreamCapture(const StreamCapture&) = delete;
+    StreamCapture& operator=(const StreamCapture&) = delete;
+
+    [[nodiscard]] std::string Release()
+    {
+        stream_.rdbuf(original_);
+        active_ = false;
+        return buffer_.str();
+    }
+
+private:
+    std::ostream& stream_;
+    std::ostringstream buffer_;
+    std::streambuf* original_ = nullptr;
+    bool active_ = true;
+};
+
+struct ToolRun
+{
+    int exit_code = 0;
+    std::string standard_output;
+    std::string standard_error;
+};
+
+[[nodiscard]] ToolRun RunLevelMaterialCatalogTool(const std::filesystem::path& root)
+{
+    StreamCapture output(std::cout);
+    StreamCapture error(std::cerr);
+    const int exit_code = omega::tool::LevelMaterialCatalogsVerifyTree(root);
+    return ToolRun{
+        .exit_code = exit_code,
+        .standard_output = output.Release(),
+        .standard_error = error.Release(),
+    };
+}
 
 std::vector<std::byte> MakeHog(
     const std::vector<HogMember>& members, const std::size_t trailing_zero_bytes = 0)
@@ -925,6 +977,62 @@ int GameDataServiceFailureCount()
                 "one-below level-material archive depth budget fails");
         }
     }
+
+    const ToolRun aggregate_tool = RunLevelMaterialCatalogTool(root);
+    Check(aggregate_tool.exit_code == 0 && aggregate_tool.standard_error.empty() &&
+              aggregate_tool.standard_output ==
+                  "{\"levels\":1,\"valid\":1,\"errors\":0,\"terrain_cells\":2,"
+                  "\"catalogs\":2,\"names\":4,\"materials\":4,"
+                  "\"name_references\":8}\n",
+        "level material tool publishes only exact tree-wide canonical aggregate counts");
+    Check(aggregate_tool.standard_output.find("MINSK") == std::string::npos &&
+              aggregate_tool.standard_output.find("BASE.TDX") == std::string::npos &&
+              aggregate_tool.standard_output.find("CELL.TDX") == std::string::npos &&
+              aggregate_tool.standard_output.find("GAMEDATA") == std::string::npos,
+        "successful level material aggregate output contains no level, asset, or path identity");
+
+    const auto invalid_level_directory = root / "GAMEDATA" / "SECRET-LEVEL";
+    std::error_code discovery_fixture_error;
+    std::filesystem::create_directories(invalid_level_directory, discovery_fixture_error);
+    Check(!discovery_fixture_error &&
+              WriteText(invalid_level_directory / "DATA.POP", "synthetic"),
+        "invalid-code level directory is created for discovery-error sanitization");
+    const ToolRun discovery_error_tool = RunLevelMaterialCatalogTool(root);
+    Check(discovery_error_tool.exit_code == 2 &&
+              discovery_error_tool.standard_output ==
+                  "{\"levels\":1,\"valid\":1,\"errors\":1,\"terrain_cells\":2,"
+                  "\"catalogs\":2,\"names\":4,\"materials\":4,"
+                  "\"name_references\":8}\n" &&
+              discovery_error_tool.standard_error ==
+                  "game-data: discover: level-entry-error\n" &&
+              discovery_error_tool.standard_error.find("SECRET-LEVEL") ==
+                  std::string::npos,
+        "level material tool reports discovery failures without directory identity");
+    std::filesystem::remove_all(invalid_level_directory, discovery_fixture_error);
+    Check(!discovery_fixture_error,
+        "invalid-code discovery fixture is removed after aggregate-tool coverage");
+
+    const auto malformed_tool_cell = MakeCellHog("CeLlA.vUm", Bytes("not-vum"),
+        {HogMember{.name = "aLpHa.CoL", .payload = spatial_fixture.col_a}});
+    Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG",
+              MakeSpatialDataHog(malformed_tool_cell, spatial_fixture.cell_b)),
+        "malformed material fixture is written for aggregate-tool error sanitization");
+    const ToolRun failed_aggregate_tool = RunLevelMaterialCatalogTool(root);
+    Check(failed_aggregate_tool.exit_code == 2 &&
+              failed_aggregate_tool.standard_output ==
+                  "{\"levels\":1,\"valid\":0,\"errors\":1,\"terrain_cells\":0,"
+                  "\"catalogs\":0,\"names\":0,\"materials\":0,"
+                  "\"name_references\":0}\n" &&
+              failed_aggregate_tool.standard_error ==
+                  "game-data: materials: decode-failed:truncated\n",
+        "level material tool fails one level atomically with sanitized typed diagnostics");
+    Check(failed_aggregate_tool.standard_error.find("MINSK") == std::string::npos &&
+              failed_aggregate_tool.standard_error.find("CeLlA") == std::string::npos &&
+              failed_aggregate_tool.standard_error.find("GAMEDATA") == std::string::npos,
+        "level material aggregate errors contain no level, member, or path identity");
+    Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG",
+              spatial_fixture.data_hog),
+        "valid material fixture is restored after aggregate-tool failure coverage");
 
     Check(WriteText(root / "SYSTEM.CNF", "BOOT2 = cdrom0:\\SLES_000.00;1\r\n"),
         "wrong-region system configuration is written");

@@ -206,6 +206,11 @@ depth ends at the cell-HOG edge. The fully owned `LevelMaterialCatalogsIR` prese
 cardinality, and repeated references without deduplication. It exposes only the already-confirmed
 name table and dense MTRL-to-name index relationships; passive VUM payloads remain retail-only.
 
+`omega_tool level-material-catalogs-verify-tree` exercises that service boundary across every
+strictly discovered level directory. It publishes only aggregate level, cell, catalog, name,
+material, reference, and error counts. Diagnostics expose stage and typed error categories without
+printing level codes, filesystem paths, archive/member names, hashes, payloads, or inferred roles.
+
 Tools may link retail adapters. Renderer and simulation targets must consume canonical assets and
 must not include retail-format headers. The native source-dependency CI gate scans every native
 C/C++ source, header, test, tool, and common source fragment after BOM removal, escaped-newline

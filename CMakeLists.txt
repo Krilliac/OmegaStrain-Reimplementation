@@ -260,6 +260,7 @@ if(BUILD_TESTING)
         native/tests/entity_registry_tests.cpp
         native/tests/frame_scheduler_tests.cpp
         native/tests/game_data_service_tests.cpp
+        native/apps/omega_tool/pop_commands.cpp
         native/tests/hog_archive_tests.cpp
         native/tests/input_tracker_tests.cpp
         native/tests/job_service_tests.cpp
@@ -285,6 +286,7 @@ if(BUILD_TESTING)
         omega_runtime
         omega_simulation
     )
+    target_include_directories(omega_core_tests PRIVATE native/apps/omega_tool)
     if(MSVC)
         target_compile_options(omega_core_tests PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
     else()
@@ -303,6 +305,9 @@ if(BUILD_TESTING)
         COMMAND omega_tool level-manifest-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_level_spatial_tree
         COMMAND omega_tool level-spatial-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_rejects_empty_level_material_catalogs_tree
+        COMMAND omega_tool level-material-catalogs-verify-tree
+            "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_asset_metadata_tree
         COMMAND omega_tool asset-metadata-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     set_tests_properties(
@@ -311,7 +316,12 @@ if(BUILD_TESTING)
         omega_tool_rejects_empty_pop_tree
         omega_tool_rejects_empty_level_manifest_tree
         omega_tool_rejects_empty_level_spatial_tree
+        omega_tool_rejects_empty_level_material_catalogs_tree
         omega_tool_rejects_empty_asset_metadata_tree
         PROPERTIES WILL_FAIL TRUE
+    )
+    set_tests_properties(
+        omega_tool_rejects_empty_level_material_catalogs_tree
+        PROPERTIES PASS_REGULAR_EXPRESSION "\"catalogs\":0"
     )
 endif()

@@ -204,6 +204,15 @@ sanitized counters, and never prints source paths or names:
 build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc
 ```
 
+The level-composition verifier separately exercises `GameDataService` manifest-to-cell traversal
+and its shared per-level decode budget. It emits only level, cell, catalog, name, material,
+reference, and error counts; diagnostics contain no level codes, paths, member names, hashes,
+payloads, or inferred roles:
+
+```powershell
+build/msvc/Debug/omega_tool.exe level-material-catalogs-verify-tree private/extracted-disc
+```
+
 The confirmed baseline is 7,036 catalogs, 38,793 owned names, 38,899 material records, 42,631
 dense name references, 91,460 passive payload pairs, 38,023 normalized T targets, 134,122
 middle-to-final references, 365,840 ordered Q/P final references, and zero errors. The same pass

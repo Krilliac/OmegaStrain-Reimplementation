@@ -96,6 +96,7 @@ ctest --preset msvc-debug
 .\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-spatial-verify-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe level-material-catalogs-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --probe-only
 .\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
