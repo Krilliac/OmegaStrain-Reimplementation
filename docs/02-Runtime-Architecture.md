@@ -175,9 +175,10 @@ eight-edge COL tree. The returned `LevelSpatialIR` has the same order and cardin
 `LevelManifestIR::terrain_cells`; provenance remains in the manifest.
 
 Tools may link retail adapters. Renderer and simulation targets must consume canonical assets and
-must not include retail-format headers. A source-include dependency check will turn this convention
-into a CI enforcement boundary as more targets appear. The existing terrain-prefix parser remains
-in `omega_core` temporarily; new semantic adapters enter through `omega_retail_formats`.
+must not include retail-format headers. The native source-dependency CI gate enforces that boundary,
+keeps SDL/OS/GPU headers out of platform-neutral runtime, simulation, and asset modules, and rejects
+any PCSX2 header from shipping native modules. The existing terrain-prefix parser remains in
+`omega_core` temporarily; new semantic adapters enter through `omega_retail_formats`.
 
 Startup owns both `LevelManifestIR` and `LevelSpatialIR`. The initial renderer consumes canonical
 spatial meshes only to build a deterministic synthetic canonical-COL wireframe contact sheet.
