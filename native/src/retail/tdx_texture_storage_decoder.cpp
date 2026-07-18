@@ -70,6 +70,12 @@ struct BlockLayout
     bool uses_implicit_zero_suffix = false;
 };
 
+struct DecodeUsage
+{
+    std::uint64_t decoded_items = 0;
+    std::uint64_t logical_output_bytes = 0;
+};
+
 [[nodiscard]] asset::DecodeError Error(const asset::DecodeErrorCode code, std::string message,
     const std::optional<std::uint64_t> byte_offset = std::nullopt)
 {
@@ -619,7 +625,7 @@ struct BlockLayout
     return {};
 }
 
-[[nodiscard]] asset::DecodeResult<void> CheckBudgets(
+[[nodiscard]] asset::DecodeResult<DecodeUsage> CheckBudgets(
     const std::span<const std::byte> bytes, const HeaderLayout& header,
     const asset::DecodeLimits limits)
 {
@@ -690,11 +696,14 @@ struct BlockLayout
                 return std::unexpected(output_result.error());
         }
     }
-    return {};
+    return DecodeUsage{
+        .decoded_items = items,
+        .logical_output_bytes = output_bytes,
+    };
 }
 } // namespace
 
-asset::DecodeResult<asset::TextureStorageIR> DecodeTdxTextureStorage(
+asset::DecodeResult<DecodedTdxTextureStorage> DecodeTdxTextureStorageMeasured(
     const std::span<const std::byte> bytes, const asset::DecodeLimits limits)
 {
     auto header = ParseHeader(bytes, limits);
@@ -704,12 +713,16 @@ asset::DecodeResult<asset::TextureStorageIR> DecodeTdxTextureStorage(
     if (!budget_result)
         return std::unexpected(budget_result.error());
 
-    asset::TextureStorageIR result{
-        .width = header->width,
-        .height = header->height,
-        .sample_encoding = header->sample_encoding,
+    DecodedTdxTextureStorage decoded{
+        .storage = asset::TextureStorageIR{
+            .width = header->width,
+            .height = header->height,
+            .sample_encoding = header->sample_encoding,
+        },
+        .decoded_items = budget_result->decoded_items,
+        .logical_output_bytes = budget_result->logical_output_bytes,
     };
-    result.blocks.reserve(header->block_count);
+    decoded.storage.blocks.reserve(header->block_count);
     for (std::uint16_t block_index = 0; block_index < header->block_count; ++block_index)
     {
         const std::uint64_t block_offset =
@@ -761,8 +774,17 @@ asset::DecodeResult<asset::TextureStorageIR> DecodeTdxTextureStorage(
             }
             output_block.palette = std::move(palette);
         }
-        result.blocks.push_back(std::move(output_block));
+        decoded.storage.blocks.push_back(std::move(output_block));
     }
-    return result;
+    return decoded;
+}
+
+asset::DecodeResult<asset::TextureStorageIR> DecodeTdxTextureStorage(
+    const std::span<const std::byte> bytes, const asset::DecodeLimits limits)
+{
+    auto decoded = DecodeTdxTextureStorageMeasured(bytes, limits);
+    if (!decoded)
+        return std::unexpected(decoded.error());
+    return std::move(decoded->storage);
 }
 } // namespace omega::retail
