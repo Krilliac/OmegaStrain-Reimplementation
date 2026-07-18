@@ -54,9 +54,9 @@ The minimum useful scene path is now concrete:
    use COL version byte 5 and exact VUM size fields.
 5. `MAPTEX.HOG` contains two version-5 TDX textures.
 
-The scanner finds these aligned tag markers in the MINSK POP, in order. Only
-the `TER:` record body is decoded; the later markers are structural leads, not
-yet confirmed section boundaries:
+The bounded post-terrain scanner finds these aligned literal-tag candidates once each, in this
+same order, in all 18 level POPs (342 aggregate hits and zero errors). Only the `TER:` record body
+is decoded; the later literals are structural leads, not confirmed section boundaries or extents:
 
 ```text
 TER GOB SND ACL INL NPC WPN PLR SKY PNT DIR ENV NOD GEN GRP BOX FIR CAM INV BUG
