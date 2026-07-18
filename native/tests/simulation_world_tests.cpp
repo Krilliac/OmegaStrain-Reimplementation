@@ -61,6 +61,14 @@ int SimulationWorldFailureCount()
         Check(world.entities().Snapshot().capacity == 65'536U &&
                   world.entities().Snapshot().alive == 0U,
             "the world solely owns its preallocated empty entity registry");
+        const auto entity = world.entities().CreateEntity();
+        Check(entity && world.Snapshot().alive_entities == 1U,
+            "the owned simulation snapshot copies the current live-entity count");
+        Check(entity &&
+                  world.entities().DestroyEntity(*entity) ==
+                      omega::simulation::EntityDestroyResult::Destroyed &&
+                  world.Snapshot().alive_entities == 0U,
+            "destroyed identities disappear from the next owned simulation snapshot");
 
         Check(world.AdvanceOneStep() == SimulationStepResult::Advanced &&
                   world.AdvanceOneStep() == SimulationStepResult::Advanced &&
@@ -84,7 +92,8 @@ int SimulationWorldFailureCount()
         const auto left = first->Snapshot();
         const auto right = second->Snapshot();
         Check(left.completed_steps == right.completed_steps &&
-                  left.simulated_time == right.simulated_time,
+                  left.simulated_time == right.simulated_time &&
+                  left.alive_entities == right.alive_entities,
             "identical step sequences produce identical owned snapshots");
     }
 
@@ -99,7 +108,8 @@ int SimulationWorldFailureCount()
             "a second maximum-sized step reports representation exhaustion");
         const auto unchanged = maximum->Snapshot();
         Check(unchanged.completed_steps == full.completed_steps &&
-                  unchanged.simulated_time == full.simulated_time,
+                  unchanged.simulated_time == full.simulated_time &&
+                  unchanged.alive_entities == full.alive_entities,
             "representation exhaustion is atomic and leaves state unchanged");
     }
 

@@ -90,6 +90,11 @@ creation/reuse is deterministic for identical call sequences, stale or forged ge
 inert, and capacity exhaustion is explicit. Component stores and gameplay systems remain future
 project-owned work; the current capacity is a synthetic host limit, not a retail population claim.
 
+Each rendered frame now crosses an explicit owned `RenderFramePacket` boundary containing the host
+frame index, deterministic world clock, and live-entity count. The SDL host consumes it
+synchronously and still renders only the content-free diagnostic; component/render scene snapshots
+remain future project-owned work.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

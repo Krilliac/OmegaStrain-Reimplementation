@@ -174,7 +174,7 @@ SdlGpuHost::~SdlGpuHost() = default;
 SdlGpuHost::SdlGpuHost(SdlGpuHost&&) noexcept = default;
 
 std::expected<void, std::string> SdlGpuHost::RenderFrame(
-    const std::uint64_t rendered_frame_index)
+    const runtime::RenderFramePacket& packet)
 {
     SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
     if (commands == nullptr)
@@ -239,7 +239,7 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
     }
     else if (swapchain != nullptr && width != 0 && height != 0)
     {
-        const float pulse = static_cast<float>((rendered_frame_index % 240U) / 239.0);
+        const float pulse = static_cast<float>((packet.rendered_frame_index % 240U) / 239.0);
         SDL_GPUColorTargetInfo target{};
         target.texture = swapchain;
         target.clear_color = SDL_FColor{

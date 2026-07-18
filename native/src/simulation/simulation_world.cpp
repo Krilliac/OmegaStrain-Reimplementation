@@ -35,7 +35,9 @@ SimulationStepResult SimulationWorld::AdvanceOneStep() noexcept
 
 SimulationState SimulationWorld::Snapshot() const noexcept
 {
-    return state_;
+    SimulationState snapshot = state_;
+    snapshot.alive_entities = entities_.Snapshot().alive;
+    return snapshot;
 }
 
 const SimulationWorldConfig& SimulationWorld::config() const noexcept

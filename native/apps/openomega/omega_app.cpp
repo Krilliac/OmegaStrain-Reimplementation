@@ -222,7 +222,14 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
             ++result.executed_simulation_steps;
         }
 
-        auto rendered = host_->RenderFrame(static_cast<std::uint64_t>(result.rendered_frames));
+        const simulation::SimulationState simulation_snapshot = simulation_->Snapshot();
+        const runtime::RenderFramePacket render_packet{
+            .rendered_frame_index = static_cast<std::uint64_t>(result.rendered_frames),
+            .completed_simulation_steps = simulation_snapshot.completed_steps,
+            .simulated_time = simulation_snapshot.simulated_time,
+            .alive_entities = simulation_snapshot.alive_entities,
+        };
+        auto rendered = host_->RenderFrame(render_packet);
         if (!rendered)
         {
             jobs_->WaitForIdle();

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "omega/runtime/render_frame_packet.h"
+
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -31,10 +33,11 @@ public:
     SdlGpuHost(const SdlGpuHost&) = delete;
     SdlGpuHost& operator=(const SdlGpuHost&) = delete;
 
-    // [main/render thread] Renders and submits one frame. The index affects only the synthetic
-    // content-free clear color and never feeds simulation state.
+    // [main/render thread] Synchronously consumes one owned renderer-neutral frame packet. The
+    // frame index affects only the synthetic content-free clear color; simulation values are
+    // transported across the boundary but do not yet drive a scene.
     [[nodiscard]] std::expected<void, std::string> RenderFrame(
-        std::uint64_t rendered_frame_index);
+        const runtime::RenderFramePacket& packet);
     [[nodiscard]] std::string_view driver_name() const noexcept;
 
 private:
