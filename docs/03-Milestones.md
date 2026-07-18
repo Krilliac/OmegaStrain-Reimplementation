@@ -85,13 +85,18 @@ step advances an owned,
 platform-neutral deterministic world clock before rendering, with fail-closed representation
 limits. The app also owns the SDL process lifetime and a resumed system-default playback stream;
 its callback supplies bounded project-owned silence and exposes lock-free health counters without
-loading files or retail data. Components, gameplay systems, render snapshots, decoded voices, and
-mixing remain incomplete.
+loading files or retail data. Concrete components, gameplay systems, render scene snapshots,
+decoded voices, and mixing remain incomplete.
 
 The simulation world now solely owns a bounded, preallocated generational entity registry. Entity
 creation/reuse is deterministic for identical call sequences, stale or forged generations are
-inert, and capacity exhaustion is explicit. Component stores and gameplay systems remain future
-project-owned work; the current capacity is a synthetic host limit, not a retail population claim.
+inert, and capacity exhaustion is explicit. A reusable header-only `ComponentStore<T>` foundation
+now provides bounded startup allocation, exact-generation access, constant-time same-slot
+replacement of stale payloads, explicit exact-generation retained cleanup, inert moved-from
+behavior, and aggregate-only snapshots for future direct world-owned stores. Unrelated retained
+payloads are not swept during insertion and fail capacity closed until cleanup. No speculative
+gameplay component is instantiated; concrete components and systems remain future project-owned
+work. Entity and component capacities are synthetic host limits, not retail population claims.
 
 Each rendered frame now crosses an explicit owned `RenderFramePacket` boundary containing the host
 frame index, deterministic world clock, and live-entity count. The SDL host consumes it
