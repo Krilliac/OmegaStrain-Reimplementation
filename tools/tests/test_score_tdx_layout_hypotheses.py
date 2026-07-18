@@ -169,8 +169,12 @@ class TdxLayoutHypothesisTests(unittest.TestCase):
         self.assertEqual(family["plane_ties"], 0)
         self.assertEqual(family["hypotheses"][scorer.LOW_NIBBLE_FIRST]["plane_wins"], 1)
         self.assertLess(
-            family["hypotheses"][scorer.LOW_NIBBLE_FIRST]["rgb_adjacency_delta_sum"],
-            family["hypotheses"][scorer.HIGH_NIBBLE_FIRST]["rgb_adjacency_delta_sum"],
+            family["hypotheses"][scorer.LOW_NIBBLE_FIRST][
+                "source_channel_adjacency_delta_sum"
+            ],
+            family["hypotheses"][scorer.HIGH_NIBBLE_FIRST][
+                "source_channel_adjacency_delta_sum"
+            ],
         )
 
     def test_indexed8_scores_palette_lookup_permutation(self) -> None:
@@ -180,9 +184,29 @@ class TdxLayoutHypothesisTests(unittest.TestCase):
         self.assertEqual(family["scored_planes"], 1)
         self.assertEqual(family["hypotheses"][scorer.IDENTITY_PALETTE]["plane_wins"], 1)
         self.assertLess(
-            family["hypotheses"][scorer.IDENTITY_PALETTE]["rgb_adjacency_delta_sum"],
-            family["hypotheses"][scorer.SWAPPED_PALETTE]["rgb_adjacency_delta_sum"],
+            family["hypotheses"][scorer.IDENTITY_PALETTE][
+                "source_channel_adjacency_delta_sum"
+            ],
+            family["hypotheses"][scorer.SWAPPED_PALETTE][
+                "source_channel_adjacency_delta_sum"
+            ],
         )
+
+    def test_coherence_uses_all_opaque_source_channels_without_rgb_names(self) -> None:
+        palette = bytes(
+            channel
+            for entry in range(256)
+            for channel in (0, 0, 0, entry)
+        )
+        payload = bytes(list(range(16)) * 4)
+        result = score_one(
+            make_tdx(8, 16, 4, [PlaneSpec(0x13, 16, 4, payload)], palette)
+        )
+        family = result["families"][scorer.family_key(8, 0x13)]
+        identity = family["hypotheses"][scorer.IDENTITY_PALETTE]
+        self.assertGreater(identity["source_channel_adjacency_delta_sum"], 0)
+        self.assertNotIn("rgb_adjacency_delta_sum", identity)
+        self.assertNotIn("RGB", result["interpretation"])
 
     def test_packed32_upload_family_is_counted_but_not_scored(self) -> None:
         payload = bytes(range(32))
@@ -207,6 +231,19 @@ class TdxLayoutHypothesisTests(unittest.TestCase):
         self.assertEqual(direct_family["planes"], 1)
         self.assertEqual(direct_family["scored_planes"], 1)
 
+    def test_later_mip_like_planes_use_their_own_rectangles_without_mip_labels(self) -> None:
+        first = bytes(list(range(8)) * 4)
+        second = bytes(list(range(4)) * 4)
+        result = score_one(make_tdx(8, 16, 4, [
+            PlaneSpec(0x13, 8, 4, first),
+            PlaneSpec(0x13, 4, 4, second),
+        ]))
+        family = result["families"][scorer.family_key(8, 0x13)]
+        self.assertEqual(family["planes"], 2)
+        self.assertEqual(family["scored_planes"], 2)
+        self.assertEqual(family["adjacency_edge_count"], 76)
+        self.assertNotIn("mip", json.dumps(result, sort_keys=True).lower())
+
     def test_proven_implicit_zero_suffix_is_reconstructed_aggregate_only(self) -> None:
         payload = bytes(256)
         complete = make_tdx(4, 32, 16, [PlaneSpec(0x14, 32, 16, payload)])
@@ -221,11 +258,61 @@ class TdxLayoutHypothesisTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             score_one(complete[:-16])
 
+    def test_proven_indexed8_packed32_zero_suffix_remains_counts_only(self) -> None:
+        complete = make_tdx(8, 16, 16, [PlaneSpec(0x00, 8, 8, bytes(256))])
+        result = score_one(complete[:-256])
+        family = result["families"][scorer.family_key(8, 0x00)]
+        self.assertEqual(family["planes"], 1)
+        self.assertEqual(family["reconstructed_zero_suffix_planes"], 1)
+        self.assertEqual(family["scored_planes"], 0)
+        self.assertNotIn("hypotheses", family)
+
     def test_mismatched_primary_transfer_fails_closed(self) -> None:
         payload = pack_low_nibble_first(list(range(8)) * 4)
         malformed = bytearray(make_tdx(4, 8, 4, [PlaneSpec(0x14, 8, 4, payload)]))
         primary_object = scorer.HEADER_BYTES + 0xC0
         write_u32(malformed, primary_object + 0x04, 0x13 << 24)
+        with self.assertRaises(ValueError):
+            score_one(bytes(malformed))
+
+    def test_zero_rectangle_and_out_of_bounds_primary_data_fail_closed(self) -> None:
+        payload = bytes(list(range(16)) * 4)
+        valid = make_tdx(8, 16, 4, [PlaneSpec(0x13, 16, 4, payload)])
+        primary_object = scorer.HEADER_BYTES + 0xC0
+
+        zero_width = bytearray(valid)
+        write_u32(zero_width, primary_object + 0x20, 0)
+        with self.assertRaises(ValueError):
+            score_one(bytes(zero_width))
+
+        bad_data = bytearray(valid)
+        write_u32(bad_data, primary_object + 0x54, 0xFFFFFFFF)
+        with self.assertRaises(ValueError):
+            score_one(bytes(bad_data))
+
+    def test_out_of_bounds_palette_object_and_data_fail_closed(self) -> None:
+        payload = bytes(list(range(16)) * 4)
+        valid = make_tdx(8, 16, 4, [PlaneSpec(0x13, 16, 4, payload)])
+        block = scorer.HEADER_BYTES
+
+        bad_object = bytearray(valid)
+        write_u32(bad_object, block + 0x14, 0xFFFFFFFF)
+        with self.assertRaises(ValueError):
+            score_one(bytes(bad_object))
+
+        bad_data = bytearray(valid)
+        palette_object = block + 0x40
+        write_u32(bad_data, palette_object + 0x54, 0xFFFFFFFF)
+        with self.assertRaises(ValueError):
+            score_one(bytes(bad_data))
+
+    def test_nonzero_palette_slot_padding_fails_closed(self) -> None:
+        payload = pack_low_nibble_first(list(range(8)) * 4)
+        malformed = bytearray(
+            make_tdx(4, 8, 4, [PlaneSpec(0x14, 8, 4, payload)])
+        )
+        palette_gap = scorer.HEADER_BYTES + 288 + 64
+        malformed[palette_gap] = 1
         with self.assertRaises(ValueError):
             score_one(bytes(malformed))
 
@@ -256,6 +343,34 @@ class TdxLayoutHypothesisTests(unittest.TestCase):
                     assert_private_keys_absent(child)
 
         assert_private_keys_absent(result)
+
+    def test_hog_entry_and_directory_metadata_budgets_fail_before_traversal(self) -> None:
+        payload = bytes(list(range(16)) * 4)
+        tdx = make_tdx(8, 16, 4, [PlaneSpec(0x13, 16, 4, payload)])
+        hog = make_hog("SECRET_TEXTURE.TDX", tdx)
+        data_offset = struct.unpack_from("<I", hog, 0x10)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "SECRET_ARCHIVE.HOG").write_bytes(hog)
+            with self.assertRaises(ValueError):
+                scorer.scan_disc(root, replace(
+                    scorer.ScanLimits(), maximum_hog_entries=0
+                ))
+            with self.assertRaises(ValueError):
+                scorer.scan_disc(root, replace(
+                    scorer.ScanLimits(), maximum_hog_directory_bytes=data_offset - 1
+                ))
+
+    def test_filesystem_depth_budget_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested = root / "one"
+            nested.mkdir()
+            (nested / "asset.tdx").write_bytes(b"not parsed")
+            with self.assertRaises(ValueError):
+                scorer.scan_disc(root, replace(
+                    scorer.ScanLimits(), maximum_filesystem_depth=0
+                ))
 
     def test_empty_corpus_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

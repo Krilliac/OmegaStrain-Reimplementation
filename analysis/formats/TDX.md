@@ -96,8 +96,9 @@ explicit source-order hypotheses:
 - four-bit `0x14`: low-nibble-first versus high-nibble-first, with an identity palette; and
 - eight-bit `0x13`: identity palette lookup versus the bit-3/bit-4 lookup permutation.
 
-The score is the summed absolute RGB delta between horizontal and vertical neighbors; lower means
-only that one hypothesis produces smoother local color adjacency. It is evidence, not a semantic
+The score is the summed absolute delta across all four opaque source palette bytes between
+horizontal and vertical neighbors; lower means only that one hypothesis produces smoother local
+source-byte adjacency. It does not assign RGB or alpha channel names and is not a semantic
 assignment. Each direct plane uses its own transfer-object dimensions, so later source-order planes
 are not forced through the top-level dimensions or assigned a mip rank.
 
