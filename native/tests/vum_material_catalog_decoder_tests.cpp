@@ -246,12 +246,12 @@ int VumMaterialCatalogDecoderFailureCount()
     WriteU32(bad, metadata_end + 4U, kPayloadA);
     WriteU32(bad, metadata_end + 12U, kPayloadB + 32U);
     CheckError(omega::retail::DecodeVumMaterialCatalog(bad),
-        omega::asset::DecodeErrorCode::InvalidReference,
+        omega::asset::DecodeErrorCode::UnsupportedVariant,
         "VUM metadata rejects a Q-like T target beyond the metadata region");
     bad = bytes;
     WriteU32(bad, kMetadataT + 8U, kMaterialsEnd + 8U * 16U);
     CheckError(omega::retail::DecodeVumMaterialCatalog(bad),
-        omega::asset::DecodeErrorCode::InvalidReference,
+        omega::asset::DecodeErrorCode::UnsupportedVariant,
         "VUM metadata rejects a T target whose record would extend past the input");
     bad = bytes;
     WriteU32(bad, kMetadataQ + 4U, kPayloadA + 32U);
