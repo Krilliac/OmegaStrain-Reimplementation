@@ -254,6 +254,7 @@ if(BUILD_TESTING)
 
     add_executable(omega_core_tests
         native/tests/col_spatial_mesh_decoder_tests.cpp
+        native/tests/component_store_tests.cpp
         native/tests/config_service_tests.cpp
         native/tests/container_descriptor_tests.cpp
         native/tests/entity_registry_tests.cpp

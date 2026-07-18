@@ -96,6 +96,7 @@ int InputTrackerFailureCount();
 int RuntimeSettingsFailureCount();
 int SimulationWorldFailureCount();
 int EntityRegistryFailureCount();
+int ComponentStoreFailureCount();
 
 int main()
 {
@@ -325,6 +326,7 @@ int main()
     failures += RuntimeSettingsFailureCount();
     failures += SimulationWorldFailureCount();
     failures += EntityRegistryFailureCount();
+    failures += ComponentStoreFailureCount();
     if (failures == 0)
         std::cout << "omega_core_tests: all checks passed\n";
     return failures == 0 ? 0 : 1;
