@@ -7,7 +7,7 @@ OmegaApp [game thread, sole lifetime owner]
 |- PlatformService [main thread]
 |- GameDataService [owns frozen VirtualFileSystem]
 |- JobService [worker pool owner]
-|- AssetService [game thread API; worker decode]
+|- AssetService [planned, unimplemented; game thread API; worker decode]
 |- RenderService [render thread]
 |- AudioService [game thread API; audio callback]
 |- SdlInputService [main thread; SDL event/gamepad owner]
@@ -42,8 +42,8 @@ runtime or simulation libraries.
 member into one `SpatialMeshIR`, and separately resolves the unique VUM member into one semantic
 `MaterialCatalogIR`, both in manifest order and cardinality. HOG objects, byte spans, and retail
 offsets remain local to each call. The catalog names retain no assigned role, and no COL triangle,
-TDX asset, placement, transform, visibility, or draw binding is asserted. Future `AssetService`
-code receives a non-owning reference; neither service owns the other.
+TDX asset, placement, transform, visibility, or draw binding is asserted. A future, currently
+unimplemented `AssetService` will receive a non-owning reference; neither service will own the other.
 
 ## Components and services
 
@@ -72,8 +72,8 @@ queues.
   normalized case-insensitive game paths.
 - `GameDataService` validates the owner-supplied NTSC-U root from bounded `SYSTEM.CNF` metadata,
   owns the frozen VFS, and maps named levels into canonical manifest and spatial-mesh values.
-- `AssetService` maps paths to typed handles, performs async decode, and publishes immutable
-  CPU assets before render/audio upload.
+- The planned, currently unimplemented `AssetService` will map paths to typed handles, perform async
+  decode, and publish immutable CPU assets before render/audio upload.
 - `ScriptService` executes only project-owned native logic or declarative mission data. Retail
   executable/script modules are inspected offline and are never loaded as executable code.
 - `SimulationWorld` advances only from explicit fixed-step calls and owns deterministic completed-
