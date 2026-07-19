@@ -111,7 +111,40 @@ int main()
         if (driver.empty())
             return Fail("GPU driver name is empty");
 
+        constexpr omega::runtime::RenderClearColorRgba8 clear_only_color{
+            .red = 0U,
+            .green = 128U,
+            .blue = 255U,
+            .alpha = 255U,
+        };
+        constexpr omega::runtime::RenderClearColorRgba8 first_blit_color{
+            .red = 85U,
+            .green = 102U,
+            .blue = 119U,
+            .alpha = 136U,
+        };
+        constexpr omega::runtime::RenderClearColorRgba8 second_blit_color{
+            .red = 153U,
+            .green = 170U,
+            .blue = 187U,
+            .alpha = 204U,
+        };
+        constexpr omega::runtime::RenderClearColorRgba8 stale_rejection_color{
+            .red = 221U,
+            .green = 51U,
+            .blue = 170U,
+            .alpha = 238U,
+        };
+        static_assert(clear_only_color != omega::runtime::kDefaultRenderClearColor &&
+                      first_blit_color != omega::runtime::kDefaultRenderClearColor &&
+                      second_blit_color != omega::runtime::kDefaultRenderClearColor &&
+                      stale_rejection_color != omega::runtime::kDefaultRenderClearColor &&
+                      first_blit_color != second_blit_color &&
+                      first_blit_color != stale_rejection_color &&
+                      second_blit_color != stale_rejection_color);
+
         omega::runtime::RenderFramePacket packet;
+        packet.clear_color = clear_only_color;
         if (!RenderUntil(host, packet,
                 [](const omega::app::GpuHostSnapshot& snapshot)
                 { return snapshot.clear_submissions == 1U; },
@@ -211,6 +244,7 @@ int main()
         if (!first_draw_list)
             return Fail("texture A/B draw-list creation failed");
         packet.draw_list = *first_draw_list;
+        packet.clear_color = first_blit_color;
         if (!RenderUntil(host, packet,
                 [](const omega::app::GpuHostSnapshot& snapshot)
                 {
@@ -231,6 +265,7 @@ int main()
             return Fail("texture A release did not preserve only texture B");
 
         const omega::app::GpuHostSnapshot before_stale = host.Snapshot();
+        packet.clear_color = stale_rejection_color;
         auto stale_render = host.RenderFrame(packet);
         if (stale_render)
             return Fail("draw list containing released texture A was accepted");
@@ -289,6 +324,7 @@ int main()
         if (!second_draw_list)
             return Fail("texture B/C draw-list creation failed");
         packet.draw_list = *second_draw_list;
+        packet.clear_color = second_blit_color;
         if (!RenderUntil(host, packet,
                 [](const omega::app::GpuHostSnapshot& snapshot)
                 {

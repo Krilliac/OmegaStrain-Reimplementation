@@ -338,6 +338,7 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
             .completed_simulation_steps = simulation_snapshot.completed_steps,
             .simulated_time = simulation_snapshot.simulated_time,
             .alive_entities = simulation_snapshot.alive_entities,
+            .clear_color = runtime::kDefaultRenderClearColor,
             .draw_list = diagnostic_draw_list_,
         };
         auto rendered = host_->RenderFrame(render_packet);

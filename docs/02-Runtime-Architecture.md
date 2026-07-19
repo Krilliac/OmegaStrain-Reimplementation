@@ -513,6 +513,33 @@ draw list are in-process owned C++ values, not a serialized, persistent, network
 wire ABI. Commands still do not pin texture generations; asynchronous queuing, a pin contract,
 fences, streaming or eviction, measured GPU memory, and display expansion remain unestablished.
 
+E-0048 extends the owned frame boundary with `RenderClearColorRgba8`. Its generic construction is
+the all-zero `{0, 0, 0, 0}` value. The named `kDefaultRenderClearColor` and default
+`RenderFramePacket::clear_color` instead use `{4, 5, 10, 255}`, and `OmegaApp` explicitly selects
+that named value. All four channels are unsigned bytes and every combination is valid; the packet
+owns the value directly without a view, pointer, or backend type.
+
+Before acquiring a GPU command buffer, `SdlGpuHost` maps red, green, blue, and alpha in order to
+SDL floats by `byte / 255.0`. One mapped value supplies every available full-target clear: both the
+empty-list clear-only path and the clear preceding a nonempty frame's source-order `LOAD` blits.
+The prior host-generated pulse and draw-list-dependent fixed clear colors are removed.
+`SDL_GPUBlitInfo::clear_color` remains inert because each blit retains `LOAD` semantics.
+
+The final regenerated MSVC build completed with zero warnings and errors. The focused portable
+executable passed once plus 100 repeated runs, and default CTest passed 20/20. One initial plus 20
+repeated public zero-file GPU smokes passed on `direct3d12`; every run retained exactly three
+uploads/640 cumulative logical bytes, three releases, two blit frames/four successful draws, one
+clear-only submission, one stale rejection, zero unavailable submissions, and zero residual
+residency. The opt-in configuration passed 21/21 CTests, was restored to `OFF`, and listed 20
+default tests. A public two-frame D3D12 `openomega` smoke passed with dummy audio. Windows, Linux,
+and public-tree CI are tracked separately from these local validation claims.
+
+This changes no frame counters, complete-list handle/source/filter preflight, target planning,
+submit-on-unwind behavior, stale-handle rejection, or unavailable-swapchain accounting. The color
+is an in-process renderer-neutral policy, not a stable ABI, persistent/serialized/wire/plugin value,
+or retail semantic. It establishes no framebuffer pixel identity, readback, color-space transfer,
+alpha or blending behavior, display expansion, or `TextureStorageIR`/`AssetService` asset bridge.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

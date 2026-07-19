@@ -65,8 +65,9 @@ public:
     [[nodiscard]] std::expected<void, std::string> WaitForIdle();
 
     // [main/render thread] Synchronously consumes one owned renderer-neutral frame packet. Every
-    // draw-list handle must resolve as a currently resident generation before any GPU work begins;
-    // an empty list preserves clear-only rendering.
+    // draw-list handle must resolve as a currently resident generation before any GPU work begins.
+    // The packet's RGBA8 clear color applies to every available target clear; an empty list
+    // preserves clear-only rendering.
     [[nodiscard]] std::expected<void, std::string> RenderFrame(
         const runtime::RenderFramePacket& packet);
 
