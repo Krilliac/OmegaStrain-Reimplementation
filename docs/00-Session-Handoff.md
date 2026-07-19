@@ -357,6 +357,27 @@ shipping dependencies or execution mechanisms.
     flip/cycle/mip/layer, alpha interpretation, blending, sRGB/HDR/color-space, presentation,
     swapchain, cross-backend, asynchronous-lifetime, public ABI/readback, asset-binding,
     retail-rendering, or gameplay guarantee.
+36. E-0051 changes no production/runtime code or public interface. The added smoke fixture uses the
+    existing private fixed-4x4 readback with two simultaneously resident synthetic textures. A's
+    Q16 first-texel crop maps exact `{32, 192, 224, 255}` across the target; B's later first-texel
+    crop maps exact `{224, 80, 32, 255}` into center pixels `[1,1,3,3)`. Two source-order
+    Stretch+Nearest `LOAD`
+    blits therefore read back `AAAA/ABBA/ABBA/AAAA` on the observed D3D12 path. The complete host
+    snapshot stays unchanged, and the production packet is reset before the existing A/B flow.
+    This closes only E-0050's same-handle fixture gap by confirming that these two commands select
+    their respective simultaneously resident generation/backend texture.
+    The one-file MSVC build completed with zero warnings or errors. Default CTest passed 20/20. One
+    initial plus 20 repeated `direct3d12` smokes passed with unchanged exact totals of four uploads/
+    656 cumulative logical bytes, four releases, two production blit frames/four draws, one
+    clear-only submission, one stale rejection, zero unavailable submissions, and zero residual
+    residency. The opt-in configuration passed 21/21, was restored to OFF, and listed 20 default
+    tests. A public two-frame D3D12 `openomega` smoke passed with dummy audio. Publication CI is
+    tracked separately from these local claims.
+    This proves only the two tested handles, first-texel crops, colors, commands, and fixed 4x4
+    result. It establishes no arbitrary multi-texture list, slot/generation, crop/target,
+    Stretch/Nearest, interpolation, sample-center, edge/border, aspect/rounding, Linear/Contain,
+    alpha/blending/color-space, swapchain/presentation, asynchronous lifetime, cross-backend,
+    public readback, asset-binding, retail-rendering, or gameplay guarantee.
 
 ## Disc observations
 

@@ -619,6 +619,28 @@ Contain/Stretch, flip/cycle/mip/layer, alpha interpretation, blending, sRGB/HDR/
 presentation/swapchain, cross-backend, asynchronous-lifetime, ABI/serialization, asset-binding,
 retail-rendering, or gameplay guarantee.
 
+E-0051 changes no runtime implementation or public interface. The public zero-file smoke reuses
+the private fixed-4x4 readback after A and B occupy the pool's two backend slots. A command selects
+A's first texel from its 8x8 source and stretches exact RGBA8 `{32, 192, 224, 255}` over the target.
+A later command selects B's first texel from its 4x8 source and overwrites center `[1,1,3,3)` with
+exact `{224, 80, 32, 255}`. Source-order `LOAD` plus Nearest therefore yields
+`AAAA/ABBA/ABBA/AAAA` on the observed D3D12 path. Full snapshot equality before and after the
+probe confirms unchanged production counters and portable texture-pool snapshot fields, while its
+own packet keeps diagnostic state out of the existing production A/B submission.
+
+The one-file MSVC build completed with zero warnings or errors; default CTest passed 20/20; one
+initial plus 20 repeated `direct3d12` smokes passed with unchanged production totals of four
+uploads/656 cumulative logical bytes, four releases, two blit frames/four draws, one clear-only
+submission, one stale rejection, zero unavailable submissions, and zero residual residency. The
+opt-in configuration passed 21/21, was restored to `OFF`, and listed 20 default tests. A public
+two-frame D3D12 `openomega` smoke passed with dummy audio. Publication CI remains separate.
+
+This closes only E-0050's same-handle fixture gap by confirming the respective live backend source
+selection for these two handles and exact commands. It proves no arbitrary multi-texture list,
+slot/generation behavior, crop/target, Stretch/Nearest, interpolation, sample-center, edge/border,
+aspect/rounding, Linear/Contain, alpha/blending/color-space, swapchain/presentation, asynchronous
+lifetime, cross-backend, public readback, asset-binding, retail-rendering, or gameplay guarantee.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a
