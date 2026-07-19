@@ -158,6 +158,23 @@ shipping dependencies or execution mechanisms.
     unreached. This offline lexical result does not observe a retail alias rule or material
     consumption, assign texture-name or binding semantics, establish class priority, or justify
     runtime integration.
+28. Added and verified the bounded native `AssetService` v0. `OmegaApp` owns it optionally only when
+    startup has a `LevelTextureStore`; a fixed reusable slot pool issues generation handles, requires
+    explicit `Ready`/`Failed` release, and enforces bounded in-flight and resident-logical accounting.
+    Accepted `JobService` callables retain a shared implementation through final return, while service
+    teardown stops acceptance, waits only its accepted work, expires handles, and runs before the job
+    pool and content dependencies. A clean MSVC build produced zero warnings and errors, focused and
+    full 18/18 CTest runs passed, and 100 repeated lifecycle-test runs passed. Two verifier passes are
+    byte-identical schema version 1 and accept 18 levels, 36 sources, and 5,801 occurrences with zero
+    errors. Requests, `Ready` states, `Get` calls, releases, stale-handle rejections, and zero-residual
+    checks also each total 5,801. Storage totals are 5,913 blocks, 7,603 planes, 615,232 palette
+    entries, 27,101,352 plane bytes, 2,460,928 palette bytes, and 29,562,280 owned bytes; maximum
+    active/in-flight/resident-logical usage is `1 / 1 / 333,232`. The verifier service limits are
+    `1 / 1 / 524,288`; runtime defaults are `64 / 64 / 64 MiB` with a hard 8,192-slot maximum. These
+    are synthetic project bounds, not retail limits or user settings. The service performs no VUM
+    name/material lookup, alias resolution, binding, pixel expansion, GPU upload, placement,
+    visibility, or rendering. Its aggregate exposes no identities or private data, and the unchanged
+    E-0038 verifier was revalidated.
 
 ## Disc observations
 
@@ -195,6 +212,8 @@ shipping dependencies or execution mechanisms.
    E-0042 now supplies the separate offline one-pass extension experiment; its positive lexical
    candidates still do not observe lookup, extension elision, or MTRL consumption. Keep basename,
    stem, substring, repeated-extension, suffix-family, and other alias hypotheses separate.
+   E-0043's `AssetService` accepts only an already-issued `LevelTextureHandle`; it does not change
+   this research boundary or consume either lexical experiment.
 3. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
    independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.

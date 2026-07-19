@@ -60,6 +60,21 @@ remains separate aggregate-only evidence. Other scene decoders remain incomplete
   independently next-binary-rounded; depth one is the smallest nonzero headroom above measured
   zero. The values are not runtime configuration or `--set` keys, and the aggregate report exposes
   no private identity or binding.
+- E-0043 implements and verifies asynchronous native `AssetService` v0. `OmegaApp` owns the service
+  optionally when startup has a texture store; fixed reusable generation handles, explicit release,
+  bounded in-flight/resident accounting, shared worker-held implementation lifetime, and ordered
+  teardown define the lifecycle. A clean MSVC build produced zero warnings and errors, focused and
+  full 18/18 CTest runs passed, and 100 repeated lifecycle-test runs passed. Two owned-tree verifier
+  passes are byte-identical schema version 1 and accept 18 levels, 36 sources, and 5,801 occurrences
+  with zero errors. Requests, `Ready` states, `Get` calls, releases, stale-handle rejections, and
+  zero-residual checks each total 5,801. Storage totals are 5,913 blocks, 7,603 planes, 615,232
+  palette entries, 27,101,352 plane bytes, 2,460,928 palette bytes, and 29,562,280 owned bytes;
+  maximum active/in-flight/resident-logical usage is `1 / 1 / 333,232`. The verifier service limits
+  are `1 / 1 / 524,288`; runtime defaults are `64 / 64 / 64 MiB`, with a hard 8,192-slot maximum.
+  These are synthetic project bounds, not retail limits or user settings. No VUM name/material
+  lookup, alias resolution, binding, display pixels, GPU upload, placement, visibility, or rendering
+  is established. The fixed report exposes no identities or private data, and the unchanged E-0038
+  verifier was revalidated.
 - Aggregate-only TDX coherence scoring accepts the same 15,248 spans and nominates low-nibble-first
   for direct four-bit `0x14` planes and the bit-3/bit-4 palette permutation for direct eight-bit
   `0x13` planes. The content-dependent scores are hypotheses, not display-layout semantics.

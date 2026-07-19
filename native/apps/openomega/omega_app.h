@@ -5,6 +5,7 @@
 #include "sdl_input_service.h"
 #include "sdl_platform_service.h"
 
+#include "omega/runtime/asset_service.h"
 #include "omega/runtime/config_service.h"
 #include "omega/runtime/content_startup.h"
 #include "omega/runtime/frame_scheduler.h"
@@ -68,6 +69,7 @@ private:
         std::unique_ptr<runtime::RingLogSink> ring_sink,
         std::unique_ptr<runtime::LogService> log,
         std::unique_ptr<runtime::JobService> jobs,
+        std::unique_ptr<runtime::AssetService> assets,
         std::unique_ptr<runtime::FrameScheduler> frame_scheduler,
         std::unique_ptr<runtime::InputTracker> input,
         std::unique_ptr<simulation::SimulationWorld> simulation,
@@ -83,6 +85,7 @@ private:
     std::unique_ptr<runtime::RingLogSink> ring_sink_;
     std::unique_ptr<runtime::LogService> log_;
     std::unique_ptr<runtime::JobService> jobs_;
+    std::unique_ptr<runtime::AssetService> assets_;
     std::unique_ptr<runtime::FrameScheduler> frame_scheduler_;
     std::unique_ptr<runtime::InputTracker> input_;
     std::unique_ptr<simulation::SimulationWorld> simulation_;
