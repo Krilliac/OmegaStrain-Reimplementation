@@ -282,6 +282,25 @@ shipping dependencies or execution mechanisms.
     streaming, or eviction; `TextureStorageIR`/`AssetService` consumption or binding; TDX plane,
     palette, channel, alpha, nibble, swizzle, mip, or display expansion; or VUM, material, alias,
     cell, mesh, placement, visibility, camera, retail rendering, or gameplay semantics.
+33. E-0048 adds `RenderClearColorRgba8` as an owned `RenderFramePacket` value. A generic color
+    defaults to `{0, 0, 0, 0}`; `kDefaultRenderClearColor` and the packet member default are
+    `{4, 5, 10, 255}`. Every unsigned-byte combination is valid. Before command-buffer acquisition,
+    `SdlGpuHost` converts each channel to SDL by `byte / 255.0` and reuses the result for clear-only
+    frames and the full-target clear before any blits. The host pulse and list-dependent fixed
+    colors are removed, and `OmegaApp` explicitly assigns the named default.
+    The final regenerated MSVC build completed with zero warnings and errors. The focused portable
+    executable passed once plus 100 repeated runs, and default CTest passed 20/20. One initial plus
+    20 repeated public zero-file GPU smokes passed on `direct3d12`; each retained exactly three
+    uploads/640 cumulative logical bytes, three releases, two blit frames/four successful draws,
+    one clear-only submission, one stale rejection, zero unavailable submissions, and zero residual
+    residency. The opt-in configuration passed 21/21 CTests, was restored to OFF, and listed 20
+    default tests. A public two-frame D3D12 `openomega` smoke passed with dummy audio. Publication
+    CI is tracked separately from these local validation claims.
+    Existing counters, complete-list handle/source/filter preflight, target planning,
+    submit-on-unwind, and fail-closed ordering remain unchanged. This project-owned in-process
+    value establishes no ABI, persistence, serialization, wire, plugin, or retail contract; no
+    framebuffer identity, pixel correctness, readback, color-space, alpha, or blending semantics;
+    and no `TextureStorageIR`/`AssetService`, material, cell, mesh, or retail asset-to-draw bridge.
 
 ## Disc observations
 

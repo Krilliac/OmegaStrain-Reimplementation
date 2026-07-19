@@ -38,6 +38,35 @@ namespace
 
 constexpr std::size_t kPostAcquireErrorCapacity = 512U;
 
+[[nodiscard]] constexpr float RenderColorChannelToFloat(
+    const std::uint8_t channel) noexcept
+{
+    return static_cast<float>(channel) /
+           static_cast<float>(std::numeric_limits<std::uint8_t>::max());
+}
+
+static_assert(RenderColorChannelToFloat(0U) == 0.0F);
+static_assert(RenderColorChannelToFloat(
+                  std::numeric_limits<std::uint8_t>::max()) == 1.0F);
+
+[[nodiscard]] constexpr SDL_FColor ToSdlClearColor(
+    const runtime::RenderClearColorRgba8 color) noexcept
+{
+    return SDL_FColor{
+        .r = RenderColorChannelToFloat(color.red),
+        .g = RenderColorChannelToFloat(color.green),
+        .b = RenderColorChannelToFloat(color.blue),
+        .a = RenderColorChannelToFloat(color.alpha),
+    };
+}
+
+constexpr SDL_FColor kClearColorConversionProbe = ToSdlClearColor(
+    runtime::RenderClearColorRgba8{.red = 0U, .green = 255U, .blue = 64U, .alpha = 128U});
+static_assert(kClearColorConversionProbe.r == 0.0F &&
+              kClearColorConversionProbe.g == 1.0F &&
+              kClearColorConversionProbe.b == RenderColorChannelToFloat(64U) &&
+              kClearColorConversionProbe.a == RenderColorChannelToFloat(128U));
+
 void AppendBounded(std::string& destination, const std::string_view text) noexcept
 {
     const std::size_t remaining = destination.capacity() - destination.size();
@@ -558,6 +587,10 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
             }
         }
 
+        // Convert the project-owned packet value before acquiring GPU work. The
+        // post-acquisition path retains only this fixed SDL value.
+        const SDL_FColor clear_color = ToSdlClearColor(packet.clear_color);
+
         // Reserve all error storage before acquiring the command buffer. The active command
         // path below uses only fixed-capacity values and bounded writes into this existing buffer.
         std::string post_acquire_error;
@@ -625,17 +658,7 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
 
             SDL_GPUColorTargetInfo target{};
             target.texture = swapchain;
-            if (draw_commands.empty())
-            {
-                const float pulse =
-                    static_cast<float>((packet.rendered_frame_index % 240U) / 239.0);
-                target.clear_color = SDL_FColor{
-                    0.025F + pulse * 0.025F, 0.035F, 0.065F + pulse * 0.04F, 1.0F};
-            }
-            else
-            {
-                target.clear_color = SDL_FColor{0.015F, 0.02F, 0.04F, 1.0F};
-            }
+            target.clear_color = clear_color;
             target.load_op = SDL_GPU_LOADOP_CLEAR;
             target.store_op = SDL_GPU_STOREOP_STORE;
             SDL_GPURenderPass* pass =

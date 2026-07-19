@@ -30,6 +30,7 @@ struct RenderTexturePoolTestAccess final
 
 namespace
 {
+using omega::runtime::RenderClearColorRgba8;
 using omega::runtime::RenderFramePacket;
 using omega::runtime::RenderTextureError;
 using omega::runtime::RenderTextureErrorCode;
@@ -91,6 +92,9 @@ void CheckContractAndConfiguration()
 {
     static_assert(std::is_trivially_copyable_v<RenderTextureHandle>);
     static_assert(std::is_standard_layout_v<RenderTextureHandle>);
+    static_assert(sizeof(RenderClearColorRgba8) == 4U);
+    static_assert(std::is_trivially_copyable_v<RenderClearColorRgba8>);
+    static_assert(std::is_standard_layout_v<RenderClearColorRgba8>);
     static_assert(std::is_trivially_copyable_v<RenderFramePacket>);
     static_assert(std::is_standard_layout_v<RenderFramePacket>);
     static_assert(!std::is_copy_constructible_v<RenderTexturePool>);
@@ -111,8 +115,21 @@ void CheckContractAndConfiguration()
 
     const RenderTextureHandle empty;
     const RenderFramePacket packet;
-    Check(!empty.valid() && packet.draw_list.empty(),
-        "default handle is invalid and frame-packet draw list is empty");
+    const RenderClearColorRgba8 zero_clear;
+    Check(zero_clear == RenderClearColorRgba8{},
+        "generic render clear color defaults to zero");
+    Check(omega::runtime::kDefaultRenderClearColor ==
+              RenderClearColorRgba8{
+                  .red = 4U,
+                  .green = 5U,
+                  .blue = 10U,
+                  .alpha = 255U,
+              },
+        "named frame clear color has the exact synthetic default");
+    Check(!empty.valid() &&
+              packet.clear_color == omega::runtime::kDefaultRenderClearColor &&
+              packet.draw_list.empty(),
+        "default handle is invalid and frame-packet clear/draw values are explicit");
     Check(omega::runtime::kMaximumRenderTextureSlotCapacity == 8192U,
         "the render texture pool hard maximum is fixed at 8192 slots");
     const RenderTexturePoolConfig defaults;

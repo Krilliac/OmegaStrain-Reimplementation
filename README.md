@@ -189,6 +189,25 @@ retail instruction blocks, or PS2 execution layer.
   It establishes no `TextureStorageIR`/`AssetService` bridge, TDX plane/palette or display
   expansion, measured GPU-byte accounting, streaming/eviction, asynchronous upload/rendering,
   residency pins, or fence design.
+- E-0048 adds packet-owned project clear policy through `RenderClearColorRgba8`. The generic value
+  defaults to `{0, 0, 0, 0}`, while `kDefaultRenderClearColor` and a default
+  `RenderFramePacket::clear_color` are `{4, 5, 10, 255}`. Every unsigned-byte channel combination
+  is valid. Before GPU command-buffer acquisition, `SdlGpuHost` maps each channel to SDL as
+  `byte / 255.0` and uses that same value for both an empty-list clear and the full-target clear
+  preceding source-order blits. This removes the host pulse and draw-list-dependent fixed colors;
+  `OmegaApp` explicitly selects the named default.
+  The final regenerated MSVC build completed with zero warnings and errors. The focused portable
+  executable passed once plus 100 repeated runs, and the default suite passed 20/20. One initial
+  plus 20 repeated public zero-file GPU smokes passed on `direct3d12`; every run retained the exact
+  three-upload/640-byte, three-release, two-blit-frame/four-draw, one-clear-only, one-stale-rejection,
+  zero-unavailable, and zero-residual snapshot. The opt-in configuration passed 21/21 CTests, then
+  was restored to OFF with 20 default tests. A public two-frame D3D12 `openomega` smoke passed with
+  dummy audio. Publication CI is tracked separately from these local validation claims.
+  Frame submission counters, complete-list preflight, planning, submit-on-unwind, and failure
+  ordering are unchanged. The clear value is an in-process renderer-neutral policy, not a stable
+  ABI, serialized or persistent value, or retail semantic. It establishes no framebuffer pixel
+  identity, readback, color-space, alpha, blending, display-expansion, or asset-service/storage
+  bridge claim.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

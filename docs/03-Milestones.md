@@ -294,6 +294,28 @@ or eviction, `TextureStorageIR`/`AssetService` bridge, TDX plane/palette/channel
 swizzle/mip or display expansion, or VUM/material/alias/cell/mesh/placement/visibility/camera/
 retail-rendering/gameplay meaning is established.
 
+E-0048 adds packet-owned clear policy without changing draw-list or submission behavior.
+`RenderClearColorRgba8` generically defaults to `{0, 0, 0, 0}`; the named
+`kDefaultRenderClearColor` and default packet member are `{4, 5, 10, 255}`. Every unsigned-byte
+combination is valid. Before command-buffer acquisition, the SDL host maps channels in RGBA order
+by `byte / 255.0` and applies the same value to clear-only frames and the full-target clear before
+blits. This replaces both the host pulse and the list-dependent fixed color. `OmegaApp` explicitly
+uses the named default, while blits retain `LOAD` with an inert blit clear-color field.
+
+The final regenerated MSVC build completed with zero warnings and errors. The focused portable
+executable passed once plus 100 repeated runs, and default CTest passed 20/20. One initial plus 20
+repeated public zero-file GPU smokes passed on `direct3d12`; each retained exactly three uploads/640
+cumulative logical bytes, three releases, two blit frames/four successful draws, one clear-only
+submission, one stale rejection, zero unavailable submissions, and zero residual residency. The
+opt-in configuration passed 21/21 CTests, was restored to OFF, and listed 20 default tests. A public
+two-frame D3D12 `openomega` smoke passed with dummy audio. Publication CI is tracked separately from
+these local validation claims.
+
+Counters, complete-list preflight, planning, submit-on-unwind, and failure ordering remain
+unchanged. This in-process project value establishes no stable ABI, persistence, serialization,
+wire/plugin, retail, pixel/readback, color-space, alpha, blending, display-expansion, or
+`TextureStorageIR`/`AssetService` asset-binding contract.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

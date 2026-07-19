@@ -25,6 +25,7 @@ struct RenderDrawListTestAccess final
 
 namespace
 {
+using omega::runtime::RenderClearColorRgba8;
 using omega::runtime::RenderDrawList;
 using omega::runtime::RenderDrawListError;
 using omega::runtime::RenderDrawListErrorCode;
@@ -121,6 +122,9 @@ void CheckContractAndErrors()
     static_assert(std::is_standard_layout_v<RenderTextureBlitPlan>);
     static_assert(std::is_trivially_copyable_v<RenderDrawList>);
     static_assert(std::is_standard_layout_v<RenderDrawList>);
+    static_assert(sizeof(RenderClearColorRgba8) == 4U);
+    static_assert(std::is_trivially_copyable_v<RenderClearColorRgba8>);
+    static_assert(std::is_standard_layout_v<RenderClearColorRgba8>);
     static_assert(std::is_trivially_copyable_v<RenderFramePacket>);
     static_assert(std::is_standard_layout_v<RenderFramePacket>);
     static_assert(std::is_nothrow_copy_constructible_v<RenderDrawList>);
@@ -170,6 +174,53 @@ void CheckContractAndErrors()
         Check(omega::runtime::RenderDrawListErrorMessage(error.code) == error.message,
             "every draw-list error has a fixed message");
     }
+}
+
+void CheckFramePacketClearColor()
+{
+    const RenderClearColorRgba8 generic_zero;
+    Check(generic_zero ==
+              RenderClearColorRgba8{
+                  .red = 0U,
+                  .green = 0U,
+                  .blue = 0U,
+                  .alpha = 0U,
+              },
+        "generic clear color value defaults to zero");
+
+    const RenderFramePacket defaults;
+    Check(defaults.clear_color == omega::runtime::kDefaultRenderClearColor,
+        "default frame packet owns the named clear color");
+
+    RenderFramePacket source;
+    source.clear_color = RenderClearColorRgba8{
+        .red = 1U,
+        .green = 2U,
+        .blue = 3U,
+        .alpha = 4U,
+    };
+    const RenderTextureBlitCommand command = Command(9U);
+    const std::array commands{command};
+    const auto draw_list = RenderDrawList::Create(commands);
+    Check(draw_list.has_value(), "frame-packet copy fixture creates a valid draw list");
+    if (!draw_list)
+        return;
+    source.draw_list = *draw_list;
+
+    const RenderFramePacket copied = source;
+    source.clear_color = {};
+    source.draw_list = {};
+
+    Check(copied.clear_color ==
+                  RenderClearColorRgba8{
+                      .red = 1U,
+                      .green = 2U,
+                      .blue = 3U,
+                      .alpha = 4U,
+                  } &&
+              copied.draw_list.size() == 1U && copied.draw_list.commands()[0] == command &&
+              source.clear_color == RenderClearColorRgba8{} && source.draw_list.empty(),
+        "frame-packet value copy owns its clear color and draw command");
 }
 
 void CheckDefaultCapacityAndOwnership()
@@ -467,6 +518,7 @@ void CheckPlanner()
 int main()
 {
     CheckContractAndErrors();
+    CheckFramePacketClearColor();
     CheckDefaultCapacityAndOwnership();
     CheckCommandValidation();
     CheckSourceMapping();

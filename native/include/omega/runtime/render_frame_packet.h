@@ -8,6 +8,30 @@
 
 namespace omega::runtime
 {
+// Renderer-neutral project-owned clear value. All byte combinations are valid; this assigns no
+// blending, color-space, retail-format, or serialized-wire semantics.
+struct RenderClearColorRgba8
+{
+    std::uint8_t red = 0U;
+    std::uint8_t green = 0U;
+    std::uint8_t blue = 0U;
+    std::uint8_t alpha = 0U;
+
+    friend constexpr bool operator==(
+        const RenderClearColorRgba8&, const RenderClearColorRgba8&) noexcept = default;
+};
+
+inline constexpr RenderClearColorRgba8 kDefaultRenderClearColor{
+    .red = 4U,
+    .green = 5U,
+    .blue = 10U,
+    .alpha = 255U,
+};
+
+static_assert(sizeof(RenderClearColorRgba8) == 4U);
+static_assert(std::is_trivially_copyable_v<RenderClearColorRgba8>);
+static_assert(std::is_standard_layout_v<RenderClearColorRgba8>);
+
 // Owned renderer-neutral value copied at the game/render boundary. It contains only project-owned
 // host state; no component pointers, retail-format views, SDL types, or reloadable vtables escape
 // with it. The current same-thread host consumes it synchronously, but the ownership contract also
@@ -18,6 +42,8 @@ struct RenderFramePacket
     std::uint64_t completed_simulation_steps = 0;
     std::chrono::nanoseconds simulated_time{0};
     std::uint32_t alive_entities = 0;
+    // Explicit project-owned target clear policy copied with the frame.
+    RenderClearColorRgba8 clear_color = kDefaultRenderClearColor;
     // Owned fixed command value. Commands do not pin texture generations; the current synchronous
     // caller keeps every referenced texture resident through consumption.
     RenderDrawList draw_list;
