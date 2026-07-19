@@ -87,6 +87,7 @@ private:
         std::unique_ptr<runtime::FrameScheduler> frame_scheduler,
         std::unique_ptr<runtime::InputTracker> input,
         std::unique_ptr<simulation::SimulationWorld> simulation,
+        simulation::EntityId debug_locomotion_entity,
         std::unique_ptr<SdlPlatformService> platform,
         std::unique_ptr<SdlInputService> sdl_input,
         std::unique_ptr<SdlAudioService> audio,
@@ -105,6 +106,8 @@ private:
     std::unique_ptr<runtime::FrameScheduler> frame_scheduler_;
     std::unique_ptr<runtime::InputTracker> input_;
     std::unique_ptr<simulation::SimulationWorld> simulation_;
+    // Non-owning world-scoped identity. SimulationWorld owns the positioned component.
+    simulation::EntityId debug_locomotion_entity_{};
     std::unique_ptr<SdlPlatformService> platform_;
     std::unique_ptr<SdlInputService> sdl_input_;
     std::unique_ptr<SdlAudioService> audio_;

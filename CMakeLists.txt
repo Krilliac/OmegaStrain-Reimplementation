@@ -47,6 +47,13 @@ add_library(omega_simulation STATIC
 target_include_directories(omega_simulation PUBLIC native/include)
 target_compile_features(omega_simulation PUBLIC cxx_std_23)
 
+add_library(omega_gameplay STATIC
+    native/src/gameplay/debug_locomotion.cpp
+)
+target_include_directories(omega_gameplay PUBLIC native/include)
+target_link_libraries(omega_gameplay PUBLIC omega_simulation)
+target_compile_features(omega_gameplay PUBLIC cxx_std_23)
+
 add_library(omega_retail_formats STATIC
     native/src/retail/col_spatial_mesh_decoder.cpp
     native/src/retail/container_descriptors.cpp
@@ -127,6 +134,19 @@ else()
 endif()
 
 if(MSVC)
+    target_compile_options(omega_gameplay PRIVATE
+        /W4
+        /WX
+        /permissive-
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /utf-8
+    )
+else()
+    target_compile_options(omega_gameplay PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+endif()
+
+if(MSVC)
     target_compile_options(omega_runtime PRIVATE
         /W4
         /WX
@@ -170,7 +190,7 @@ add_library(omega_app_core STATIC
     native/apps/openomega/run_replay_session.cpp
 )
 target_include_directories(omega_app_core PUBLIC native/apps/openomega)
-target_link_libraries(omega_app_core PUBLIC omega_runtime omega_simulation)
+target_link_libraries(omega_app_core PUBLIC omega_runtime omega_simulation omega_gameplay)
 target_compile_features(omega_app_core PUBLIC cxx_std_23)
 if(MSVC)
     target_compile_options(omega_app_core PRIVATE
@@ -563,6 +583,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_run_replay_session_tests COMMAND omega_run_replay_session_tests)
     set_tests_properties(omega_run_replay_session_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_gameplay_tests
+        native/tests/debug_locomotion_tests.cpp
+    )
+    target_link_libraries(omega_gameplay_tests PRIVATE omega_gameplay)
+    if(MSVC)
+        target_compile_options(omega_gameplay_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_gameplay_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_gameplay_tests COMMAND omega_gameplay_tests)
+    set_tests_properties(omega_gameplay_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_render_texture_pool_tests
         native/tests/render_texture_pool_tests.cpp

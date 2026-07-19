@@ -571,6 +571,29 @@ shipping dependencies or execution mechanisms.
     persistence, file/wire/stable ABI, or cross-process format. `RunReplaySession` owns no pacing or
     host clock and performs no rendering, audio, or job work. The command adds no seek, rewind,
     loop, rollback, or retail timing or determinism claim.
+45. E-0060 adds the first project-owned simulation component and input-consuming replay path.
+    `SimulationWorld` directly owns a preallocated `ComponentStore<Position3>` after its entity
+    registry. Zero configured position capacity resolves to the world entity capacity at creation;
+    no steady-state operation allocates. Positioned creation preflights identity then component
+    capacity, destruction erases the exact-generation component before registry reuse, and queries
+    return owned copies only. An optional `EntityTranslation` participates in the same fixed-step
+    transaction as the simulation clock. Clock representation, target liveness, position presence,
+    and signed X/Y/Z addition are checked in that fixed priority before any write. The no-argument
+    step remains a neutral wrapper and retains its prior results.
+    The new SDL-free `omega_gameplay` target maps a validated `-1/0/1` lateral/longitudinal command
+    to exactly one signed synthetic project unit on X/Z. `OmegaApp` creates one positioned debug
+    actor and maps W/S/A/D plus gamepad D-pad held state to actions 2 through 5; opposing inputs
+    cancel, and one frame command is reused for each scheduler-planned step. Terminal frames still
+    stop before scheduler or world mutation.
+    `RunReplaySessionConfig::enable_debug_locomotion` is opt-in and defaults false. When enabled, a
+    fresh replay owns its own positioned actor, reconstructs the same held command, and exposes only
+    an owned optional final position. The CLI enables this path only when the captured schema has
+    all four synthetic actions. It keeps the E-0059 output line byte-compatible, validates fresh
+    ownership and state without reading the still-live app, and relies on the real-host smoke for
+    exact host-versus-replay position comparison. No position checkpoint is added to the capture.
+    Every identifier, binding, coordinate, axis, unit, speed, diagonal rule, and capacity is a
+    project diagnostic choice. E-0060 claims no retail player, input map, analog behavior, transform,
+    collision, gravity, camera, rendering, animation, weapons, AI, mission, or determinism semantics.
 
 ## Disc observations
 

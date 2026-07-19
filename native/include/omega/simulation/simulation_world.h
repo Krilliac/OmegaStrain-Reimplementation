@@ -1,14 +1,56 @@
 #pragma once
 
+#include "omega/simulation/component_store.h"
 #include "omega/simulation/entity_registry.h"
 
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string>
 
 namespace omega::simulation
 {
+// Signed synthetic project units. Their scale, axes, and handedness are host
+// policy until retail behavior is established from evidence.
+struct Position3
+{
+    std::int64_t x = 0;
+    std::int64_t y = 0;
+    std::int64_t z = 0;
+
+    [[nodiscard]] friend constexpr bool operator==(const Position3&, const Position3&) = default;
+};
+
+struct Translation3
+{
+    std::int64_t dx = 0;
+    std::int64_t dy = 0;
+    std::int64_t dz = 0;
+
+    [[nodiscard]] friend constexpr bool operator==(
+        const Translation3&, const Translation3&) = default;
+};
+
+struct EntityTranslation
+{
+    EntityId entity{};
+    Translation3 delta{};
+
+    [[nodiscard]] friend constexpr bool operator==(
+        const EntityTranslation&, const EntityTranslation&) = default;
+};
+
+struct SimulationStepInput
+{
+    // E0060 deliberately admits at most one project-owned translation command
+    // per fixed step. Absence is the neutral input used by the legacy overload.
+    std::optional<EntityTranslation> translation;
+
+    [[nodiscard]] friend constexpr bool operator==(
+        const SimulationStepInput&, const SimulationStepInput&) = default;
+};
+
 struct SimulationWorldConfig
 {
     // Project-owned fixed step supplied by the composition root. It must be positive; its value is
@@ -16,6 +58,9 @@ struct SimulationWorldConfig
     std::chrono::nanoseconds fixed_step{0};
     // Project-owned bounded identity capacity. It is host infrastructure, not a retail limit.
     std::uint32_t maximum_entities = 65'536U;
+    // Project-owned bounded position capacity. Zero resolves to maximum_entities
+    // so existing aggregate configurations retain their source behavior.
+    std::uint32_t maximum_positioned_entities = 0U;
 };
 
 struct SimulationState
@@ -29,13 +74,22 @@ enum class SimulationStepResult : std::uint8_t
 {
     Advanced,
     RepresentationExhausted,
+    EntityNotAlive,
+    PositionNotPresent,
+    PositionRepresentationExhausted,
+};
+
+enum class PositionedEntityCreateError : std::uint8_t
+{
+    EntityCapacityExhausted,
+    PositionCapacityExhausted,
 };
 
 // App-owned, non-hot-reloadable deterministic game-thread state boundary. This
-// first implementation owns only the canonical simulation clock and entity
-// identity storage. Entity lifecycle remains behind this boundary so future
-// direct component stores can be cleaned in deterministic declaration order
-// without making the SDL host or frame scheduler depend on gameplay state.
+// implementation owns the canonical simulation clock, entity identity storage,
+// and the first justified project-owned component store. Entity lifecycle stays
+// behind this boundary so cleanup remains deterministic without making the SDL
+// host or frame scheduler depend on mutable gameplay storage.
 class SimulationWorld final
 {
 public:
@@ -58,6 +112,12 @@ public:
     // CapacityExhausted. All identity storage was allocated during Create().
     [[nodiscard]] std::expected<EntityId, EntityCreateError> CreateEntity() noexcept;
 
+    // [game thread] Atomically creates an identity and initial position from
+    // preallocated storage. Reported capacity failures leave identity reuse,
+    // component storage, and clock state unchanged.
+    [[nodiscard]] std::expected<EntityId, PositionedEntityCreateError> CreatePositionedEntity(
+        Position3 initial_position) noexcept;
+
     // [game thread, lifecycle] This is the sole in-place world-owned entity
     // destruction path. An exact live generation is destroyed; every other
     // handle is inert.
@@ -73,9 +133,19 @@ public:
     // registry reference or storage view escapes SimulationWorld ownership.
     [[nodiscard]] EntityRegistrySnapshot EntitySnapshot() const noexcept;
 
+    // [game thread] Returns an owned position copy only for an exact live
+    // generation with a position. No component-store pointer escapes the world.
+    [[nodiscard]] std::optional<Position3> PositionOf(EntityId entity) const noexcept;
+
     // [game thread] Advances exactly one fixed step. If either diagnostic representation is full,
     // returns RepresentationExhausted and leaves the complete state unchanged.
     [[nodiscard]] SimulationStepResult AdvanceOneStep() noexcept;
+
+    // [game thread] Applies at most one translation and advances exactly one
+    // fixed step as a single transaction. Result priority is clock
+    // representation, entity liveness, position presence, then coordinate
+    // representation; every failure leaves position and clock state unchanged.
+    [[nodiscard]] SimulationStepResult AdvanceOneStep(const SimulationStepInput& input) noexcept;
 
     // [game thread] Returns an owned immutable value suitable for render/debug packet assembly.
     [[nodiscard]] SimulationState Snapshot() const noexcept;
@@ -84,10 +154,12 @@ public:
     [[nodiscard]] const SimulationWorldConfig& config() const noexcept;
 
 private:
-    SimulationWorld(const SimulationWorldConfig& config, EntityRegistry entities) noexcept;
+    SimulationWorld(const SimulationWorldConfig& config, EntityRegistry entities,
+        ComponentStore<Position3> positions) noexcept;
 
     SimulationWorldConfig config_{};
     EntityRegistry entities_;
+    ComponentStore<Position3> positions_;
     SimulationState state_{};
 };
 } // namespace omega::simulation

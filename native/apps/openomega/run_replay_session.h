@@ -13,10 +13,20 @@
 
 namespace omega::app
 {
+// Project-owned logical action identifiers used only by the synthetic native diagnostic host.
+// They are not retail input bindings or control-layout claims.
+inline constexpr std::uint32_t kDebugMoveForwardAction = 2U;
+inline constexpr std::uint32_t kDebugMoveBackwardAction = 3U;
+inline constexpr std::uint32_t kDebugMoveLeftAction = 4U;
+inline constexpr std::uint32_t kDebugMoveRightAction = 5U;
+
 struct RunReplaySessionConfig
 {
     runtime::FrameSchedulerConfig scheduler{};
     std::uint32_t maximum_entities = 65'536U;
+    // Project-owned diagnostic input policy. Disabled preserves the E0059 replay behavior even
+    // when a trace happens to contain the synthetic movement action identifiers.
+    bool enable_debug_locomotion = false;
 
     friend constexpr bool operator==(
         const RunReplaySessionConfig&, const RunReplaySessionConfig&) noexcept = default;
@@ -51,6 +61,8 @@ enum class RunReplayErrorCode
     ReplayComplete,
     InvalidSessionState,
     SimulationRepresentationExhausted,
+    DebugLocomotionEntityCreateFailed,
+    DebugLocomotionPlanFailed,
 };
 
 [[nodiscard]] constexpr std::string_view RunReplayErrorCodeName(
@@ -74,6 +86,10 @@ enum class RunReplayErrorCode
         return "invalid-session-state";
     case RunReplayErrorCode::SimulationRepresentationExhausted:
         return "simulation-representation-exhausted";
+    case RunReplayErrorCode::DebugLocomotionEntityCreateFailed:
+        return "debug-locomotion-entity-create-failed";
+    case RunReplayErrorCode::DebugLocomotionPlanFailed:
+        return "debug-locomotion-plan-failed";
     }
     return "unknown";
 }
@@ -99,6 +115,10 @@ enum class RunReplayErrorCode
         return "run replay session state is invalid";
     case RunReplayErrorCode::SimulationRepresentationExhausted:
         return "run replay simulation representation is exhausted";
+    case RunReplayErrorCode::DebugLocomotionEntityCreateFailed:
+        return "run replay debug locomotion entity creation failed";
+    case RunReplayErrorCode::DebugLocomotionPlanFailed:
+        return "run replay debug locomotion planning failed";
     }
     return "run replay error is unknown";
 }
@@ -189,8 +209,8 @@ public:
     ~RunReplaySession() = default;
 
     // [game thread; no concurrent use] Consumes one replay frame. Lower replay failures are
-    // retryable and transactional. Simulation representation exhaustion permanently fails this
-    // session after the scheduler plan and replay frame have already been consumed.
+    // retryable and transactional. After a normal replay frame and scheduler plan are consumed,
+    // diagnostic locomotion-planning or simulation-step failure permanently fails this session.
     [[nodiscard]] std::expected<RunReplayFrame, RunReplayError> Next() noexcept;
 
     // [game thread; no concurrent use] Returned snapshots are owned copies.
@@ -200,16 +220,22 @@ public:
     scheduler_state() const noexcept;
     [[nodiscard]] std::optional<simulation::SimulationState>
     simulation_state() const noexcept;
+    // [game thread; no concurrent use] Returns an owned copy only when the explicit synthetic
+    // locomotion option created its positioned diagnostic entity.
+    [[nodiscard]] std::optional<simulation::Position3>
+    debug_locomotion_position() const noexcept;
 
 private:
     RunReplaySession(runtime::FrameScheduler&& scheduler,
         simulation::SimulationWorld&& simulation,
-        runtime::RunCaptureReplaySession&& replay) noexcept;
+        runtime::RunCaptureReplaySession&& replay,
+        std::optional<simulation::EntityId> debug_locomotion_entity) noexcept;
     void NormalizeInert() noexcept;
 
     std::optional<runtime::FrameScheduler> scheduler_;
     std::optional<simulation::SimulationWorld> simulation_;
     std::optional<runtime::RunCaptureReplaySession> replay_;
+    std::optional<simulation::EntityId> debug_locomotion_entity_;
     RunReplaySessionState state_ = RunReplaySessionState::Inert;
 };
 } // namespace omega::app

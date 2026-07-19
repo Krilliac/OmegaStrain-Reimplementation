@@ -5,6 +5,8 @@
 #include "omega/runtime/launch_options.h"
 #include "omega/runtime/runtime_settings.h"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -105,6 +107,14 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
 
     omega::app::RunReplaySessionConfig config{};
     config.scheduler = capture_before.config;
+    constexpr std::array debug_locomotion_actions{
+        omega::app::kDebugMoveForwardAction,
+        omega::app::kDebugMoveBackwardAction,
+        omega::app::kDebugMoveLeftAction,
+        omega::app::kDebugMoveRightAction,
+    };
+    config.enable_debug_locomotion = std::ranges::includes(
+        traces->input_trace().actions(), debug_locomotion_actions);
     auto created = omega::app::RunReplaySession::Create(std::move(*traces), config);
     if (!created)
     {
@@ -151,6 +161,7 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     }
     const auto scheduler = replay.scheduler_state();
     const auto simulation = replay.simulation_state();
+    const auto replay_debug_position = replay.debug_locomotion_position();
     if (!scheduler || !simulation)
     {
         std::cerr << "runtime capture replay: final owner snapshots are unavailable\n";
@@ -182,9 +193,13 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     }
     const std::chrono::nanoseconds expected_time{
         static_cast<std::int64_t>(capture_result.executed_simulation_steps) * step_count};
+    const std::uint32_t expected_alive_entities =
+        config.enable_debug_locomotion ? 1U : 0U;
     if (simulation->completed_steps != capture_result.executed_simulation_steps ||
         simulation->completed_steps != capture_result.planned_simulation_steps ||
-        simulation->simulated_time != expected_time || simulation->alive_entities != 0U)
+        simulation->simulated_time != expected_time ||
+        simulation->alive_entities != expected_alive_entities ||
+        replay_debug_position.has_value() != config.enable_debug_locomotion)
     {
         std::cerr << "runtime capture replay: fresh simulation state differs\n";
         return false;

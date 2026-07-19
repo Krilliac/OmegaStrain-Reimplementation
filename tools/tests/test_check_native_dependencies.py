@@ -85,6 +85,95 @@ class NativeDependencyGateTests(unittest.TestCase):
             "omega_runtime includes forbidden dependency",
         )
 
+    def test_gameplay_header_and_source_allow_only_self_simulation_and_stdlib(
+        self,
+    ) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/include/omega/gameplay/debug_locomotion.h": (
+                    "#pragma once\n"
+                    "#include <cstdint>\n"
+                    '#include "omega/simulation/simulation_world.h"\n'
+                ),
+                "native/src/gameplay/debug_locomotion.cpp": (
+                    '#include "omega/gameplay/debug_locomotion.h"\n'
+                    "#include <vector>\n"
+                ),
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(errors, [])
+        for relative_path in (
+            "native/include/omega/gameplay/debug_locomotion.h",
+            "native/src/gameplay/debug_locomotion.cpp",
+        ):
+            with self.subTest(relative_path=relative_path):
+                rule = gate.module_rule(Path(relative_path))
+                self.assertIsNotNone(rule)
+                self.assertEqual(rule.name, "omega_gameplay")
+
+    def test_gameplay_rejects_runtime_sdl_and_app_dependencies(self) -> None:
+        cases = (
+            (
+                '#include "omega/runtime/frame_scheduler.h"\n',
+                "omega_gameplay includes forbidden dependency",
+            ),
+            ("#include <SDL3/SDL.h>\n", "includes unapproved external header"),
+            (
+                '#include "sdl_platform_service.h"\n',
+                "includes unresolved local header",
+            ),
+            ('#include "omega_app.h"\n', "includes unresolved local header"),
+        )
+        for source, message in cases:
+            with self.subTest(source=source):
+                self.assert_rejected(
+                    "native/src/gameplay/example.cpp", source, message
+                )
+
+    def test_lower_layers_cannot_depend_upward_on_gameplay(self) -> None:
+        cases = (
+            "native/src/simulation/example.cpp",
+            "native/src/runtime/example.cpp",
+            "native/include/omega/asset/example.h",
+            "native/src/retail/example.cpp",
+            "native/src/archive/example.cpp",
+            "native/src/content/example.cpp",
+            "native/apps/openomega/sdl_example.cpp",
+        )
+        for relative_path in cases:
+            with self.subTest(relative_path=relative_path):
+                self.assert_rejected(
+                    relative_path,
+                    '#include "omega/gameplay/debug_locomotion.h"\n',
+                    "includes forbidden dependency",
+                )
+
+    def test_openomega_app_core_and_host_may_depend_on_gameplay(self) -> None:
+        for relative_path in (
+            "native/apps/openomega/run_replay_session.cpp",
+            "native/apps/openomega/omega_app.cpp",
+        ):
+            with self.subTest(relative_path=relative_path):
+                checked, errors = self.check_source(
+                    relative_path,
+                    '#include "omega/gameplay/debug_locomotion.h"\n',
+                )
+                self.assertEqual(checked, 1)
+                self.assertEqual(errors, [])
+
+    def test_gameplay_classification_remains_fail_closed(self) -> None:
+        self.assert_rejected(
+            "native/src/gameplay_extra/example.cpp",
+            "constexpr int example = 0;\n",
+            "unclassified shipping native source path",
+        )
+        self.assert_rejected(
+            "native/src/gameplay/example.cpp",
+            '#include "omega/gameplay_extra/example.h"\n',
+            "unclassified project include",
+        )
+
     def test_platform_neutral_modules_accept_standard_headers(self) -> None:
         source = "".join(
             f"#include <{header}>\n"

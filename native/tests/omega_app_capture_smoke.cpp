@@ -70,6 +70,31 @@ struct OmegaAppTestAccess final
     {
         return app.host_->Snapshot();
     }
+
+    [[nodiscard]] static std::optional<simulation::Position3>
+    DebugLocomotionPosition(const OmegaApp& app) noexcept
+    {
+        if (!app.simulation_)
+            return std::nullopt;
+        return app.simulation_->PositionOf(app.debug_locomotion_entity_);
+    }
+
+    [[nodiscard]] static bool HasInputBinding(const OmegaApp& app,
+        const runtime::InputDevice device, const std::uint16_t code,
+        const std::uint32_t action) noexcept
+    {
+        if (!app.input_)
+            return false;
+        for (const runtime::InputBinding& binding : app.input_->bindings().bindings())
+        {
+            if (binding.device == device && binding.code == code &&
+                binding.action == action)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 };
 } // namespace omega::app::detail
 
@@ -101,6 +126,15 @@ void Check(const bool condition, const std::string_view message)
     event.key.down = down;
     return SDL_PushEvent(&event);
 }
+
+[[nodiscard]] bool PushKey(const SDL_Scancode scancode, const bool down)
+{
+    SDL_Event event{};
+    event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    event.key.scancode = scancode;
+    event.key.down = down;
+    return SDL_PushEvent(&event);
+}
 } // namespace
 
 int main()
@@ -116,6 +150,12 @@ int main()
     omega::runtime::RuntimeSettings settings;
     settings.jobs.worker_count = 1U;
     settings.jobs.max_pending_jobs = 8U;
+    settings.frame.simulation_step = omega::runtime::kMinimumSimulationStep;
+    settings.frame.max_steps_per_frame = 8U;
+    settings.frame.max_frame_delta =
+        omega::runtime::kMinimumSimulationStep * 8;
+    settings.max_input_events_per_frame =
+        omega::runtime::InputTracker::kMaxEventsPerFrameLimit;
     auto app = omega::app::OmegaApp::Create(std::move(*config), settings,
         omega::runtime::ContentStartupState{}, false);
     Check(app.has_value(), "the zero-file OmegaApp fixture starts");
@@ -124,6 +164,37 @@ int main()
         std::cerr << app.error() << '\n';
         return EXIT_FAILURE;
     }
+
+    using omega::runtime::InputDevice;
+    using omega::app::detail::OmegaAppTestAccess;
+    Check(OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
+              omega::simulation::Position3{},
+        "the host creates one positioned synthetic diagnostic entity at the origin");
+    Check(OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+              static_cast<std::uint16_t>(SDL_SCANCODE_W),
+              omega::app::kDebugMoveForwardAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_S),
+                  omega::app::kDebugMoveBackwardAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_A),
+                  omega::app::kDebugMoveLeftAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_D),
+                  omega::app::kDebugMoveRightAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
+                  static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_UP),
+                  omega::app::kDebugMoveForwardAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
+                  static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_DOWN),
+                  omega::app::kDebugMoveBackwardAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
+                  static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_LEFT),
+                  omega::app::kDebugMoveLeftAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
+                  static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_RIGHT),
+                  omega::app::kDebugMoveRightAction),
+        "the synthetic W/S/A/D and gamepad dpad bindings expose action IDs 2 through 5");
 
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     Check(PushQuit(), "a host-quit event enters the SDL queue");
@@ -206,18 +277,31 @@ int main()
             "logical quit retains its distinct owned reason and continued index");
     }
 
-    Check(PushEscape(false), "the Escape release enters the SDL queue");
+    bool movement_events_queued = PushEscape(false) && PushKey(SDL_SCANCODE_W, true);
+    // Keep the real SDL pump busy for longer than the minimum synthetic step without sleeping.
+    // Duplicate level reports are explicitly accepted no-ops after the first held transition.
+    for (std::size_t index = 0U; movement_events_queued && index < 2'048U; ++index)
+        movement_events_queued = PushKey(SDL_SCANCODE_W, true);
+    Check(movement_events_queued,
+        "the movement fixture enters the real SDL event queue");
     auto normal = app->RunWithCapture(1);
     Check(normal.has_value(), "a released quit action permits one captured render");
     if (!normal)
         return EXIT_FAILURE;
     const auto* normal_pair = normal->trace_pair();
     const RunResult normal_result = normal->result();
+    const auto normal_debug_position =
+        OmegaAppTestAccess::DebugLocomotionPosition(*app);
     Check(normal->completion() == RunCaptureCompletion::FrameLimitReached &&
               !normal->failure() && normal_pair != nullptr &&
               normal_result.input_frames == 1U && normal_result.rendered_frames == 1 &&
-              !normal_result.quit_requested,
-        "one normal frame publishes aligned input, elapsed, and render counts");
+              !normal_result.quit_requested &&
+              normal_result.executed_simulation_steps > 0U &&
+              normal_debug_position &&
+              normal_debug_position->x == 0 && normal_debug_position->y == 0 &&
+              normal_debug_position->z == static_cast<std::int64_t>(
+                  normal_result.executed_simulation_steps),
+        "one normal frame applies its held synthetic translation to every executed step");
 
     const omega::runtime::FrameSchedulerState normal_before =
         normal->scheduler_state_before();
@@ -226,6 +310,7 @@ int main()
     std::optional<omega::runtime::InputTraceFrameState> captured_input;
     std::optional<omega::runtime::SchedulerElapsedFrameState> captured_elapsed;
     std::optional<omega::runtime::FramePlan> captured_plan;
+    std::optional<omega::runtime::InputTraceActionState> captured_forward;
     std::array<std::uint32_t, omega::runtime::InputBindingTable::kMaxActions>
         captured_actions{};
     std::array<omega::runtime::InputTraceActionState,
@@ -237,6 +322,8 @@ int main()
     {
         captured_input = normal_pair->input_trace().FrameAt(0U);
         captured_elapsed = normal_pair->scheduler_elapsed_trace().FrameAt(0U);
+        captured_forward = normal_pair->input_trace().ActionAt(
+            0U, omega::app::kDebugMoveForwardAction);
         const auto action_schema = normal_pair->input_trace().actions();
         captured_action_count = action_schema.size();
         for (std::size_t index = 0U; index < captured_action_count; ++index)
@@ -254,9 +341,11 @@ int main()
         Check(normal_pair->input_trace().first_frame_index() == 2U &&
                   normal_pair->input_trace().frame_count() == 1U &&
                   normal_pair->scheduler_elapsed_trace().frame_count() == 1U &&
-                  captured_input && captured_elapsed && captured_action_count > 0U &&
-                  captured_action_states_valid,
-            "normal capture aligns the continued input index with one elapsed sample");
+                  captured_input && captured_elapsed && captured_action_count == 5U &&
+                  captured_action_states_valid && captured_forward &&
+                  captured_forward->held && captured_forward->pressed &&
+                  !captured_forward->released,
+            "normal capture keeps its format while recording the five-action debug schema");
         if (captured_elapsed)
         {
             auto replay = omega::runtime::FrameScheduler::Create(normal_before.config);
@@ -284,7 +373,10 @@ int main()
 
     auto replay_created = omega::app::RunReplaySession::Create(
         std::move(*replay_traces),
-        omega::app::RunReplaySessionConfig{.scheduler = normal_before.config});
+        omega::app::RunReplaySessionConfig{
+            .scheduler = normal_before.config,
+            .enable_debug_locomotion = true,
+        });
     Check(replay_created.has_value(),
         "the actual real-host capture creates a fresh app replay session");
     if (!replay_created)
@@ -299,8 +391,10 @@ int main()
               replay_simulation_before->completed_steps == 0U &&
               replay_simulation_before->simulated_time ==
                   std::chrono::nanoseconds::zero() &&
-              replay_simulation_before->alive_entities == 0U,
-        "real-host replay begins with the captured scheduler boundary and a fresh world");
+              replay_simulation_before->alive_entities == 1U &&
+              replay_session.debug_locomotion_position() ==
+                  omega::simulation::Position3{},
+        "real-host replay begins with a fresh positioned synthetic diagnostic entity");
 
     auto replay_frame = replay_session.Next();
     Check(replay_frame.has_value(), "the actual captured frame advances through app replay");
@@ -343,7 +437,8 @@ int main()
               replay_simulation_after->completed_steps ==
                   captured_plan->simulation_steps &&
               replay_simulation_after->simulated_time == expected_fresh_time &&
-              replay_simulation_after->alive_entities == 0U &&
+              replay_simulation_after->alive_entities == 1U &&
+              replay_session.debug_locomotion_position() == normal_debug_position &&
               normal_result.planned_simulation_steps ==
                   captured_plan->simulation_steps &&
               normal_result.executed_simulation_steps ==
@@ -361,8 +456,10 @@ int main()
               !replay_complete.error().replay_error,
         "the consumed real-host capture reports stable app replay completion");
 
-    Check(PushEscape(true) && PushQuit(),
-        "simultaneous logical and host quit events enter the SDL queue");
+    const auto debug_position_before_terminal =
+        OmegaAppTestAccess::DebugLocomotionPosition(*app);
+    Check(PushKey(SDL_SCANCODE_W, false) && PushEscape(true) && PushQuit(),
+        "the movement release and simultaneous quit reasons enter the SDL queue");
     auto both = app->RunWithCapture(1);
     Check(both.has_value(), "simultaneous quit reasons publish a terminal capture");
     if (!both)
@@ -373,8 +470,10 @@ int main()
               both_terminal->host_quit_requested &&
               both_terminal->logical_quit_pressed &&
               both->scheduler_state_before() == normal_after &&
-              both->scheduler_state_after() == normal_after,
-        "both quit reasons survive one terminal frame without scheduler mutation");
+              both->scheduler_state_after() == normal_after &&
+              OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
+                  debug_position_before_terminal,
+        "a terminal host frame cannot mutate scheduler or synthetic position");
 
     Check(PushEscape(false), "the final Escape release enters the SDL queue");
     Check(omega::app::detail::OmegaAppTestAccess::InstallUnownedDiagnosticDraw(*app),

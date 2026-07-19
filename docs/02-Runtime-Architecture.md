@@ -16,7 +16,7 @@ OmegaApp [game thread, sole lifetime owner]
 |- ScriptService [game thread]
 |- SimulationWorld [game thread; non-hot-reloadable owner]
 |  |- EntityRegistry [world-owned identity component]
-|  `- ComponentStore<T> [future direct members; bounded plain state]
+|  `- ComponentStore<Position3> [world-owned bounded synthetic position state]
 |- UiService [game thread build; render thread consume]
 `- NetworkService [game thread API; I/O worker]
 ```
@@ -139,21 +139,23 @@ handles fail closed at resident lookup.
 - `ScriptService` executes only project-owned native logic or declarative mission data. Retail
   executable/script modules are inspected offline and are never loaded as executable code.
 - `SimulationWorld` advances only from explicit fixed-step calls and owns deterministic completed-
-  step/simulated-time state plus a preallocated bounded `EntityRegistry`. Generational entity IDs
+  step/simulated-time state, a preallocated bounded `EntityRegistry`, and a direct preallocated
+  `ComponentStore<Position3>`. Generational entity IDs
   reject stale handles, and the registry allocates only during world creation. The composition root
   supplies the scheduler's validated step; its current default and entity capacity are synthetic-
   shell values, while retail timing and population limits remain evidence-driven. Entity IDs are
   plain world-scoped values: they do not own the world, and an identical numeric value in another
   world is a different identity even though the value itself cannot distinguish those worlds.
-  `CreateEntity`, `DestroyEntity`, `IsAlive`, and the aggregate value-returning `EntitySnapshot`
-  form the lifecycle facade; no mutable registry reference escapes world ownership. `DestroyEntity`
-  is reserved as the sole in-place removal path so future direct component stores can erase the
-  exact generation in deterministic declaration order before registry reuse. A world may transfer
+  `CreateEntity`, `CreatePositionedEntity`, `DestroyEntity`, `IsAlive`, `PositionOf`, and the
+  aggregate value-returning snapshots form the lifecycle facade; no mutable registry or component
+  reference escapes world ownership. `DestroyEntity` erases an exact-generation position before
+  registry reuse. Optional one-entity translation input is checked together with the clock before
+  a fixed step commits, so every reported failure leaves both position and clock unchanged. A world may transfer
   complete ownership by move construction, but move assignment is deleted so a live destination
   cannot be replaced outside that lifecycle facade. Whole-world destruction releases future stores
   in reverse member order before the registry.
-- `ComponentStore<T>` is the reusable header-only foundation for future direct `SimulationWorld`
-  members; no speculative gameplay component is instantiated yet. Creation allocates one optional
+- `ComponentStore<T>` is the reusable header-only foundation for direct `SimulationWorld`
+  members; E-0060 instantiates only the synthetic project-owned `Position3` component. Creation allocates one optional
   sparse slot per possible entity index and captures a caller-bounded maximum occupancy, after which
   store access is allocation-free and game-thread-only. Every lookup or mutation receives the
   issuing registry and validates the exact live generation. Future world lifecycle code erases
@@ -917,6 +919,36 @@ no reconstructed input, and the fresh world does not consume that input. It reco
 gameplay and restores no captured scheduler/world state, entities, or RNG. It defines no
 persistence, file, wire, stable ABI, cross-process format, seek, rewind, loop, rollback, retail
 timing, or retail determinism contract.
+
+E-0060 supersedes only the prior statements that every fresh replay world is empty and reconstructed
+input is never consumed. The new `omega_gameplay` library is a portable value/system layer above
+`omega_simulation`; it owns no service, thread, callback, platform handle, world pointer, or retained
+component reference. Its pure planner accepts only signed digital axes `-1`, `0`, and `1`, mapping
+them to a project-defined one-unit X/Z translation with Y unchanged. That mapping is synthetic host
+policy rather than recovered player or coordinate semantics.
+
+`OmegaApp` creates one positioned diagnostic entity in its owned world. W/S/A/D and gamepad D-pad
+bindings publish actions 2 through 5 through the existing immutable input snapshot. Opposing held
+actions cancel. Once a nonterminal frame has an immutable input snapshot, the app derives one
+translation and supplies that same value to every fixed step in the scheduler plan. The world
+preflights clock representation, exact entity liveness, exact-generation position presence, and
+signed X/Y/Z addition before committing the position and clock together. Terminal frames still end
+before clock sampling, scheduler planning, locomotion, simulation, or rendering.
+
+`RunReplaySessionConfig::enable_debug_locomotion` defaults false, preserving the prior clock-only
+behavior for every existing caller and trace. When explicitly enabled, the session creates its own
+fresh positioned diagnostic entity and consumes reconstructed held actions through the same pure
+planner and world transaction. Its observer returns an owned optional position. The finite CLI
+enables this option only when all four action identifiers are present in the captured schema. It
+still transfers no captured world checkpoint and does not read the still-live `OmegaApp`; it checks
+fresh actor/position presence plus the established aggregate, scheduler, and clock conditions. The
+real-host integration smoke separately compares the captured app position with the fresh replay
+position. The fixed E-0059 success line is unchanged.
+
+This path renders no actor and establishes no retail input IDs, bindings, axes, handedness, origin,
+unit, speed, diagonal normalization, tick rate, analog/deadzone behavior, transform, physics,
+collision, gravity, camera, animation, weapons, AI, mission, asset, network, or retail determinism
+contract.
 
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are

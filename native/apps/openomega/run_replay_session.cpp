@@ -1,5 +1,7 @@
 #include "run_replay_session.h"
 
+#include "omega/gameplay/debug_locomotion.h"
+
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -93,6 +95,18 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
             RunReplayErrorCode::SimulationWorldCreateFailed));
     }
 
+    std::optional<simulation::EntityId> debug_locomotion_entity;
+    if (config.enable_debug_locomotion)
+    {
+        auto created_entity = world->CreatePositionedEntity(simulation::Position3{});
+        if (!created_entity)
+        {
+            return std::unexpected(Error(RunReplayOperation::Create,
+                RunReplayErrorCode::DebugLocomotionEntityCreateFailed));
+        }
+        debug_locomotion_entity = *created_entity;
+    }
+
     auto replay = runtime::RunCaptureReplaySession::Create(std::move(traces));
     if (!replay)
     {
@@ -101,16 +115,19 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
     }
 
     RunReplaySession session(
-        std::move(*scheduler), std::move(*world), std::move(*replay));
+        std::move(*scheduler), std::move(*world), std::move(*replay),
+        debug_locomotion_entity);
     return std::expected<RunReplaySession, RunReplayError>{std::move(session)};
 }
 
 RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
     simulation::SimulationWorld&& simulation,
-    runtime::RunCaptureReplaySession&& replay) noexcept
+    runtime::RunCaptureReplaySession&& replay,
+    const std::optional<simulation::EntityId> debug_locomotion_entity) noexcept
     : scheduler_(std::in_place, std::move(scheduler)),
       simulation_(std::in_place, std::move(simulation)),
       replay_(std::in_place, std::move(replay)),
+      debug_locomotion_entity_(debug_locomotion_entity),
       state_(replay_->complete()
                  ? RunReplaySessionState::Complete
                  : RunReplaySessionState::Ready)
@@ -121,6 +138,8 @@ RunReplaySession::RunReplaySession(RunReplaySession&& other) noexcept
     : scheduler_(std::move(other.scheduler_)),
       simulation_(std::move(other.simulation_)),
       replay_(std::move(other.replay_)),
+      debug_locomotion_entity_(std::exchange(
+          other.debug_locomotion_entity_, std::nullopt)),
       state_(std::exchange(other.state_, RunReplaySessionState::Inert))
 {
     other.NormalizeInert();
@@ -129,6 +148,7 @@ RunReplaySession::RunReplaySession(RunReplaySession&& other) noexcept
 void RunReplaySession::NormalizeInert() noexcept
 {
     replay_.reset();
+    debug_locomotion_entity_.reset();
     simulation_.reset();
     scheduler_.reset();
     state_ = RunReplaySessionState::Inert;
@@ -164,10 +184,35 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
 
     const std::optional<std::chrono::nanoseconds> elapsed = replay_frame->elapsed();
     const runtime::FramePlan plan = scheduler_->BeginFrame(*elapsed);
+
+    simulation::SimulationStepInput simulation_input{};
+    if (debug_locomotion_entity_)
+    {
+        const auto translation = gameplay::PlanDebugLocomotionStep(
+            gameplay::DigitalMoveCommand{
+                .lateral = static_cast<std::int8_t>(
+                    (replay_frame->input().IsHeld(kDebugMoveRightAction) ? 1 : 0) -
+                    (replay_frame->input().IsHeld(kDebugMoveLeftAction) ? 1 : 0)),
+                .longitudinal = static_cast<std::int8_t>(
+                    (replay_frame->input().IsHeld(kDebugMoveForwardAction) ? 1 : 0) -
+                    (replay_frame->input().IsHeld(kDebugMoveBackwardAction) ? 1 : 0)),
+            });
+        if (!translation)
+        {
+            state_ = RunReplaySessionState::Failed;
+            return std::unexpected(Error(RunReplayOperation::Next,
+                RunReplayErrorCode::DebugLocomotionPlanFailed));
+        }
+        simulation_input.translation = simulation::EntityTranslation{
+            .entity = *debug_locomotion_entity_,
+            .delta = *translation,
+        };
+    }
+
     for (std::uint32_t step = 0U; step < plan.simulation_steps; ++step)
     {
-        if (simulation_->AdvanceOneStep() ==
-            simulation::SimulationStepResult::RepresentationExhausted)
+        if (simulation_->AdvanceOneStep(simulation_input) !=
+            simulation::SimulationStepResult::Advanced)
         {
             state_ = RunReplaySessionState::Failed;
             return std::unexpected(Error(RunReplayOperation::Next,
@@ -211,5 +256,13 @@ RunReplaySession::simulation_state() const noexcept
     if (!simulation_)
         return std::nullopt;
     return simulation_->Snapshot();
+}
+
+std::optional<simulation::Position3>
+RunReplaySession::debug_locomotion_position() const noexcept
+{
+    if (!simulation_ || !debug_locomotion_entity_)
+        return std::nullopt;
+    return simulation_->PositionOf(*debug_locomotion_entity_);
 }
 } // namespace omega::app
