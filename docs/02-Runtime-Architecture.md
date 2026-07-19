@@ -438,6 +438,43 @@ gating are unchanged, and no retry, picker, fallback, persistence, schema, captu
 is introduced. Focused/full MSVC, direct core/process, 30/34/30 CTest, runtime-off, dependency,
 tooling, and compile-all validation passed. Publication remains unclaimed.
 
+E-0073 makes the existing optional diagnostic-base presentation concrete for accepted no-level
+owner states. `BuildProjectDiagnosticNoLevelImage` is a reentrant app-core builder that returns a
+new owned, fully opaque 128x72 RGBA8 image on every call. It uses only the existing integer glyph
+and rectangle primitives and reads no file, platform object, asset service, canonical asset, or
+retail payload. The fixed labels are `DIAGNOSTIC PLAY`, `NO LEVEL IMAGE`, `F1/ENTER MENU`, and
+`ESC QUIT` beneath the existing project frame and header. Exact background/cyan/slate/amber
+populations are 3,327/1,285/4,124/480; the full FNV-1a-64 is `0x37f823d27a4cb3ce`.
+
+The E-0071 classification still occurs before allocation or service construction. Once a state is
+valid, `OmegaApp::Create` borrows its owner `debug_image` when present; otherwise it owns the
+no-level image locally through the synchronous upload. This is precisely the existing diagnostic
+upload error boundary and retained handle, not a new resource owner or failure category. Complete
+`LevelContent` continues to require and present its owner image. `NoContent` and `DataMounted`
+instead use the placeholder, so START DIAGNOSTIC remains reachable in both no-level states.
+
+The no-level upload sequence is diagnostic placeholder, menu, controls, then topology. Fresh host
+slots therefore hold four distinct textures totaling 122,880 logical bytes. The retained hidden
+draw list contains exactly one full-source/full-target `Contain`/`Nearest` diagnostic command.
+Each MainMenu list copies that base then appends the full card and selection marker; Controls and
+AssetTopology copy the base then append their card. DiagnosticPlay selects the one-command base
+list. Per-frame image construction, upload, draw-list construction, and allocation remain absent.
+Destruction clears topology, controls, visible, and hidden lists before releasing topology,
+controls, menu, and diagnostic textures in reverse upload order. The four-texture count and byte
+total apply only to no-level startup; a level owner's image may have different dimensions and size.
+
+This presentation does not change the reducer, valid state domain, logical or physical input,
+simulation or locomotion gate, elapsed scheduling, return transition, terminal priority, capture,
+replay, configuration, CLI, file/wire/stable-ABI schema, asset decoding, or content ownership.
+The image is a synthetic developer placeholder. It establishes no typed allocation-error contract,
+full-framebuffer pixel identity, retail frontend, level selection, DataMounted hardware result,
+private-input result, or emulator equivalence. Focused and full MSVC builds were clean. The focused
+diagnostic and replay executables and the real D3D12 host smoke each passed directly plus 20/20
+repetitions; default, opt-in GPU, and restored CTest passed 30/34/30. A 20-frame capture-replay and
+20/20 short repetitions passed. Runtime-off direct and focused CTest checks retained 27
+registrations. The dependency gate checked 157 native files, all 209 tooling tests passed, and
+Python compile-all passed. Publication remains unclaimed.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

@@ -701,6 +701,25 @@ retail instruction blocks, or PS2 execution layer.
   `omega_core_tests`, the process contract, and 30/34/30 default/GPU/restored CTest matrices passed.
   Runtime-off checks retained 27 registrations, the dependency gate checked 157 native files, all
   209 tooling tests passed, and Python compile-all passed. Publication remains unclaimed.
+- E-0073 gives valid no-level startup states a visible synthetic `DiagnosticPlay` surface without
+  changing the level-content path. `BuildProjectDiagnosticNoLevelImage` independently owns one
+  opaque 128x72 RGBA8 image and reads no file, platform object, decoded asset, or retail input. It
+  draws the existing frame and `OPEN OMEGA` header with `DIAGNOSTIC PLAY`, `NO LEVEL IMAGE`,
+  `F1/ENTER MENU`, and `ESC QUIT`; its exact background/cyan/slate/amber populations are
+  3,327/1,285/4,124/480 and its FNV-1a-64 is `0x37f823d27a4cb3ce`.
+  After the existing ownership classifier succeeds, `OmegaApp` keeps an owner-supplied level debug
+  image when present and otherwise builds this placeholder. Both flow through the existing
+  diagnostic texture upload, full-source/full-target `Contain`/`Nearest` command, handle, error,
+  and teardown path. Zero-file upload order is placeholder, menu, controls, topology: four distinct
+  resident textures and exactly 122,880 logical bytes. MainMenu submits base/card/marker, Controls
+  and AssetTopology submit base/card, and no-level DiagnosticPlay submits the one base blit. START
+  DIAGNOSTIC remains available for `NoContent` and `DataMounted`; reducer, simulation, locomotion,
+  elapsed, return, terminal priority, capture, and replay behavior are unchanged. Residency totals
+  apply only to no-level startup. This is a project-generated missing-level diagnostic, not a retail
+  UI, level selector, framebuffer-identity, private-input, or emulator-equivalence claim. Focused
+  and full MSVC builds, direct and repeated diagnostic/replay/GPU checks, 30/34/30
+  default/GPU/restored CTest, capture-replay, runtime-off, dependency, tooling, and compile-all
+  validation passed. Publication remains unclaimed.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

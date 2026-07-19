@@ -301,6 +301,22 @@ runtime::DebugImage BuildProjectDiagnosticMenuImage(
     return image;
 }
 
+runtime::DebugImage BuildProjectDiagnosticNoLevelImage()
+{
+    runtime::DebugImage image = BuildDiagnosticCardBase();
+
+    DrawOpenOmegaHeader(image);
+    DrawLabel(image, "DIAGNOSTIC PLAY", 34U, 24U);
+
+    FillRectangle(image, 8U, 34U, 120U, 52U, kSlateColor);
+    DrawLabel(image, "NO LEVEL IMAGE", 36U, 40U);
+
+    FillRectangle(image, 8U, 56U, 120U, 68U, kSlateColor);
+    DrawLabel(image, "F1/ENTER MENU", 12U, 59U);
+    DrawLabel(image, "ESC QUIT", 84U, 59U);
+    return image;
+}
+
 runtime::DebugImage BuildProjectDiagnosticControlsImage()
 {
     runtime::DebugImage image = BuildDiagnosticCardBase();

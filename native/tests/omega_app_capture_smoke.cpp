@@ -290,7 +290,7 @@ void Check(const bool condition, const std::string_view message)
     return SameTextureResidency(before, after) &&
            after.frame_submissions == before.frame_submissions + 1U &&
            after.blit_submissions == before.blit_submissions + 1U &&
-           after.successful_blit_draws == before.successful_blit_draws + 2U &&
+           after.successful_blit_draws == before.successful_blit_draws + 3U &&
            after.clear_submissions == before.clear_submissions &&
            after.unavailable_swapchain_submissions ==
                before.unavailable_swapchain_submissions &&
@@ -298,7 +298,7 @@ void Check(const bool condition, const std::string_view message)
                before.rejected_nondefault_texture_handles;
 }
 
-[[nodiscard]] bool IsOneModalCardSubmission(
+[[nodiscard]] bool IsOneDiagnosticPlaySubmission(
     const omega::app::GpuHostSnapshot& before,
     const omega::app::GpuHostSnapshot& after) noexcept
 {
@@ -313,7 +313,22 @@ void Check(const bool condition, const std::string_view message)
                before.rejected_nondefault_texture_handles;
 }
 
-[[nodiscard]] bool IsOneHiddenMenuSubmission(
+[[nodiscard]] bool IsOneModalCardSubmission(
+    const omega::app::GpuHostSnapshot& before,
+    const omega::app::GpuHostSnapshot& after) noexcept
+{
+    return SameTextureResidency(before, after) &&
+           after.frame_submissions == before.frame_submissions + 1U &&
+           after.blit_submissions == before.blit_submissions + 1U &&
+           after.successful_blit_draws == before.successful_blit_draws + 2U &&
+           after.clear_submissions == before.clear_submissions &&
+           after.unavailable_swapchain_submissions ==
+               before.unavailable_swapchain_submissions &&
+           after.rejected_nondefault_texture_handles ==
+               before.rejected_nondefault_texture_handles;
+}
+
+[[nodiscard]] bool IsOneClearOnlySubmission(
     const omega::app::GpuHostSnapshot& before,
     const omega::app::GpuHostSnapshot& after) noexcept
 {
@@ -525,6 +540,12 @@ int main()
         .right = omega::runtime::kNormalizedRenderExtent,
         .bottom = omega::runtime::kNormalizedRenderExtent,
     };
+    constexpr omega::runtime::RenderTargetRectQ16 kFullTarget{
+        .left = 0U,
+        .top = 0U,
+        .right = omega::runtime::kNormalizedRenderExtent,
+        .bottom = omega::runtime::kNormalizedRenderExtent,
+    };
     constexpr omega::runtime::RenderTargetRectQ16 kMenuDestination{
         .left = 2048U,
         .top = 2048U,
@@ -560,6 +581,15 @@ int main()
     static_assert(kMenuSelectionTargets.size() ==
                   omega::app::kDiagnosticMenuRowCount);
     const auto hidden_commands = initial_hidden_draw_list.commands();
+    const bool hidden_list_is_exact =
+        hidden_commands.size() == 1U &&
+        hidden_commands[0].texture == diagnostic_texture &&
+        hidden_commands[0].source == kFullMenuSource &&
+        hidden_commands[0].destination == kFullTarget &&
+        hidden_commands[0].fit_mode ==
+            omega::runtime::RenderTextureFitMode::Contain &&
+        hidden_commands[0].filter_mode ==
+            omega::runtime::RenderTextureFilterMode::Nearest;
     bool visible_lists_are_exact = true;
     for (std::size_t row = 0U; row < initial_visible_draw_lists.size(); ++row)
     {
@@ -627,19 +657,32 @@ int main()
             asset_topology_card.filter_mode ==
                 omega::runtime::RenderTextureFilterMode::Nearest;
     }
-    Check(!diagnostic_texture.valid() && diagnostic_menu_texture.valid() &&
+    Check(diagnostic_texture.valid() && diagnostic_menu_texture.valid() &&
               diagnostic_controls_texture.valid() &&
               diagnostic_asset_topology_texture.valid() &&
+              diagnostic_texture != diagnostic_menu_texture &&
+              diagnostic_texture != diagnostic_controls_texture &&
+              diagnostic_texture != diagnostic_asset_topology_texture &&
               diagnostic_menu_texture != diagnostic_controls_texture &&
               diagnostic_menu_texture != diagnostic_asset_topology_texture &&
               diagnostic_controls_texture != diagnostic_asset_topology_texture &&
+              diagnostic_texture.pool_identity ==
+                  diagnostic_menu_texture.pool_identity &&
+              diagnostic_texture.pool_identity ==
+                  diagnostic_controls_texture.pool_identity &&
+              diagnostic_texture.pool_identity ==
+                  diagnostic_asset_topology_texture.pool_identity &&
+              diagnostic_texture.slot_index == 0U &&
+              diagnostic_menu_texture.slot_index == 1U &&
+              diagnostic_controls_texture.slot_index == 2U &&
+              diagnostic_asset_topology_texture.slot_index == 3U &&
               OmegaAppTestAccess::DiagnosticMenu(*app) ==
                   omega::app::InitialDiagnosticMenuState() &&
-              initial_hidden_draw_list.empty() && visible_lists_are_exact &&
+              hidden_list_is_exact && visible_lists_are_exact &&
               controls_list_is_exact && asset_topology_list_is_exact &&
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
                   initial_visible_draw_lists[0]),
-        "the zero-file host owns distinct exact MainMenu, Controls, and AssetTopology presentation resources");
+        "the zero-file host uploads distinct placeholder, menu, controls, and topology textures in exact order and owns every immutable list");
 
     OmegaAppTestAccess::SetDiagnosticMenuState(*app,
         omega::app::DiagnosticMenuState{
@@ -694,18 +737,18 @@ int main()
 
     constexpr std::uint64_t kDiagnosticMenuLogicalBytes = 128ULL * 72ULL * 4ULL;
     constexpr std::uint64_t kDiagnosticPresentationLogicalBytes =
-        kDiagnosticMenuLogicalBytes * 2ULL + 96ULL * 32ULL * 4ULL;
+        kDiagnosticMenuLogicalBytes * 3ULL + 96ULL * 32ULL * 4ULL;
     const omega::app::GpuHostSnapshot initial_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    Check(initial_gpu.successful_uploads == 3U &&
+    Check(initial_gpu.successful_uploads == 4U &&
               initial_gpu.successful_upload_logical_bytes ==
                   kDiagnosticPresentationLogicalBytes &&
               initial_gpu.successful_releases == 0U &&
               initial_gpu.textures.reserved_slots == 0U &&
-              initial_gpu.textures.resident_slots == 3U &&
+              initial_gpu.textures.resident_slots == 4U &&
               initial_gpu.textures.resident_logical_bytes ==
                   kDiagnosticPresentationLogicalBytes,
-        "the two 128x72 cards and one 96x32 topology card own exactly 86,016 resident logical bytes");
+        "the three 128x72 images and one 96x32 topology image own exactly 122,880 no-level resident logical bytes");
 
     // The last two probes are stable pixels in the zero-file CONTENT and NONE labels.
     constexpr std::array menu_probe_coordinates{
@@ -747,6 +790,71 @@ int main()
     constexpr auto destination_edge = [](const std::uint32_t coordinate) noexcept {
         return coordinate * (omega::runtime::kNormalizedRenderExtent / 4U);
     };
+    constexpr std::array no_level_probe_coordinates{
+        std::array{0U, 0U}, std::array{4U, 4U}, std::array{8U, 8U},
+        std::array{9U, 8U}, std::array{40U, 12U}, std::array{33U, 24U},
+        std::array{34U, 24U}, std::array{7U, 34U}, std::array{8U, 34U},
+        std::array{35U, 40U}, std::array{36U, 40U}, std::array{8U, 52U},
+        std::array{8U, 56U}, std::array{12U, 59U}, std::array{83U, 59U},
+        std::array{84U, 59U},
+    };
+    constexpr std::array expected_no_level_probe_readback{
+        probe_cyan, probe_background, probe_slate, probe_cyan,
+        probe_amber, probe_background, probe_cyan, probe_background,
+        probe_slate, probe_slate, probe_cyan, probe_background,
+        probe_slate, probe_cyan, probe_slate, probe_cyan,
+    };
+    std::array<omega::runtime::RenderTextureBlitCommand, 16U>
+        no_level_probe_commands{};
+    for (std::size_t index = 0U; index < no_level_probe_commands.size(); ++index)
+    {
+        const std::uint32_t x = no_level_probe_coordinates[index][0];
+        const std::uint32_t y = no_level_probe_coordinates[index][1];
+        const std::uint32_t column = static_cast<std::uint32_t>(index % 4U);
+        const std::uint32_t row = static_cast<std::uint32_t>(index / 4U);
+        no_level_probe_commands[index] =
+            omega::runtime::RenderTextureBlitCommand{
+                .texture = diagnostic_texture,
+                .source = omega::runtime::RenderSourceRectQ16{
+                    .left = source_begin(
+                        x, omega::app::kDiagnosticMenuImageWidth),
+                    .top = source_begin(
+                        y, omega::app::kDiagnosticMenuImageHeight),
+                    .right = source_end(
+                        x, omega::app::kDiagnosticMenuImageWidth),
+                    .bottom = source_end(
+                        y, omega::app::kDiagnosticMenuImageHeight),
+                },
+                .destination = omega::runtime::RenderTargetRectQ16{
+                    .left = destination_edge(column),
+                    .top = destination_edge(row),
+                    .right = destination_edge(column + 1U),
+                    .bottom = destination_edge(row + 1U),
+                },
+                .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+                .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+            };
+    }
+    auto no_level_probe_draw_list =
+        omega::runtime::RenderDrawList::Create(no_level_probe_commands);
+    Check(no_level_probe_draw_list.has_value(),
+        "the sixteen one-texel no-level readback commands form a valid draw list");
+    if (no_level_probe_draw_list)
+    {
+        omega::runtime::RenderFramePacket no_level_probe_packet{
+            .clear_color = omega::runtime::kDefaultRenderClearColor,
+            .draw_list = *no_level_probe_draw_list,
+        };
+        auto no_level_probe_readback =
+            omega::app::detail::SdlGpuHostTestAccess::ReadbackBlitsForTesting(
+                OmegaAppTestAccess::Host(*app), no_level_probe_packet);
+        Check(no_level_probe_readback &&
+                  *no_level_probe_readback == expected_no_level_probe_readback,
+            "the resident zero-file DiagnosticPlay placeholder preserves the exact sixteen-probe RGBA8 grid on GPU");
+        Check(OmegaAppTestAccess::GpuSnapshot(*app) == initial_gpu,
+            "the private no-level readback seam leaves every production GPU counter unchanged");
+    }
+
     std::array<omega::runtime::RenderTextureBlitCommand, 16U> menu_probe_commands{};
     for (std::size_t index = 0U; index < menu_probe_commands.size(); ++index)
     {
@@ -1031,10 +1139,13 @@ int main()
                       .selected_row =
                           omega::app::DiagnosticMenuRow::StartDiagnosticPlay,
                   } &&
+              OmegaAppTestAccess::DiagnosticTexture(*app) == diagnostic_texture &&
               OmegaAppTestAccess::DiagnosticMenuTexture(*app) ==
                   diagnostic_menu_texture &&
               OmegaAppTestAccess::DiagnosticControlsTexture(*app) ==
                   diagnostic_controls_texture &&
+              OmegaAppTestAccess::DiagnosticAssetTopologyTexture(*app) ==
+                  diagnostic_asset_topology_texture &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
                   initial_hidden_draw_list) &&
               DrawListArraysEqual(OmegaAppTestAccess::DiagnosticVisibleDrawLists(*app),
@@ -1043,8 +1154,8 @@ int main()
                   initial_controls_draw_list) &&
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
                   initial_hidden_draw_list) &&
-              IsOneHiddenMenuSubmission(initial_gpu, normal_gpu),
-        "primary priority enters DiagnosticPlay with one clear-only frame and no reupload");
+              IsOneDiagnosticPlaySubmission(initial_gpu, normal_gpu),
+        "primary priority enters DiagnosticPlay with one no-level placeholder blit and no reupload");
 
     const omega::runtime::FrameSchedulerState normal_before =
         normal->scheduler_state_before();
@@ -1279,7 +1390,7 @@ int main()
               OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
               OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
                   position_after_primary &&
-              IsOneHiddenMenuSubmission(normal_gpu, held_gpu),
+              IsOneDiagnosticPlaySubmission(normal_gpu, held_gpu),
         "a second physical alias does not repeat the held action-6 press edge or reopen the menu");
 
     const std::uint64_t nonfinal_release_index =
@@ -1309,7 +1420,7 @@ int main()
               OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
               OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
                   position_after_primary &&
-              IsOneHiddenMenuSubmission(held_gpu, nonfinal_release_gpu),
+              IsOneDiagnosticPlaySubmission(held_gpu, nonfinal_release_gpu),
         "releasing Return cannot release action 6 or mutate the menu while F1 remains held");
 
     const std::uint64_t final_release_index =
@@ -1337,7 +1448,7 @@ int main()
               OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
               OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
                   position_after_primary &&
-              IsOneHiddenMenuSubmission(
+              IsOneDiagnosticPlaySubmission(
                   nonfinal_release_gpu, final_release_gpu),
         "only the last physical alias release emits the logical action-6 release edge");
 
@@ -1351,7 +1462,7 @@ int main()
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
                   initial_visible_draw_lists[0]) &&
               IsOneVisibleMenuSubmission(final_release_gpu, reopened_gpu),
-        "keypad Enter reopens MainMenu at row zero with exactly two resident blits");
+        "keypad Enter reopens MainMenu at row zero with exactly three resident blits");
     Check(PushKey(SDL_SCANCODE_KP_ENTER, false),
         "the reopened keypad Enter primary releases");
     Check(RunPlainFrame(), "reopened release frame completes");
@@ -1544,7 +1655,7 @@ int main()
               OmegaAppTestAccess::DiagnosticMenu(*app) == kControlsRowOne &&
               IsOneModalCardSubmission(controls_entry_gpu_after,
                   OmegaAppTestAccess::GpuSnapshot(*app)),
-        "held primary does not repeat and Controls remains a one-card modal frame");
+        "held primary does not repeat and Controls remains an exact base-plus-card modal frame");
 
     Check(PushKey(SDL_SCANCODE_F1, false) && PushKey(SDL_SCANCODE_W, false),
         "Controls primary and held movement release");
@@ -1731,7 +1842,7 @@ int main()
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
                   initial_asset_topology_draw_list) &&
               IsOneModalCardSubmission(topology_entry_gpu_after, topology_held_gpu),
-        "held primary does not repeat and AssetTopology remains an exact one-card modal frame");
+        "held primary does not repeat and AssetTopology remains an exact base-plus-card modal frame");
 
     Check(PushKey(SDL_SCANCODE_F1, false) && PushKey(SDL_SCANCODE_W, false),
         "AssetTopology primary and held navigation release");
@@ -1760,7 +1871,7 @@ int main()
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
                   initial_asset_topology_draw_list) &&
               IsOneModalCardSubmission(topology_held_gpu, topology_released_gpu),
-        "release edges preserve AssetTopology, its one-card render, and every frozen simulation owner");
+        "release edges preserve AssetTopology, its base-plus-card render, and every frozen simulation owner");
 
     const std::uint64_t topology_terminal_index =
         OmegaAppTestAccess::NextInputFrameIndex(*app);
@@ -1811,7 +1922,7 @@ int main()
                   initial_asset_topology_draw_list) &&
               IsOneModalCardSubmission(topology_terminal_release_gpu_before,
                   topology_terminal_release_gpu_after),
-        "terminal release resumes the unchanged AssetTopology one-card screen");
+        "terminal release resumes the unchanged AssetTopology base-plus-card screen");
 
     const omega::app::GpuHostSnapshot topology_exit_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
@@ -1925,6 +2036,7 @@ int main()
               DrawListsEqual(
                   OmegaAppTestAccess::DiagnosticAssetTopologyDrawList(*app),
                   initial_asset_topology_draw_list) &&
+              OmegaAppTestAccess::DiagnosticTexture(*app) == diagnostic_texture &&
               OmegaAppTestAccess::DiagnosticMenuTexture(*app) ==
                   diagnostic_menu_texture &&
               OmegaAppTestAccess::DiagnosticControlsTexture(*app) ==
@@ -1932,7 +2044,7 @@ int main()
               OmegaAppTestAccess::DiagnosticAssetTopologyTexture(*app) ==
                   diagnostic_asset_topology_texture &&
               SameTextureResidency(initial_gpu, ready_gpu),
-        "navigation preserves all three immutable card resources and their three uploads");
+        "navigation preserves all four immutable presentation resources and their four uploads");
 
     const auto debug_position_before_terminal =
         OmegaAppTestAccess::DebugLocomotionPosition(*app);
@@ -1965,6 +2077,7 @@ int main()
               both->scheduler_state_before() == scheduler_before_terminal &&
               both->scheduler_state_after() == scheduler_before_terminal &&
               OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
+              OmegaAppTestAccess::DiagnosticTexture(*app) == diagnostic_texture &&
               OmegaAppTestAccess::DiagnosticMenuTexture(*app) ==
                   diagnostic_menu_texture &&
               OmegaAppTestAccess::DiagnosticControlsTexture(*app) ==
@@ -2045,7 +2158,7 @@ int main()
               continued->result().input_frames == 1U &&
               continued->result().rendered_frames == 1 &&
               OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
-              IsOneHiddenMenuSubmission(failure_gpu_after, continued_gpu),
+              IsOneClearOnlySubmission(failure_gpu_after, continued_gpu),
         "capture resumes with one clear-only hidden submission at the scheduler boundary");
     if (continued_pair != nullptr)
     {
@@ -2061,7 +2174,7 @@ int main()
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(plain && plain->rendered_frames == 1 && plain->input_frames == 1U &&
               !plain->quit_requested &&
-              IsOneHiddenMenuSubmission(continued_gpu, plain_gpu),
+              IsOneClearOnlySubmission(continued_gpu, plain_gpu),
         "plain Run adds one hidden clear submission without reuploading any card");
 
     if (failures == 0)
