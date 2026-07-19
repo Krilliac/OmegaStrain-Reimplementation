@@ -267,6 +267,99 @@ OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
 
 std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
 {
+    RunLoopResult loop = RunLoop(frame_limit, nullptr);
+    if (loop.operational_error)
+        return std::unexpected(std::move(*loop.operational_error));
+    return loop.result;
+}
+
+std::expected<RunCaptureOutcome, std::string> OmegaApp::RunWithCapture(
+    const int frame_limit)
+{
+    const auto planned = detail::PlanFiniteRunCapture(
+        frame_limit, input_->next_frame_index());
+    if (!planned)
+    {
+        return std::unexpected(std::string(
+            detail::FiniteRunCapturePlanErrorMessage(planned.error())));
+    }
+
+    auto created = runtime::RunCaptureSession::Create(
+        planned->session, input_->bindings().actions());
+    if (!created)
+        return std::unexpected(detail::FormatRunCaptureSessionError(created.error()));
+
+    runtime::RunCaptureSession capture_session = std::move(*created);
+    const runtime::FrameSchedulerState scheduler_state_before =
+        frame_scheduler_->Snapshot();
+
+    if (planned->requested_frames == 0U)
+    {
+        auto finished = std::move(capture_session).Finish();
+        const runtime::FrameSchedulerState scheduler_state_after =
+            frame_scheduler_->Snapshot();
+        if (!finished)
+        {
+            return RunCaptureOutcome(planned->requested_frames, RunResult{},
+                RunCaptureCompletion::CaptureFailure, scheduler_state_before,
+                scheduler_state_after,
+                detail::FormatRunCaptureSessionError(finished.error()), std::nullopt);
+        }
+        return RunCaptureOutcome(planned->requested_frames, RunResult{},
+            RunCaptureCompletion::FrameLimitReached, scheduler_state_before,
+            scheduler_state_after, std::nullopt,
+            std::optional<runtime::RunCaptureTracePair>{
+                std::in_place, std::move(*finished)});
+    }
+
+    RunLoopResult loop = RunLoop(frame_limit, &capture_session);
+    const runtime::FrameSchedulerState scheduler_state_after =
+        frame_scheduler_->Snapshot();
+
+    if (loop.capture_error)
+    {
+        std::optional<std::string> failure{
+            std::in_place,
+            detail::FormatRunCaptureSessionError(*loop.capture_error)};
+        auto finished = std::move(capture_session).Finish();
+        if (!finished)
+        {
+            return RunCaptureOutcome(planned->requested_frames, loop.result,
+                RunCaptureCompletion::CaptureFailure, scheduler_state_before,
+                scheduler_state_after, std::move(failure), std::nullopt);
+        }
+        return RunCaptureOutcome(planned->requested_frames, loop.result,
+            RunCaptureCompletion::CaptureFailure, scheduler_state_before,
+            scheduler_state_after, std::move(failure),
+            std::optional<runtime::RunCaptureTracePair>{
+                std::in_place, std::move(*finished)});
+    }
+
+    auto finished = std::move(capture_session).Finish();
+    if (!finished)
+    {
+        return RunCaptureOutcome(planned->requested_frames, loop.result,
+            RunCaptureCompletion::CaptureFailure, scheduler_state_before,
+            scheduler_state_after,
+            detail::FormatRunCaptureSessionError(finished.error()), std::nullopt);
+    }
+
+    RunCaptureCompletion completion = RunCaptureCompletion::FrameLimitReached;
+    if (loop.operational_error)
+        completion = RunCaptureCompletion::OperationalFailure;
+    else if (loop.result.quit_requested)
+        completion = RunCaptureCompletion::QuitRequested;
+
+    return RunCaptureOutcome(planned->requested_frames, loop.result, completion,
+        scheduler_state_before, scheduler_state_after,
+        std::move(loop.operational_error),
+        std::optional<runtime::RunCaptureTracePair>{
+            std::in_place, std::move(*finished)});
+}
+
+OmegaApp::RunLoopResult OmegaApp::RunLoop(
+    const int frame_limit, runtime::RunCaptureSession* const capture_session)
+{
     using Clock = std::chrono::steady_clock;
 
     log_->Info("runtime", "entering native host loop");
@@ -277,6 +370,19 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
     {
         const InputPumpResult events = sdl_input_->PumpEvents(*input_, *log_);
         const runtime::InputSnapshot input_snapshot = input_->EndFrame();
+        if (capture_session != nullptr)
+        {
+            const auto captured = capture_session->AppendInput(input_snapshot);
+            if (!captured)
+            {
+                jobs_->WaitForIdle();
+                return RunLoopResult{
+                    .result = result,
+                    .operational_error = std::nullopt,
+                    .capture_error = captured.error(),
+                };
+            }
+        }
         ++result.input_frames;
         if (input_snapshot.rejected_event_count() != 0U)
         {
@@ -284,7 +390,29 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
                                        std::to_string(input_snapshot.rejected_event_count()) +
                                        " host events in one frame");
         }
-        if (events.quit_requested || input_snapshot.WasPressed(kQuitAction))
+        if (capture_session != nullptr)
+        {
+            const bool host_quit_requested = events.quit_requested;
+            const bool logical_quit_pressed = input_snapshot.WasPressed(kQuitAction);
+            if (host_quit_requested || logical_quit_pressed)
+            {
+                const auto marked = capture_session->MarkTerminal(
+                    host_quit_requested, logical_quit_pressed);
+                if (!marked)
+                {
+                    jobs_->WaitForIdle();
+                    return RunLoopResult{
+                        .result = result,
+                        .operational_error = std::nullopt,
+                        .capture_error = marked.error(),
+                    };
+                }
+                running = false;
+                result.quit_requested = true;
+                break;
+            }
+        }
+        else if (events.quit_requested || input_snapshot.WasPressed(kQuitAction))
         {
             running = false;
             result.quit_requested = true;
@@ -292,9 +420,22 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
         }
 
         const auto current_frame = Clock::now();
-        const runtime::FramePlan plan = frame_scheduler_->BeginFrame(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                current_frame - previous_frame));
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            current_frame - previous_frame);
+        if (capture_session != nullptr)
+        {
+            const auto captured = capture_session->AppendElapsed(elapsed);
+            if (!captured)
+            {
+                jobs_->WaitForIdle();
+                return RunLoopResult{
+                    .result = result,
+                    .operational_error = std::nullopt,
+                    .capture_error = captured.error(),
+                };
+            }
+        }
+        const runtime::FramePlan plan = frame_scheduler_->BeginFrame(elapsed);
         previous_frame = current_frame;
         if (plan.simulation_steps >
             std::numeric_limits<std::uint64_t>::max() - result.planned_simulation_steps)
@@ -302,7 +443,11 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
             jobs_->WaitForIdle();
             constexpr std::string_view error = "run-local simulation step counter exhausted";
             log_->Error("simulation", error);
-            return std::unexpected(std::string(error));
+            return RunLoopResult{
+                .result = result,
+                .operational_error = std::string(error),
+                .capture_error = std::nullopt,
+            };
         }
         result.planned_simulation_steps += plan.simulation_steps;
         if (plan.clamped_delta)
@@ -327,7 +472,11 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
                 constexpr std::string_view error =
                     "simulation world representation exhausted";
                 log_->Error("simulation", error);
-                return std::unexpected(std::string(error));
+                return RunLoopResult{
+                    .result = result,
+                    .operational_error = std::string(error),
+                    .capture_error = std::nullopt,
+                };
             }
             ++result.executed_simulation_steps;
         }
@@ -346,7 +495,11 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
         {
             jobs_->WaitForIdle();
             log_->Error("render", rendered.error());
-            return std::unexpected(rendered.error());
+            return RunLoopResult{
+                .result = result,
+                .operational_error = rendered.error(),
+                .capture_error = std::nullopt,
+            };
         }
         ++result.rendered_frames;
 
@@ -356,7 +509,11 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
             constexpr std::string_view error =
                 "audio callback failed to provide playback data";
             log_->Error("audio", error);
-            return std::unexpected(std::string(error));
+            return RunLoopResult{
+                .result = result,
+                .operational_error = std::string(error),
+                .capture_error = std::nullopt,
+            };
         }
     }
 
@@ -366,7 +523,11 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
     {
         constexpr std::string_view error = "audio callback failed to provide playback data";
         log_->Error("audio", error);
-        return std::unexpected(std::string(error));
+        return RunLoopResult{
+            .result = result,
+            .operational_error = std::string(error),
+            .capture_error = std::nullopt,
+        };
     }
     result.audio_callback_count = audio.callback_count;
     result.audio_frames_provided = audio.provided_frames;
@@ -374,7 +535,11 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
                               std::to_string(result.rendered_frames) + " rendered frames and " +
                               std::to_string(result.executed_simulation_steps) +
                               " executed simulation steps");
-    return result;
+    return RunLoopResult{
+        .result = result,
+        .operational_error = std::nullopt,
+        .capture_error = std::nullopt,
+    };
 }
 
 std::string_view OmegaApp::driver_name() const noexcept

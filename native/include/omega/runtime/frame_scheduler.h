@@ -48,6 +48,22 @@ struct FrameSchedulerConfig
     std::uint32_t max_steps_per_frame = 0;
     // Per-frame elapsed-time clamp. Must lie in [simulation_step, kMaximumFrameDelta].
     std::chrono::nanoseconds max_frame_delta{0};
+
+    friend constexpr bool operator==(const FrameSchedulerConfig&,
+        const FrameSchedulerConfig&) noexcept = default;
+};
+
+// Small owned scheduler snapshot. It contains no clock or borrowed storage and remains valid
+// after the source scheduler advances, moves, or is destroyed.
+struct FrameSchedulerState
+{
+    FrameSchedulerConfig config{};
+    std::chrono::nanoseconds accumulated_remainder{0};
+    std::uint64_t total_planned_steps = 0U;
+    std::chrono::nanoseconds total_dropped_time{0};
+
+    friend constexpr bool operator==(const FrameSchedulerState&,
+        const FrameSchedulerState&) noexcept = default;
 };
 
 // One frame's plan. `simulation_steps` is how many fixed steps the caller must execute this
@@ -100,6 +116,10 @@ public:
 
     // [game thread] The validated, immutable configuration.
     [[nodiscard]] const FrameSchedulerConfig& config() const noexcept;
+
+    // [game thread] Returns one owned exact copy of the configuration and current accumulator
+    // diagnostics. Later scheduler mutations do not change the returned value.
+    [[nodiscard]] FrameSchedulerState Snapshot() const noexcept;
 
 private:
     explicit FrameScheduler(const FrameSchedulerConfig& config) noexcept;

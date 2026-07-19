@@ -353,6 +353,34 @@ retail instruction blocks, or PS2 execution layer.
   limit, timing, or determinism claim. The separately published `InputTracker::next_frame_index()`
   accessor is future app-integration support, not coordinator behavior; E-0055 must preflight a
   planned capture of `N` frames with `N`, not `N - 1`, before tracker-index wrap.
+- E-0055 adds owned scheduler snapshots and finite captured app runs.
+  `FrameScheduler::Snapshot` copies configuration, accumulated remainder, and lifetime
+  planned-step and dropped-time totals; it adds no restore or delta API. Planning rejects negative
+  limits before limits above 65,536. A zero-frame plan creates capacity-one empty traces at any
+  next index. Positive `N` requires `N <= UINT64_MAX - next_frame_index`, intentionally using
+  `N` so the following tracker index remains representable.
+  Move-only `RunCaptureOutcome` owns the requested limit, partial `RunResult`, completion,
+  before/after scheduler states, optional failure text, and an optional trace pair.
+  `OmegaApp::Run` and `RunWithCapture` share one loop, preserving ordinary `Run`. Capture
+  preallocates before logging, clock sampling, or mutation. Zero capture performs no event, clock,
+  scheduler mutation, simulation, render, audio, job, or log work. Each active frame captures
+  `EndFrame` input first, retains both independent quit flags on terminal input, or captures the
+  exact raw elapsed value before the same `BeginFrame`. Only planning or session creation returns
+  outer `unexpected`. Loop operational and capture failures publish nontransactional partial
+  outcomes and best-effort traces. The CLI and `main` remain unchanged and use ordinary `Run`.
+  The clean MSVC build completed with zero warnings or errors. `omega_core_tests` passed.
+  `omega_run_capture_tests` passed once plus 100/100 repeated runs; default CTest passed 24/24.
+  With Direct3D12 and dummy audio, `omega_app_capture_smoke` passed once plus 20/20 repeated
+  runs. Its unowned-draw fixture forced the real render-error path, which retained one paired
+  input/elapsed sample, zero rendered frames, owned failure text, and the exact scheduler boundary;
+  the next capture then resumed successfully. The public zero-file `openomega.exe --frames=2` path
+  also succeeded with two rendered and input frames and equal planned and executed steps. GPU
+  CTest passed 26/26. Registration was restored to `OFF` with 24 default tests. The dependency gate
+  passed 140 files, all 204 tooling tests passed, and Python compile-all passed. Publication CI
+  remains separate.
+  This adds no capture CLI, replay, input/playback injection, restore, persistence, serialization,
+  stable ABI, simulation checkpoint, RNG state, fake services, rollback, ordinary `Run` tracker
+  exhaustion guarantee, or retail timing or determinism claim.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
