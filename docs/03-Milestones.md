@@ -346,6 +346,36 @@ atomicity or production asynchronous queue/pin/fence contract; and no stable ABI
 persistence, wire/plugin, measured GPU-memory, streaming/eviction, display-expansion,
 `TextureStorageIR`/`AssetService` binding, retail-rendering, or gameplay semantic.
 
+E-0050 adds one private friend-only synchronous blit-readback seam without changing the public
+renderer contract. An empty draw list fails before SDL/resource work with exact error
+`blit readback requires a nonempty draw list`. A nonempty list completes every handle/backend-slot,
+source-crop, filter, and fixed-4x4 target-plan check before creating a temporary
+`R8G8B8A8_UNORM` target, 64-byte download buffer, or command buffer. Production and diagnostic
+paths share filter mapping and source-order `LOAD` blit recording, while both retain the shared
+clear-pass recorder. The probe submits with a fence, waits, maps, explicitly decodes sixteen owned
+row-major RGBA8 pixels, and cleans up through guards without changing production counters or
+portable residency.
+
+The public zero-file fixture uploads opaque endpoint texels `R G / B W`, clears to opaque black,
+applies one exact top-row Contain+Nearest blit and one later bottom-left Stretch+Nearest overwrite,
+and reads back `KKKK/RRBG/RRBG/KKKK`. Both rejection and successful readback preserve the complete
+host snapshot; probe release restores empty residency before the existing production flow.
+
+The corrected MSVC build completed with zero warnings or errors. Default CTest passed 20/20. One
+initial plus 20 repeated public zero-file `direct3d12` GPU smokes passed; every run ended with four
+uploads/656 cumulative logical bytes, four releases, two production blit frames/four draws, one
+clear-only submission, one stale rejection, zero unavailable submissions, and zero residual
+residency. The opt-in configuration passed 21/21, was restored to OFF, and listed 20 default tests.
+A public two-frame D3D12 `openomega` smoke passed with dummy audio. Publication CI is tracked
+separately from these local validation claims.
+
+This endpoint-only fixture confirms the two tested source/destination plans, command order, load
+preservation, and sixteen exact opaque RGBA8 values on the observed D3D12 path. It establishes no
+public readback API; general Nearest/Linear, crop, aspect, rounding, sample-center, edge/border,
+Contain/Stretch, flip/cycle/mip/layer, alpha interpretation, blending, sRGB/HDR/color-space,
+presentation/swapchain, cross-backend, asynchronous-lifetime, ABI/serialization, asset-binding,
+retail-rendering, or gameplay guarantee.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

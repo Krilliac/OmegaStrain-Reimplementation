@@ -329,6 +329,34 @@ shipping dependencies or execution mechanisms.
     asynchronous queue, residency-pin,
     or fence contract; stable ABI, serialization, persistence, wire/plugin, measured GPU-memory,
     streaming/eviction, display-expansion, asset-binding, retail-rendering, or gameplay semantic.
+35. E-0050 adds a private friend-only `ReadbackBlitsForTesting` seam for one synchronous synthetic
+    blit readback without changing the public renderer API. An empty draw list returns exact error
+    `blit readback requires a nonempty draw list` before SDL or resource work and leaves the full
+    snapshot unchanged. For a nonempty list, the seam resolves every generation and backend slot,
+    maps all source crops and filters, and plans every fixed 4x4 destination before allocating a
+    temporary `R8G8B8A8_UNORM` color target, 64-byte download buffer, or command buffer.
+    Production rendering and the probe share `TryMapTextureFilter` plus one source-order
+    `RecordTextureBlits` path whose SDL blits retain `LOAD`, no flip, the mapped filter, and no
+    cycling. The probe first calls the existing shared clear recorder, records all blits, downloads,
+    takes the command buffer into fence-producing submission, waits, maps, explicitly decodes all
+    sixteen row-major RGBA8 pixels, and releases every temporary resource through guards.
+    The public zero-file fixture uploads opaque `R G / B W` endpoint texels, clears to opaque black,
+    applies a top-row Contain+Nearest blit followed by a bottom-left Stretch+Nearest overwrite, and
+    reads back exactly `KKKK/RRBG/RRBG/KKKK`. Successful readback preserves the full host snapshot;
+    releasing the probe restores empty residency before the existing production flow.
+    The corrected MSVC build completed with zero warnings or errors. Default CTest passed 20/20.
+    One initial plus 20 repeated public zero-file `direct3d12` smokes passed, each ending at exactly
+    four uploads/656 cumulative logical bytes, four releases, two production blit frames/four draws,
+    one clear-only submission, one stale rejection, zero unavailable submissions, and zero residual
+    residency. The opt-in configuration passed 21/21, was restored to OFF, and listed 20 default
+    tests. A public two-frame D3D12 `openomega` smoke passed with dummy audio. Publication CI is
+    tracked separately from these local claims.
+    This confirms only the opaque endpoint bytes, two exact source/destination plans, source order,
+    and load preservation in the fixed 4x4 target on the observed D3D12 path. It establishes no
+    general Nearest/Linear, crop, aspect, rounding, sample-center, edge/border, Contain/Stretch,
+    flip/cycle/mip/layer, alpha interpretation, blending, sRGB/HDR/color-space, presentation,
+    swapchain, cross-backend, asynchronous-lifetime, public ABI/readback, asset-binding,
+    retail-rendering, or gameplay guarantee.
 
 ## Disc observations
 

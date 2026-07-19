@@ -308,6 +308,23 @@ void SaturatingAdd(std::uint64_t& value, const std::uint64_t added) noexcept
     return handle == runtime::RenderTextureHandle{};
 }
 
+[[nodiscard]] bool TryMapTextureFilter(
+    const runtime::RenderTextureFilterMode filter_mode,
+    SDL_GPUFilter& mapped_filter) noexcept
+{
+    switch (filter_mode)
+    {
+    case runtime::RenderTextureFilterMode::Nearest:
+        mapped_filter = SDL_GPU_FILTER_NEAREST;
+        return true;
+    case runtime::RenderTextureFilterMode::Linear:
+        mapped_filter = SDL_GPU_FILTER_LINEAR;
+        return true;
+    default:
+        return false;
+    }
+}
+
 enum class FrameSubmissionKind
 {
     Blit,
@@ -321,6 +338,52 @@ struct ResolvedTextureBlit
     std::uint32_t width = 0U;
     std::uint32_t height = 0U;
 };
+
+struct PreparedTextureBlit
+{
+    SDL_GPUTexture* source = nullptr;
+    runtime::RenderTextureBlitPlan plan{};
+    SDL_GPUFilter filter = SDL_GPU_FILTER_NEAREST;
+};
+
+void RecordTextureBlits(SDL_GPUCommandBuffer* commands,
+    SDL_GPUTexture* destination,
+    const std::span<const PreparedTextureBlit> blits) noexcept
+{
+    for (const PreparedTextureBlit& prepared : blits)
+    {
+        const runtime::RenderTextureBlitPlan& plan = prepared.plan;
+        const SDL_GPUBlitInfo blit{
+            .source = {
+                .texture = prepared.source,
+                .mip_level = 0,
+                .layer_or_depth_plane = 0,
+                .x = plan.source.left,
+                .y = plan.source.top,
+                .w = plan.source.right - plan.source.left,
+                .h = plan.source.bottom - plan.source.top,
+            },
+            .destination = {
+                .texture = destination,
+                .mip_level = 0,
+                .layer_or_depth_plane = 0,
+                .x = plan.destination.left,
+                .y = plan.destination.top,
+                .w = plan.destination.right - plan.destination.left,
+                .h = plan.destination.bottom - plan.destination.top,
+            },
+            .load_op = SDL_GPU_LOADOP_LOAD,
+            .clear_color = {},
+            .flip_mode = SDL_FLIP_NONE,
+            .filter = prepared.filter,
+            .cycle = false,
+            .padding1 = 0,
+            .padding2 = 0,
+            .padding3 = 0,
+        };
+        SDL_BlitGPUTexture(commands, &blit);
+    }
+}
 
 } // namespace
 
@@ -750,6 +813,251 @@ SdlGpuHost::ReadbackClearForTesting(const runtime::RenderFramePacket& packet)
     }
 }
 
+std::expected<std::array<runtime::RenderClearColorRgba8, 16U>, std::string>
+SdlGpuHost::ReadbackBlitsForTesting(const runtime::RenderFramePacket& packet)
+{
+    try
+    {
+        const std::span<const runtime::RenderTextureBlitCommand> draw_commands =
+            packet.draw_list.commands();
+        if (draw_commands.empty())
+            return std::unexpected("blit readback requires a nonempty draw list");
+
+        constexpr SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        constexpr std::uint32_t width = 4U;
+        constexpr std::uint32_t height = 4U;
+        constexpr std::size_t pixel_count =
+            static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+        constexpr std::size_t byte_count =
+            pixel_count * sizeof(runtime::RenderClearColorRgba8);
+        static_assert(pixel_count == 16U);
+        static_assert(byte_count == 64U);
+
+        std::array<ResolvedTextureBlit,
+            runtime::kMaximumRenderTextureBlitsPerFrame> resolved_blits{};
+        std::array<runtime::RenderSourceRectPixels,
+            runtime::kMaximumRenderTextureBlitsPerFrame> mapped_sources{};
+        std::array<SDL_GPUFilter,
+            runtime::kMaximumRenderTextureBlitsPerFrame> mapped_filters{};
+        std::array<PreparedTextureBlit,
+            runtime::kMaximumRenderTextureBlitsPerFrame> prepared_blits{};
+
+        // Keep the test seam counter-neutral while retaining production's complete-handle
+        // preflight and backend-slot invariants before any SDL resource or command work.
+        for (std::size_t index = 0U; index < draw_commands.size(); ++index)
+        {
+            const runtime::RenderTextureBlitCommand& draw = draw_commands[index];
+            auto metadata = impl_->texture_pool.Get(draw.texture);
+            if (!metadata)
+            {
+                return std::unexpected(
+                    PoolError("offscreen blit draw texture resolve", metadata.error()));
+            }
+
+            const std::uint32_t slot_index = metadata->handle.slot_index;
+            if (slot_index >= impl_->texture_slots.size() ||
+                impl_->texture_slots[slot_index] == nullptr)
+            {
+                return std::unexpected(
+                    "offscreen blit draw texture backend slot invariant failed");
+            }
+            resolved_blits[index] = ResolvedTextureBlit{
+                .texture = impl_->texture_slots[slot_index],
+                .width = metadata->width,
+                .height = metadata->height,
+            };
+        }
+
+        // Map the complete source/filter set only after all generations resolve.
+        for (std::size_t index = 0U; index < draw_commands.size(); ++index)
+        {
+            const runtime::RenderTextureBlitCommand& draw = draw_commands[index];
+            const ResolvedTextureBlit& resolved = resolved_blits[index];
+            auto source = runtime::MapTextureSourceRect(
+                draw.source, resolved.width, resolved.height);
+            if (!source)
+            {
+                return std::unexpected(std::string(
+                    "offscreen blit source rectangle mapping failed: ") +
+                    std::string(source.error().message));
+            }
+            mapped_sources[index] = *source;
+
+            if (!TryMapTextureFilter(draw.filter_mode, mapped_filters[index]))
+                return std::unexpected("offscreen blit texture filter mode is invalid");
+        }
+
+        // The offscreen extent is fixed, so every destination can also be planned before
+        // target creation or command acquisition. No accepted prefix can reach the GPU.
+        for (std::size_t index = 0U; index < draw_commands.size(); ++index)
+        {
+            const runtime::RenderTextureBlitCommand& draw = draw_commands[index];
+            auto plan = runtime::PlanTextureBlit(mapped_sources[index],
+                draw.destination, draw.fit_mode, width, height);
+            if (!plan)
+            {
+                return std::unexpected(std::string(
+                    "offscreen blit texture planning failed: ") +
+                    std::string(plan.error().message));
+            }
+            prepared_blits[index] = PreparedTextureBlit{
+                .source = resolved_blits[index].texture,
+                .plan = *plan,
+                .filter = mapped_filters[index],
+            };
+        }
+        const std::span<const PreparedTextureBlit> active_blits{
+            prepared_blits.data(), draw_commands.size()};
+
+        if (!SDL_GPUTextureSupportsFormat(impl_->device, format,
+                SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET))
+        {
+            return std::unexpected(
+                "offscreen blit readback RGBA8 color target is unsupported");
+        }
+        if (SDL_GPUTextureFormatTexelBlockSize(format) != 4U)
+        {
+            return std::unexpected(
+                "offscreen blit readback RGBA8 texel size is not four bytes");
+        }
+
+        const SDL_FColor clear_color = ToSdlClearColor(packet.clear_color);
+        const SDL_GPUTextureCreateInfo texture_info{
+            .type = SDL_GPU_TEXTURETYPE_2D,
+            .format = format,
+            .usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+            .width = width,
+            .height = height,
+            .layer_count_or_depth = 1U,
+            .num_levels = 1U,
+            .sample_count = SDL_GPU_SAMPLECOUNT_1,
+            .props = 0,
+        };
+        SDL_GPUTexture* texture = SDL_CreateGPUTexture(impl_->device, &texture_info);
+        if (texture == nullptr)
+            return std::unexpected(SdlError("offscreen blit target create"));
+        TextureGuard texture_guard(impl_->device, texture);
+
+        const SDL_GPUTransferBufferCreateInfo transfer_info{
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
+            .size = static_cast<std::uint32_t>(byte_count),
+            .props = 0,
+        };
+        SDL_GPUTransferBuffer* transfer =
+            SDL_CreateGPUTransferBuffer(impl_->device, &transfer_info);
+        if (transfer == nullptr)
+        {
+            return std::unexpected(
+                SdlError("offscreen blit download transfer-buffer create"));
+        }
+        TransferBufferGuard transfer_guard(impl_->device, transfer);
+
+        std::string post_acquire_error;
+        post_acquire_error.reserve(kPostAcquireErrorCapacity);
+
+        SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
+        if (commands == nullptr)
+        {
+            SetSdlErrorBounded(
+                post_acquire_error, "offscreen blit command-buffer acquire");
+            return std::unexpected(std::move(post_acquire_error));
+        }
+        CommandBufferGuard command_guard(commands);
+
+        if (!RecordClearPass(commands, texture, clear_color))
+        {
+            SetSdlErrorBounded(post_acquire_error, "offscreen blit render-pass begin");
+            if (!command_guard.Cancel())
+            {
+                AppendSdlErrorBounded(post_acquire_error,
+                    "SDL_CancelGPUCommandBuffer after offscreen blit render-pass failure");
+            }
+            return std::unexpected(std::move(post_acquire_error));
+        }
+        RecordTextureBlits(commands, texture, active_blits);
+
+        SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+        if (copy == nullptr)
+        {
+            SetSdlErrorBounded(post_acquire_error, "offscreen blit copy-pass begin");
+            if (!command_guard.Cancel())
+            {
+                AppendSdlErrorBounded(post_acquire_error,
+                    "SDL_CancelGPUCommandBuffer after offscreen blit copy-pass failure");
+            }
+            return std::unexpected(std::move(post_acquire_error));
+        }
+
+        const SDL_GPUTextureRegion source{
+            .texture = texture,
+            .mip_level = 0U,
+            .layer = 0U,
+            .x = 0U,
+            .y = 0U,
+            .z = 0U,
+            .w = width,
+            .h = height,
+            .d = 1U,
+        };
+        const SDL_GPUTextureTransferInfo destination{
+            .transfer_buffer = transfer,
+            .offset = 0U,
+            .pixels_per_row = 0U,
+            .rows_per_layer = 0U,
+        };
+        SDL_DownloadFromGPUTexture(copy, &source, &destination);
+        SDL_EndGPUCopyPass(copy);
+
+        SDL_GPUFence* fence =
+            SDL_SubmitGPUCommandBufferAndAcquireFence(command_guard.Take());
+        if (fence == nullptr)
+        {
+            SetSdlErrorBounded(post_acquire_error,
+                "offscreen blit command-buffer submit and fence acquire");
+            return std::unexpected(std::move(post_acquire_error));
+        }
+        FenceGuard fence_guard(impl_->device, fence);
+
+        SDL_GPUFence* fence_to_wait = fence;
+        if (!SDL_WaitForGPUFences(impl_->device, true, &fence_to_wait, 1U))
+        {
+            SetSdlErrorBounded(post_acquire_error, "offscreen blit fence wait");
+            return std::unexpected(std::move(post_acquire_error));
+        }
+
+        void* mapped = SDL_MapGPUTransferBuffer(impl_->device, transfer, false);
+        if (mapped == nullptr)
+        {
+            SetSdlErrorBounded(
+                post_acquire_error, "offscreen blit download transfer-buffer map");
+            return std::unexpected(std::move(post_acquire_error));
+        }
+        TransferBufferMapGuard map_guard(impl_->device, transfer, mapped);
+
+        const auto* bytes = static_cast<const std::byte*>(mapped);
+        std::array<runtime::RenderClearColorRgba8, pixel_count> pixels{};
+        for (std::size_t index = 0U; index < pixels.size(); ++index)
+        {
+            const std::size_t offset = index * 4U;
+            pixels[index] = runtime::RenderClearColorRgba8{
+                .red = std::to_integer<std::uint8_t>(bytes[offset + 0U]),
+                .green = std::to_integer<std::uint8_t>(bytes[offset + 1U]),
+                .blue = std::to_integer<std::uint8_t>(bytes[offset + 2U]),
+                .alpha = std::to_integer<std::uint8_t>(bytes[offset + 3U]),
+            };
+        }
+        return pixels;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected("offscreen blit readback error allocation failed");
+    }
+    catch (...)
+    {
+        return std::unexpected("offscreen blit readback failed unexpectedly");
+    }
+}
+
 std::expected<void, std::string> SdlGpuHost::RenderFrame(
     const runtime::RenderFramePacket& packet)
 {
@@ -763,8 +1071,8 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
             runtime::kMaximumRenderTextureBlitsPerFrame> mapped_sources{};
         std::array<SDL_GPUFilter,
             runtime::kMaximumRenderTextureBlitsPerFrame> mapped_filters{};
-        std::array<runtime::RenderTextureBlitPlan,
-            runtime::kMaximumRenderTextureBlitsPerFrame> blit_plans{};
+        std::array<PreparedTextureBlit,
+            runtime::kMaximumRenderTextureBlitsPerFrame> prepared_blits{};
 
         // Resolve the complete handle set before interpreting any remaining command fields.
         // This keeps a stale later generation from permitting partial validation or any
@@ -811,17 +1119,8 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
             }
             mapped_sources[index] = *source;
 
-            switch (draw.filter_mode)
-            {
-            case runtime::RenderTextureFilterMode::Nearest:
-                mapped_filters[index] = SDL_GPU_FILTER_NEAREST;
-                break;
-            case runtime::RenderTextureFilterMode::Linear:
-                mapped_filters[index] = SDL_GPU_FILTER_LINEAR;
-                break;
-            default:
+            if (!TryMapTextureFilter(draw.filter_mode, mapped_filters[index]))
                 return std::unexpected("render frame texture filter mode is invalid");
-            }
         }
 
         // Convert the project-owned packet value before acquiring GPU work. The
@@ -888,7 +1187,11 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
                         }
                         return std::unexpected(std::move(post_acquire_error));
                     }
-                    blit_plans[index] = *plan;
+                    prepared_blits[index] = PreparedTextureBlit{
+                        .source = resolved_blits[index].texture,
+                        .plan = *plan,
+                        .filter = mapped_filters[index],
+                    };
                 }
                 submission_kind = FrameSubmissionKind::Blit;
             }
@@ -904,41 +1207,9 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
                 return std::unexpected(std::move(post_acquire_error));
             }
 
-            for (std::size_t index = 0U; index < draw_commands.size(); ++index)
-            {
-                const ResolvedTextureBlit& resolved = resolved_blits[index];
-                const runtime::RenderTextureBlitPlan& plan = blit_plans[index];
-
-                const SDL_GPUBlitInfo blit{
-                    .source = {
-                        .texture = resolved.texture,
-                        .mip_level = 0,
-                        .layer_or_depth_plane = 0,
-                        .x = plan.source.left,
-                        .y = plan.source.top,
-                        .w = plan.source.right - plan.source.left,
-                        .h = plan.source.bottom - plan.source.top,
-                    },
-                    .destination = {
-                        .texture = swapchain,
-                        .mip_level = 0,
-                        .layer_or_depth_plane = 0,
-                        .x = plan.destination.left,
-                        .y = plan.destination.top,
-                        .w = plan.destination.right - plan.destination.left,
-                        .h = plan.destination.bottom - plan.destination.top,
-                    },
-                    .load_op = SDL_GPU_LOADOP_LOAD,
-                    .clear_color = {},
-                    .flip_mode = SDL_FLIP_NONE,
-                    .filter = mapped_filters[index],
-                    .cycle = false,
-                    .padding1 = 0,
-                    .padding2 = 0,
-                    .padding3 = 0,
-                };
-                SDL_BlitGPUTexture(gpu_commands, &blit);
-            }
+            RecordTextureBlits(gpu_commands, swapchain,
+                std::span<const PreparedTextureBlit>{
+                    prepared_blits.data(), draw_commands.size()});
         }
 
         if (!command_guard.Submit())

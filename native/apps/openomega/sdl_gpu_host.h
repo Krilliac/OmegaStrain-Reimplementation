@@ -90,6 +90,13 @@ private:
         std::array<runtime::RenderClearColorRgba8, 4U>, std::string>
         ReadbackClearForTesting(const runtime::RenderFramePacket& packet);
 
+    // [main/render thread, test access only] Returns sixteen owned row-major pixels from a
+    // temporary synthetic 4x4 RGBA8 target. Referenced generations remain caller-retained and
+    // host-resident; no backend resource, production counter, or residency escapes.
+    [[nodiscard]] std::expected<
+        std::array<runtime::RenderClearColorRgba8, 16U>, std::string>
+        ReadbackBlitsForTesting(const runtime::RenderFramePacket& packet);
+
     struct Impl;
     explicit SdlGpuHost(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;
