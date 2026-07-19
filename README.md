@@ -106,6 +106,29 @@ retail instruction blocks, or PS2 execution layer.
   handle yet. The existing one-off debug-image upload remains unchanged; no GPU upload, blit, or
   residency is validated, and no `AssetService`, TDX, VUM, material, binding, or display semantic is
   connected.
+- E-0045 supersedes E-0044's historical host non-consumption and unchanged one-off-upload state.
+  `SdlGpuHost` now owns a fixed parallel SDL texture table and runs project-owned RGBA8 uploads as
+  RAII transactions: pool `Reserve`, backend create/copy/submit, then `Publish`, with rollback and
+  backend cleanup on failure. Explicit release waits for GPU idle. `RenderFramePacket` carries the
+  generation handle that selects a blit, while its default-invalid handle still selects a clear;
+  aggregate host snapshots expose no resource or pool identities. `OmegaApp` uploads its existing
+  project-generated diagnostic image, retains only the handle, and explicitly releases it before
+  host fallback teardown. Post-swapchain command buffers submit on unwind instead of attempting the
+  illegal cancel path. Host defaults remain 64 slots and 64 MiB of logical RGBA8 with the hard
+  8,192-slot maximum.
+  A clean MSVC build completed with zero warnings and errors, and the default full 19/19 CTest suite
+  passed. One initial plus 20 repeated public zero-file GPU smokes all passed on `direct3d12` (21
+  total), and the separate public two-frame `openomega` smoke passed. Each GPU smoke uses one slot
+  and a 256-byte budget, clears once, uploads and blits an opaque
+  8x8/256-byte image, releases it, rejects its stale handle before GPU access, then uploads and blits
+  a 4x8/128-byte image in the same slot with a new generation. The final checked-idle snapshot has
+  two uploads, 384 cumulative logical bytes, two releases, two blits, one clear, one rejection, zero
+  unavailable-swapchain submissions, and one free slot with no reserved, resident, retired, or
+  charged bytes. This proves command submission and checked idle, not framebuffer pixel identity or
+  readback. It establishes no `TextureStorageIR`/`AssetService` bridge, TDX plane or palette
+  consumption, channel/alpha/nibble/palette/swizzle/mip/display expansion, VUM/material/alias/binding,
+  scene placement/visibility, retail rendering, gameplay, measured GPU-byte accounting,
+  streaming/eviction, asynchronous upload, or fence design.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
@@ -186,6 +209,7 @@ a VS2022 developer environment, then use the checked-in multi-config presets:
 cmake --preset msvc
 cmake --build --preset msvc-debug
 ctest --preset msvc-debug
+.\build\msvc\Debug\omega_sdl_gpu_texture_smoke.exe
 .\build\msvc\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
@@ -206,8 +230,9 @@ python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\priv
 that opens the modern GPU backend, renders exactly `N` frames, and exits without user input.
 `--probe-only` validates the retail root and selected level, then loads the owned manifest plus one
 all-or-error `LevelContentIR` and opens an inventory-only `LevelTextureStore` without opening a
-window. The store is retained only after the existing content and debug-image gates succeed; startup
-does not call `Load`, expand display pixels, bind materials, upload to the GPU, or render textures.
+window. The store is retained only after the existing content and debug-image gates succeed. No
+`LevelTextureStore` payload is loaded or used for display expansion, material binding, GPU upload, or
+rendering; the rendered path uploads only the existing project-generated diagnostic RGBA8 image.
 The spatial meshes and role-free material catalogs are decoded under one shared budget while each
 common/cell archive is traversed once; their parallel manifest order asserts no mesh-to-material
 binding. The current MINSK view is a deterministic synthetic
@@ -223,6 +248,10 @@ non-hot-reloadable `SdlInputService` is the sole global event-queue consumer thr
 owns the gamepad subsystem and primary-gamepad lifetime, and translates accepted events into the
 neutral input tracker. `SdlGpuHost` is consequently limited to video, window, GPU, and rendering
 resources.
+
+The zero-file `omega_sdl_gpu_texture_smoke` target compiles whenever tests and the SDL backend are
+built, but hardware/display-dependent CTest registration is off by default for headless safety.
+Configure with `-DOMEGA_RUN_GPU_SMOKE_TEST=ON` to register it as a serial GPU integration test.
 
 The optional project-owned configuration file uses strict `lower_snake_case` dotted keys and
 `key = value` lines. `--set=KEY=VALUE` applies one validated command-line override per key. Current

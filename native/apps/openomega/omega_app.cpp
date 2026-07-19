@@ -135,15 +135,33 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     }
     auto audio = std::make_unique<SdlAudioService>(std::move(*created_audio));
 
-    auto created_host = SdlGpuHost::Create(
-        *platform, content_owner->debug_image ? &*content_owner->debug_image : nullptr,
-        debug_device);
+    auto created_host = SdlGpuHost::Create(*platform, debug_device);
     if (!created_host)
     {
         log->Error("startup", "SDL/GPU host: " + created_host.error());
         return std::unexpected(created_host.error());
     }
     auto host = std::make_unique<SdlGpuHost>(std::move(*created_host));
+
+    runtime::RenderTextureHandle diagnostic_texture;
+    if (content_owner->debug_image)
+    {
+        const runtime::DebugImage& image = *content_owner->debug_image;
+        auto uploaded = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+            .width = image.width,
+            .height = image.height,
+            .pixels = image.pixels(),
+        });
+        if (!uploaded)
+        {
+            const std::string error =
+                "SDL/GPU diagnostic texture upload: " + uploaded.error();
+            log->Error("startup", error);
+            return std::unexpected(error);
+        }
+        diagnostic_texture = *uploaded;
+    }
+
     log->Info("startup", "runtime services ready with " +
                              std::to_string(jobs->worker_count()) + " workers and " +
                              std::string(audio->driver_name()) + " audio");
@@ -151,7 +169,8 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     return OmegaApp(std::move(config_owner), std::move(content_owner), std::move(stderr_sink),
         std::move(ring_sink), std::move(log), std::move(jobs), std::move(assets),
         std::move(frame_scheduler), std::move(input), std::move(simulation),
-        std::move(platform), std::move(sdl_input), std::move(audio), std::move(host));
+        std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
+        diagnostic_texture);
 }
 
 OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
@@ -166,17 +185,48 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<SdlPlatformService> platform,
     std::unique_ptr<SdlInputService> sdl_input,
     std::unique_ptr<SdlAudioService> audio,
-    std::unique_ptr<SdlGpuHost> host) noexcept
+    std::unique_ptr<SdlGpuHost> host,
+    const runtime::RenderTextureHandle diagnostic_texture) noexcept
     : config_(std::move(config)), content_(std::move(content)),
       stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)),
       log_(std::move(log)), jobs_(std::move(jobs)), assets_(std::move(assets)),
       frame_scheduler_(std::move(frame_scheduler)), input_(std::move(input)),
       simulation_(std::move(simulation)), platform_(std::move(platform)),
-      sdl_input_(std::move(sdl_input)), audio_(std::move(audio)), host_(std::move(host))
+      sdl_input_(std::move(sdl_input)), audio_(std::move(audio)), host_(std::move(host)),
+      diagnostic_texture_(diagnostic_texture)
 {
 }
 
-OmegaApp::~OmegaApp() = default;
+OmegaApp::~OmegaApp() noexcept
+{
+    if (host_ != nullptr && diagnostic_texture_.valid())
+    {
+        bool release_failed = false;
+        try
+        {
+            release_failed = !host_->ReleaseTexture(diagnostic_texture_);
+        }
+        catch (...)
+        {
+            // The host remains the authoritative owner and releases all surviving resources.
+            release_failed = true;
+        }
+
+        if (release_failed && log_ != nullptr)
+        {
+            try
+            {
+                log_->Warning("shutdown",
+                    "diagnostic texture release failed; SDL/GPU host cleanup will retry");
+            }
+            catch (...)
+            {
+                // Destruction remains noexcept even if bounded shutdown logging cannot allocate.
+            }
+        }
+    }
+    diagnostic_texture_ = {};
+}
 OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
 
 std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
@@ -252,6 +302,7 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
             .completed_simulation_steps = simulation_snapshot.completed_steps,
             .simulated_time = simulation_snapshot.simulated_time,
             .alive_entities = simulation_snapshot.alive_entities,
+            .diagnostic_texture = diagnostic_texture_,
         };
         auto rendered = host_->RenderFrame(render_packet);
         if (!rendered)

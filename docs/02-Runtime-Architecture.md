@@ -41,6 +41,9 @@ before the platform service calls the process-global SDL shutdown.
 bounded plan, executes every planned world step, copies the clock and live-entity aggregate into an
 owned renderer-neutral `RenderFramePacket`, then submits one render frame. The current host consumes
 the packet synchronously; it contains no component pointers, retail views, SDL types, or vtables.
+When the existing project-generated diagnostic image uploads successfully, `OmegaApp` retains only
+its generation handle, copies that value into each packet, and explicitly releases it before the host
+is reset; host destruction remains the fallback resource teardown.
 `SdlInputService::PumpEvents` is the sole process-global event-queue consumer. `SdlGpuHost` owns
 only video, window, GPU, and rendering resources; no SDL type crosses into the platform-neutral
 runtime or simulation libraries.
@@ -163,8 +166,9 @@ handles fail closed at resident lookup.
   borrowed value pointers; neither storage nor pointers cross a reload boundary.
 - `RenderService` receives owned renderer-neutral frame packets and exposes no retail-format
   details. The initial packet carries only host frame index, deterministic simulation clock, and
-  live-entity count plus E-0044's default-invalid fixed-width diagnostic texture handle; future scene values
-  must enter as independently owned canonical state. The handle is currently unconsumed.
+  live-entity count plus E-0044's fixed-width diagnostic texture handle; future scene values must
+  enter as independently owned canonical state. E-0045 makes the all-zero default select clear-only
+  rendering and resolves a current resident generation for diagnostic blitting before backend access.
 - `SdlInputService` is an app-owned, non-hot-reloadable main-thread leaf. It owns the ref-counted
   SDL gamepad subsystem, pumps the global SDL event queue, and owns at most one primary gamepad.
   Button events are accepted only when their instance ID matches that primary. Window focus loss
@@ -362,7 +366,7 @@ may now construct the optional service, but still issues no asset request and se
 service performs no VUM-name/material lookup, alias resolution, material/texture/cell/mesh/draw
 binding, display-pixel expansion, placement, visibility, or rendering.
 
-E-0044 adds one independent SDL-free `RenderTexturePool` policy boundary. Its defaults are 64 fixed
+E-0044 added one independent SDL-free `RenderTexturePool` policy boundary. Its defaults are 64 fixed
 slots and 64 MiB of logical tightly packed RGBA8 bytes, with a hard 8,192-slot maximum. Every live
 pool receives a unique nonzero process-local identity; handles add slot and 64-bit generation values,
 and slot reuse is explicit and generation-safe. `RenderFramePacket` remains trivially copyable and
@@ -370,11 +374,42 @@ standard layout after receiving its default-invalid diagnostic handle. A clean M
 zero warnings and errors, the focused test and 100 repeated focused runs passed, and the full 19/19
 CTest suite passed.
 
-The pool creates and owns no SDL or GPU object. `SdlGpuHost` and `OmegaApp` do not yet reserve,
-publish, resolve, release, or consume its handles, so the existing one-off debug-image upload remains
-the only diagnostic upload path. E-0044 validates no GPU upload, blit, synchronization, allocation, or
-residency behavior and makes no connection to `AssetService`, TDX storage, VUM names, materials,
-bindings, display pixels, placement, visibility, or rendering semantics.
+At E-0044 the pool created and owned no SDL or GPU object, `SdlGpuHost` and `OmegaApp` did not yet
+consume its handles, and the existing one-off debug-image upload remained unchanged. That historical
+slice validated no GPU behavior.
+
+E-0045 supersedes that host non-consumption and one-off-upload state without changing the portable
+pool defaults: 64 slots, 64 MiB logical RGBA8, and a hard 8,192-slot maximum. `SdlGpuHost` owns a
+fixed slot-indexed table of SDL texture pointers parallel to the portable metadata pool. Upload of an
+exact tightly packed project-owned RGBA8 view performs `Reserve`, backend texture and transfer-buffer
+creation, copy-command submission, then `Publish`. Scope guards roll the reservation back and release
+every acquired backend object on failure. Successful release waits for GPU idle before retiring the
+exact generation and clearing its backend slot. After a swapchain is successfully acquired, the
+command-buffer guard submits on unwind instead of attempting SDL's illegal post-acquisition cancel.
+
+`RenderFramePacket::diagnostic_texture` is now consumed synchronously: the default-invalid handle
+selects a clear, while any nondefault value must resolve as a current resident generation before the
+parallel backend slot is read. `OmegaApp` uploads its existing project-generated diagnostic image,
+stores only the returned handle, places that handle in frame packets, and releases it explicitly before
+host fallback teardown. `GpuHostSnapshot` exposes only pool totals and saturating operation counters;
+it contains no pool, texture, source, or backend identity.
+
+A clean MSVC build completed with zero warnings and errors, and the default suite passed 19/19 tests.
+One initial plus 20 repeated public zero-file GPU smokes all passed on `direct3d12` (21 total), and a
+public two-frame `openomega` smoke passed. Each GPU smoke uses capacity one and a 256-byte logical
+budget, clears once, uploads/blits/releases opaque 8x8 A (256 bytes), rejects A's stale handle before
+GPU access, reuses the same slot at a new generation for opaque 4x8 B (128 bytes), blits/releases B,
+and performs a checked idle wait. The exact final totals are two uploads, 384 cumulative logical
+bytes, two releases, two blits, one clear, one rejection, zero unavailable-swapchain submissions,
+and one free slot with zero reserved, resident, retired, or charged bytes. The executable target
+always compiles when testing and the SDL backend are enabled; hardware/display CTest registration is
+off by default and becomes a serial GPU integration test only with `OMEGA_RUN_GPU_SMOKE_TEST=ON`.
+
+This smoke proves SDL GPU command submission and checked idle, not framebuffer pixel identity or
+readback. E-0045 establishes no `TextureStorageIR`/`AssetService` bridge, TDX plane or palette
+consumption, channel/alpha/nibble/palette/swizzle/mip/display expansion, VUM/material/alias/binding,
+scene placement/visibility, retail rendering, gameplay, measured GPU allocation bytes,
+streaming/eviction, asynchronous upload, or fence design.
 
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
