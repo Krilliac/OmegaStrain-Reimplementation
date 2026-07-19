@@ -606,6 +606,30 @@ shipping dependencies or execution mechanisms.
     capture, replay, file, decoded asset, or private input consumes this value yet. It establishes
     no retail menu art, text, palette, layout, controls, navigation, selection, activation, pause,
     timing, asset provenance, or UI behavior.
+47. E-0062 connects the project diagnostic menu to the native host without making it modal.
+    Keyboard F1 and gamepad Start bind to logical action 6. Each input snapshot is appended to an
+    active capture first; host/logical terminal checks run next; only a nonterminal frame can pass
+    the action-6 press edge through `UpdateDiagnosticMenu`. Movement, scheduling, simulation, and
+    rendering continue on that same frame regardless of visibility.
+    `OmegaApp::Create` builds and uploads the 128x72 menu image once. It retains one fixed hidden
+    draw list containing only the optional base diagnostic command and one fixed visible draw list
+    containing the base command followed by the menu command. The menu command uses Q16 source
+    `{0,0,65536,65536}`, exact destination `{2048,2048,26624,15872}`, `Stretch` fit, and `Nearest`
+    filtering. Frame publication selects between those lists without rebuilding either list or
+    uploading the card again. Teardown clears both lists, then releases the menu and base textures
+    independently with the existing host-owned fallback.
+    Capture/replay preserves action 6 as ordinary input-row state, including on a terminal row, but
+    neither the trace nor `RunReplaySession` owns diagnostic-menu visibility. Terminal input leaves
+    host menu state unchanged, and the `OpenOmega fresh replay:` success line remains unchanged.
+    These bindings, dimensions, rectangles, ordering, and visibility rules are project diagnostics;
+    they establish no retail menu, pause, navigation, selection, activation, layout, timing,
+    rendering, persistence, or replay behavior.
+    Local validation completed with a clean zero-warning MSVC build, focused portable and real-host
+    passes, 20/20 repeated real-host runs, 29/29 default CTest, 33/33 opt-in GPU CTest, and 20/20
+    unchanged capture/replay CLI repetitions. Runtime-off validation built and ran the exact
+    portable menu target and registered 26 tests. The native dependency gate checked 152 files,
+    all 209 tooling tests passed, Python compile-all passed, and the public-tree gate checked 239
+    indexed text blobs. Publication CI has not run for E-0062.
 
 ## Disc observations
 

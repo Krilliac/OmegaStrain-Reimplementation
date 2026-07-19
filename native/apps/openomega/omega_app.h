@@ -1,10 +1,11 @@
 #pragma once
 
+#include "diagnostic_menu.h"
+#include "run_capture.h"
 #include "sdl_audio_service.h"
 #include "sdl_gpu_host.h"
 #include "sdl_input_service.h"
 #include "sdl_platform_service.h"
-#include "run_capture.h"
 
 #include "omega/runtime/asset_service.h"
 #include "omega/runtime/config_service.h"
@@ -93,7 +94,9 @@ private:
         std::unique_ptr<SdlAudioService> audio,
         std::unique_ptr<SdlGpuHost> host,
         runtime::RenderTextureHandle diagnostic_texture,
-        runtime::RenderDrawList diagnostic_draw_list) noexcept;
+        runtime::RenderTextureHandle diagnostic_menu_texture,
+        runtime::RenderDrawList diagnostic_hidden_draw_list,
+        runtime::RenderDrawList diagnostic_visible_draw_list) noexcept;
 
     // Declaration order is ownership order; destruction is the required reverse order.
     std::unique_ptr<runtime::ConfigStore> config_;
@@ -115,7 +118,11 @@ private:
     // Non-owning generation-scoped identity. The host remains the backend-resource owner and a
     // default-moved-from app cannot release this copied value because its host_ is null.
     runtime::RenderTextureHandle diagnostic_texture_;
-    // Immutable non-owning draw data, retained independently from the explicit release handle.
-    runtime::RenderDrawList diagnostic_draw_list_;
+    runtime::RenderTextureHandle diagnostic_menu_texture_;
+    // Immutable non-owning draw data, retained independently from the explicit release handles.
+    runtime::RenderDrawList diagnostic_hidden_draw_list_;
+    runtime::RenderDrawList diagnostic_visible_draw_list_;
+    // Project-owned app-layer state. It has no renderer or retail-data lifetime.
+    DiagnosticMenuState diagnostic_menu_state_{};
 };
 } // namespace omega::app

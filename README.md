@@ -489,6 +489,23 @@ retail instruction blocks, or PS2 execution layer.
   reserved only; this first slice is not bound to a physical control, uploaded to the GPU, rendered,
   serialized, or replayed. It establishes no retail menu art, text, palette, layout, controls,
   navigation, selection, activation, pause behavior, timing, asset provenance, or UI semantics.
+- E-0062 wires that project diagnostic value into `OmegaApp`: keyboard F1 and gamepad Start feed
+  logical action 6 as a press edge. The toggle is processed after terminal handling and remains
+  nonmodal, so a nonterminal toggle frame continues through the existing movement, simulation, and
+  rendering path. Startup generates and uploads the 128x72 card once, then retains fixed hidden/base
+  and visible/base-plus-menu draw lists. The menu blit uses Q16 source `{0,0,65536,65536}`, exact Q16
+  destination `{2048,2048,26624,15872}`, `Stretch`, and `Nearest`; frames select one prebuilt list
+  without another menu upload or per-frame draw-list allocation. Capture retains action 6 in the
+  ordinary input row, including a terminal row, but terminal input does not mutate menu visibility.
+  Fresh replay preserves that input row while owning no menu state, and the established
+  `OpenOmega fresh replay:` success line is unchanged. This remains synthetic developer UI and
+  establishes no retail menu, control, pause, navigation, rendering, timing, or replay semantics.
+  The clean MSVC build completed with zero warnings or errors. The focused portable test passed;
+  the real D3D12 host smoke passed directly plus 20/20 repetitions; default CTest passed 29/29;
+  the opt-in GPU matrix passed 33/33; and the unchanged capture/replay CLI smoke passed 20/20.
+  Runtime-off validation built and ran the exact portable menu target and registered 26 tests.
+  Static dependency, tooling, compile-all, and public-tree gates also passed. Publication CI is
+  separate and remains unclaimed.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

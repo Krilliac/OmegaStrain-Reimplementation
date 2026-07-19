@@ -965,6 +965,37 @@ action has no physical binding. Consequently this slice defines no retail screen
 font, palette, navigation, activation, pause, timing, rendering, asset, persistence, or replay
 contract. Host input and GPU ownership are intentionally deferred to a separate milestone.
 
+E-0062 supplies that native-host ownership while keeping the portable reducer independent of SDL.
+`OmegaApp` owns `DiagnosticMenuState`, binds keyboard F1 and gamepad Start to logical action 6, and
+applies only `WasPressed(6)` after capture publication and terminal host/logical-quit handling. A
+terminal snapshot can therefore retain the action row without changing visibility. On a normal
+frame, visibility changes do not suppress locomotion planning, scheduler work, simulation, audio,
+or rendering; the menu is a nonmodal draw-list choice.
+
+Startup creates the project image and performs one 128x72 RGBA8 upload. The optional base diagnostic
+texture remains independent. Two fixed `RenderDrawList` values are assembled once: hidden contains
+the base command when present, while visible contains that same base command followed by the menu
+command. The menu command uses Q16 source `{0,0,65536,65536}`, target
+`{2048,2048,26624,15872}`, `RenderTextureFitMode::Stretch`, and
+`RenderTextureFilterMode::Nearest`. Each frame packet copies the selected immutable list; it does not
+allocate a replacement list or upload the menu again. Destruction clears both lists before releasing
+the menu and base handles independently; the GPU host remains the fallback owner after a failed
+release.
+
+Action 6 remains ordinary captured input evidence. `RunCaptureReplaySession` reconstructs the row,
+but `RunReplaySession` has no diagnostic-menu value or reducer and transfers no visibility state.
+The finite CLI continues to publish the established `OpenOmega fresh replay:` success line. This
+host slice remains synthetic developer presentation and defines no retail menu, input map, pause,
+navigation, selection, activation, layout, timing, render composition, persistence, or replay
+contract.
+
+E-0062 local validation completed with a clean zero-warning MSVC build. The focused portable menu
+test passed, the real D3D12 host smoke passed directly plus 20/20 repetitions, default CTest passed
+29/29, the opt-in GPU matrix passed 33/33, and the unchanged capture/replay CLI smoke passed 20/20.
+Runtime-off validation built and ran the exact portable target and registered 26 tests. The native
+dependency gate checked 152 files, all 209 tooling tests and Python compile-all passed, and the
+public-tree gate checked 239 indexed text blobs. Publication CI remains separate.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a
