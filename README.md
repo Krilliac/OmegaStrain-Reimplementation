@@ -158,6 +158,37 @@ retail instruction blocks, or PS2 execution layer.
   texture, mesh, or gameplay semantics; no `TextureStorageIR`/`AssetService` bridge or display
   expansion; and no measured GPU-byte accounting, streaming, eviction, asynchronous upload, or
   fence design.
+- E-0047 extends each bounded blit command with a half-open normalized Q16 source crop plus explicit
+  project-owned `Contain`/`Stretch` fit and `Nearest`/`Linear` filter choices. Draw-list
+  construction rejects capacity overflow first, then validates commands in source order with fixed
+  handle/source/target/fit/filter priority while retaining the owned, zero-tailed, trivially
+  copyable value contract. The pure integer source mapper floors left/top texel edges and ceilings
+  right/bottom edges; the overflow-safe planner preserves that mapped crop exactly, maps the target
+  with the same half-open rule, and either aspect-contains with deterministic round-half-up
+  centering or stretches to the complete mapped destination.
+  `SdlGpuHost` preserves three complete-list fail-closed passes: it resolves the complete
+  handle/backend-slot set, then maps every source crop and filter before acquiring GPU work. Once a
+  nonzero swapchain is available, it plans the complete frame before recording the full-target clear
+  and source-order blits, so a later stale handle or planning rejection cannot submit an accepted
+  visible prefix. `OmegaApp` keeps its existing
+  project-generated diagnostic image on the full-source, full-target, `Contain` plus `Nearest`
+  default and retains its separate handle solely for explicit release.
+  A clean MSVC build rebuilt seven translation units with zero warnings and errors. The focused
+  portable executable passed once and through 100 additional repetitions, and the default suite
+  passed 20/20. One initial plus 20 repeated public zero-file GPU smokes all passed on `direct3d12`;
+  every run ended with exactly three uploads and 640 cumulative logical bytes, three releases, two
+  submitted blit frames containing four successful draws, one clear-only submission, one stale-list
+  rejection, zero unavailable-swapchain submissions, and zero residual residency. The opt-in GPU
+  configuration passed 21/21 CTests, after which registration was restored to OFF and the default
+  listing to 20 tests. A public two-frame D3D12 `openomega` smoke also passed with deterministic
+  dummy audio. Publication CI is tracked separately from these local validation claims.
+  This proves bounded project-owned crop/fit/filter command validation, planning, and SDL
+  submission, not framebuffer pixel identity or readback, arbitrary backend-failure atomicity,
+  alpha or blending semantics, or retail draw order, source/target coordinates, filtering,
+  clear/composition, placement, visibility, camera, material, texture, mesh, or gameplay meaning.
+  It establishes no `TextureStorageIR`/`AssetService` bridge, TDX plane/palette or display
+  expansion, measured GPU-byte accounting, streaming/eviction, asynchronous upload/rendering,
+  residency pins, or fence design.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

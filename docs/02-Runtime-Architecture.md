@@ -167,10 +167,12 @@ handles fail closed at resident lookup.
   borrowed value pointers; neither storage nor pointers cross a reload boundary.
 - `RenderService` receives owned renderer-neutral frame packets and exposes no retail-format
   details. The current packet carries only host frame index, deterministic simulation clock,
-  live-entity count, and E-0046's owned `RenderDrawList`. The list has a fully zeroed fixed backing
+  live-entity count, and E-0047's owned `RenderDrawList`. The list has a fully zeroed fixed backing
   store for at most 16 renderer-neutral texture-blit commands; future scene values must enter as
-  independently owned canonical state. Its coordinates use a synthetic normalized extent of 65,536,
-  and its commands retain handles without owning or pinning the referenced texture generations.
+  independently owned canonical state. Each command contains a generation handle, a half-open
+  mip-zero source crop and target rectangle in a synthetic normalized extent of 65,536, and explicit
+  `Contain`/`Stretch` fit plus `Nearest`/`Linear` filter policy. Commands retain handles without
+  owning or pinning the referenced texture generations.
 - `SdlInputService` is an app-owned, non-hot-reloadable main-thread leaf. It owns the ref-counted
   SDL gamepad subsystem, pumps the global SDL event queue, and owns at most one primary gamepad.
   Button events are accepted only when their instance ID matches that primary. Window focus loss
@@ -422,9 +424,9 @@ fixed-capacity `RenderDrawList`. Construction accepts at most 16 commands, valid
 handle and normalized nonempty in-bounds target rectangle, and preserves both source order and
 duplicates. Default construction clears the complete fixed command backing storage, while the list,
 commands, rectangles, and containing frame packet remain trivially copyable and standard layout.
-The normalized target extent is 65,536. `PlanContainedTextureBlit` maps left/top edges by floor and
-right/bottom edges by ceiling with 64-bit arithmetic, then deterministically centers an
-aspect-contained source rectangle in the mapped destination.
+The E-0046-era normalized target extent was 65,536. Its now-superseded contained-blit planner mapped
+left/top edges by floor and right/bottom edges by ceiling with 64-bit arithmetic, then
+deterministically centered an aspect-contained source rectangle in the mapped destination.
 
 Draw-list commands are non-owning and do not pin texture generations. The current same-thread,
 synchronous caller keeps every referenced texture resident through consumption; a future queued or
@@ -456,6 +458,60 @@ assigns no retail draw order, coordinates, filtering, clear/compositing behavior
 material, mesh, or gameplay meaning. It also establishes no `TextureStorageIR`/`AssetService`
 bridge, display expansion, measured GPU allocation, streaming or eviction, asynchronous
 upload/rendering, resource pins, or fence design.
+
+E-0047 supersedes E-0046's full-source, `Contain`-only, `Nearest`-only command policy. Each command
+now owns a half-open normalized mip-zero source crop, a normalized target rectangle, and explicit
+`Contain`/`Stretch` and `Nearest`/`Linear` modes together with its generation handle. The fixed
+16-command capacity, owned-copy construction, source order, duplicate preservation, zeroed inactive
+tail, and const-prefix access remain unchanged. Construction reports fixed typed error categories
+and validates capacity first, then every command in source order by handle, source rectangle, target
+rectangle, fit mode, and filter mode. The source and target rectangles, modes, command, plan, list,
+and containing packet remain trivially copyable and standard layout.
+
+`MapTextureSourceRect` validates the nonzero mip-zero source extent before the normalized source
+rectangle. It maps left/top by floor and right/bottom by ceiling with 64-bit products, producing a
+bounded, nonempty, half-open texel crop. `PlanTextureBlit` then validates the mapped source before
+the target extent, target rectangle, and fit mode. It retains the mapped crop exactly. `Stretch`
+uses the complete mapped target rectangle; `Contain` performs overflow-safe aspect comparison,
+round-half-up sizing, and deterministic centering. These are pure renderer-neutral policies;
+filter selection is mapped separately by the backend.
+
+The host uses three complete-list fail-closed passes. Before acquiring a GPU command buffer, it
+first resolves every generation and backend slot, then maps every normalized source crop and every
+`Nearest`/`Linear` filter into fixed local storage. After an available nonzero swapchain extent is
+known, the third pass plans every destination and fit into another fixed array before recording the
+full clear or any blit. A planning failure submits the required empty acquired command buffer and
+records no successful-frame counters, so no accepted prefix reaches visible GPU work. Successful
+SDL blits use the planned half-open source and destination extents, the selected filter, no flip,
+and `LOAD` target semantics in source order after one full-target clear. Empty lists remain
+clear-only, while
+aggregate counters continue to distinguish successful nonempty frames from individual draws.
+
+`OmegaApp` keeps the generated diagnostic texture handle separately for explicit release and builds
+one immutable full-source, full-target, `Contain`-and-`Nearest` command. E-0047 therefore expands
+the bounded renderer command vocabulary without changing the app's diagnostic placement policy or
+connecting a retail asset to a draw.
+
+Local E-0047 validation completed with a clean MSVC build that exited zero after compiling seven
+translation units with zero warnings and zero errors. The focused portable test passed once plus
+100 repeated runs, and the default suite passed 20/20. One initial plus 20 repeated public zero-file
+GPU smokes passed on `direct3d12` (21 total). Each completed run ended with exactly three uploads,
+640 cumulative logical upload bytes, three releases, two successful blit frames, four successful
+draws, one clear-only submission, one stale-list rejection, zero unavailable-swapchain submissions,
+and zero residual residency. With GPU test registration enabled, the full opt-in suite passed 21/21;
+the option was then restored to `OFF` and the default listing returned to 20 tests. A public
+two-frame `openomega` smoke also passed on `direct3d12` with deterministic dummy audio. Windows,
+Linux, and public-tree CI results are tracked separately from these local validation claims.
+
+The GPU smoke proves checked command acceptance, submission, counters, and idle cleanup, not
+framebuffer pixel identity, readback, interpolation quality, or arbitrary backend-failure
+atomicity. Source crops, normalized coordinates, fit and filter modes, order, clearing, and
+composition are project-owned policies, not retail semantics. E-0047 assigns no retail placement,
+visibility, camera, material, texture, mesh, or gameplay meaning and establishes no
+`TextureStorageIR`/`AssetService`, TDX, VUM, material, cell, or mesh-to-draw binding. The packet and
+draw list are in-process owned C++ values, not a serialized, persistent, network, plugin, or stable
+wire ABI. Commands still do not pin texture generations; asynchronous queuing, a pin contract,
+fences, streaming or eviction, measured GPU memory, and display expansion remain unestablished.
 
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are

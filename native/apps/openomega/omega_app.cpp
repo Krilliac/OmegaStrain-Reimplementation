@@ -161,6 +161,12 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
             return std::unexpected(error);
         }
 
+        constexpr runtime::RenderSourceRectQ16 full_source{
+            .left = 0U,
+            .top = 0U,
+            .right = runtime::kNormalizedRenderExtent,
+            .bottom = runtime::kNormalizedRenderExtent,
+        };
         constexpr runtime::RenderTargetRectQ16 full_target{
             .left = 0U,
             .top = 0U,
@@ -170,7 +176,10 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
         const std::array commands{
             runtime::RenderTextureBlitCommand{
                 .texture = *uploaded,
+                .source = full_source,
                 .destination = full_target,
+                .fit_mode = runtime::RenderTextureFitMode::Contain,
+                .filter_mode = runtime::RenderTextureFilterMode::Nearest,
             },
         };
         auto created_draw_list = runtime::RenderDrawList::Create(commands);
