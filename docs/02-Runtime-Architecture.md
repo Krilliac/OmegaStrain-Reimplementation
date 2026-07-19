@@ -503,6 +503,41 @@ Runtime-off direct and focused checks retained 27 registrations. The dependency 
 native files, all 209 tooling tests passed, and Python compile-all passed. Publication remains
 unclaimed.
 
+E-0075 adds default-profile selection as a separate composition-root stage. The compile-time
+`HostRuntimeConfigPlatform` classifier is `noexcept` and performs no I/O. The pure lexical
+`ResolveDefaultRuntimeConfigPath` consumes only caller-captured `RuntimeConfigSearchRoots`; it
+requires nonempty absolute roots and appends one fixed suffix. Windows uses
+`LOCALAPPDATA/OpenOmega/openomega.cfg`, macOS uses
+`HOME/Library/Application Support/OpenOmega/openomega.cfg`, and XDG uses
+`XDG_CONFIG_HOME/openomega/openomega.cfg` with `HOME/.config/openomega/openomega.cfg` as the
+fallback when no usable XDG root is present. Dot-dot components and environment-looking tokens are
+literal. The resolver does not read the environment or filesystem, normalize, canonicalize,
+absolutize, expand, create, or write.
+
+After successful launch parsing and the help fast path, main captures only the roots relevant to
+the compile-time host, and only when `--config` is absent. Windows captures `LOCALAPPDATA` through
+the wide environment representation. The two-argument `LoadRuntimeConfig` selects explicit config
+ahead of the supplied default candidate, so explicit selection bypasses default inspection. The
+one-argument overload remains ambient-free. A missing default yields the empty store. Otherwise
+the loader inspects only the final entry with `symlink_status(error_code)`: regular files use the
+existing bounded loader; a reported symlink, dangling symlink, directory, or other non-regular
+entry fails without being followed; other inspection errors fail. This does not assert rejection
+of symlinked parents or every Windows reparse point. Default-only load and inspection diagnostics
+carry `runtime configuration default profile: `; existing explicit and `--set` diagnostics are
+unchanged. File values, source-order overrides, E-0074 tuple validation, and atomic direct CLI
+precedence retain their order. Success remains silent. There is no profile write, directory
+creation, migration, picker, startup dialog, default level, hot reload, private-data access, retail
+behavior, or emulator-equivalence claim.
+
+Serialized local validation passed: focused and full MSVC builds completed cleanly; direct
+`omega_core_tests` and the exact process contract passed; default, opt-in GPU, and restored CTest
+passed 30/30, 34/34, and 30/30; runtime-off direct and focused checks passed with 27 registrations;
+the dependency gate checked 160 native files; all 209 tooling tests and Python compile-all passed;
+and the staged public-tree gate checked 247 indexed text blobs. On Windows, the non-missing
+inspection-error oracle was explicitly skipped because MSVC maps the
+available invalid and overlong candidates to not-found. Commit, DCO, publication, and exact-main
+validation remain unclaimed.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

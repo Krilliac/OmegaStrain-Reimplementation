@@ -899,6 +899,30 @@ shipping dependencies or execution mechanisms.
     registrations, the 157-file dependency gate, all 209 tooling tests, and Python compile-all
     passed. Publication remains unclaimed.
 
+60. E-0075 adds narrow per-user default-profile discovery at the composition root. A compile-time
+    host classifier performs no I/O, and a separate pure lexical resolver accepts only captured
+    absolute roots. It maps Windows `LOCALAPPDATA` to `OpenOmega/openomega.cfg`, macOS `HOME` to
+    `Library/Application Support/OpenOmega/openomega.cfg`, and `XDG_CONFIG_HOME` to
+    `openomega/openomega.cfg` with an absolute-`HOME` `.config/openomega/openomega.cfg` fallback.
+    Main captures only those relevant variables after successful parsing and help handling, and
+    only when explicit `--config` is absent; Windows uses the wide environment representation.
+    Explicit config therefore bypasses all default discovery and inspection. A missing default is
+    silent, a regular file uses the existing bounded loader, and `symlink_status(error_code)`
+    rejects a reported final-entry symlink, dangling symlink, directory, or other non-regular type
+    without following it. The slice intentionally does not claim rejection of parent symlinks or
+    every Windows reparse-point shape. File values still precede source-order `--set`, E-0074
+    validation, and atomic direct CLI content selection. Discovery is lexical: it does not
+    normalize, canonicalize, absolutize, expand tokens, write, create directories, migrate, print
+    a success path, choose a level, or inspect owner content. Serialized local validation passed:
+    focused and full MSVC builds completed cleanly; direct `omega_core_tests` and the exact process
+    contract passed; default, opt-in GPU, and restored CTest passed 30/30, 34/34, and 30/30;
+    runtime-off direct and focused checks passed with 27 registrations; the dependency gate checked
+    160 native files; all 209 tooling tests and Python compile-all passed; and the staged public-tree
+    gate checked 247 indexed text blobs. On Windows, the non-missing inspection-error oracle was
+    explicitly skipped because MSVC maps the available
+    invalid and overlong candidates to not-found. Commit, DCO, publication, and exact-main
+    validation remain unclaimed.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2

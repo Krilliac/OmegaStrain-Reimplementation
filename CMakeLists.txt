@@ -92,6 +92,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/log_service.cpp
     native/src/runtime/render_draw_list.cpp
     native/src/runtime/render_texture_pool.cpp
+    native/src/runtime/runtime_config_discovery.cpp
     native/src/runtime/run_capture_replay.cpp
     native/src/runtime/run_capture_session.cpp
     native/src/runtime/scheduler_elapsed_trace.cpp
@@ -325,6 +326,23 @@ if(OMEGA_RUN_GPU_SMOKE_TEST AND NOT TARGET omega_sdl_backend)
 endif()
 
 if(BUILD_TESTING)
+    function(set_openomega_synthetic_profile_environment test_name)
+        set(profile_root
+            "${CMAKE_CURRENT_BINARY_DIR}/synthetic-runtime-profiles/${test_name}")
+        file(REMOVE_RECURSE "${profile_root}")
+        file(MAKE_DIRECTORY
+            "${profile_root}/local-app-data"
+            "${profile_root}/xdg-config-home"
+            "${profile_root}/home"
+        )
+        set_property(TEST "${test_name}" APPEND PROPERTY ENVIRONMENT
+            "OPENOMEGA_TEST_PROFILE_ROOT=${profile_root}"
+            "LOCALAPPDATA=${profile_root}/local-app-data"
+            "XDG_CONFIG_HOME=${profile_root}/xdg-config-home"
+            "HOME=${profile_root}/home"
+        )
+    endfunction()
+
     if(TARGET openomega)
         add_test(NAME openomega_process_contract
             COMMAND "${CMAKE_COMMAND}"
@@ -335,6 +353,7 @@ if(BUILD_TESTING)
             TIMEOUT 10
             LABELS "integration"
         )
+        set_openomega_synthetic_profile_environment(openomega_process_contract)
     endif()
 
     add_executable(omega_pop_post_terrain_commands_tests
@@ -779,6 +798,7 @@ if(BUILD_TESTING)
                 RUN_SERIAL TRUE
                 LABELS "gpu;integration"
             )
+            set_openomega_synthetic_profile_environment(openomega_capture_cli_smoke)
 
             add_test(NAME openomega_capture_replay_cli_smoke
                 COMMAND "${CMAKE_COMMAND}"
@@ -791,6 +811,7 @@ if(BUILD_TESTING)
                 RUN_SERIAL TRUE
                 LABELS "gpu;integration"
             )
+            set_openomega_synthetic_profile_environment(openomega_capture_replay_cli_smoke)
         endif()
 
         add_executable(omega_sdl_audio_tests
@@ -844,6 +865,7 @@ if(BUILD_TESTING)
         native/tests/pop_level_manifest_decoder_tests.cpp
         native/tests/pop_post_terrain_hypothesis_descriptor_tests.cpp
         native/tests/pop_terrain_index_tests.cpp
+        native/tests/runtime_config_discovery_tests.cpp
         native/tests/runtime_settings_tests.cpp
         native/tests/simulation_world_tests.cpp
         native/tests/ska_container_descriptor_tests.cpp
