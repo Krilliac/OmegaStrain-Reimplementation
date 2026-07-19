@@ -51,7 +51,7 @@ endfunction()
 string(CONCAT openomega_usage
     "usage: openomega [-h|--help]\n"
     "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
-    "[--frames=N [--capture-run]] "
+    "[--frames=N [--capture-run [--replay-capture]]] "
     "[--data-root=PATH [--level=CODE] [--probe-only]]\n"
 )
 set(zero_frame_stdout "OpenOmega native shell: rendered_frames=0\n")
@@ -60,6 +60,18 @@ run_openomega_case(zero_frames TRUE "${zero_frame_stdout}" "" --frames=0)
 run_openomega_case(capture_without_frames FALSE ""
     "--capture-run requires --frames\n${openomega_usage}"
     --capture-run
+)
+run_openomega_case(replay_without_capture FALSE ""
+    "--replay-capture requires --capture-run\n${openomega_usage}"
+    --frames=1 --replay-capture
+)
+run_openomega_case(replay_without_frames FALSE ""
+    "--capture-run requires --frames\n${openomega_usage}"
+    --replay-capture --capture-run
+)
+run_openomega_case(replay_attached_value FALSE ""
+    "unknown option: --replay-capture=true\n${openomega_usage}"
+    --replay-capture=true
 )
 run_openomega_case(capture_zero_frames FALSE ""
     "--capture-run requires --frames in the range 1..65536\n${openomega_usage}"

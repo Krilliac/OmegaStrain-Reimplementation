@@ -680,6 +680,18 @@ if(BUILD_TESTING)
                 RUN_SERIAL TRUE
                 LABELS "gpu;integration"
             )
+
+            add_test(NAME openomega_capture_replay_cli_smoke
+                COMMAND "${CMAKE_COMMAND}"
+                    "-DOPENOMEGA_EXECUTABLE=$<TARGET_FILE:openomega>"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/openomega_capture_replay_cli_smoke.cmake"
+            )
+            set_tests_properties(openomega_capture_replay_cli_smoke PROPERTIES
+                ENVIRONMENT "SDL_AUDIO_DRIVER=dummy"
+                TIMEOUT 20
+                RUN_SERIAL TRUE
+                LABELS "gpu;integration"
+            )
         endif()
 
         add_executable(omega_sdl_audio_tests

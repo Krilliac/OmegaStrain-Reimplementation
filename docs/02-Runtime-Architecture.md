@@ -886,6 +886,38 @@ a host clock, replay an existing `OmegaApp`, add a CLI route, render, mix audio,
 persist data, define a file/wire/stable ABI or cross-process contract, seek, rewind, loop, roll
 back, or claim retail timing or determinism.
 
+E-0059 adds the exact once-only `--replay-capture` launch flag. The one-process flow is
+`openomega --frames=N --capture-run --replay-capture`, with `N` in the existing explicit capture
+range of 1 through 65,536. The replay and capture flags may appear in either token order, but replay
+always requires capture. Ordinary launch and capture-only behavior remain unchanged.
+
+The process first completes the existing captured run. Before any destructive ownership transfer,
+`main` requires `IsCompleteRunCaptureOutcome` to accept the capture and requires the captured
+starting `FrameSchedulerState` to contain only its configuration, with zero remainder, planned
+steps, and dropped time. The complete-capture gate excludes operational or capture failure, quit or
+terminal input, incomplete result or trace counts, capacity/origin disagreement, and unequal
+planned and executed steps. Only then does rvalue-only `TakeTracePair` normalize the outcome and
+transfer its pair into a new `RunReplaySession`.
+
+The replay uses the capture's starting scheduler configuration to create a fresh scheduler and a
+fresh empty world. It advances every elapsed frame synchronously on the main thread, accumulating
+replayed-frame, planned-step, clamped-frame, and dropped-frame totals. Completion requires those
+aggregates to match the captured result, the replay scheduler snapshot to equal the captured final
+scheduler snapshot, and the fresh world to have matching completed steps and derived simulated
+time with zero live entities. Creation, frame-shape, overflow, replay, completion, aggregate, and
+final-state failures are fail-fast. Only complete success prints one fixed
+`OpenOmega fresh replay:` line containing replayed frames, planned and completed simulation steps,
+clamped and dropped frames, and `completion=complete`.
+
+This CLI does not replay into the existing `OmegaApp`. After capture, its main-thread replay
+orchestration makes no calls into or reads from that app. The host remains alive, so its audio
+callback may continue independently. `RunReplaySession` performs no pacing, host-clock sampling,
+rendering, audio, or job work. The CLI accepts no terminal or incomplete capture for replay, injects
+no reconstructed input, and the fresh world does not consume that input. It reconstructs no
+gameplay and restores no captured scheduler/world state, entities, or RNG. It defines no
+persistence, file, wire, stable ABI, cross-process format, seek, rewind, loop, rollback, retail
+timing, or retail determinism contract.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

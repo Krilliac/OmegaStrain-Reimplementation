@@ -441,6 +441,26 @@ retail instruction blocks, or PS2 execution layer.
   host-event synthesis, captured scheduler/world checkpoint, entity or RNG restoration, pacing or
   clock ownership, rendering, audio, jobs, persistence, file/wire/stable ABI, cross-process
   compatibility, seek, rewind, loop, rollback, or retail timing or determinism claim.
+- E-0059 adds the exact once-only `--replay-capture` launch flag for one-process finite capture and
+  immediate fresh replay. It is valid only with `--capture-run` and its explicit `--frames=N` range
+  of 1 through 65,536; token order does not change those dependencies. `main` first performs the
+  existing capture and accepts replay only when the capture is complete and consistent, has no
+  terminal frame, and began from a scheduler whose counters and remainder were all zero. Only after
+  those checks does rvalue extraction transfer the trace pair and normalize the capture outcome.
+  Replay then creates a fresh scheduler from the captured starting configuration and a fresh empty
+  world, consumes every elapsed frame on the main thread, and compares replay aggregates, the final
+  scheduler state, and the fresh world's final clock and empty-entity state with capture results.
+  Any mismatch or replay error fails the process immediately. Success alone prints one fixed
+  `OpenOmega fresh replay:` aggregate line with `replayed_frames`, planned and completed simulation
+  steps, clamped and dropped frame counts, and `completion=complete`. Ordinary runs and
+  capture-only commands retain their prior behavior.
+  This does not replay into the existing `OmegaApp`; after capture, the main-thread replay
+  orchestration makes no calls into or reads from it. The host remains alive, so its audio callback
+  may continue independently. `RunReplaySession` itself performs no pacing, clock sampling,
+  rendering, audio, or job work. The command adds no terminal or incomplete CLI replay, input
+  injection or world input use, gameplay reconstruction, captured scheduler/world state, entity or
+  RNG restoration, persistence, file/wire/stable ABI, cross-process contract, seek, rewind, loop,
+  rollback, or retail timing or determinism claim.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
@@ -536,6 +556,7 @@ ctest --preset msvc-debug
 python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\private\extracted-disc --aggregate-only
 .\build\msvc\Debug\openomega.exe --frames=120
 .\build\msvc\Debug\openomega.exe --frames=120 --capture-run
+.\build\msvc\Debug\openomega.exe --frames=120 --capture-run --replay-capture
 .\build\msvc\Debug\openomega.exe --config=.\openomega.cfg --set=log.minimum_severity=debug --frames=120
 ```
 
@@ -545,6 +566,11 @@ Adding `--capture-run` explicitly selects bounded in-process capture for 1 throu
 and prints only aggregate trace metadata plus selected absolute scheduler counters; it creates no
 capture file and prints no per-frame input or elapsed records. Ordinary `--frames` behavior is
 unchanged when the flag is absent.
+Adding `--replay-capture` to that finite capture performs immediate main-thread replay into a fresh
+scheduler and empty world in the same process. It requires a complete nonterminal capture and a
+zero-origin capture scheduler, fails fast on any replay or comparison error, and prints the fixed
+fresh-replay aggregate line only after aggregate and final-state verification succeeds. Without
+`--replay-capture`, capture-only output and behavior remain unchanged.
 `--probe-only` validates the retail root and selected level, then loads the owned manifest plus one
 all-or-error `LevelContentIR` and opens an inventory-only `LevelTextureStore` without opening a
 window. The store is retained only after the existing content and debug-image gates succeed. No

@@ -63,6 +63,7 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     bool saw_level = false;
     bool saw_config = false;
     bool saw_capture_run = false;
+    bool saw_replay_capture = false;
     bool saw_probe_only = false;
     bool saw_help = false;
 
@@ -167,6 +168,14 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
             result.capture_run = true;
             continue;
         }
+        if (argument == "--replay-capture")
+        {
+            if (saw_replay_capture)
+                return std::unexpected("--replay-capture may be specified only once");
+            saw_replay_capture = true;
+            result.replay_capture = true;
+            continue;
+        }
         if (argument == "--help" || argument == "-h")
         {
             if (saw_help)
@@ -186,6 +195,8 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
         return std::unexpected("--probe-only cannot be combined with --frames");
     if (result.show_help && arguments.size() != 1U)
         return std::unexpected("--help cannot be combined with other options");
+    if (result.replay_capture && !result.capture_run)
+        return std::unexpected("--replay-capture requires --capture-run");
     if (result.capture_run && !saw_frames)
         return std::unexpected("--capture-run requires --frames");
     if (result.capture_run &&
@@ -200,7 +211,7 @@ std::string_view LaunchUsage() noexcept
 {
     return "usage: openomega [-h|--help]\n"
            "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
-           "[--frames=N [--capture-run]] "
+           "[--frames=N [--capture-run [--replay-capture]]] "
            "[--data-root=PATH [--level=CODE] [--probe-only]]\n";
 }
 } // namespace omega::runtime
