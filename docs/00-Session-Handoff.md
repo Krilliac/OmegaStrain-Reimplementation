@@ -175,6 +175,20 @@ shipping dependencies or execution mechanisms.
     name/material lookup, alias resolution, binding, pixel expansion, GPU upload, placement,
     visibility, or rendering. Its aggregate exposes no identities or private data, and the unchanged
     E-0038 verifier was revalidated.
+29. Added and verified the portable bounded `RenderTexturePool` foundation. The SDL-free pool
+    preallocates fixed metadata slots, accepts only exact overflow-checked tightly packed project-owned
+    RGBA8 extents, and supports transactional `Reserve`/`Publish`/`Rollback` around future backend
+    creation and upload. Unique nonzero process-local pool identities and 64-bit slot generations
+    reject default, foreign, stale, and released handles; explicit release refunds logical resident
+    bytes, while a maximum generation retires instead of wrapping. Defaults are 64 slots and 64 MiB
+    logical RGBA8 with a hard 8,192-slot maximum. `RenderFramePacket` now contains a default-invalid
+    fixed-width diagnostic handle and remains trivially copyable and standard layout. A clean MSVC
+    build had
+    zero warnings or errors, the focused test passed, 100 repeated focused runs passed, and full
+    19/19 CTest passed. This is metadata/lifecycle policy only: it creates no GPU resource,
+    `SdlGpuHost` and `OmegaApp` do not consume the handle, and the existing one-off debug upload is
+    unchanged. No GPU upload, blit, or residency and no `AssetService`, TDX, VUM, material, binding,
+    or display semantic is established.
 
 ## Disc observations
 
@@ -214,6 +228,8 @@ shipping dependencies or execution mechanisms.
    stem, substring, repeated-extension, suffix-family, and other alias hypotheses separate.
    E-0043's `AssetService` accepts only an already-issued `LevelTextureHandle`; it does not change
    this research boundary or consume either lexical experiment.
+   E-0044 likewise adds only portable renderer metadata lifecycle; it does not connect an asset,
+   decoded storage, catalog name, material record, or locator to the frame-packet handle.
 3. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
    independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.

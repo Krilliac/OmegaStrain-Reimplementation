@@ -91,6 +91,21 @@ retail instruction blocks, or PS2 execution layer.
   display-pixel expansion, GPU upload, placement, visibility, or rendering. Its fixed aggregate
   report exposes no paths, names, hashes, offsets, payloads, per-level rows, identities, bindings,
   messages, or exception text; the unchanged E-0038 store verifier was revalidated separately.
+- E-0044 adds the SDL-free bounded `RenderTexturePool` foundation for project-owned tightly packed
+  RGBA8 images. It preallocates a fixed slot pool, checks the exact `width * height * 4` extent with
+  overflow protection, and separates backend work into transactional `Reserve`, `Publish`, and
+  `Rollback` phases. Unique nonzero process-local pool identities plus slot and 64-bit generation
+  fields reject default, foreign, stale, and released handles; explicit release refunds logical
+  resident bytes, and a maximum generation retires rather than wraps. Defaults are 64 slots and
+  64 MiB of logical RGBA8 bytes with a hard 8,192-slot maximum. `RenderFramePacket` now carries one
+  default-invalid fixed-width diagnostic handle while remaining trivially copyable and standard
+  layout. A
+  clean MSVC build produced zero warnings and errors, the focused test passed, 100 repeated focused
+  runs passed, and the full 19/19 CTest suite passed. This is renderer-neutral metadata and lifecycle
+  policy only: it creates no GPU resource, and neither `SdlGpuHost` nor `OmegaApp` consumes the new
+  handle yet. The existing one-off debug-image upload remains unchanged; no GPU upload, blit, or
+  residency is validated, and no `AssetService`, TDX, VUM, material, binding, or display semantic is
+  connected.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
