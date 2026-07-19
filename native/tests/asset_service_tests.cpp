@@ -3,6 +3,7 @@
 #include "omega/content/level_texture_store.h"
 #include "omega/runtime/asset_service.h"
 #include "omega/runtime/job_service.h"
+#include "omega/runtime/texture_storage_topology_debug_image.h"
 
 #include <algorithm>
 #include <array>
@@ -375,6 +376,17 @@ std::uint8_t FirstStorageByte(const omega::asset::TextureStorageIR& storage)
         storage.blocks.front().planes.front().bytes.front());
 }
 
+std::uint64_t Fnv1a64(const std::span<const std::byte> bytes) noexcept
+{
+    std::uint64_t hash = 14695981039346656037ULL;
+    for (const std::byte value : bytes)
+    {
+        hash ^= std::to_integer<std::uint8_t>(value);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
 std::optional<std::uint64_t> ResidentBytes(
     const ContentFixture& fixture, const LevelTextureHandle& handle)
 {
@@ -610,6 +622,84 @@ void CheckDuplicatesPoolReuseAndAccounting(const ContentFixture& fixture)
     }
     Check(IsEmptySnapshot(assets->Snapshot(), 2U),
         "reuse leaves no residency or retired slots behind");
+}
+
+void CheckOwnedTopologyImageComposition(const ContentFixture& fixture)
+{
+    auto source_a = fixture.HandleAt(0U);
+    auto source_b = fixture.HandleAt(1U);
+    auto jobs = MakeJobs(8U);
+    Check(source_a && source_b && jobs,
+        "topology-composition dependencies are created from public synthetic data");
+    if (!source_a || !source_b || !jobs)
+        return;
+
+    auto created = MakeAssets(*jobs, fixture, Config(2U, 2U, 1ULL << 20U));
+    Check(created.has_value(), "the topology-composition asset service is created");
+    if (!created)
+        return;
+    std::unique_ptr<AssetService> assets = std::move(*created);
+
+    auto first_handle = assets->Request(*source_a);
+    auto second_handle = assets->Request(*source_b);
+    Check(first_handle && second_handle,
+        "two distinct synthetic payloads are accepted for asynchronous loading");
+    if (!first_handle || !second_handle)
+        return;
+
+    assets->WaitForIdle();
+    std::optional<omega::runtime::DebugImage> first_image;
+    std::optional<omega::runtime::DebugImage> second_image;
+    {
+        auto first_view = assets->Get(*first_handle);
+        auto second_view = assets->Get(*second_handle);
+        Check(first_view && second_view,
+            "both asynchronous loads publish canonical immutable texture storage");
+        if (!first_view || !second_view)
+            return;
+        Check(FirstStorageByte(first_view->storage.get()) !=
+                  FirstStorageByte(second_view->storage.get()),
+            "the two canonical inputs retain their intentionally distinct payload bytes");
+
+        auto first_built = omega::runtime::BuildTextureStorageTopologyDebugImage(
+            first_view->storage.get());
+        auto second_built = omega::runtime::BuildTextureStorageTopologyDebugImage(
+            second_view->storage.get());
+        Check(first_built && second_built,
+            "ready asset views compose directly with the portable topology adapter");
+        if (!first_built || !second_built)
+            return;
+        first_image.emplace(std::move(*first_built));
+        second_image.emplace(std::move(*second_built));
+    }
+
+    const bool exact_dimensions = first_image->width == 32U && first_image->height == 32U &&
+                                  second_image->width == 32U &&
+                                  second_image->height == 32U &&
+                                  first_image->rgba8_pixels.size() == 32U * 32U * 4U &&
+                                  second_image->rgba8_pixels.size() == 32U * 32U * 4U;
+    Check(exact_dimensions,
+        "both one-block public fixtures produce complete owned topology tiles");
+    Check(Fnv1a64(first_image->pixels()) == 0x666d00371feff88dULL &&
+              Fnv1a64(second_image->pixels()) == 0x666d00371feff88dULL,
+        "both composed one-block images have the independently frozen signature");
+    Check(first_image->rgba8_pixels == second_image->rgba8_pixels,
+        "different payload bytes cannot change metadata-only topology pixels");
+    Check(!first_image->rgba8_pixels.empty() && !second_image->rgba8_pixels.empty() &&
+              first_image->rgba8_pixels.data() != second_image->rgba8_pixels.data(),
+        "the topology results own distinct nonempty pixel allocations");
+    const std::vector<std::byte> first_pixels_before_release = first_image->rgba8_pixels;
+    const std::vector<std::byte> second_pixels_before_release = second_image->rgba8_pixels;
+
+    const auto released_first = assets->Release(*first_handle);
+    const auto released_second = assets->Release(*second_handle);
+    Check(released_first.has_value(), "the first source asset releases after image construction");
+    Check(released_second.has_value(), "the second source asset releases independently");
+    Check(IsEmptySnapshot(assets->Snapshot(), 2U),
+        "topology composition leaves no asset residency or active slots");
+    Check(first_image->rgba8_pixels == first_pixels_before_release &&
+              second_image->rgba8_pixels == second_pixels_before_release,
+        "the independently owned topology images survive source-slot recycling");
 }
 
 void CheckHandleIdentityAndSourceValidation(const ContentFixture& fixture)
@@ -1195,6 +1285,7 @@ int main()
         CheckConfigurationAndNames(fixture);
         CheckQueuedBusyAndInFlight(fixture);
         CheckDuplicatesPoolReuseAndAccounting(fixture);
+        CheckOwnedTopologyImageComposition(fixture);
         CheckHandleIdentityAndSourceValidation(fixture);
         CheckFailedReleaseAndPrivacy(fixture);
         CheckSubmissionRejectionRollback(fixture);

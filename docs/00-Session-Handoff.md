@@ -767,6 +767,16 @@ shipping dependencies or execution mechanisms.
     or PCSX2 input was used. Publication CI remains separate and unclaimed. This contact sheet proves
     no retail pixel/display expansion, channel/alpha/nibble/palette/swizzle meaning, material or
     geometry relationship, or app/GPU behavior.
+52. E-0067 adds no production API or retail binding. Instead, the public synthetic
+    `omega_asset_service_tests` fixture now proves that the existing asynchronous runtime ownership
+    chain composes with E-0066. Two direct-24 TDX members with distinct payload seeds load through
+    `LevelTextureStore`, `JobService`, and `AssetService`; their ready immutable storage views each
+    produce one owned 32x32 RGBA8 topology image with 4,096 bytes. The images are pixel-identical
+    despite different canonical plane bytes. Releasing both asset handles restores the exact empty
+    two-slot snapshot, and both images remain intact afterward, proving that no image retains a slot
+    or storage view. This is test-only integration. No source is selected at startup, and no image is
+    connected to `OmegaApp`, a GPU upload, a draw list, a material, or geometry. It establishes no
+    retail display, channel, alpha, nibble, palette, swizzle, placement, or visibility behavior.
 
 ## Disc observations
 

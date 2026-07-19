@@ -618,6 +618,15 @@ retail instruction blocks, or PS2 execution layer.
   Python compile-all passed, and the final staged-tree public gate checked 242 indexed text blobs.
   Validation used no private data, D-drive content, disc
   image, retail executable, emulator, or PCSX2 input. Publication CI remains separate and unclaimed.
+- E-0067 verifies the first complete public-fixture composition of the existing texture asset path
+  with that topology adapter, without adding a production binding. Two generated direct-24 TDX
+  members contain deliberately different payload bytes and load asynchronously through
+  `LevelTextureStore`, `JobService`, and `AssetService`. Their ready immutable
+  `TextureAssetView::storage` values each produce one owned 32x32 RGBA8 topology tile with 4,096
+  bytes, and the two images are pixel-identical because payload bytes are not topology inputs. Both
+  asset handles then release to an exactly empty two-slot snapshot while both independent images
+  remain intact. This is a test-only ownership and composition proof: `OmegaApp`, startup selection,
+  GPU upload, material/geometry association, and retail display expansion remain unwired.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
