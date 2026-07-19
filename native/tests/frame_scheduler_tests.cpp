@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <iostream>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace
 {
@@ -39,6 +41,25 @@ void Check(const bool condition, const std::string_view message)
 int FrameSchedulerFailureCount()
 {
     using omega::runtime::FrameScheduler;
+    using omega::runtime::FrameSchedulerConfig;
+    using omega::runtime::FrameSchedulerState;
+
+    static_assert(std::is_trivially_copyable_v<FrameSchedulerConfig>);
+    static_assert(std::is_standard_layout_v<FrameSchedulerConfig>);
+    static_assert(std::is_trivially_copyable_v<FrameSchedulerState>);
+    static_assert(std::is_standard_layout_v<FrameSchedulerState>);
+    static_assert(noexcept(std::declval<const FrameScheduler&>().Snapshot()));
+    static_assert(std::is_same_v<
+        decltype(std::declval<const FrameScheduler&>().Snapshot()),
+        FrameSchedulerState>);
+
+    constexpr FrameSchedulerState default_state;
+    static_assert(default_state == FrameSchedulerState{});
+    Check(default_state.config == FrameSchedulerConfig{} &&
+              default_state.accumulated_remainder == nanoseconds{0} &&
+              default_state.total_planned_steps == 0U &&
+              default_state.total_dropped_time == nanoseconds{0},
+        "a default scheduler state is an exact owned zero checkpoint");
 
     // Configuration rejection matrix: every bound rejects instead of adjusting.
     Check(!FrameScheduler::Create(MakeConfig(nanoseconds{0})),
@@ -87,6 +108,71 @@ int FrameSchedulerFailureCount()
         "a fresh scheduler starts with an empty accumulator and zero counters");
     Check(scheduler->config().simulation_step == milliseconds{10},
         "the validated configuration is preserved verbatim");
+    const FrameScheduler& const_scheduler = *scheduler;
+    const FrameSchedulerState fresh_state = const_scheduler.Snapshot();
+    Check(fresh_state == FrameSchedulerState{
+                             .config = MakeConfig(),
+                             .accumulated_remainder = nanoseconds{0},
+                             .total_planned_steps = 0U,
+                             .total_dropped_time = nanoseconds{0},
+                         },
+        "a fresh scheduler snapshot copies the exact validated configuration and zero state");
+
+    auto checkpoint_scheduler = FrameScheduler::Create(
+        MakeConfig(milliseconds{10}, 2U, milliseconds{100}));
+    Check(checkpoint_scheduler.has_value(),
+        "the scheduler checkpoint fixture configuration is accepted");
+    if (checkpoint_scheduler)
+    {
+        const FrameSchedulerState before = checkpoint_scheduler->Snapshot();
+        (void)checkpoint_scheduler->BeginFrame(milliseconds{3});
+        (void)checkpoint_scheduler->BeginFrame(milliseconds{25});
+        (void)checkpoint_scheduler->BeginFrame(milliseconds{95});
+        const FrameSchedulerState after =
+            std::as_const(*checkpoint_scheduler).Snapshot();
+        Check(before == FrameSchedulerState{
+                            .config = MakeConfig(
+                                milliseconds{10}, 2U, milliseconds{100}),
+                            .accumulated_remainder = nanoseconds{0},
+                            .total_planned_steps = 0U,
+                            .total_dropped_time = nanoseconds{0},
+                        },
+            "the pre-run owned snapshot retains the exact initial scheduler state");
+        Check(after == FrameSchedulerState{
+                           .config = MakeConfig(
+                               milliseconds{10}, 2U, milliseconds{100}),
+                           .accumulated_remainder = milliseconds{3},
+                           .total_planned_steps = 4U,
+                           .total_dropped_time = milliseconds{80},
+                       },
+            "the post-run snapshot copies exact state after multiple frame plans");
+        Check(before.accumulated_remainder == nanoseconds{0} &&
+                  before.total_planned_steps == 0U &&
+                  before.total_dropped_time == nanoseconds{0},
+            "advancing the scheduler cannot mutate an earlier owned snapshot");
+    }
+
+    FrameSchedulerState lifetime_state;
+    {
+        auto temporary = FrameScheduler::Create(
+            MakeConfig(milliseconds{4}, 3U, milliseconds{20}));
+        Check(temporary.has_value(),
+            "the owned-lifetime scheduler fixture configuration is accepted");
+        if (temporary)
+        {
+            (void)temporary->BeginFrame(milliseconds{11});
+            lifetime_state = temporary->Snapshot();
+            (void)temporary->BeginFrame(milliseconds{20});
+        }
+    }
+    Check(lifetime_state == FrameSchedulerState{
+                                .config = MakeConfig(
+                                    milliseconds{4}, 3U, milliseconds{20}),
+                                .accumulated_remainder = milliseconds{3},
+                                .total_planned_steps = 2U,
+                                .total_dropped_time = nanoseconds{0},
+                            },
+        "an owned scheduler snapshot survives later mutation and source destruction");
 
     // Uneven deltas around a 10 ms step: 3 ms, 25 ms, 2 ms.
     auto plan = scheduler->BeginFrame(milliseconds{3});

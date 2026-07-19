@@ -86,4 +86,14 @@ const FrameSchedulerConfig& FrameScheduler::config() const noexcept
 {
     return config_;
 }
+
+FrameSchedulerState FrameScheduler::Snapshot() const noexcept
+{
+    return FrameSchedulerState{
+        .config = config_,
+        .accumulated_remainder = accumulator_,
+        .total_planned_steps = total_planned_steps_,
+        .total_dropped_time = total_dropped_time_,
+    };
+}
 } // namespace omega::runtime

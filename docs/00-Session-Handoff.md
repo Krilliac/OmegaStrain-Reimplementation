@@ -452,6 +452,37 @@ shipping dependencies or execution mechanisms.
     or determinism claim. The separately published `InputTracker::next_frame_index()` accessor is
     future app-integration support, not coordinator behavior. E-0055 must preflight a requested
     capture length `N` with `N`, not `N - 1`, before tracker-index wrap.
+40. E-0055 adds an owned `FrameSchedulerState` and finite `OmegaApp` capture. `Snapshot` copies
+    validated configuration, accumulated remainder, lifetime planned-step total, and lifetime
+    dropped time. It has no restore or delta operation. Finite planning rejects a negative limit
+    before a limit above 65,536. Zero frames use a capacity-one empty session at any next input
+    index. Positive `N` requires `N <= UINT64_MAX - next_frame_index`, using `N` rather than
+    `N - 1` so the following tracker index remains representable.
+    Move-only `RunCaptureOutcome` owns the requested limit, partial `RunResult`, completion,
+    scheduler states before and after, optional failure text, and an optional trace pair.
+    `OmegaApp::Run` and `RunWithCapture` share `RunLoop`, preserving ordinary `Run` behavior.
+    Capture allocates all backing before logging, clock sampling, or mutation. Zero-frame capture
+    enters no loop and performs no event, clock, scheduler mutation, simulation, rendering, audio,
+    job, or logging work.
+    Active capture taps `InputTracker::EndFrame` before `AppendInput`. It then preserves host and
+    logical quit as independent terminal flags, or appends the exact raw elapsed value before
+    passing it to the unchanged `FrameScheduler::BeginFrame` call. Only planning and session
+    creation failures return outer `unexpected`. After loop entry, operational and capture
+    failures return nontransactional partial outcomes and attempt to publish best-effort traces.
+    The CLI and `main` are unchanged and continue to call ordinary `Run`.
+    The clean MSVC build completed with zero warnings or errors. `omega_core_tests` passed.
+    `omega_run_capture_tests` passed once plus 100/100 repeated runs; default CTest passed 24/24.
+    With Direct3D12 and dummy audio, `omega_app_capture_smoke` passed once plus 20/20 repeated
+    runs. Its unowned-draw fixture forced a real render error and retained one paired input/elapsed
+    sample, zero rendered frames, owned failure text, and the scheduler boundary. The next capture
+    resumed successfully. The public zero-file `openomega.exe --frames=2` path also succeeded with
+    two rendered and input frames and equal planned and executed steps. GPU CTest passed 26/26.
+    Registration was restored to `OFF` with 24 default tests. The dependency gate passed 140 files,
+    all 204 tooling tests passed, and Python compile-all passed. Publication CI remains separate.
+    This adds no capture CLI, replay, input/playback injection, restore, persistence,
+    serialization, wire format,
+    stable ABI, simulation checkpoint, RNG state, fake services, rollback, ordinary `Run` tracker
+    exhaustion guarantee, or retail timing or determinism claim.
 
 ## Disc observations
 

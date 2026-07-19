@@ -164,6 +164,31 @@ else()
     target_compile_options(omega_retail_formats PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
 endif()
 
+add_library(omega_app_core STATIC
+    native/apps/openomega/run_capture.cpp
+)
+target_include_directories(omega_app_core PUBLIC native/apps/openomega)
+target_link_libraries(omega_app_core PUBLIC omega_runtime)
+target_compile_features(omega_app_core PUBLIC cxx_std_23)
+if(MSVC)
+    target_compile_options(omega_app_core PRIVATE
+        /W4
+        /WX
+        /permissive-
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /utf-8
+    )
+else()
+    target_compile_options(omega_app_core PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+        -Wno-missing-field-initializers
+    )
+endif()
+
 add_executable(omega_tool
     native/apps/omega_tool/asset_commands.cpp
     native/apps/omega_tool/level_texture_commands.cpp
@@ -221,11 +246,41 @@ if(OMEGA_BUILD_RUNTIME)
         target_compile_options(omega_sdl_backend PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
     endif()
 
-    add_executable(openomega
-        native/apps/openomega/main.cpp
+    add_library(omega_app_host STATIC
         native/apps/openomega/omega_app.cpp
     )
-    target_link_libraries(openomega PRIVATE omega_runtime omega_simulation omega_sdl_backend)
+    target_include_directories(omega_app_host PUBLIC native/apps/openomega)
+    target_link_libraries(omega_app_host
+        PUBLIC
+            omega_app_core
+            omega_runtime
+            omega_simulation
+            omega_sdl_backend
+    )
+    target_compile_features(omega_app_host PUBLIC cxx_std_23)
+    if(MSVC)
+        target_compile_options(omega_app_host PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_app_host PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+
+    add_executable(openomega
+        native/apps/openomega/main.cpp
+    )
+    target_link_libraries(openomega PRIVATE omega_app_host)
     target_compile_definitions(openomega PRIVATE
         $<$<CONFIG:Debug>:OMEGA_GPU_DEBUG=1>
     )
@@ -417,6 +472,31 @@ if(BUILD_TESTING)
     add_test(NAME omega_run_capture_session_tests COMMAND omega_run_capture_session_tests)
     set_tests_properties(omega_run_capture_session_tests PROPERTIES TIMEOUT 5)
 
+    add_executable(omega_run_capture_tests
+        native/tests/run_capture_tests.cpp
+    )
+    target_link_libraries(omega_run_capture_tests PRIVATE omega_app_core)
+    if(MSVC)
+        target_compile_options(omega_run_capture_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_run_capture_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_run_capture_tests COMMAND omega_run_capture_tests)
+    set_tests_properties(omega_run_capture_tests PROPERTIES TIMEOUT 5)
+
     add_executable(omega_render_texture_pool_tests
         native/tests/render_texture_pool_tests.cpp
     )
@@ -486,6 +566,38 @@ if(BUILD_TESTING)
             add_test(NAME omega_sdl_gpu_texture_smoke COMMAND omega_sdl_gpu_texture_smoke)
             set_tests_properties(omega_sdl_gpu_texture_smoke PROPERTIES
                 TIMEOUT 15
+                RUN_SERIAL TRUE
+                LABELS "gpu;integration"
+            )
+        endif()
+
+        add_executable(omega_app_capture_smoke
+            native/tests/omega_app_capture_smoke.cpp
+        )
+        target_link_libraries(omega_app_capture_smoke PRIVATE omega_app_host)
+        if(MSVC)
+            target_compile_options(omega_app_capture_smoke PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_app_capture_smoke PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+        if(OMEGA_RUN_GPU_SMOKE_TEST)
+            add_test(NAME omega_app_capture_smoke COMMAND omega_app_capture_smoke)
+            set_tests_properties(omega_app_capture_smoke PROPERTIES
+                ENVIRONMENT "SDL_AUDIO_DRIVER=dummy"
+                TIMEOUT 20
                 RUN_SERIAL TRUE
                 LABELS "gpu;integration"
             )

@@ -748,6 +748,55 @@ retail limit, timing, or determinism semantics. The separately published
 not coordinator behavior. E-0055 must preflight a planned capture length `N` with `N`, not
 `N - 1`, before tracker-index wrap.
 
+E-0055 adds `FrameSchedulerState`, a trivially copyable owned snapshot containing the validated
+configuration, accumulated remainder, lifetime planned-step count, and lifetime dropped time.
+`FrameScheduler::Snapshot` copies those fields exactly. The value survives later scheduler
+mutation and destruction, but supplies no restore or delta operation.
+
+Finite run-capture planning checks a negative limit before the 65,536-frame maximum. A zero-frame
+request creates capacity-one empty trace backing at any `next_frame_index`, including
+`UINT64_MAX`. A positive `N` is accepted only when
+`N <= UINT64_MAX - next_frame_index`. The deliberate `N` check, rather than `N - 1`, keeps the
+following `InputTracker` index representable.
+
+Move-only `RunCaptureOutcome` owns the requested limit, possibly partial `RunResult`, completion
+category, scheduler states before and after the run, optional failure text, and an optional
+`RunCaptureTracePair`. Its source becomes inert after move construction. Published const reads are
+reentrant when no read races outcome move or destruction. Operational and capture failures are
+nontransactional: service and scheduler work is not rolled back, partial counters remain visible,
+and trace finalization is best effort. An operational failure can own finished traces. A capture
+failure can own finished partial traces or no pair when finalization fails.
+
+`OmegaApp::Run` and `RunWithCapture` use one shared `RunLoop`; the null capture path preserves
+ordinary `Run` behavior. `RunWithCapture` completes planning and all trace-backing allocation
+before host-loop logging, clock sampling, or service mutation. The zero-frame path finalizes its
+capacity-one empty pair without entering the loop or performing event, clock, scheduler mutation,
+simulation, rendering, audio, job, or logging work.
+
+For each active captured frame, the app pumps events, calls `InputTracker::EndFrame`, and appends
+that exact logical snapshot. It then computes host quit and logical quit independently. If either
+is true, `MarkTerminal` retains both flags and no clock or scheduler work occurs. Otherwise the app
+appends the exact elapsed nanoseconds before passing the same value to
+`FrameScheduler::BeginFrame`. Only finite-plan validation and session creation can return the
+outer `unexpected<string>`. Once the loop begins, operational or capture failure is an owned
+outcome. The CLI and `main` remain unchanged and continue to use ordinary `Run`.
+
+The clean MSVC build completed with zero warnings or errors. `omega_core_tests` passed.
+`omega_run_capture_tests` passed once plus 100/100 repeated runs, and default CTest passed 24/24.
+With Direct3D12 and dummy audio, `omega_app_capture_smoke` passed once plus 20/20 repeated runs.
+Its unowned-draw fixture forced the real render-error path. The operational outcome retained one
+paired input/elapsed sample, zero rendered frames, owned failure text, and the exact scheduler
+boundary, after which the next capture resumed successfully. The public zero-file
+`openomega.exe --frames=2` path also succeeded with two rendered and input frames and equal planned
+and executed steps. GPU CTest passed 26/26. Registration was restored to `OFF` and the default list
+returned to 24 tests. The static native dependency gate passed 140 files, all 204 tooling tests
+passed, and Python compile-all passed. Publication CI remains separate.
+
+This establishes no capture CLI, replay, input/playback injection, scheduler restore, persistence,
+serialization, file or wire format, stable ABI, simulation checkpoint, RNG state, fake services,
+rollback,
+ordinary `Run` tracker-exhaustion guarantee, or retail timing or determinism semantics.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a
