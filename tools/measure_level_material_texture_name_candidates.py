@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Measure exact VUM-name to level-TDX-locator candidates without exporting identity.
+"""Measure bounded VUM-name to level-TDX-locator candidates without exporting identity.
 
-This is an analysis-only lexical-coherence experiment. It compares only normalized,
-full terminal names ending in .TDX. Equality nominates a candidate; it does not prove
-that a catalog name is a texture name or that retail code performs the lookup.
+This is an analysis-only lexical-coherence experiment. Its default policy compares only
+normalized, full terminal names ending in .TDX; an explicit policy can additionally test
+one final-component extension removal with exact equality taking precedence. Equality
+nominates a candidate; it does not prove that a catalog name is a texture name, that
+extension removal is a retail alias rule, or that retail code performs the lookup.
 
 The fixed report contains aggregate counters and maxima only. It never emits paths,
 archive/member/catalog names, hashes, offsets, payload bytes, locator identities,
@@ -37,6 +39,8 @@ except ModuleNotFoundError:  # Direct execution from the tools directory.
 
 CONTAINER_CLASSES = ("primary", "map")
 CONTAINER_FILENAMES = {"primary": "TEX.HOG", "map": "MAPTEX.HOG"}
+CANDIDATE_FAMILIES = ("exact-terminal-tdx", "one-terminal-extension")
+DEFAULT_CANDIDATE_FAMILY = "exact-terminal-tdx"
 
 ERROR_CATEGORIES = (
     "config",
@@ -118,6 +122,46 @@ NON_CLAIMS = (
     "container_class_implies_priority",
     "locator_implies_cell_mesh_or_draw_binding",
     "runtime_integration_is_justified",
+)
+
+ONE_TERMINAL_EXTENSION_STATUS_FIELDS = (
+    "invalid_member_candidate",
+    "unmatched_after_one_terminal_extension",
+    "exact_unique_primary",
+    "exact_unique_map",
+    "exact_ambiguous_cross_class",
+    "extension_elided_unique_primary",
+    "extension_elided_unique_map",
+    "extension_elided_ambiguous_cross_class",
+)
+
+ONE_TERMINAL_EXTENSION_MATERIAL_RECORD_FLAG_FIELDS = (
+    *MATERIAL_RECORD_FLAG_FIELDS,
+    "any_extension_elided",
+)
+
+ONE_TERMINAL_EXTENSION_LOCATOR_COVERAGE_FIELDS = (
+    "reached_by_exact_only",
+    "reached_by_extension_elided_only",
+    "reached_by_exact_and_extension_elided",
+    "unreached",
+)
+
+ONE_TERMINAL_EXTENSION_MEASUREMENT_GAPS = (
+    *MEASUREMENT_GAPS,
+    "retail_extension_elision_observed",
+)
+
+ONE_TERMINAL_EXTENSION_NON_CLAIMS = (
+    *NON_CLAIMS,
+    "one_terminal_extension_removal_is_retail_alias_rule",
+)
+
+ONE_TERMINAL_EXTENSION_SCOPE = (
+    "fixed aggregate normalized exact-first one-terminal-extension lexical-coherence "
+    "experiment only; terminal extension removal is not a retail alias rule; candidate "
+    "equality is not a retail binding; no paths, names, hashes, offsets, payloads, "
+    "per-level rows, locator identities, or inferred semantics"
 )
 
 _MAX_U64 = (1 << 64) - 1
@@ -407,8 +451,102 @@ class Aggregate:
         }
 
 
+@dataclass
+class OneTerminalExtensionAggregate:
+    totals: Counter[str] = field(default_factory=Counter)
+    name_occurrences: Counter[str] = field(default_factory=Counter)
+    dense_name_references: Counter[str] = field(default_factory=Counter)
+    material_record_flags: Counter[str] = field(default_factory=Counter)
+    locator_coverage: Counter[str] = field(default_factory=Counter)
+    maxima: dict[str, int] = field(
+        default_factory=lambda: {key: 0 for key in MAXIMUM_FIELDS}
+    )
+    errors: Counter[str] = field(default_factory=Counter)
+
+    def record_failure(self, failure: ScanFailure) -> None:
+        self.errors[failure.category] = _checked_add(
+            int(self.errors[failure.category]), 1
+        )
+
+    def merge_level(self, measured: LevelMeasurement) -> None:
+        total_fields = tuple(key for key in TOTAL_FIELDS if key != "errors")
+        totals = _merged_counter(self.totals, measured.totals, total_fields)
+        names = _merged_counter(
+            self.name_occurrences,
+            measured.name_occurrences,
+            ONE_TERMINAL_EXTENSION_STATUS_FIELDS,
+        )
+        references = _merged_counter(
+            self.dense_name_references,
+            measured.dense_name_references,
+            ONE_TERMINAL_EXTENSION_STATUS_FIELDS,
+        )
+        record_flags = _merged_counter(
+            self.material_record_flags,
+            measured.material_record_flags,
+            ONE_TERMINAL_EXTENSION_MATERIAL_RECORD_FLAG_FIELDS,
+        )
+        coverage = _merged_counter(
+            self.locator_coverage,
+            measured.locator_coverage,
+            ONE_TERMINAL_EXTENSION_LOCATOR_COVERAGE_FIELDS,
+        )
+        maxima = {
+            key: max(self.maxima[key], measured.maxima[key])
+            for key in MAXIMUM_FIELDS
+        }
+        self.totals = totals
+        self.name_occurrences = names
+        self.dense_name_references = references
+        self.material_record_flags = record_flags
+        self.locator_coverage = coverage
+        self.maxima = maxima
+
+    def document(self) -> dict[str, object]:
+        totals = {key: int(self.totals[key]) for key in TOTAL_FIELDS}
+        totals["errors"] = int(sum(self.errors.values()))
+        return {
+            "schema_version": 2,
+            "scope": ONE_TERMINAL_EXTENSION_SCOPE,
+            "totals": totals,
+            "candidate_classes": {
+                "normalized_one_terminal_extension": {
+                    "name_occurrences": {
+                        key: int(self.name_occurrences[key])
+                        for key in ONE_TERMINAL_EXTENSION_STATUS_FIELDS
+                    },
+                    "dense_name_references": {
+                        key: int(self.dense_name_references[key])
+                        for key in ONE_TERMINAL_EXTENSION_STATUS_FIELDS
+                    },
+                    "material_record_flags": {
+                        key: int(self.material_record_flags[key])
+                        for key in ONE_TERMINAL_EXTENSION_MATERIAL_RECORD_FLAG_FIELDS
+                    },
+                    "tdx_locator_occurrences": {
+                        key: int(self.locator_coverage[key])
+                        for key in ONE_TERMINAL_EXTENSION_LOCATOR_COVERAGE_FIELDS
+                    },
+                }
+            },
+            "maxima": {key: int(self.maxima[key]) for key in MAXIMUM_FIELDS},
+            "error_categories": {
+                key: int(self.errors[key]) for key in ERROR_CATEGORIES
+            },
+            "measurement_gaps": {
+                key: 1 for key in ONE_TERMINAL_EXTENSION_MEASUREMENT_GAPS
+            },
+            "non_claims": {key: 1 for key in ONE_TERMINAL_EXTENSION_NON_CLAIMS},
+        }
+
+
 def _validate_limits(limits: ScanLimits) -> None:
     if any(value <= 0 for value in vars(limits).values()):
+        raise ScanFailure("config")
+
+
+def _validate_candidate_family(candidate_family: str) -> None:
+    if candidate_family not in CANDIDATE_FAMILIES:
         raise ScanFailure("config")
 
 
@@ -876,8 +1014,55 @@ def _classify_candidate(
     return f"unique_{container_class}", locators
 
 
-def _scan_level(level: LevelInputs, budget: ScanBudget) -> LevelMeasurement:
+def _strip_one_terminal_extension(value: str) -> str:
+    component_begin = value.rfind("/") + 1
+    final_component = value[component_begin:]
+    separator = final_component.rfind(".")
+    if separator <= 0 or separator == len(final_component) - 1:
+        return value
+    return value[: component_begin + separator]
+
+
+def _classify_one_terminal_extension_candidate(
+    value: str,
+    exact_lookup: dict[str, frozenset[str]],
+    extension_elided_lookup: dict[str, tuple[tuple[str, str], ...]],
+    maximum_name_bytes: int,
+) -> tuple[str, tuple[tuple[str, str], ...]]:
+    try:
+        normalized = base_topology._normalize_game_path(value, maximum_name_bytes)
+    except base_topology.ScanFailure:
+        return "invalid_member_candidate", ()
+
+    exact_classes = exact_lookup.get(normalized, frozenset())
+    if exact_classes:
+        locators = tuple(
+            (container_class, normalized)
+            for container_class in sorted(exact_classes)
+        )
+        if len(exact_classes) > 1:
+            return "exact_ambiguous_cross_class", locators
+        container_class = next(iter(exact_classes))
+        return f"exact_unique_{container_class}", locators
+
+    extension_elided = _strip_one_terminal_extension(normalized)
+    locators = extension_elided_lookup.get(extension_elided, ())
+    if not locators:
+        return "unmatched_after_one_terminal_extension", ()
+    classes = {container_class for container_class, _normalized in locators}
+    if len(classes) > 1:
+        return "extension_elided_ambiguous_cross_class", locators
+    container_class = next(iter(classes))
+    return f"extension_elided_unique_{container_class}", locators
+
+
+def _scan_level(
+    level: LevelInputs,
+    budget: ScanBudget,
+    candidate_family: str = DEFAULT_CANDIDATE_FAMILY,
+) -> LevelMeasurement:
     assert level.common is not None and level.primary is not None and level.map is not None
+    _validate_candidate_family(candidate_family)
 
     with _open_regular(level.pop, "missing_level_input") as (stream, file_size):
         cell_names = _parse_pop_cell_names(stream, file_size, budget.limits)
@@ -894,6 +1079,17 @@ def _scan_level(level: LevelInputs, budget: ScanBudget) -> LevelMeasurement:
         normalized: frozenset(classes)
         for normalized, classes in lookup_mutable.items()
     }
+    extension_elided_lookup: dict[str, tuple[tuple[str, str], ...]] = {}
+    if candidate_family == "one-terminal-extension":
+        extension_elided_mutable: dict[str, set[tuple[str, str]]] = {}
+        for locator in locators:
+            _container_class, normalized = locator
+            key = _strip_one_terminal_extension(normalized)
+            extension_elided_mutable.setdefault(key, set()).add(locator)
+        extension_elided_lookup = {
+            key: tuple(sorted(values))
+            for key, values in extension_elided_mutable.items()
+        }
 
     measured = LevelMeasurement()
     measured.totals["texture_containers"] = len(CONTAINER_CLASSES)
@@ -901,6 +1097,8 @@ def _scan_level(level: LevelInputs, budget: ScanBudget) -> LevelMeasurement:
     measured.observe("tdx_locators_per_level", len(locators))
     reached_unique: set[tuple[str, str]] = set()
     reached_ambiguous: set[tuple[str, str]] = set()
+    reached_exact: set[tuple[str, str]] = set()
+    reached_extension_elided: set[tuple[str, str]] = set()
 
     with _open_regular(level.common, "missing_level_input") as (stream, file_size):
         common = _bounded_hog(
@@ -943,55 +1141,129 @@ def _scan_level(level: LevelInputs, budget: ScanBudget) -> LevelMeasurement:
 
             classified: list[tuple[str, tuple[tuple[str, str], ...]]] = []
             for name in catalog.names:
-                status, candidates = _classify_candidate(
-                    name, lookup, budget.limits.maximum_name_bytes
-                )
+                if candidate_family == DEFAULT_CANDIDATE_FAMILY:
+                    status, candidates = _classify_candidate(
+                        name, lookup, budget.limits.maximum_name_bytes
+                    )
+                else:
+                    status, candidates = _classify_one_terminal_extension_candidate(
+                        name,
+                        lookup,
+                        extension_elided_lookup,
+                        budget.limits.maximum_name_bytes,
+                    )
                 measured.name_occurrences[status] += 1
                 measured.observe("candidate_locators_per_name", len(candidates))
-                if status.startswith("unique_"):
-                    reached_unique.update(candidates)
-                elif status == "ambiguous_cross_class":
-                    reached_ambiguous.update(candidates)
+                if candidate_family == DEFAULT_CANDIDATE_FAMILY:
+                    if status.startswith("unique_"):
+                        reached_unique.update(candidates)
+                    elif status == "ambiguous_cross_class":
+                        reached_ambiguous.update(candidates)
+                elif status.startswith("exact_"):
+                    reached_exact.update(candidates)
+                elif status.startswith("extension_elided_"):
+                    reached_extension_elided.update(candidates)
                 classified.append((status, candidates))
 
             for material in catalog.materials:
                 statuses = [classified[index][0] for index in material]
                 for status in statuses:
                     measured.dense_name_references[status] += 1
-                unique = [status.startswith("unique_") for status in statuses]
+                if candidate_family == DEFAULT_CANDIDATE_FAMILY:
+                    unique = [status.startswith("unique_") for status in statuses]
+                else:
+                    unique = [
+                        status
+                        in (
+                            "exact_unique_primary",
+                            "exact_unique_map",
+                            "extension_elided_unique_primary",
+                            "extension_elided_unique_map",
+                        )
+                        for status in statuses
+                    ]
                 measured.material_record_flags["all_references_unique"] += int(
                     all(unique)
                 )
                 measured.material_record_flags["any_unique"] += int(any(unique))
-                measured.material_record_flags["any_unmatched"] += int(
-                    "unmatched" in statuses
-                )
-                measured.material_record_flags["any_ambiguous"] += int(
-                    "ambiguous_cross_class" in statuses
-                )
-                measured.material_record_flags["any_ineligible"] += int(
-                    any(
-                        status in ("invalid_member_candidate", "non_tdx_suffix")
-                        for status in statuses
+                if candidate_family == DEFAULT_CANDIDATE_FAMILY:
+                    measured.material_record_flags["any_unmatched"] += int(
+                        "unmatched" in statuses
                     )
-                )
+                    measured.material_record_flags["any_ambiguous"] += int(
+                        "ambiguous_cross_class" in statuses
+                    )
+                    measured.material_record_flags["any_ineligible"] += int(
+                        any(
+                            status
+                            in ("invalid_member_candidate", "non_tdx_suffix")
+                            for status in statuses
+                        )
+                    )
+                else:
+                    measured.material_record_flags["any_unmatched"] += int(
+                        "unmatched_after_one_terminal_extension" in statuses
+                    )
+                    measured.material_record_flags["any_ambiguous"] += int(
+                        any(
+                            status.endswith("ambiguous_cross_class")
+                            for status in statuses
+                        )
+                    )
+                    measured.material_record_flags["any_ineligible"] += int(
+                        "invalid_member_candidate" in statuses
+                    )
+                    measured.material_record_flags["any_extension_elided"] += int(
+                        any(
+                            status.startswith("extension_elided_")
+                            for status in statuses
+                        )
+                    )
 
-    reached_only_ambiguously = reached_ambiguous - reached_unique
-    reached = reached_unique | reached_ambiguous
-    measured.locator_coverage["reached_by_unique_candidate"] = len(reached_unique)
-    measured.locator_coverage["reached_only_ambiguously"] = len(
-        reached_only_ambiguously
-    )
-    measured.locator_coverage["unreached"] = len(locators - reached)
+    if candidate_family == DEFAULT_CANDIDATE_FAMILY:
+        reached_only_ambiguously = reached_ambiguous - reached_unique
+        reached = reached_unique | reached_ambiguous
+        measured.locator_coverage["reached_by_unique_candidate"] = len(
+            reached_unique
+        )
+        measured.locator_coverage["reached_only_ambiguously"] = len(
+            reached_only_ambiguously
+        )
+        measured.locator_coverage["unreached"] = len(locators - reached)
+    else:
+        reached_by_both = reached_exact & reached_extension_elided
+        reached_by_exact_only = reached_exact - reached_extension_elided
+        reached_by_extension_elided_only = reached_extension_elided - reached_exact
+        reached = reached_exact | reached_extension_elided
+        measured.locator_coverage["reached_by_exact_only"] = len(
+            reached_by_exact_only
+        )
+        measured.locator_coverage["reached_by_extension_elided_only"] = len(
+            reached_by_extension_elided_only
+        )
+        measured.locator_coverage[
+            "reached_by_exact_and_extension_elided"
+        ] = len(reached_by_both)
+        measured.locator_coverage["unreached"] = len(locators - reached)
     measured.totals["levels_scanned"] = 1
     return measured
 
 
-def scan_disc(root: Path, limits: ScanLimits = ScanLimits()) -> dict[str, object]:
+def scan_disc(
+    root: Path,
+    limits: ScanLimits = ScanLimits(),
+    *,
+    candidate_family: str = DEFAULT_CANDIDATE_FAMILY,
+) -> dict[str, object]:
+    _validate_candidate_family(candidate_family)
     _validate_limits(limits)
     _require_directory(root, "unsafe_input")
     budget = ScanBudget(limits)
-    aggregate = Aggregate()
+    aggregate: Aggregate | OneTerminalExtensionAggregate
+    if candidate_family == DEFAULT_CANDIDATE_FAMILY:
+        aggregate = Aggregate()
+    else:
+        aggregate = OneTerminalExtensionAggregate()
     levels = _discover_levels(root.absolute(), budget)
     aggregate.totals["levels_discovered"] = len(levels)
 
@@ -1007,22 +1279,34 @@ def scan_disc(root: Path, limits: ScanLimits = ScanLimits()) -> dict[str, object
         if missing:
             continue
         try:
-            measured = _scan_level(level, budget)
+            measured = _scan_level(level, budget, candidate_family)
             aggregate.merge_level(measured)
         except ScanFailure as failure:
             aggregate.record_failure(failure)
     return aggregate.document()
 
 
-def failure_document(category: str) -> dict[str, object]:
-    aggregate = Aggregate()
+def failure_document(
+    category: str, *, candidate_family: str = DEFAULT_CANDIDATE_FAMILY
+) -> dict[str, object]:
+    _validate_candidate_family(candidate_family)
+    aggregate: Aggregate | OneTerminalExtensionAggregate
+    if candidate_family == DEFAULT_CANDIDATE_FAMILY:
+        aggregate = Aggregate()
+    else:
+        aggregate = OneTerminalExtensionAggregate()
     aggregate.record_failure(ScanFailure(category))
     return aggregate.document()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = AggregateArgumentParser(add_help=False)
+    parser = AggregateArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("disc_root", type=Path)
+    parser.add_argument(
+        "--candidate-family",
+        choices=CANDIDATE_FAMILIES,
+        default=DEFAULT_CANDIDATE_FAMILY,
+    )
     try:
         args = parser.parse_args(argv)
     except AggregateArgumentError:
@@ -1030,11 +1314,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, separators=(",", ":"), sort_keys=True))
         return 1
     try:
-        result = scan_disc(args.disc_root)
+        result = scan_disc(args.disc_root, candidate_family=args.candidate_family)
     except ScanFailure as failure:
-        result = failure_document(failure.category)
+        result = failure_document(
+            failure.category, candidate_family=args.candidate_family
+        )
     except (OSError, ValueError, struct.error):
-        result = failure_document("io")
+        result = failure_document("io", candidate_family=args.candidate_family)
     print(json.dumps(result, separators=(",", ":"), sort_keys=True))
     return 1 if result["totals"]["errors"] else 0
 

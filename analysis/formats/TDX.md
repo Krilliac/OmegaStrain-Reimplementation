@@ -158,6 +158,26 @@ occurrences lack terminal `.TDX` and never enter the lookup branch. This is narr
 not retail ownership, material binding, source priority, or runtime lookup evidence. Detailed
 name/reference classification and privacy constraints are documented in `analysis/formats/VUM.md`.
 
+## Cross-format exact-first one-terminal-extension candidate experiment
+
+The additive one-terminal-extension family does not widen the locator inventory: it uses the same
+5,801 direct normalized `.TDX` occurrences in the same two class-qualified containers, and direct
+members with any other suffix remain outside the locator universe. Complete strings are normalized
+first. If full-string equality has no candidate, at most one syntactic extension is removed from the
+final component independently on each side before a second exact comparison. Directory components
+are preserved, and basename, substring, fuzzy, repeated-extension, nested-container, and other alias
+families remain excluded.
+
+Candidate and coverage bookkeeping retains each original class-qualified `.TDX` locator rather than
+the transformed comparison key. The two byte-identical confirmed passes reach 5,690 original locator
+occurrences only through extension elision, reach none through exact equality or both routes, and
+leave 111 unreached. All 34,267 accepted VUM name occurrences classify as extension-elided
+unique-primary candidates; this assigns neither ownership nor priority to the primary class. It is
+offline lexical coverage, not evidence that retail code removes extensions, consumes a material
+reference, resolves an alias, or binds a texture to a material, cell, mesh, draw, placement,
+visibility state, or renderer resource. Detailed status, material-flag, nonclaim, and privacy
+constraints are documented in `analysis/formats/VUM.md`.
+
 ## Display-layout hypothesis scoring
 
 `score_tdx_layout_hypotheses.py` is a bounded, aggregate-only experiment for the remaining indexed

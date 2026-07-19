@@ -90,6 +90,16 @@ retail instruction blocks, or PS2 execution layer.
   negative result tests no alias family, observes no native or retail lookup, establishes no texture
   role, material binding, source priority, or runtime integration, and exposes no identities or
   proprietary data.
+- A separate exact-first one-terminal-extension pass keeps that direct `.TDX` locator universe
+  unchanged. After complete normalization, it independently removes at most one syntactic extension
+  from the final component on both sides only when the full strings are not already equal; directory
+  components and original class-qualified locators are preserved. Two passes are byte-identical and
+  scan 18/18 levels with zero errors. All 34,267 VUM name occurrences and 37,893 dense references are
+  extension-elided unique-primary candidates; all 34,589 material records inherit a unique
+  extension-elided candidate, while 5,690 original locator occurrences are reached only through
+  extension elision and 111 remain unreached. This offline lexical result does not observe a retail
+  alias rule or material consumption, establish a texture role or binding, assign class priority, or
+  justify runtime integration, and it exposes no identities or proprietary data.
 - The first privacy-safe VUM consumer trace has one strict-validator-accepted complete 120-frame pair
   from one selected runtime copy. Its repeat is byte-identical; each validated report contains two
   EE-read aggregate rows, two anonymous-site rows, and zero VIF1 chunk rows. Post-run containment

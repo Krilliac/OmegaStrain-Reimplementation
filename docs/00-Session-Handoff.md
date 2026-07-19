@@ -147,6 +147,17 @@ shipping dependencies or execution mechanisms.
     extension addition/removal, suffix substitution, nested-container, fuzzy, and other alias
     hypotheses. This narrow negative result establishes no retail lookup, texture-name role, material
     binding, class priority, or runtime integration.
+27. Added the separate exact-first one-terminal-extension candidate family without changing the
+    E-0041 default output or direct `.TDX` locator universe. After complete normalization, it removes
+    at most one syntactic extension from the final component independently on both sides, preserves
+    directories and original class-qualified locators, and performs no basename, substring, fuzzy,
+    or repeated-extension search. Two byte-identical passes scan 18/18 levels with zero errors. All
+    34,267 VUM names and 37,893 dense references classify as extension-elided unique-primary
+    candidates; all 34,589 material records inherit a unique extension-elided candidate. Of 5,801
+    original locator occurrences, 5,690 are reached only through extension elision and 111 remain
+    unreached. This offline lexical result does not observe a retail alias rule or material
+    consumption, assign texture-name or binding semantics, establish class priority, or justify
+    runtime integration.
 
 ## Disc observations
 
@@ -181,6 +192,9 @@ shipping dependencies or execution mechanisms.
    other alias behavior as separate bounded experiments because E-0041 excludes them. Do not connect
    `MaterialCatalogIR` to `LevelTextureStore` until lookup behavior and material consumption are
    independently observed and corroborated.
+   E-0042 now supplies the separate offline one-pass extension experiment; its positive lexical
+   candidates still do not observe lookup, extension elision, or MTRL consumption. Keep basename,
+   stem, substring, repeated-extension, suffix-family, and other alias hypotheses separate.
 3. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
    independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.

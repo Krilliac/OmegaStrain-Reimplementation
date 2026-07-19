@@ -326,6 +326,10 @@ name table and dense MTRL-to-name index relationships; passive VUM payloads rema
 Offline exact equality of complete normalized names ending `.TDX` does not cross this service
 boundary: `GameDataService`, `LevelContentIR`, and `LevelTextureStore` perform no catalog-name-to-
 locator lookup or alias resolution and expose no material-to-texture binding.
+The offline exact-first one-terminal-extension candidate family likewise remains outside this
+boundary. Its transformed comparison keys and candidate relationships do not enter canonical IR,
+and no runtime service removes a name extension, resolves an alias, consumes the candidate result,
+or binds a material catalog entry to a texture locator.
 
 `LoadLevelContent` is the startup composition boundary for those two canonical collections. It
 reads and indexes the common archive chain and each referenced cell HOG once, then decodes the
