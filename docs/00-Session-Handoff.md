@@ -696,6 +696,51 @@ shipping dependencies or execution mechanisms.
     exact portable target, its focused CTest passed, and 26 tests were registered. The dependency
     gate checked 152 native files, all 209 tooling tests passed, Python compile-all passed, and the
     public-tree gate checked 239 indexed text blobs. Publication CI remains separate and unclaimed.
+50. E-0065 turns the synthetic second main-menu row into a complete project-owned Controls submenu.
+    `DiagnosticMenuMode::Controls` is byte value 2 and `DiagnosticMenuRow::ShowControls` preserves
+    row byte 1. Explicit startup remains `MainMenu` / `StartDiagnosticPlay`; the safe default remains
+    `DiagnosticPlay` / `StartDiagnosticPlay`; any invalid mode or row fails closed to startup before
+    edge processing. Primary retains priority over navigation. From MainMenu, row zero enters
+    DiagnosticPlay, row one enters Controls without changing the row, and reserved row two is inert.
+    Primary from any valid DiagnosticPlay row returns to main row zero, while primary from any valid
+    Controls row returns to main row one. Previous/next applies only in MainMenu, clamps at rows zero
+    and two, consumes press edges only, and is neutral when both edges arrive together.
+    `DiagnosticMenuAllowsSimulation` remains true only for a fully valid DiagnosticPlay state, so
+    MainMenu, Controls, and invalid representations gate scheduler/world work.
+    The main card now draws `CONTROLS` on row one. `BuildProjectDiagnosticControlsImage` independently
+    returns another owned 128x72 opaque RGBA8 card with `CONTROLS`, `W FORWARD`, `S REVERSE`,
+    `A LEFT`, `D RIGHT`, `F1 RETURN`, and `ESC QUIT`. The main card's exact
+    background/cyan/slate/amber populations are 3,739/1,491/3,506/480 and its FNV-1a-64 is
+    `0x5303b94979cd74d6`. The Controls card's populations are 2,104/1,326/5,373/413 and its FNV-1a-64
+    is `0xa68873cc7444bdf6`. Both are integer-only project images with no font, file, decoded asset, or
+    retail input.
+    Startup uploads the two cards once and retains a separate controls texture and immutable controls
+    draw list. That list contains the optional base diagnostic command followed by the controls card;
+    the three MainMenu lists retain the optional base, main card, and row marker. The public zero-file
+    fixture therefore owns exactly two uploads and 73,728 resident logical bytes, renders Controls as
+    one blit, MainMenu as two, and DiagnosticPlay as clear-only. Destruction clears the controls,
+    visible, and hidden lists before releasing controls, menu, and optional base handles; startup
+    failure still falls back to authoritative host cleanup.
+    Live and opt-in replay reduce each nonterminal row before gating elapsed, so entering Controls
+    freezes on the same frame, large modal elapsed is discarded from scheduling, returning to
+    DiagnosticPlay advances only that frame's elapsed, and no modal catch-up occurs. Held primary
+    levels do not repeat. Terminal resolution remains before the reducer and therefore preserves the
+    Controls state even when a primary edge is captured. Null replay menu ownership remains legacy
+    nonmodal. No action/binding, input or elapsed trace schema, captured menu state or checkpoint,
+    persistence, serialization, CLI, file, wire, or stable-ABI contract changes.
+    E-0065 validation used only public project-generated zero-file fixtures. The final MSVC build was
+    clean. Diagnostic and replay tests passed directly plus 20/20 repetitions; the Direct3D12 host
+    passed directly plus 20/20; default CTest passed 29/29, opt-in GPU CTest passed 33/33, and restored
+    default passed 29/29. One 20-frame capture/replay and 20/20 short repetitions passed. Runtime-off
+    focused direct and CTest checks passed with 26 registrations. The dependency gate checked 152
+    native files, all 209 tooling tests passed, Python compile-all passed, and the public-tree gate
+    checked 239 indexed text blobs. Three initial validation-only `SimulationState` C2676 comparisons
+    were changed to a fieldwise helper. A direct configure outside `vcvars` also
+    contaminated generated cache state; the exact MSVC linker, archiver, and flags were restored
+    without a source change. No private data, disc image, retail executable, emulator, or PCSX2 input
+    was used. This proves only synthetic developer presentation and gating, not retail menu art,
+    controls, pause, timing, persistence, private-input behavior, or emulator equivalence.
+    Publication CI remains separate and unclaimed for E-0065.
 
 ## Disc observations
 

@@ -677,6 +677,39 @@ and 26 tests were registered. The dependency gate checked 152 native files, all 
 passed, Python compile-all passed, and the public-tree gate checked 239 indexed text blobs.
 Publication CI remains separate and unclaimed.
 
+E-0065 promotes synthetic main-menu row one to `ShowControls` and adds a third `Controls` mode while
+preserving startup at MainMenu row zero, the safe DiagnosticPlay default, action IDs and bindings,
+and the existing capture schemas. Invalid representations fail closed. Primary has priority, enters
+Controls from main row one, returns every Controls row to main row one, and leaves reserved row two
+inert. Previous/next remains press-edge-only, MainMenu-only, clamped, and simultaneous-neutral.
+MainMenu and Controls both gate simulation; only a fully valid DiagnosticPlay state runs it.
+
+The main card now labels row one `CONTROLS` and has exact four-color populations
+3,739/1,491/3,506/480 with FNV-1a-64 `0x5303b94979cd74d6`. A second independent generated 128x72
+opaque RGBA8 card labels `CONTROLS`, `W FORWARD`, `S REVERSE`, `A LEFT`, `D RIGHT`, `F1 RETURN`, and
+`ESC QUIT`; its populations are 2,104/1,326/5,373/413 and FNV-1a-64 is
+`0xa68873cc7444bdf6`. Startup uploads both project cards once and retains one controls draw list in
+addition to the hidden and three MainMenu lists. The public zero-file host owns two uploads and
+73,728 resident logical bytes; Controls renders one card blit, MainMenu renders card plus marker, and
+DiagnosticPlay remains clear-only. All lists are cleared before reverse presentation-texture release.
+
+Live and opt-in replay resolve terminal input before reduction, apply the reducer before the modal
+elapsed gate, ignore held primary levels, and discard Controls elapsed without later catch-up. Null
+menu replay stays legacy nonmodal. No action/binding, input or elapsed trace schema, captured
+checkpoint, persistence, serialization, CLI, file, wire, or stable-ABI schema changes. E-0065
+validation used only public project-generated zero-file fixtures. The final MSVC build was clean;
+diagnostic and replay tests passed directly plus 20/20 repetitions; Direct3D12 host testing passed
+directly plus 20/20; default, opt-in GPU, and restored-default CTest passed 29/29, 33/33, and 29/29;
+and a 20-frame capture/replay plus 20/20 short repetitions passed. Runtime-off focused direct and
+CTest checks passed with 26 registrations. Dependency, tooling, compile-all, and public-tree gates
+passed at 152 native files, 209 tests, and 239 indexed text blobs. Three validation-only
+`SimulationState` C2676 comparisons were corrected to the fieldwise helper. A direct non-`vcvars`
+configure also contaminated generated cache state; the exact MSVC linker, archiver, and flags were
+restored without changing source. No private data, disc image, retail executable, emulator, or PCSX2
+input was used. This proves only synthetic developer presentation and gating, not retail menu,
+controls, pause, timing, persistence, private-input behavior, or emulator equivalence. Publication CI
+remains separate and unclaimed for E-0065.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

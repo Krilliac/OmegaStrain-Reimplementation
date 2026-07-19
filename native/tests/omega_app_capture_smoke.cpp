@@ -74,6 +74,7 @@ struct OmegaAppTestAccess final
         app.diagnostic_hidden_draw_list_ = *created;
         for (runtime::RenderDrawList& draw_list : app.diagnostic_visible_draw_lists_)
             draw_list = *created;
+        app.diagnostic_controls_draw_list_ = *created;
         return true;
     }
 
@@ -82,6 +83,7 @@ struct OmegaAppTestAccess final
         app.diagnostic_hidden_draw_list_ = {};
         for (runtime::RenderDrawList& draw_list : app.diagnostic_visible_draw_lists_)
             draw_list = {};
+        app.diagnostic_controls_draw_list_ = {};
     }
 
     [[nodiscard]] static GpuHostSnapshot GpuSnapshot(const OmegaApp& app) noexcept
@@ -101,6 +103,12 @@ struct OmegaAppTestAccess final
         return app.diagnostic_menu_texture_;
     }
 
+    [[nodiscard]] static runtime::RenderTextureHandle DiagnosticControlsTexture(
+        const OmegaApp& app) noexcept
+    {
+        return app.diagnostic_controls_texture_;
+    }
+
     [[nodiscard]] static const runtime::RenderDrawList& DiagnosticHiddenDrawList(
         const OmegaApp& app) noexcept
     {
@@ -112,6 +120,12 @@ struct OmegaAppTestAccess final
         const OmegaApp& app) noexcept
     {
         return app.diagnostic_visible_draw_lists_;
+    }
+
+    [[nodiscard]] static const runtime::RenderDrawList& DiagnosticControlsDrawList(
+        const OmegaApp& app) noexcept
+    {
+        return app.diagnostic_controls_draw_list_;
     }
 
     [[nodiscard]] static const runtime::RenderDrawList& CurrentDiagnosticDrawList(
@@ -234,6 +248,15 @@ void Check(const bool condition, const std::string_view message)
            left.successful_releases == right.successful_releases;
 }
 
+[[nodiscard]] bool SameSimulationState(
+    const omega::simulation::SimulationState& left,
+    const omega::simulation::SimulationState& right) noexcept
+{
+    return left.completed_steps == right.completed_steps &&
+           left.simulated_time == right.simulated_time &&
+           left.alive_entities == right.alive_entities;
+}
+
 [[nodiscard]] bool IsOneVisibleMenuSubmission(
     const omega::app::GpuHostSnapshot& before,
     const omega::app::GpuHostSnapshot& after) noexcept
@@ -242,6 +265,21 @@ void Check(const bool condition, const std::string_view message)
            after.frame_submissions == before.frame_submissions + 1U &&
            after.blit_submissions == before.blit_submissions + 1U &&
            after.successful_blit_draws == before.successful_blit_draws + 2U &&
+           after.clear_submissions == before.clear_submissions &&
+           after.unavailable_swapchain_submissions ==
+               before.unavailable_swapchain_submissions &&
+           after.rejected_nondefault_texture_handles ==
+               before.rejected_nondefault_texture_handles;
+}
+
+[[nodiscard]] bool IsOneControlsSubmission(
+    const omega::app::GpuHostSnapshot& before,
+    const omega::app::GpuHostSnapshot& after) noexcept
+{
+    return SameTextureResidency(before, after) &&
+           after.frame_submissions == before.frame_submissions + 1U &&
+           after.blit_submissions == before.blit_submissions + 1U &&
+           after.successful_blit_draws == before.successful_blit_draws + 1U &&
            after.clear_submissions == before.clear_submissions &&
            after.unavailable_swapchain_submissions ==
                before.unavailable_swapchain_submissions &&
@@ -262,6 +300,54 @@ void Check(const bool condition, const std::string_view message)
                before.unavailable_swapchain_submissions &&
            after.rejected_nondefault_texture_handles ==
                before.rejected_nondefault_texture_handles;
+}
+
+struct ExpectedSchedulerAdvance
+{
+    omega::runtime::FrameSchedulerState state;
+    omega::runtime::FramePlan plan;
+};
+
+[[nodiscard]] ExpectedSchedulerAdvance AdvanceSchedulerSnapshot(
+    const omega::runtime::FrameSchedulerState before,
+    const std::chrono::nanoseconds elapsed) noexcept
+{
+    ExpectedSchedulerAdvance expected{
+        .state = before,
+        .plan = {},
+    };
+    std::chrono::nanoseconds delta = elapsed;
+    if (delta < std::chrono::nanoseconds::zero())
+        delta = std::chrono::nanoseconds::zero();
+    if (delta > before.config.max_frame_delta)
+    {
+        delta = before.config.max_frame_delta;
+        expected.plan.clamped_delta = true;
+    }
+
+    const std::chrono::nanoseconds accumulated = before.accumulated_remainder + delta;
+    const std::int64_t step = before.config.simulation_step.count();
+    const std::int64_t available = accumulated.count() / step;
+    const std::int64_t budget =
+        static_cast<std::int64_t>(before.config.max_steps_per_frame);
+    std::int64_t planned = available;
+    if (available > budget)
+    {
+        planned = budget;
+        expected.plan.dropped_time = true;
+        expected.state.total_dropped_time =
+            omega::runtime::detail::SaturatingAddNanoseconds(
+                before.total_dropped_time,
+                std::chrono::nanoseconds{(available - budget) * step});
+    }
+    expected.plan.simulation_steps = static_cast<std::uint32_t>(planned);
+    expected.state.accumulated_remainder =
+        std::chrono::nanoseconds{accumulated.count() % step};
+    expected.state.total_planned_steps += static_cast<std::uint64_t>(planned);
+    expected.plan.interpolation_alpha =
+        static_cast<double>(expected.state.accumulated_remainder.count()) /
+        static_cast<double>(step);
+    return expected;
 }
 
 [[nodiscard]] bool PushQuit()
@@ -360,11 +446,15 @@ int main()
         OmegaAppTestAccess::DiagnosticTexture(*app);
     const omega::runtime::RenderTextureHandle diagnostic_menu_texture =
         OmegaAppTestAccess::DiagnosticMenuTexture(*app);
+    const omega::runtime::RenderTextureHandle diagnostic_controls_texture =
+        OmegaAppTestAccess::DiagnosticControlsTexture(*app);
     const omega::runtime::RenderDrawList initial_hidden_draw_list =
         OmegaAppTestAccess::DiagnosticHiddenDrawList(*app);
     const std::array<omega::runtime::RenderDrawList,
         omega::app::kDiagnosticMenuRowCount> initial_visible_draw_lists =
         OmegaAppTestAccess::DiagnosticVisibleDrawLists(*app);
+    const omega::runtime::RenderDrawList initial_controls_draw_list =
+        OmegaAppTestAccess::DiagnosticControlsDrawList(*app);
     constexpr omega::runtime::RenderSourceRectQ16 kFullMenuSource{
         .left = 0U,
         .top = 0U,
@@ -433,13 +523,34 @@ int main()
             marker.fit_mode == omega::runtime::RenderTextureFitMode::Stretch &&
             marker.filter_mode == omega::runtime::RenderTextureFilterMode::Nearest;
     }
+    const auto controls_commands = initial_controls_draw_list.commands();
+    bool controls_list_is_exact =
+        controls_commands.size() == hidden_commands.size() + 1U;
+    for (std::size_t index = 0U;
+         controls_list_is_exact && index < hidden_commands.size(); ++index)
+    {
+        controls_list_is_exact = controls_commands[index] == hidden_commands[index];
+    }
+    if (controls_list_is_exact)
+    {
+        const auto& controls_card = controls_commands[hidden_commands.size()];
+        controls_list_is_exact =
+            controls_card.texture == diagnostic_controls_texture &&
+            controls_card.source == kFullMenuSource &&
+            controls_card.destination == kMenuDestination &&
+            controls_card.fit_mode == omega::runtime::RenderTextureFitMode::Stretch &&
+            controls_card.filter_mode == omega::runtime::RenderTextureFilterMode::Nearest;
+    }
     Check(!diagnostic_texture.valid() && diagnostic_menu_texture.valid() &&
+              diagnostic_controls_texture.valid() &&
+              diagnostic_menu_texture != diagnostic_controls_texture &&
               OmegaAppTestAccess::DiagnosticMenu(*app) ==
                   omega::app::InitialDiagnosticMenuState() &&
               initial_hidden_draw_list.empty() && visible_lists_are_exact &&
+              controls_list_is_exact &&
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
                   initial_visible_draw_lists[0]),
-        "the zero-file host starts in MainMenu row zero with three exact card-and-marker lists");
+        "the zero-file host owns distinct exact MainMenu and Controls presentation resources");
 
     OmegaAppTestAccess::SetDiagnosticMenuState(*app,
         omega::app::DiagnosticMenuState{
@@ -457,28 +568,46 @@ int main()
     Check(DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
               initial_hidden_draw_list),
         "an invalid main-menu row selects the fail-closed hidden draw list");
+    OmegaAppTestAccess::SetDiagnosticMenuState(*app,
+        omega::app::DiagnosticMenuState{
+            .mode = omega::app::DiagnosticMenuMode::Controls,
+            .selected_row = omega::app::DiagnosticMenuRow::ShowControls,
+        });
+    Check(DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+              initial_controls_draw_list),
+        "a valid Controls state selects the exact immutable controls draw list");
+    OmegaAppTestAccess::SetDiagnosticMenuState(*app,
+        omega::app::DiagnosticMenuState{
+            .mode = omega::app::DiagnosticMenuMode::Controls,
+            .selected_row = static_cast<omega::app::DiagnosticMenuRow>(255U),
+        });
+    Check(DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+              initial_hidden_draw_list),
+        "an invalid Controls row selects the fail-closed hidden draw list");
     OmegaAppTestAccess::SetDiagnosticMenuState(
         *app, omega::app::InitialDiagnosticMenuState());
 
     constexpr std::uint64_t kDiagnosticMenuLogicalBytes = 128ULL * 72ULL * 4ULL;
+    constexpr std::uint64_t kDiagnosticPresentationLogicalBytes =
+        kDiagnosticMenuLogicalBytes * 2ULL;
     const omega::app::GpuHostSnapshot initial_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    Check(initial_gpu.successful_uploads == 1U &&
+    Check(initial_gpu.successful_uploads == 2U &&
               initial_gpu.successful_upload_logical_bytes ==
-                  kDiagnosticMenuLogicalBytes &&
+                  kDiagnosticPresentationLogicalBytes &&
               initial_gpu.successful_releases == 0U &&
               initial_gpu.textures.reserved_slots == 0U &&
-              initial_gpu.textures.resident_slots == 1U &&
+              initial_gpu.textures.resident_slots == 2U &&
               initial_gpu.textures.resident_logical_bytes ==
-                  kDiagnosticMenuLogicalBytes,
-        "the project menu is uploaded exactly once and remains host-resident");
+                  kDiagnosticPresentationLogicalBytes,
+        "the two 128x72 project cards own exactly 73,728 resident logical bytes");
 
     constexpr std::array menu_probe_coordinates{
         std::array{4U, 4U}, std::array{0U, 0U}, std::array{8U, 8U},
         std::array{9U, 8U}, std::array{40U, 12U}, std::array{8U, 23U},
         std::array{9U, 22U}, std::array{52U, 22U}, std::array{9U, 30U},
         std::array{16U, 30U}, std::array{17U, 30U}, std::array{77U, 30U},
-        std::array{72U, 45U}, std::array{73U, 45U}, std::array{72U, 60U},
+        std::array{44U, 45U}, std::array{45U, 45U}, std::array{72U, 60U},
         std::array{72U, 61U},
     };
     constexpr omega::runtime::RenderClearColorRgba8 probe_background{
@@ -555,6 +684,64 @@ int main()
             "the resident menu texture preserves the exact sixteen-probe RGBA8 grid on GPU");
         Check(OmegaAppTestAccess::GpuSnapshot(*app) == initial_gpu,
             "the private menu readback seam leaves every production GPU counter unchanged");
+    }
+
+    constexpr std::array controls_probe_coordinates{
+        std::array{4U, 4U}, std::array{0U, 0U}, std::array{8U, 8U},
+        std::array{9U, 8U}, std::array{40U, 12U}, std::array{42U, 11U},
+        std::array{43U, 11U}, std::array{8U, 23U}, std::array{12U, 25U},
+        std::array{13U, 25U}, std::array{13U, 32U}, std::array{13U, 39U},
+        std::array{12U, 46U}, std::array{33U, 48U}, std::array{12U, 55U},
+        std::array{12U, 62U},
+    };
+    constexpr std::array expected_controls_probe_readback{
+        probe_background, probe_cyan, probe_slate, probe_cyan,
+        probe_amber, probe_amber, probe_cyan, probe_background,
+        probe_cyan, probe_slate, probe_cyan, probe_cyan,
+        probe_cyan, probe_cyan, probe_cyan, probe_cyan,
+    };
+    for (std::size_t index = 0U; index < menu_probe_commands.size(); ++index)
+    {
+        const std::uint32_t x = controls_probe_coordinates[index][0];
+        const std::uint32_t y = controls_probe_coordinates[index][1];
+        const std::uint32_t column = static_cast<std::uint32_t>(index % 4U);
+        const std::uint32_t row = static_cast<std::uint32_t>(index / 4U);
+        menu_probe_commands[index] = omega::runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_controls_texture,
+            .source = omega::runtime::RenderSourceRectQ16{
+                .left = source_begin(x, omega::app::kDiagnosticMenuImageWidth),
+                .top = source_begin(y, omega::app::kDiagnosticMenuImageHeight),
+                .right = source_end(x, omega::app::kDiagnosticMenuImageWidth),
+                .bottom = source_end(y, omega::app::kDiagnosticMenuImageHeight),
+            },
+            .destination = omega::runtime::RenderTargetRectQ16{
+                .left = destination_edge(column),
+                .top = destination_edge(row),
+                .right = destination_edge(column + 1U),
+                .bottom = destination_edge(row + 1U),
+            },
+            .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+        };
+    }
+    auto controls_probe_draw_list =
+        omega::runtime::RenderDrawList::Create(menu_probe_commands);
+    Check(controls_probe_draw_list.has_value(),
+        "the sixteen one-texel controls readback commands form a valid draw list");
+    if (controls_probe_draw_list)
+    {
+        omega::runtime::RenderFramePacket controls_probe_packet{
+            .clear_color = omega::runtime::kDefaultRenderClearColor,
+            .draw_list = *controls_probe_draw_list,
+        };
+        auto controls_probe_readback =
+            omega::app::detail::SdlGpuHostTestAccess::ReadbackBlitsForTesting(
+                OmegaAppTestAccess::Host(*app), controls_probe_packet);
+        Check(controls_probe_readback &&
+                  *controls_probe_readback == expected_controls_probe_readback,
+            "the resident controls texture preserves the exact sixteen-probe RGBA8 grid on GPU");
+        Check(OmegaAppTestAccess::GpuSnapshot(*app) == initial_gpu,
+            "the private controls readback seam leaves every production GPU counter unchanged");
     }
 
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
@@ -681,10 +868,14 @@ int main()
                   } &&
               OmegaAppTestAccess::DiagnosticMenuTexture(*app) ==
                   diagnostic_menu_texture &&
+              OmegaAppTestAccess::DiagnosticControlsTexture(*app) ==
+                  diagnostic_controls_texture &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
                   initial_hidden_draw_list) &&
               DrawListArraysEqual(OmegaAppTestAccess::DiagnosticVisibleDrawLists(*app),
                   initial_visible_draw_lists) &&
+              DrawListsEqual(OmegaAppTestAccess::DiagnosticControlsDrawList(*app),
+                  initial_controls_draw_list) &&
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
                   initial_hidden_draw_list) &&
               IsOneHiddenMenuSubmission(initial_gpu, normal_gpu),
@@ -881,7 +1072,11 @@ int main()
     constexpr omega::app::DiagnosticMenuState kDiagnosticPlayRowZero{};
     constexpr omega::app::DiagnosticMenuState kMainMenuRowOne{
         .mode = omega::app::DiagnosticMenuMode::MainMenu,
-        .selected_row = omega::app::DiagnosticMenuRow::ReservedProjectOne,
+        .selected_row = omega::app::DiagnosticMenuRow::ShowControls,
+    };
+    constexpr omega::app::DiagnosticMenuState kControlsRowOne{
+        .mode = omega::app::DiagnosticMenuMode::Controls,
+        .selected_row = omega::app::DiagnosticMenuRow::ShowControls,
     };
     constexpr omega::app::DiagnosticMenuState kMainMenuRowTwo{
         .mode = omega::app::DiagnosticMenuMode::MainMenu,
@@ -1003,15 +1198,150 @@ int main()
               OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne,
         "held action 3 does not repeat navigation");
 
-    Check(PushKey(SDL_SCANCODE_S, false) && PushKey(SDL_SCANCODE_F1, true) &&
-              PushKey(SDL_SCANCODE_W, true),
-        "reserved primary plus previous edge enter together");
+    const omega::app::GpuHostSnapshot controls_entry_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    bool controls_entry_events = PushKey(SDL_SCANCODE_S, false) &&
+                                 PushKey(SDL_SCANCODE_F1, true) &&
+                                 PushKey(SDL_SCANCODE_W, true);
+    for (std::size_t index = 0U; controls_entry_events && index < 4'093U; ++index)
+        controls_entry_events = PushKey(SDL_SCANCODE_W, true);
+    Check(controls_entry_events,
+        "primary, previous, and Controls timing events enter together");
+    auto controls_entry = app->RunWithCapture(1);
+    Check(controls_entry.has_value(), "MainMenu-to-Controls activation captures");
+    if (!controls_entry)
+        return EXIT_FAILURE;
+    const auto* controls_entry_pair = controls_entry->trace_pair();
+    const auto controls_entry_elapsed = controls_entry_pair != nullptr
+                                            ? controls_entry_pair->scheduler_elapsed_trace().FrameAt(0U)
+                                            : std::nullopt;
+    const auto controls_entry_primary = controls_entry_pair != nullptr
+                                            ? controls_entry_pair->input_trace().ActionAt(
+                                                  0U, omega::app::kDiagnosticMenuPrimaryAction)
+                                            : std::nullopt;
+    const RunResult controls_entry_result = controls_entry->result();
+    const omega::app::GpuHostSnapshot controls_entry_gpu_after =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    Check(controls_entry_pair != nullptr && controls_entry_elapsed &&
+              controls_entry_elapsed->elapsed > settings.frame.simulation_step &&
+              controls_entry_primary && controls_entry_primary->held &&
+              controls_entry_primary->pressed &&
+              controls_entry_result.input_frames == 1U &&
+              controls_entry_result.rendered_frames == 1 &&
+              controls_entry_result.planned_simulation_steps == 0U &&
+              controls_entry_result.executed_simulation_steps == 0U &&
+              controls_entry->scheduler_state_before() == modal_scheduler_before &&
+              controls_entry->scheduler_state_after() == modal_scheduler_before &&
+              OmegaAppTestAccess::SchedulerSnapshot(*app) == modal_scheduler_before &&
+              SameSimulationState(OmegaAppTestAccess::SimulationSnapshot(*app),
+                  modal_simulation_before) &&
+              OmegaAppTestAccess::DebugLocomotionPosition(*app) == modal_position_before &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kControlsRowOne &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+                  initial_controls_draw_list) &&
+              IsOneControlsSubmission(
+                  controls_entry_gpu_before, controls_entry_gpu_after),
+        "primary priority enters Controls on the same frame while raw elapsed remains captured and every simulation owner stays frozen");
+
+    Check(PushKey(SDL_SCANCODE_F1, true), "held Controls primary enters the queue");
+    auto controls_held = app->RunWithCapture(1);
+    Check(controls_held &&
+              controls_held->result().planned_simulation_steps == 0U &&
+              controls_held->result().executed_simulation_steps == 0U &&
+              controls_held->scheduler_state_before() == modal_scheduler_before &&
+              controls_held->scheduler_state_after() == modal_scheduler_before &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kControlsRowOne &&
+              IsOneControlsSubmission(controls_entry_gpu_after,
+                  OmegaAppTestAccess::GpuSnapshot(*app)),
+        "held primary does not repeat and Controls remains a one-card modal frame");
+
+    Check(PushKey(SDL_SCANCODE_F1, false) && PushKey(SDL_SCANCODE_W, false),
+        "Controls primary and held movement release");
+    Check(RunPlainFrame() &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kControlsRowOne &&
+              OmegaAppTestAccess::SchedulerSnapshot(*app) == modal_scheduler_before,
+        "release edges preserve Controls and its frozen scheduler");
+
+    const std::uint64_t controls_terminal_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
+    const omega::app::GpuHostSnapshot controls_terminal_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    Check(PushKey(SDL_SCANCODE_F1, true) && PushEscape(true) && PushQuit(),
+        "Controls primary and simultaneous terminal reasons enter the queue");
+    auto controls_terminal = app->RunWithCapture(1);
+    Check(controls_terminal.has_value(), "Controls terminal precedence captures");
+    if (!controls_terminal)
+        return EXIT_FAILURE;
+    const auto* controls_terminal_pair = controls_terminal->trace_pair();
+    const auto controls_terminal_reason = controls_terminal->terminal_input();
+    const auto controls_terminal_primary = controls_terminal_pair != nullptr
+                                               ? controls_terminal_pair->input_trace().ActionAt(
+                                                     0U,
+                                                     omega::app::kDiagnosticMenuPrimaryAction)
+                                               : std::nullopt;
+    Check(controls_terminal->completion() == RunCaptureCompletion::QuitRequested &&
+              controls_terminal_reason && controls_terminal_pair != nullptr &&
+              controls_terminal_reason->frame_index == controls_terminal_index &&
+              controls_terminal_reason->host_quit_requested &&
+              controls_terminal_reason->logical_quit_pressed &&
+              controls_terminal_primary && controls_terminal_primary->held &&
+              controls_terminal_primary->pressed &&
+              controls_terminal->scheduler_state_before() == modal_scheduler_before &&
+              controls_terminal->scheduler_state_after() == modal_scheduler_before &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kControlsRowOne &&
+              SameSimulationState(OmegaAppTestAccess::SimulationSnapshot(*app),
+                  modal_simulation_before) &&
+              OmegaAppTestAccess::DebugLocomotionPosition(*app) == modal_position_before &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+                  initial_controls_draw_list) &&
+              OmegaAppTestAccess::GpuSnapshot(*app) == controls_terminal_gpu_before,
+        "terminal resolution captures the Controls primary edge without reducing, rendering, or mutating any owner");
+
+    Check(PushEscape(false) && PushKey(SDL_SCANCODE_F1, false),
+        "Controls terminal inputs release");
+    Check(RunPlainFrame() &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kControlsRowOne,
+        "terminal release resumes the unchanged Controls screen");
+
+    const omega::app::GpuHostSnapshot controls_exit_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    bool controls_exit_events = PushKey(SDL_SCANCODE_F1, true);
+    for (std::size_t index = 0U; controls_exit_events && index < 4'095U; ++index)
+        controls_exit_events = PushKey(SDL_SCANCODE_F1, true);
+    Check(controls_exit_events, "fresh Controls return edge and timing workload enter");
+    auto controls_exit = app->RunWithCapture(1);
+    Check(controls_exit.has_value(), "Controls-to-MainMenu return captures");
+    if (!controls_exit)
+        return EXIT_FAILURE;
+    const auto* controls_exit_pair = controls_exit->trace_pair();
+    const auto controls_exit_elapsed = controls_exit_pair != nullptr
+                                           ? controls_exit_pair->scheduler_elapsed_trace().FrameAt(0U)
+                                           : std::nullopt;
+    const RunResult controls_exit_result = controls_exit->result();
+    const omega::app::GpuHostSnapshot controls_exit_gpu_after =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    Check(controls_exit_pair != nullptr && controls_exit_elapsed &&
+              controls_exit_elapsed->elapsed > settings.frame.simulation_step &&
+              controls_exit_result.input_frames == 1U &&
+              controls_exit_result.rendered_frames == 1 &&
+              controls_exit_result.planned_simulation_steps == 0U &&
+              controls_exit_result.executed_simulation_steps == 0U &&
+              controls_exit->scheduler_state_before() == modal_scheduler_before &&
+              controls_exit->scheduler_state_after() == modal_scheduler_before &&
+              OmegaAppTestAccess::SchedulerSnapshot(*app) == modal_scheduler_before &&
+              SameSimulationState(OmegaAppTestAccess::SimulationSnapshot(*app),
+                  modal_simulation_before) &&
+              OmegaAppTestAccess::DebugLocomotionPosition(*app) == modal_position_before &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+                  initial_visible_draw_lists[1]) &&
+              IsOneVisibleMenuSubmission(
+                  controls_exit_gpu_before, controls_exit_gpu_after),
+        "fresh primary returns Controls to MainMenu row one on the same frame without advancing accumulated menu time");
+    Check(PushKey(SDL_SCANCODE_F1, false), "returned MainMenu primary releases");
     Check(RunPlainFrame() &&
               OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne,
-        "reserved primary is inert and has priority over simultaneous navigation");
-    Check(PushKey(SDL_SCANCODE_F1, false) && PushKey(SDL_SCANCODE_W, false),
-        "reserved-primary controls release");
-    Check(RunPlainFrame(), "reserved-primary release frame completes");
+        "return release preserves MainMenu row one");
 
     Check(PushKey(SDL_SCANCODE_S, true), "row-two edge enters the SDL queue");
     Check(RunPlainFrame() &&
@@ -1051,11 +1381,40 @@ int main()
               OmegaAppTestAccess::DiagnosticMenu(*app) ==
                   omega::app::InitialDiagnosticMenuState(),
         "previous clamps at row zero instead of wrapping");
+    const omega::runtime::FrameSchedulerState play_resume_scheduler_before =
+        OmegaAppTestAccess::SchedulerSnapshot(*app);
     Check(PushKey(SDL_SCANCODE_W, false) && PushKey(SDL_SCANCODE_F1, true),
         "row-zero primary edge enters the SDL queue");
-    Check(RunPlainFrame() &&
+    auto play_resume = app->RunWithCapture(1);
+    Check(play_resume.has_value(), "row-zero primary activation captures");
+    if (!play_resume)
+        return EXIT_FAILURE;
+    const auto* play_resume_pair = play_resume->trace_pair();
+    const auto play_resume_elapsed = play_resume_pair != nullptr
+                                         ? play_resume_pair->scheduler_elapsed_trace().FrameAt(0U)
+                                         : std::nullopt;
+    std::optional<ExpectedSchedulerAdvance> expected_play_resume;
+    if (play_resume_elapsed)
+    {
+        expected_play_resume = AdvanceSchedulerSnapshot(
+            play_resume_scheduler_before, play_resume_elapsed->elapsed);
+    }
+    const RunResult play_resume_result = play_resume->result();
+    Check(play_resume_pair != nullptr && play_resume_elapsed && expected_play_resume &&
+              play_resume_scheduler_before == modal_scheduler_before &&
+              play_resume->scheduler_state_before() == play_resume_scheduler_before &&
+              play_resume->scheduler_state_after() == expected_play_resume->state &&
+              OmegaAppTestAccess::SchedulerSnapshot(*app) == expected_play_resume->state &&
+              play_resume_result.planned_simulation_steps ==
+                  expected_play_resume->plan.simulation_steps &&
+              play_resume_result.executed_simulation_steps ==
+                  expected_play_resume->plan.simulation_steps &&
+              play_resume_result.clamped_frame_count ==
+                  (expected_play_resume->plan.clamped_delta ? 1U : 0U) &&
+              play_resume_result.dropped_time_frame_count ==
+                  (expected_play_resume->plan.dropped_time ? 1U : 0U) &&
               OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero,
-        "row-zero primary enters DiagnosticPlay");
+        "row-zero activation resumes from the frozen scheduler using only its own captured elapsed sample, with no Controls catch-up");
     Check(PushKey(SDL_SCANCODE_F1, false), "row-zero primary releases");
     auto ready_for_terminal = app->RunWithCapture(1);
     Check(ready_for_terminal.has_value(),
@@ -1069,8 +1428,10 @@ int main()
               initial_hidden_draw_list) &&
               DrawListArraysEqual(OmegaAppTestAccess::DiagnosticVisibleDrawLists(*app),
                   initial_visible_draw_lists) &&
+              DrawListsEqual(OmegaAppTestAccess::DiagnosticControlsDrawList(*app),
+                  initial_controls_draw_list) &&
               SameTextureResidency(initial_gpu, ready_gpu),
-        "navigation preserves all immutable menu resources and the single upload");
+        "navigation preserves both immutable card resources and their two uploads");
 
     const auto debug_position_before_terminal =
         OmegaAppTestAccess::DebugLocomotionPosition(*app);
@@ -1105,12 +1466,16 @@ int main()
               OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
               OmegaAppTestAccess::DiagnosticMenuTexture(*app) ==
                   diagnostic_menu_texture &&
+              OmegaAppTestAccess::DiagnosticControlsTexture(*app) ==
+                  diagnostic_controls_texture &&
               OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
                   debug_position_before_terminal &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
                   initial_hidden_draw_list) &&
               DrawListArraysEqual(OmegaAppTestAccess::DiagnosticVisibleDrawLists(*app),
                   initial_visible_draw_lists) &&
+              DrawListsEqual(OmegaAppTestAccess::DiagnosticControlsDrawList(*app),
+                  initial_controls_draw_list) &&
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
                   initial_hidden_draw_list) &&
               terminal_gpu == ready_gpu,
@@ -1191,7 +1556,7 @@ int main()
     Check(plain && plain->rendered_frames == 1 && plain->input_frames == 1U &&
               !plain->quit_requested &&
               IsOneHiddenMenuSubmission(continued_gpu, plain_gpu),
-        "plain Run adds one hidden clear submission without reuploading the menu");
+        "plain Run adds one hidden clear submission without reuploading either card");
 
     if (failures == 0)
         std::cout << "omega_app_capture_smoke: passed\n";
