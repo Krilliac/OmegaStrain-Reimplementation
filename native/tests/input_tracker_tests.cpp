@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <iostream>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace
@@ -123,6 +125,44 @@ void TrackerCreationChecks()
                   InputTracker::kMaxEventsPerFrameLimit + 1U)
                    .has_value(),
         "a per-frame event budget beyond the tracker limit is rejected");
+}
+
+void NextFrameIndexChecks()
+{
+    static_assert(noexcept(std::declval<const InputTracker&>().next_frame_index()));
+    static_assert(std::is_same_v<
+        decltype(std::declval<const InputTracker&>().next_frame_index()), std::uint64_t>);
+
+    InputTracker tracker = MakeTracker(4U);
+    const InputTracker& const_tracker = tracker;
+    Check(const_tracker.next_frame_index() == 0U,
+        "the next frame index starts at the tracker's initial zero index");
+
+    const InputSnapshot first = tracker.EndFrame();
+    Check(first.frame_index() == 0U && tracker.next_frame_index() == 1U,
+        "a successful EndFrame assigns the reported index and advances it exactly once");
+
+    Check(Push(tracker, InputDevice::Keyboard, 44U, true),
+        "an event is accepted before the second indexed frame");
+    Check(tracker.next_frame_index() == 1U,
+        "accepted events do not advance the next frame index");
+    const auto rejected = tracker.PushEvent(InputEvent{
+        .device = static_cast<InputDevice>(255),
+        .code = 1U,
+        .pressed = true,
+    });
+    Check(!rejected && tracker.next_frame_index() == 1U,
+        "rejected events do not advance the next frame index");
+    const InputSnapshot second = tracker.EndFrame();
+    Check(second.frame_index() == 1U && tracker.next_frame_index() == 2U,
+        "the second successful EndFrame assigns and advances the next index");
+
+    InputTracker moved = std::move(tracker);
+    Check(moved.next_frame_index() == 2U,
+        "move construction preserves the next frame index");
+    const InputSnapshot later = moved.EndFrame();
+    Check(later.frame_index() == 2U && moved.next_frame_index() == 3U,
+        "a moved tracker continues the exact later-frame sequence");
 }
 
 void EdgeMatrixChecks()
@@ -411,6 +451,7 @@ int InputTrackerFailureCount()
 {
     TableValidationChecks();
     TrackerCreationChecks();
+    NextFrameIndexChecks();
     EdgeMatrixChecks();
     MultiBindingChecks();
     BudgetAndRejectionChecks();

@@ -235,6 +235,11 @@ void InputTracker::ResetAllControls() noexcept
     }
 }
 
+std::uint64_t InputTracker::next_frame_index() const noexcept
+{
+    return next_frame_index_;
+}
+
 InputSnapshot InputTracker::EndFrame()
 {
     InputSnapshot snapshot;

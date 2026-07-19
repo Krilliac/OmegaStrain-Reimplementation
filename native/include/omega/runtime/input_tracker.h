@@ -153,6 +153,9 @@ public:
     // edge produced earlier in the frame remains sticky, and repeated resets are no-ops.
     void ResetAllControls() noexcept;
 
+    // [main/game thread] Exact index the next successful EndFrame() will assign.
+    [[nodiscard]] std::uint64_t next_frame_index() const noexcept;
+
     // [main thread] Closes the frame and returns the owned immutable snapshot for the game
     // thread. Held reflects whether any bound control is down at this call; pressed/released
     // edges are sticky within the frame, so a press+release inside one frame reports both edges.
