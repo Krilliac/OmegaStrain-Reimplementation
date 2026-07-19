@@ -19,6 +19,7 @@
 #include "omega/runtime/runtime_settings.h"
 #include "omega/simulation/simulation_world.h"
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -77,6 +78,7 @@ private:
 
     [[nodiscard]] RunLoopResult RunLoop(
         int frame_limit, runtime::RunCaptureSession* capture_session);
+    [[nodiscard]] const runtime::RenderDrawList& CurrentDiagnosticDrawList() const noexcept;
 
     OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
         std::unique_ptr<runtime::ContentStartupState> content,
@@ -96,7 +98,8 @@ private:
         runtime::RenderTextureHandle diagnostic_texture,
         runtime::RenderTextureHandle diagnostic_menu_texture,
         runtime::RenderDrawList diagnostic_hidden_draw_list,
-        runtime::RenderDrawList diagnostic_visible_draw_list) noexcept;
+        std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
+            diagnostic_visible_draw_lists) noexcept;
 
     // Declaration order is ownership order; destruction is the required reverse order.
     std::unique_ptr<runtime::ConfigStore> config_;
@@ -121,8 +124,9 @@ private:
     runtime::RenderTextureHandle diagnostic_menu_texture_;
     // Immutable non-owning draw data, retained independently from the explicit release handles.
     runtime::RenderDrawList diagnostic_hidden_draw_list_;
-    runtime::RenderDrawList diagnostic_visible_draw_list_;
+    std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
+        diagnostic_visible_draw_lists_;
     // Project-owned app-layer state. It has no renderer or retail-data lifetime.
-    DiagnosticMenuState diagnostic_menu_state_{};
+    DiagnosticMenuState diagnostic_menu_state_;
 };
 } // namespace omega::app

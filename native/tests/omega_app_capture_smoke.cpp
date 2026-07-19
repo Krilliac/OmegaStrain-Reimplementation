@@ -59,14 +59,16 @@ struct OmegaAppTestAccess final
         if (!created)
             return false;
         app.diagnostic_hidden_draw_list_ = *created;
-        app.diagnostic_visible_draw_list_ = std::move(*created);
+        for (runtime::RenderDrawList& draw_list : app.diagnostic_visible_draw_lists_)
+            draw_list = *created;
         return true;
     }
 
     static void ClearDiagnosticDraw(OmegaApp& app) noexcept
     {
         app.diagnostic_hidden_draw_list_ = {};
-        app.diagnostic_visible_draw_list_ = {};
+        for (runtime::RenderDrawList& draw_list : app.diagnostic_visible_draw_lists_)
+            draw_list = {};
     }
 
     [[nodiscard]] static GpuHostSnapshot GpuSnapshot(const OmegaApp& app) noexcept
@@ -92,16 +94,29 @@ struct OmegaAppTestAccess final
         return app.diagnostic_hidden_draw_list_;
     }
 
-    [[nodiscard]] static const runtime::RenderDrawList& DiagnosticVisibleDrawList(
+    [[nodiscard]] static const std::array<runtime::RenderDrawList,
+        kDiagnosticMenuRowCount>& DiagnosticVisibleDrawLists(
         const OmegaApp& app) noexcept
     {
-        return app.diagnostic_visible_draw_list_;
+        return app.diagnostic_visible_draw_lists_;
+    }
+
+    [[nodiscard]] static const runtime::RenderDrawList& CurrentDiagnosticDrawList(
+        const OmegaApp& app) noexcept
+    {
+        return app.CurrentDiagnosticDrawList();
     }
 
     [[nodiscard]] static DiagnosticMenuState DiagnosticMenu(
         const OmegaApp& app) noexcept
     {
         return app.diagnostic_menu_state_;
+    }
+
+    static void SetDiagnosticMenuState(
+        OmegaApp& app, const DiagnosticMenuState state) noexcept
+    {
+        app.diagnostic_menu_state_ = state;
     }
 
     [[nodiscard]] static std::optional<simulation::Position3>
@@ -127,6 +142,12 @@ struct OmegaAppTestAccess final
             }
         }
         return false;
+    }
+
+    [[nodiscard]] static std::uint64_t NextInputFrameIndex(
+        const OmegaApp& app) noexcept
+    {
+        return app.input_ ? app.input_->next_frame_index() : 0U;
     }
 };
 } // namespace omega::app::detail
@@ -159,6 +180,20 @@ void Check(const bool condition, const std::string_view message)
     return true;
 }
 
+[[nodiscard]] bool DrawListArraysEqual(
+    const std::array<omega::runtime::RenderDrawList,
+        omega::app::kDiagnosticMenuRowCount>& left,
+    const std::array<omega::runtime::RenderDrawList,
+        omega::app::kDiagnosticMenuRowCount>& right) noexcept
+{
+    for (std::size_t index = 0U; index < left.size(); ++index)
+    {
+        if (!DrawListsEqual(left[index], right[index]))
+            return false;
+    }
+    return true;
+}
+
 [[nodiscard]] bool SameTextureResidency(const omega::app::GpuHostSnapshot& left,
     const omega::app::GpuHostSnapshot& right) noexcept
 {
@@ -176,7 +211,7 @@ void Check(const bool condition, const std::string_view message)
     return SameTextureResidency(before, after) &&
            after.frame_submissions == before.frame_submissions + 1U &&
            after.blit_submissions == before.blit_submissions + 1U &&
-           after.successful_blit_draws == before.successful_blit_draws + 1U &&
+           after.successful_blit_draws == before.successful_blit_draws + 2U &&
            after.clear_submissions == before.clear_submissions &&
            after.unavailable_swapchain_submissions ==
                before.unavailable_swapchain_submissions &&
@@ -297,9 +332,9 @@ int main()
         OmegaAppTestAccess::DiagnosticMenuTexture(*app);
     const omega::runtime::RenderDrawList initial_hidden_draw_list =
         OmegaAppTestAccess::DiagnosticHiddenDrawList(*app);
-    const omega::runtime::RenderDrawList initial_visible_draw_list =
-        OmegaAppTestAccess::DiagnosticVisibleDrawList(*app);
-    const auto visible_commands = initial_visible_draw_list.commands();
+    const std::array<omega::runtime::RenderDrawList,
+        omega::app::kDiagnosticMenuRowCount> initial_visible_draw_lists =
+        OmegaAppTestAccess::DiagnosticVisibleDrawLists(*app);
     constexpr omega::runtime::RenderSourceRectQ16 kFullMenuSource{
         .left = 0U,
         .top = 0U,
@@ -312,17 +347,88 @@ int main()
         .right = 26624U,
         .bottom = 15872U,
     };
+    constexpr omega::runtime::RenderSourceRectQ16 kMenuSelectionSource{
+        .left = 18432U,
+        .top = 9103U,
+        .right = 59392U,
+        .bottom = 14563U,
+    };
+    constexpr std::array kMenuSelectionTargets{
+        omega::runtime::RenderTargetRectQ16{
+            .left = 3584U,
+            .top = 7424U,
+            .right = 4352U,
+            .bottom = 9344U,
+        },
+        omega::runtime::RenderTargetRectQ16{
+            .left = 3584U,
+            .top = 10304U,
+            .right = 4352U,
+            .bottom = 12224U,
+        },
+        omega::runtime::RenderTargetRectQ16{
+            .left = 3584U,
+            .top = 13184U,
+            .right = 4352U,
+            .bottom = 15104U,
+        },
+    };
+    static_assert(kMenuSelectionTargets.size() ==
+                  omega::app::kDiagnosticMenuRowCount);
+    const auto hidden_commands = initial_hidden_draw_list.commands();
+    bool visible_lists_are_exact = true;
+    for (std::size_t row = 0U; row < initial_visible_draw_lists.size(); ++row)
+    {
+        const auto commands = initial_visible_draw_lists[row].commands();
+        visible_lists_are_exact = visible_lists_are_exact &&
+                                  commands.size() == hidden_commands.size() + 2U;
+        for (std::size_t index = 0U;
+             visible_lists_are_exact && index < hidden_commands.size(); ++index)
+        {
+            visible_lists_are_exact = commands[index] == hidden_commands[index];
+        }
+        if (!visible_lists_are_exact)
+            break;
+
+        const auto& card = commands[hidden_commands.size()];
+        const auto& marker = commands[hidden_commands.size() + 1U];
+        visible_lists_are_exact =
+            card.texture == diagnostic_menu_texture &&
+            card.source == kFullMenuSource && card.destination == kMenuDestination &&
+            card.fit_mode == omega::runtime::RenderTextureFitMode::Stretch &&
+            card.filter_mode == omega::runtime::RenderTextureFilterMode::Nearest &&
+            marker.texture == diagnostic_menu_texture &&
+            marker.source == kMenuSelectionSource &&
+            marker.destination == kMenuSelectionTargets[row] &&
+            marker.fit_mode == omega::runtime::RenderTextureFitMode::Stretch &&
+            marker.filter_mode == omega::runtime::RenderTextureFilterMode::Nearest;
+    }
     Check(!diagnostic_texture.valid() && diagnostic_menu_texture.valid() &&
-              !OmegaAppTestAccess::DiagnosticMenu(*app).visible &&
-              initial_hidden_draw_list.empty() && visible_commands.size() == 1U &&
-              visible_commands[0].texture == diagnostic_menu_texture &&
-              visible_commands[0].source == kFullMenuSource &&
-              visible_commands[0].destination == kMenuDestination &&
-              visible_commands[0].fit_mode ==
-                  omega::runtime::RenderTextureFitMode::Stretch &&
-              visible_commands[0].filter_mode ==
-                  omega::runtime::RenderTextureFilterMode::Nearest,
-        "the zero-file host starts hidden with exact immutable hidden/visible menu draws");
+              OmegaAppTestAccess::DiagnosticMenu(*app) ==
+                  omega::app::InitialDiagnosticMenuState() &&
+              initial_hidden_draw_list.empty() && visible_lists_are_exact &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+                  initial_visible_draw_lists[0]),
+        "the zero-file host starts in MainMenu row zero with three exact card-and-marker lists");
+
+    OmegaAppTestAccess::SetDiagnosticMenuState(*app,
+        omega::app::DiagnosticMenuState{
+            .mode = static_cast<omega::app::DiagnosticMenuMode>(255U),
+            .selected_row = omega::app::DiagnosticMenuRow::StartDiagnosticPlay,
+        });
+    Check(DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+              initial_hidden_draw_list),
+        "an invalid menu mode selects the fail-closed hidden draw list");
+    OmegaAppTestAccess::SetDiagnosticMenuState(*app,
+        omega::app::DiagnosticMenuState{
+            .mode = omega::app::DiagnosticMenuMode::MainMenu,
+            .selected_row = static_cast<omega::app::DiagnosticMenuRow>(255U),
+        });
+    Check(DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+              initial_hidden_draw_list),
+        "an invalid main-menu row selects the fail-closed hidden draw list");
+    OmegaAppTestAccess::SetDiagnosticMenuState(
+        *app, omega::app::InitialDiagnosticMenuState());
 
     constexpr std::uint64_t kDiagnosticMenuLogicalBytes = 128ULL * 72ULL * 4ULL;
     const omega::app::GpuHostSnapshot initial_gpu =
@@ -335,7 +441,7 @@ int main()
               initial_gpu.textures.resident_slots == 1U &&
               initial_gpu.textures.resident_logical_bytes ==
                   kDiagnosticMenuLogicalBytes,
-        "the hidden menu is uploaded exactly once and remains host-resident");
+        "the project menu is uploaded exactly once and remains host-resident");
 
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     Check(PushQuit(), "a host-quit event enters the SDL queue");
@@ -383,8 +489,11 @@ int main()
               !host->failure() && host_pair != nullptr && host_terminal &&
               host_result.input_frames == 1U && host_result.rendered_frames == 0 &&
               host_result.quit_requested &&
-              host->scheduler_state_before() == host->scheduler_state_after(),
-        "host quit ends before clock, scheduler, simulation, and rendering work");
+              host->scheduler_state_before() == host->scheduler_state_after() &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) ==
+                  omega::app::InitialDiagnosticMenuState() &&
+              OmegaAppTestAccess::GpuSnapshot(*app) == initial_gpu,
+        "host quit preserves startup menu, scheduler, GPU, and render resources");
     if (host_pair != nullptr && host_terminal)
     {
         Check(host_pair->input_trace().first_frame_index() == 0U &&
@@ -406,8 +515,11 @@ int main()
     Check(logical->completion() == RunCaptureCompletion::QuitRequested &&
               logical_pair != nullptr && logical_terminal &&
               logical->result().input_frames == 1U &&
-              logical->result().rendered_frames == 0,
-        "logical quit also ends before an elapsed sample or render");
+              logical->result().rendered_frames == 0 &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) ==
+                  omega::app::InitialDiagnosticMenuState() &&
+              OmegaAppTestAccess::GpuSnapshot(*app) == initial_gpu,
+        "logical quit also preserves startup menu and ends before rendering");
     if (logical_pair != nullptr && logical_terminal)
     {
         Check(logical_pair->input_trace().first_frame_index() == 1U &&
@@ -444,18 +556,25 @@ int main()
               normal_debug_position->x == 0 && normal_debug_position->y == 0 &&
               normal_debug_position->z == static_cast<std::int64_t>(
                   normal_result.executed_simulation_steps),
-        "one F1-plus-W frame toggles nonmodally and applies movement to every executed step");
+        "one F1-plus-W frame enters diagnostic play and applies movement nonmodally");
     const omega::app::GpuHostSnapshot normal_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    Check(OmegaAppTestAccess::DiagnosticMenu(*app).visible &&
+    Check(OmegaAppTestAccess::DiagnosticMenu(*app) ==
+                  omega::app::DiagnosticMenuState{
+                      .mode = omega::app::DiagnosticMenuMode::DiagnosticPlay,
+                      .selected_row =
+                          omega::app::DiagnosticMenuRow::StartDiagnosticPlay,
+                  } &&
               OmegaAppTestAccess::DiagnosticMenuTexture(*app) ==
                   diagnostic_menu_texture &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
                   initial_hidden_draw_list) &&
-              DrawListsEqual(OmegaAppTestAccess::DiagnosticVisibleDrawList(*app),
-                  initial_visible_draw_list) &&
-              IsOneVisibleMenuSubmission(initial_gpu, normal_gpu),
-        "the first F1 edge submits one immutable resident-menu blit without reupload");
+              DrawListArraysEqual(OmegaAppTestAccess::DiagnosticVisibleDrawLists(*app),
+                  initial_visible_draw_lists) &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+                  initial_hidden_draw_list) &&
+              IsOneHiddenMenuSubmission(initial_gpu, normal_gpu),
+        "primary priority enters DiagnosticPlay with one clear-only frame and no reupload");
 
     const omega::runtime::FrameSchedulerState normal_before =
         normal->scheduler_state_before();
@@ -639,128 +758,169 @@ int main()
               !replay_complete.error().replay_error,
         "the consumed real-host capture reports stable app replay completion");
 
-    const auto position_after_first_toggle =
+    constexpr omega::app::DiagnosticMenuState kDiagnosticPlayRowZero{};
+    constexpr omega::app::DiagnosticMenuState kMainMenuRowOne{
+        .mode = omega::app::DiagnosticMenuMode::MainMenu,
+        .selected_row = omega::app::DiagnosticMenuRow::ReservedProjectOne,
+    };
+    constexpr omega::app::DiagnosticMenuState kMainMenuRowTwo{
+        .mode = omega::app::DiagnosticMenuMode::MainMenu,
+        .selected_row = omega::app::DiagnosticMenuRow::ReservedProjectTwo,
+    };
+    const auto RunPlainFrame = [&app]() {
+        const auto result = app->Run(1);
+        Check(result && result->input_frames == 1U && result->rendered_frames == 1 &&
+                  !result->quit_requested,
+            "one menu navigation frame completes");
+        return result.has_value();
+    };
+
+    const auto position_after_primary =
         OmegaAppTestAccess::DebugLocomotionPosition(*app);
+    const std::uint64_t held_primary_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
     Check(PushKey(SDL_SCANCODE_F1, true) && PushKey(SDL_SCANCODE_W, false),
-        "the held F1 report and movement release enter the SDL queue");
-    auto held_toggle = app->RunWithCapture(1);
-    Check(held_toggle.has_value(), "the held F1 frame renders without toggling again");
-    if (!held_toggle)
+        "held primary and forward release enter the SDL queue");
+    auto held_primary = app->RunWithCapture(1);
+    Check(held_primary.has_value(), "held primary renders DiagnosticPlay once");
+    if (!held_primary)
         return EXIT_FAILURE;
-    const auto* held_pair = held_toggle->trace_pair();
-    const auto held_menu_action = held_pair != nullptr
-                                      ? held_pair->input_trace().ActionAt(
-                                            0U, omega::app::kDiagnosticMenuToggleAction)
-                                      : std::nullopt;
-    const auto released_forward = held_pair != nullptr
-                                      ? held_pair->input_trace().ActionAt(
-                                            0U, omega::app::kDebugMoveForwardAction)
-                                      : std::nullopt;
+    const auto* held_pair = held_primary->trace_pair();
+    const auto held_action = held_pair != nullptr
+                                 ? held_pair->input_trace().ActionAt(
+                                       0U, omega::app::kDiagnosticMenuPrimaryAction)
+                                 : std::nullopt;
     const omega::app::GpuHostSnapshot held_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    Check(held_toggle->completion() == RunCaptureCompletion::FrameLimitReached &&
-              held_pair != nullptr &&
-              held_pair->input_trace().first_frame_index() == 3U &&
-              held_menu_action && held_menu_action->held &&
-              !held_menu_action->pressed && !held_menu_action->released &&
-              released_forward && !released_forward->held &&
-              !released_forward->pressed && released_forward->released &&
-              OmegaAppTestAccess::DiagnosticMenu(*app).visible &&
+    Check(held_pair != nullptr &&
+              held_pair->input_trace().first_frame_index() == held_primary_index &&
+              held_action && held_action->held && !held_action->pressed &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
               OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
-                  position_after_first_toggle &&
-              DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
-                  initial_hidden_draw_list) &&
-              DrawListsEqual(OmegaAppTestAccess::DiagnosticVisibleDrawList(*app),
-                  initial_visible_draw_list) &&
-              IsOneVisibleMenuSubmission(normal_gpu, held_gpu),
-        "a held F1 level submits one more visible blit without repeating the edge");
+                  position_after_primary &&
+              IsOneHiddenMenuSubmission(normal_gpu, held_gpu),
+        "held action 6 does not repeat its press edge or reopen the menu");
 
-    Check(PushKey(SDL_SCANCODE_F1, false),
-        "the first F1 release enters the SDL queue");
-    auto released_toggle = app->RunWithCapture(1);
-    Check(released_toggle.has_value(), "the F1 release frame renders without toggling");
-    if (!released_toggle)
-        return EXIT_FAILURE;
-    const auto* released_pair = released_toggle->trace_pair();
-    const auto released_menu_action = released_pair != nullptr
-                                          ? released_pair->input_trace().ActionAt(
-                                                0U,
-                                                omega::app::kDiagnosticMenuToggleAction)
-                                          : std::nullopt;
+    Check(PushKey(SDL_SCANCODE_F1, false), "primary release enters the SDL queue");
+    Check(RunPlainFrame(), "primary release frame completes");
     const omega::app::GpuHostSnapshot released_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    Check(released_toggle->completion() == RunCaptureCompletion::FrameLimitReached &&
-              released_pair != nullptr &&
-              released_pair->input_trace().first_frame_index() == 4U &&
-              released_menu_action && !released_menu_action->held &&
-              !released_menu_action->pressed && released_menu_action->released &&
-              OmegaAppTestAccess::DiagnosticMenu(*app).visible &&
-              OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
-                  position_after_first_toggle &&
-              IsOneVisibleMenuSubmission(held_gpu, released_gpu),
-        "releasing F1 preserves the visible menu and submits one more resident blit");
+    Check(OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
+              IsOneHiddenMenuSubmission(held_gpu, released_gpu),
+        "primary release preserves DiagnosticPlay with a clear-only frame");
 
-    Check(PushKey(SDL_SCANCODE_F1, true),
-        "the second F1 press enters the SDL queue");
-    auto repressed_toggle = app->RunWithCapture(1);
-    Check(repressed_toggle.has_value(), "the second F1 edge renders the hidden list");
-    if (!repressed_toggle)
-        return EXIT_FAILURE;
-    const auto* repressed_pair = repressed_toggle->trace_pair();
-    const auto repressed_menu_action = repressed_pair != nullptr
-                                           ? repressed_pair->input_trace().ActionAt(
-                                                 0U,
-                                                 omega::app::kDiagnosticMenuToggleAction)
-                                           : std::nullopt;
-    const omega::app::GpuHostSnapshot repressed_gpu =
+    Check(PushKey(SDL_SCANCODE_F1, true), "fresh primary edge enters the SDL queue");
+    Check(RunPlainFrame(), "fresh primary frame completes");
+    const omega::app::GpuHostSnapshot reopened_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    Check(repressed_toggle->completion() == RunCaptureCompletion::FrameLimitReached &&
-              repressed_pair != nullptr &&
-              repressed_pair->input_trace().first_frame_index() == 5U &&
-              repressed_menu_action && repressed_menu_action->held &&
-              repressed_menu_action->pressed && !repressed_menu_action->released &&
-              !OmegaAppTestAccess::DiagnosticMenu(*app).visible &&
-              OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
-                  position_after_first_toggle &&
-              DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
-                  initial_hidden_draw_list) &&
-              DrawListsEqual(OmegaAppTestAccess::DiagnosticVisibleDrawList(*app),
-                  initial_visible_draw_list) &&
-              IsOneHiddenMenuSubmission(released_gpu, repressed_gpu),
-        "a new F1 edge selects one clear-only hidden submission without reallocating");
+    Check(OmegaAppTestAccess::DiagnosticMenu(*app) ==
+                  omega::app::InitialDiagnosticMenuState() &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+                  initial_visible_draw_lists[0]) &&
+              IsOneVisibleMenuSubmission(released_gpu, reopened_gpu),
+        "F1 reopens MainMenu at row zero with exactly two resident blits");
+    Check(PushKey(SDL_SCANCODE_F1, false), "reopened primary releases");
+    Check(RunPlainFrame(), "reopened release frame completes");
 
-    Check(PushKey(SDL_SCANCODE_F1, false),
-        "the second F1 release enters the SDL queue");
-    auto released_after_repress = app->RunWithCapture(1);
-    Check(released_after_repress.has_value(),
-        "the second release leaves the hidden menu ready for a terminal edge");
-    if (!released_after_repress)
+    const std::uint64_t next_edge_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
+    Check(PushKey(SDL_SCANCODE_S, true), "next-row edge enters the SDL queue");
+    auto next_edge = app->RunWithCapture(1);
+    Check(next_edge.has_value(), "next-row edge captures");
+    if (!next_edge)
         return EXIT_FAILURE;
-    const auto* released_after_pair = released_after_repress->trace_pair();
-    const auto released_after_menu_action = released_after_pair != nullptr
-                                                ? released_after_pair->input_trace().ActionAt(
-                                                      0U,
-                                                      omega::app::kDiagnosticMenuToggleAction)
-                                                : std::nullopt;
-    const omega::app::GpuHostSnapshot released_after_gpu =
+    const auto* next_pair = next_edge->trace_pair();
+    const auto next_action = next_pair != nullptr
+                                 ? next_pair->input_trace().ActionAt(
+                                       0U, omega::app::kDiagnosticMenuNextAction)
+                                 : std::nullopt;
+    Check(next_pair != nullptr &&
+              next_pair->input_trace().first_frame_index() == next_edge_index &&
+              next_action && next_action->held && next_action->pressed &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+                  initial_visible_draw_lists[1]),
+        "S/action 3 moves row zero to row one on its press edge");
+    Check(PushKey(SDL_SCANCODE_S, true), "held next level enters the SDL queue");
+    Check(RunPlainFrame() &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne,
+        "held action 3 does not repeat navigation");
+
+    Check(PushKey(SDL_SCANCODE_S, false) && PushKey(SDL_SCANCODE_F1, true) &&
+              PushKey(SDL_SCANCODE_W, true),
+        "reserved primary plus previous edge enter together");
+    Check(RunPlainFrame() &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne,
+        "reserved primary is inert and has priority over simultaneous navigation");
+    Check(PushKey(SDL_SCANCODE_F1, false) && PushKey(SDL_SCANCODE_W, false),
+        "reserved-primary controls release");
+    Check(RunPlainFrame(), "reserved-primary release frame completes");
+
+    Check(PushKey(SDL_SCANCODE_S, true), "row-two edge enters the SDL queue");
+    Check(RunPlainFrame() &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowTwo &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+                  initial_visible_draw_lists[2]),
+        "next moves row one to row two");
+    Check(PushKey(SDL_SCANCODE_S, false), "row-two edge releases");
+    Check(RunPlainFrame(), "row-two release completes");
+    Check(PushKey(SDL_SCANCODE_S, true), "lower-bound edge enters the SDL queue");
+    Check(RunPlainFrame() &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowTwo,
+        "next clamps at row two instead of wrapping");
+    Check(PushKey(SDL_SCANCODE_S, false), "lower-bound edge releases");
+    Check(RunPlainFrame(), "lower-bound release completes");
+    Check(PushKey(SDL_SCANCODE_W, true) && PushKey(SDL_SCANCODE_S, true),
+        "simultaneous navigation edges enter the SDL queue");
+    Check(RunPlainFrame() &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowTwo,
+        "simultaneous previous and next edges are neutral");
+    Check(PushKey(SDL_SCANCODE_W, false) && PushKey(SDL_SCANCODE_S, false),
+        "simultaneous navigation controls release");
+    Check(RunPlainFrame(), "simultaneous navigation release completes");
+
+    for (int row = 0; row < 2; ++row)
+    {
+        Check(PushKey(SDL_SCANCODE_W, true), "previous-row edge enters the SDL queue");
+        Check(RunPlainFrame(), "previous-row frame completes");
+        Check(PushKey(SDL_SCANCODE_W, false), "previous-row edge releases");
+        Check(RunPlainFrame(), "previous-row release completes");
+    }
+    Check(OmegaAppTestAccess::DiagnosticMenu(*app) ==
+              omega::app::InitialDiagnosticMenuState(),
+        "two previous edges return row two to row zero");
+    Check(PushKey(SDL_SCANCODE_W, true), "upper-bound edge enters the SDL queue");
+    Check(RunPlainFrame() &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) ==
+                  omega::app::InitialDiagnosticMenuState(),
+        "previous clamps at row zero instead of wrapping");
+    Check(PushKey(SDL_SCANCODE_W, false) && PushKey(SDL_SCANCODE_F1, true),
+        "row-zero primary edge enters the SDL queue");
+    Check(RunPlainFrame() &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero,
+        "row-zero primary enters DiagnosticPlay");
+    Check(PushKey(SDL_SCANCODE_F1, false), "row-zero primary releases");
+    auto ready_for_terminal = app->RunWithCapture(1);
+    Check(ready_for_terminal.has_value(),
+        "DiagnosticPlay is ready for a terminal-priority frame");
+    if (!ready_for_terminal)
+        return EXIT_FAILURE;
+    const omega::app::GpuHostSnapshot ready_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    Check(released_after_repress->completion() ==
-                  RunCaptureCompletion::FrameLimitReached &&
-              released_after_pair != nullptr &&
-              released_after_pair->input_trace().first_frame_index() == 6U &&
-              released_after_menu_action && !released_after_menu_action->held &&
-              !released_after_menu_action->pressed &&
-              released_after_menu_action->released &&
-              !OmegaAppTestAccess::DiagnosticMenu(*app).visible &&
-              OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
-                  position_after_first_toggle &&
-              IsOneHiddenMenuSubmission(repressed_gpu, released_after_gpu),
-        "the second release preserves hidden state with one more clear-only submission");
+
+    Check(DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
+              initial_hidden_draw_list) &&
+              DrawListArraysEqual(OmegaAppTestAccess::DiagnosticVisibleDrawLists(*app),
+                  initial_visible_draw_lists) &&
+              SameTextureResidency(initial_gpu, ready_gpu),
+        "navigation preserves all immutable menu resources and the single upload");
 
     const auto debug_position_before_terminal =
         OmegaAppTestAccess::DebugLocomotionPosition(*app);
     const omega::runtime::FrameSchedulerState scheduler_before_terminal =
-        released_after_repress->scheduler_state_after();
+        ready_for_terminal->scheduler_state_after();
+    const std::uint64_t terminal_frame_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
     Check(PushKey(SDL_SCANCODE_F1, true) && PushEscape(true) && PushQuit(),
         "a fresh menu edge and simultaneous quit reasons enter the SDL queue");
     auto both = app->RunWithCapture(1);
@@ -777,23 +937,26 @@ int main()
     const omega::app::GpuHostSnapshot terminal_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(both->completion() == RunCaptureCompletion::QuitRequested && both_terminal &&
-              both_pair != nullptr && both_terminal->frame_index == 7U &&
+              both_pair != nullptr &&
+              both_terminal->frame_index == terminal_frame_index &&
               both_terminal->host_quit_requested &&
               both_terminal->logical_quit_pressed &&
               terminal_menu_action && terminal_menu_action->held &&
               terminal_menu_action->pressed && !terminal_menu_action->released &&
               both->scheduler_state_before() == scheduler_before_terminal &&
               both->scheduler_state_after() == scheduler_before_terminal &&
-              !OmegaAppTestAccess::DiagnosticMenu(*app).visible &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
               OmegaAppTestAccess::DiagnosticMenuTexture(*app) ==
                   diagnostic_menu_texture &&
               OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
                   debug_position_before_terminal &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
                   initial_hidden_draw_list) &&
-              DrawListsEqual(OmegaAppTestAccess::DiagnosticVisibleDrawList(*app),
-                  initial_visible_draw_list) &&
-              terminal_gpu == released_after_gpu,
+              DrawListArraysEqual(OmegaAppTestAccess::DiagnosticVisibleDrawLists(*app),
+                  initial_visible_draw_lists) &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
+                  initial_hidden_draw_list) &&
+              terminal_gpu == ready_gpu,
         "a terminal action-6 edge performs no render or menu/resource mutation");
 
     Check(PushEscape(false) && PushKey(SDL_SCANCODE_F1, false),
@@ -802,6 +965,8 @@ int main()
         "the operational-failure fixture installs an unowned diagnostic draw");
     const omega::app::GpuHostSnapshot failure_gpu_before =
         omega::app::detail::OmegaAppTestAccess::GpuSnapshot(*app);
+    const std::uint64_t failure_frame_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
     auto failed = app->RunWithCapture(1);
     Check(failed.has_value(), "a render error publishes a partial capture outcome");
     if (!failed)
@@ -825,9 +990,10 @@ int main()
         "the rejected handle changes only its pre-acquisition diagnostic counter");
     if (failed_pair != nullptr)
     {
-        Check(failed_pair->input_trace().first_frame_index() == 8U &&
+        Check(failed_pair->input_trace().first_frame_index() == failure_frame_index &&
                   failed_pair->input_trace().frame_count() == 1U &&
-                  failed_pair->scheduler_elapsed_trace().first_frame_index() == 8U &&
+                  failed_pair->scheduler_elapsed_trace().first_frame_index() ==
+                      failure_frame_index &&
                   failed_pair->scheduler_elapsed_trace().frame_count() == 1U &&
                   !failed_pair->terminal_input(),
             "the failed render remains after one exact paired input and elapsed sample");
@@ -836,6 +1002,8 @@ int main()
         failed->scheduler_state_after();
 
     omega::app::detail::OmegaAppTestAccess::ClearDiagnosticDraw(*app);
+    const std::uint64_t continued_frame_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
     auto continued = app->RunWithCapture(1);
     Check(continued.has_value(), "capture continues after clearing the render fixture");
     if (!continued)
@@ -848,13 +1016,15 @@ int main()
               continued->scheduler_state_before() == failed_after &&
               continued->result().input_frames == 1U &&
               continued->result().rendered_frames == 1 &&
-              !OmegaAppTestAccess::DiagnosticMenu(*app).visible &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
               IsOneHiddenMenuSubmission(failure_gpu_after, continued_gpu),
         "capture resumes with one clear-only hidden submission at the scheduler boundary");
     if (continued_pair != nullptr)
     {
-        Check(continued_pair->input_trace().first_frame_index() == 9U &&
-                  continued_pair->scheduler_elapsed_trace().first_frame_index() == 9U,
+        Check(continued_pair->input_trace().first_frame_index() ==
+                      continued_frame_index &&
+                  continued_pair->scheduler_elapsed_trace().first_frame_index() ==
+                      continued_frame_index,
             "sequential capture continues the global input frame index");
     }
 

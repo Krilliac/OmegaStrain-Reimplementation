@@ -504,8 +504,36 @@ retail instruction blocks, or PS2 execution layer.
   the real D3D12 host smoke passed directly plus 20/20 repetitions; default CTest passed 29/29;
   the opt-in GPU matrix passed 33/33; and the unchanged capture/replay CLI smoke passed 20/20.
   Runtime-off validation built and ran the exact portable menu target and registered 26 tests.
-  Static dependency, tooling, compile-all, and public-tree gates also passed. Publication CI is
-  separate and remains unclaimed.
+  Static dependency, tooling, compile-all, and public-tree gates also passed. The exact E-0062
+  main tree subsequently passed the Windows x86-64 native, Linux x86-64 native, and public-tree
+  safety publication-CI jobs.
+- E-0063 makes the project diagnostic menu the explicit native startup state while retaining a
+  safe default. Default construction yields `DiagnosticPlay` on `StartDiagnosticPlay`, and
+  `OmegaApp` explicitly starts in `MainMenu` on that first row. The constexpr/noexcept reducer
+  validates both enums before consuming press edges; invalid state resets directly to the startup
+  value. Existing actions 2/3/6 remain W/S plus gamepad D-pad Up/Down and F1 plus gamepad Start.
+  Primary has priority, opens row zero from play, enters play from the first menu row, and is inert
+  on the two reserved project rows. Previous/next clamp, and simultaneous navigation edges are
+  neutral. Capture and terminal handling remain before the reducer, while ordinary menu frames
+  remain nonmodal for held locomotion, scheduling, simulation, rendering, and fresh replay. Replay
+  reconstructs the ordinary action rows but owns no menu state.
+  Startup reuses the one existing 128x72 card upload and retains one hidden/base list plus three
+  immutable base/card/amber-marker lists. The card uses source `{0,0,65536,65536}` and target
+  `{2048,2048,26624,15872}`. The marker reuses card crop `{18432,9103,59392,14563}` at row targets
+  `{3584,7424,4352,9344}`, `{3584,10304,4352,12224}`, and
+  `{3584,13184,4352,15104}`, with `Stretch`/`Nearest` throughout. Frames select a prebuilt list
+  without another upload, list construction, or per-frame menu allocation. These modes, rows,
+  reused controls, priorities, crop, and targets are synthetic and establish no retail menu,
+  control, pause, activation, timing, persistence, replay-UI, private-input, or PCSX2-equivalence
+  claim. E-0063 local validation used project-generated zero-file fixtures only and no private
+  inputs. A clean incremental MSVC build completed with zero warnings and errors. The focused
+  portable executable passed directly plus 20/20 repetitions, and the real `direct3d12` host
+  smoke passed directly plus 20/20 repetitions. Default CTest passed 29/29 both before and after
+  restoring GPU registration; the opt-in GPU configuration passed 33/33. The unchanged
+  capture/replay CLI smoke passed 20/20. Runtime-off validation built and ran the exact portable
+  menu target directly and through CTest, with 26 tests registered. The native dependency gate
+  checked 152 files, all 209 tooling tests passed, Python compile-all passed, and the public-tree
+  gate checked 239 indexed text blobs. Publication CI remains separate and is not claimed here.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

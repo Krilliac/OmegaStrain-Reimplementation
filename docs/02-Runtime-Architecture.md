@@ -994,7 +994,52 @@ test passed, the real D3D12 host smoke passed directly plus 20/20 repetitions, d
 29/29, the opt-in GPU matrix passed 33/33, and the unchanged capture/replay CLI smoke passed 20/20.
 Runtime-off validation built and ran the exact portable target and registered 26 tests. The native
 dependency gate checked 152 files, all 209 tooling tests and Python compile-all passed, and the
-public-tree gate checked 239 indexed text blobs. Publication CI remains separate.
+public-tree gate checked 239 indexed text blobs. The exact E-0062 main tree subsequently passed the
+Windows x86-64 native, Linux x86-64 native, and public-tree safety publication-CI jobs.
+
+E-0063 extends the same portable value into a bounded two-mode, three-row state machine without
+making it a service. A default-constructed `DiagnosticMenuState` is the safe
+`DiagnosticPlay`/`StartDiagnosticPlay` value, while `InitialDiagnosticMenuState()` explicitly
+starts `OmegaApp` in `MainMenu` on `StartDiagnosticPlay`. Before consuming any edge, the
+constexpr/noexcept reducer validates both enum values; an invalid mode or row resets directly to
+that explicit startup state. It consumes only `WasPressed` edges. Primary action 6 has priority:
+it opens the main menu at row zero from diagnostic play, enters diagnostic play from the main
+menu's first row, and is inert on the two reserved project rows. Previous action 2 and next action
+3 move only in `MainMenu`, clamp at the first and last rows, and are neutral when both edges occur
+together.
+
+The physical bindings remain the already-project-owned W/S and gamepad D-pad Up/Down controls for
+actions 2/3 and F1/gamepad Start for action 6. Those same actions 2/3 remain held locomotion input,
+so a menu navigation edge neither pauses nor suppresses movement, scheduling, simulation, audio,
+or replay locomotion. Capture publication and host/logical terminal handling still run before the
+menu reducer. Terminal rows may therefore retain any of these action edges without changing mode,
+selection, scheduler, world, or renderer state. `RunReplaySession` continues to reconstruct the
+ordinary action rows and consume actions 2/3 for synthetic locomotion; it owns no menu state and
+performs no menu transition.
+
+Rendering reuses the one existing project-generated 128x72 upload. Startup retains one hidden
+draw list plus three immutable visible lists. Hidden contains only the optional base diagnostic
+command. Every visible list contains that same optional base command, the full-card command with
+source `{0,0,65536,65536}` and target `{2048,2048,26624,15872}`, then one amber marker command
+cropped from the card at source `{18432,9103,59392,14563}`. The three marker targets are
+`{3584,7424,4352,9344}`, `{3584,10304,4352,12224}`, and
+`{3584,13184,4352,15104}` in row order. All card and marker commands use `Stretch` and `Nearest`.
+The current mode and bounds-checked row select one prebuilt list; frame publication performs no
+menu upload, list construction, or other per-frame menu allocation.
+
+These modes, row names, action reuse, clamping, priorities, crop, and marker locations are
+synthetic project diagnostics. E-0063 establishes no retail title-screen sequence, menu art or
+text, controls, wrapping, selection, activation, pause, transition timing, audio, persistence,
+render composition, replay UI state, private-input result, or PCSX2 equivalence. E-0063 local
+validation used only project-generated zero-file fixtures and no private inputs. The incremental
+MSVC build completed with zero warnings and zero errors. The portable test passed directly plus
+20/20 repetitions, and the real Direct3D12 host smoke passed directly plus 20/20 repetitions.
+Default CTest passed 29/29 before GPU enablement and again after restoring GPU registration off;
+the opt-in GPU matrix passed 33/33, and the unchanged capture/replay CLI smoke passed 20/20.
+Runtime-off validation built the exact portable target, which passed directly and through CTest,
+with 26 tests registered. The native dependency gate checked 152 files, all 209 tooling tests
+passed, Python compile-all passed, and the public-tree gate checked 239 indexed text blobs.
+Publication CI remains separate and unclaimed.
 
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are

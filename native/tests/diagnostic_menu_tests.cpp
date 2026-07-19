@@ -51,29 +51,152 @@ constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
     }
     return hash;
 }
+
+[[nodiscard]] constexpr omega::app::DiagnosticMenuInputEdges InputFromMask(
+    const std::uint32_t mask) noexcept
+{
+    return omega::app::DiagnosticMenuInputEdges{
+        .primary_pressed = (mask & 0b001U) != 0U,
+        .previous_pressed = (mask & 0b010U) != 0U,
+        .next_pressed = (mask & 0b100U) != 0U,
+    };
+}
+
+// Independent explicit oracle for the complete small reducer domain. It deliberately does not
+// call InitialDiagnosticMenuState() or share the production reducer's navigation arithmetic.
+[[nodiscard]] constexpr omega::app::DiagnosticMenuState ReferenceUpdate(
+    omega::app::DiagnosticMenuState state,
+    const omega::app::DiagnosticMenuInputEdges input) noexcept
+{
+    using omega::app::DiagnosticMenuMode;
+    using omega::app::DiagnosticMenuRow;
+    using omega::app::DiagnosticMenuState;
+
+    constexpr DiagnosticMenuState initial{
+        .mode = DiagnosticMenuMode::MainMenu,
+        .selected_row = DiagnosticMenuRow::StartDiagnosticPlay,
+    };
+
+    switch (state.mode)
+    {
+    case DiagnosticMenuMode::MainMenu:
+    case DiagnosticMenuMode::DiagnosticPlay:
+        break;
+    default:
+        return initial;
+    }
+    switch (state.selected_row)
+    {
+    case DiagnosticMenuRow::StartDiagnosticPlay:
+    case DiagnosticMenuRow::ReservedProjectOne:
+    case DiagnosticMenuRow::ReservedProjectTwo:
+        break;
+    default:
+        return initial;
+    }
+
+    if (input.primary_pressed)
+    {
+        if (state.mode == DiagnosticMenuMode::DiagnosticPlay)
+            return initial;
+        if (state.selected_row == DiagnosticMenuRow::StartDiagnosticPlay)
+            state.mode = DiagnosticMenuMode::DiagnosticPlay;
+        return state;
+    }
+
+    if (state.mode == DiagnosticMenuMode::DiagnosticPlay ||
+        input.previous_pressed == input.next_pressed)
+    {
+        return state;
+    }
+
+    if (input.previous_pressed)
+    {
+        switch (state.selected_row)
+        {
+        case DiagnosticMenuRow::StartDiagnosticPlay:
+            break;
+        case DiagnosticMenuRow::ReservedProjectOne:
+            state.selected_row = DiagnosticMenuRow::StartDiagnosticPlay;
+            break;
+        case DiagnosticMenuRow::ReservedProjectTwo:
+            state.selected_row = DiagnosticMenuRow::ReservedProjectOne;
+            break;
+        }
+    }
+    else
+    {
+        switch (state.selected_row)
+        {
+        case DiagnosticMenuRow::StartDiagnosticPlay:
+            state.selected_row = DiagnosticMenuRow::ReservedProjectOne;
+            break;
+        case DiagnosticMenuRow::ReservedProjectOne:
+            state.selected_row = DiagnosticMenuRow::ReservedProjectTwo;
+            break;
+        case DiagnosticMenuRow::ReservedProjectTwo:
+            break;
+        }
+    }
+    return state;
+}
 } // namespace
 
 int main()
 {
     using omega::app::BuildProjectDiagnosticMenuImage;
+    using omega::app::DiagnosticMenuInputEdges;
+    using omega::app::DiagnosticMenuMode;
+    using omega::app::DiagnosticMenuRow;
     using omega::app::DiagnosticMenuState;
+    using omega::app::InitialDiagnosticMenuState;
     using omega::app::UpdateDiagnosticMenu;
 
     static_assert(omega::app::kDiagnosticMenuToggleAction == 6U);
+    static_assert(omega::app::kDiagnosticMenuPrimaryAction ==
+                  omega::app::kDiagnosticMenuToggleAction);
+    static_assert(omega::app::kDiagnosticMenuPreviousAction == 2U);
+    static_assert(omega::app::kDiagnosticMenuNextAction == 3U);
+    static_assert(omega::app::kDiagnosticMenuRowCount == 3U);
     static_assert(omega::app::kDiagnosticMenuImageWidth == 128U);
     static_assert(omega::app::kDiagnosticMenuImageHeight == 72U);
+    static_assert(sizeof(DiagnosticMenuMode) == 1U);
+    static_assert(sizeof(DiagnosticMenuRow) == 1U);
+    static_assert(std::is_trivially_copyable_v<DiagnosticMenuMode>);
+    static_assert(std::is_standard_layout_v<DiagnosticMenuMode>);
+    static_assert(std::is_trivially_copyable_v<DiagnosticMenuRow>);
+    static_assert(std::is_standard_layout_v<DiagnosticMenuRow>);
     static_assert(std::is_trivially_copyable_v<DiagnosticMenuState>);
     static_assert(std::is_standard_layout_v<DiagnosticMenuState>);
+    static_assert(std::is_trivially_copyable_v<DiagnosticMenuInputEdges>);
+    static_assert(std::is_standard_layout_v<DiagnosticMenuInputEdges>);
     static_assert(std::is_same_v<
-        decltype(UpdateDiagnosticMenu(DiagnosticMenuState{}, false)),
+        decltype(UpdateDiagnosticMenu(
+            DiagnosticMenuState{}, DiagnosticMenuInputEdges{})),
         DiagnosticMenuState>);
-    static_assert(noexcept(UpdateDiagnosticMenu(DiagnosticMenuState{}, false)));
-    static_assert(UpdateDiagnosticMenu(DiagnosticMenuState{}, false) ==
-                  DiagnosticMenuState{});
-    static_assert(UpdateDiagnosticMenu(DiagnosticMenuState{}, true) ==
-                  DiagnosticMenuState{.visible = true});
+    static_assert(noexcept(InitialDiagnosticMenuState()));
+    static_assert(noexcept(UpdateDiagnosticMenu(
+        DiagnosticMenuState{}, DiagnosticMenuInputEdges{})));
+    static_assert(DiagnosticMenuState{} ==
+                  DiagnosticMenuState{
+                      .mode = DiagnosticMenuMode::DiagnosticPlay,
+                      .selected_row = DiagnosticMenuRow::StartDiagnosticPlay,
+                  });
+    static_assert(InitialDiagnosticMenuState() ==
+                  DiagnosticMenuState{
+                      .mode = DiagnosticMenuMode::MainMenu,
+                      .selected_row = DiagnosticMenuRow::StartDiagnosticPlay,
+                  });
     static_assert(UpdateDiagnosticMenu(
-                      UpdateDiagnosticMenu(DiagnosticMenuState{}, true), true) ==
+                      DiagnosticMenuState{}, DiagnosticMenuInputEdges{}) ==
+                  DiagnosticMenuState{});
+    static_assert(UpdateDiagnosticMenu(
+                      DiagnosticMenuState{},
+                      DiagnosticMenuInputEdges{.primary_pressed = true}) ==
+                  InitialDiagnosticMenuState());
+    static_assert(UpdateDiagnosticMenu(
+                      InitialDiagnosticMenuState(),
+                      DiagnosticMenuInputEdges{.primary_pressed = true}) ==
                   DiagnosticMenuState{});
 
     int failures = 0;
@@ -86,21 +209,126 @@ int main()
         }
     };
 
-    DiagnosticMenuState state{};
-    Check(!state.visible, "the default diagnostic menu is hidden");
-    state = UpdateDiagnosticMenu(state, false);
-    Check(!state.visible, "a false toggle edge preserves hidden state");
-    state = UpdateDiagnosticMenu(state, true);
-    Check(state.visible, "a true toggle edge reveals the menu exactly once");
-    state = UpdateDiagnosticMenu(state, false);
-    Check(state.visible, "a false toggle edge preserves visible state");
-    state = UpdateDiagnosticMenu(state, true);
-    Check(!state.visible, "a second true toggle edge hides the menu exactly once");
+    Check(DiagnosticMenuState{} ==
+              DiagnosticMenuState{
+                  .mode = DiagnosticMenuMode::DiagnosticPlay,
+                  .selected_row = DiagnosticMenuRow::StartDiagnosticPlay,
+              },
+        "the safe default is diagnostic play with the first row selected");
+    Check(InitialDiagnosticMenuState() ==
+              DiagnosticMenuState{
+                  .mode = DiagnosticMenuMode::MainMenu,
+                  .selected_row = DiagnosticMenuRow::StartDiagnosticPlay,
+              },
+        "the explicit app startup state is the main menu on its first row");
+
+    constexpr std::array modes{
+        DiagnosticMenuMode::MainMenu,
+        DiagnosticMenuMode::DiagnosticPlay,
+    };
+    constexpr std::array rows{
+        DiagnosticMenuRow::StartDiagnosticPlay,
+        DiagnosticMenuRow::ReservedProjectOne,
+        DiagnosticMenuRow::ReservedProjectTwo,
+    };
+    std::size_t exhaustive_cases = 0U;
+    for (const DiagnosticMenuMode mode : modes)
+    {
+        for (const DiagnosticMenuRow row : rows)
+        {
+            for (std::uint32_t mask = 0U; mask < 8U; ++mask)
+            {
+                const DiagnosticMenuState source{
+                    .mode = mode,
+                    .selected_row = row,
+                };
+                const DiagnosticMenuInputEdges input = InputFromMask(mask);
+                Check(UpdateDiagnosticMenu(source, input) ==
+                          ReferenceUpdate(source, input),
+                    "the exhaustive reducer result matches the independent oracle");
+                ++exhaustive_cases;
+            }
+        }
+    }
+    Check(exhaustive_cases == 48U,
+        "the exhaustive reducer matrix covers two modes, three rows, and eight edge masks");
+
+    constexpr std::array invalid_states{
+        DiagnosticMenuState{
+            .mode = static_cast<DiagnosticMenuMode>(2U),
+            .selected_row = DiagnosticMenuRow::StartDiagnosticPlay,
+        },
+        DiagnosticMenuState{
+            .mode = static_cast<DiagnosticMenuMode>(255U),
+            .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+        },
+        DiagnosticMenuState{
+            .mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = static_cast<DiagnosticMenuRow>(3U),
+        },
+        DiagnosticMenuState{
+            .mode = DiagnosticMenuMode::DiagnosticPlay,
+            .selected_row = static_cast<DiagnosticMenuRow>(255U),
+        },
+        DiagnosticMenuState{
+            .mode = static_cast<DiagnosticMenuMode>(2U),
+            .selected_row = static_cast<DiagnosticMenuRow>(3U),
+        },
+    };
+    std::size_t invalid_cases = 0U;
+    for (const DiagnosticMenuState invalid : invalid_states)
+    {
+        for (std::uint32_t mask = 0U; mask < 8U; ++mask)
+        {
+            Check(UpdateDiagnosticMenu(invalid, InputFromMask(mask)) ==
+                      InitialDiagnosticMenuState(),
+                "invalid state resets before and consumes every edge combination");
+            ++invalid_cases;
+        }
+    }
+    Check(invalid_cases == 40U,
+        "invalid mode, row, and combined states consume all eight edge masks");
+
+    const DiagnosticMenuState first_row = InitialDiagnosticMenuState();
+    const DiagnosticMenuState last_row{
+        .mode = DiagnosticMenuMode::MainMenu,
+        .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+    };
+    Check(UpdateDiagnosticMenu(first_row,
+              DiagnosticMenuInputEdges{.previous_pressed = true}) == first_row &&
+              UpdateDiagnosticMenu(last_row,
+                  DiagnosticMenuInputEdges{.next_pressed = true}) == last_row,
+        "previous and next navigation clamp at their respective boundaries");
+    Check(UpdateDiagnosticMenu(first_row,
+              DiagnosticMenuInputEdges{
+                  .previous_pressed = true,
+                  .next_pressed = true,
+              }) == first_row,
+        "simultaneous previous and next edges are neutral");
+    Check(UpdateDiagnosticMenu(
+              DiagnosticMenuState{
+                  .mode = DiagnosticMenuMode::MainMenu,
+                  .selected_row = DiagnosticMenuRow::ReservedProjectOne,
+              },
+              DiagnosticMenuInputEdges{
+                  .primary_pressed = true,
+                  .previous_pressed = true,
+                  .next_pressed = true,
+              }) ==
+              DiagnosticMenuState{
+                  .mode = DiagnosticMenuMode::MainMenu,
+                  .selected_row = DiagnosticMenuRow::ReservedProjectOne,
+              },
+        "primary consumes navigation while reserved project rows remain inert");
 
     Check(omega::app::kDiagnosticMenuToggleAction == 6U &&
+              omega::app::kDiagnosticMenuPrimaryAction == 6U &&
+              omega::app::kDiagnosticMenuPreviousAction == 2U &&
+              omega::app::kDiagnosticMenuNextAction == 3U &&
+              omega::app::kDiagnosticMenuRowCount == 3U &&
               omega::app::kDiagnosticMenuImageWidth == 128U &&
               omega::app::kDiagnosticMenuImageHeight == 72U,
-        "the project action identifier and image dimensions remain exact");
+        "the project action identifiers, row count, and image dimensions remain exact");
 
     const omega::runtime::DebugImage first = BuildProjectDiagnosticMenuImage();
     const omega::runtime::DebugImage second = BuildProjectDiagnosticMenuImage();

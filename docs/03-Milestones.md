@@ -623,7 +623,36 @@ E-0062 local validation is green: a clean zero-warning MSVC build; focused porta
 passes; 20/20 repeated host runs; 29/29 default and 33/33 opt-in GPU CTest; 20/20 unchanged
 capture/replay CLI repetitions; an exact runtime-off portable target build/run with 26 registered
 tests; 152 native dependency files; 209 tooling tests; Python compile-all; and 239 indexed public
-text blobs. Publication CI has not run for this slice.
+text blobs. The exact E-0062 main tree subsequently passed the Windows x86-64 native, Linux x86-64
+native, and public-tree safety publication-CI jobs.
+
+E-0063 makes the project diagnostic menu the explicit native startup state without assigning it
+retail meaning. The safe default value remains `DiagnosticPlay` on `StartDiagnosticPlay`, while
+`OmegaApp` explicitly starts in `MainMenu` on that first row. Invalid enum state resets to the
+startup value before edge processing. Existing actions 2/3/6 remain W/S plus gamepad D-pad
+Up/Down and F1 plus gamepad Start. The reducer consumes press edges only: primary has priority,
+switches diagnostic play to main-menu row zero, switches the first main-menu row back to play, and
+is inert on the two reserved rows; previous/next clamp and simultaneous edges are neutral.
+Terminal handling remains first, and visible-menu frames remain nonmodal for held locomotion,
+scheduling, simulation, capture, and fresh replay. Replay owns no menu state.
+
+Startup still performs only the existing 128x72 card upload. It builds one immutable hidden/base
+list and three immutable base/card/amber-marker lists. The card retains full source
+`{0,0,65536,65536}` and target `{2048,2048,26624,15872}`. The marker reuses the same texture crop
+`{18432,9103,59392,14563}` at row targets `{3584,7424,4352,9344}`,
+`{3584,10304,4352,12224}`, and `{3584,13184,4352,15104}`; all use `Stretch`/`Nearest`.
+Frames select a prebuilt list without another upload, list construction, or per-frame menu
+allocation. Every mode, row, binding reuse, clamp, priority, crop, and target is synthetic and
+establishes no retail menu, control, pause, activation, persistence, timing, replay-UI, private
+input, or PCSX2-equivalence claim. E-0063 local validation used only project-generated zero-file
+fixtures and no private inputs. The incremental MSVC build completed with zero warnings and zero
+errors. The portable test passed directly plus 20/20 repetitions, and the real Direct3D12 host
+smoke passed directly plus 20/20 repetitions. Default CTest passed 29/29 before GPU enablement and
+again after restoring GPU registration off; the opt-in GPU matrix passed 33/33, and the unchanged
+capture/replay CLI smoke passed 20/20. Runtime-off validation built the exact portable target,
+which passed directly and through CTest, with 26 tests registered. The native dependency gate
+checked 152 files, all 209 tooling tests passed, Python compile-all passed, and the public-tree gate
+checked 239 indexed text blobs. Publication CI remains separate and unclaimed.
 
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
