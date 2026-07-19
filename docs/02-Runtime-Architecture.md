@@ -281,6 +281,37 @@ objects, and palette entries; its logical-output count covers the compiled-ABI s
 owned plane bytes, and four source bytes per palette entry. These counters are logical operation
 budgets rather than allocator or process-memory measurements.
 
+E-0066 adds a separate portable runtime diagnostic over that canonical boundary.
+`BuildTextureStorageTopologyDebugImage` borrows an already-created `TextureStorageIR` and returns an
+independent owned `DebugImage`; it is reentrant on any worker thread, has no global state or I/O, and
+does not call or depend on the retail decoder, `AssetService`, `OmegaApp`, or a GPU backend. Its
+typed fail order first validates nonzero texture dimensions, the sample enum, block presence and
+limit, then each source-order block's plane presence and 64-marker hard cap, cumulative plane limit,
+each plane's dimensions/enum/exact encoded byte size, optional palette dimensions/cardinality, and
+cumulative palette limit. Checked final image dimensions, RGBA8 byte size, output limit, host-size
+conversion, and allocation complete the fail-closed boundary. Limits are caller-replaceable values;
+the defaults are 4,096 blocks, 262,144 planes, 1,048,576 palette entries, and 64 MiB of output.
+
+The diagnostic raster is intentionally topological. Source-order blocks occupy 32x32 tiles in rows
+of at most eight columns. An opaque `{8,12,24,255}` background and `{28,38,58,255}` slate border
+contain cyan `{112,220,255,255}` 2x2 masks: `0x1`, `0x9`, `0x7`, and `0xf` distinguish the four
+sample and transfer-element enum values. An optional palette adds one amber `{255,196,64,255}` plus.
+After validation, only block order, sample/transfer encodings, and palette presence affect pixels;
+plane bytes, palette bytes, and dimensions cannot be interpreted as display data. The frozen
+three-block fixture is 96x32 RGBA8 (12,288 bytes), has exact background/slate/cyan/amber populations
+2,667/372/23/10, and hashes to FNV-1a-64 `0xb56c8db088c5a9fe`.
+
+This value adapter is deliberately not an app, service, asset-binding, upload, or rendering path. It
+establishes no retail pixel expansion, display order, channel/alpha conversion, nibble order,
+palette permutation, swizzle, material association, geometry relationship, or gameplay meaning.
+MSVC configure, focused-target, and full builds were clean with zero warnings or errors. The focused
+executable passed directly plus 20/20 repetitions, focused CTest passed, and default CTest passed
+30/30. Runtime-off direct and focused checks passed with 27 tests registered. The dependency gate
+checked 155 native files, all 209 tooling tests passed, Python compile-all passed, and the final
+staged-tree public gate checked 242 indexed text blobs. Validation used no private data, D-drive
+content, disc image, retail executable, emulator, or
+PCSX2 input. Publication CI remains separate and unclaimed.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit
