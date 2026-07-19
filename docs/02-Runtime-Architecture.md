@@ -860,6 +860,32 @@ clock sampling, scheduler restore, simulation checkpoint or RNG restore, world m
 audio, or job work. It defines no persistence, serialization, file/wire/stable ABI, cross-process,
 seek, rewind, loop, rollback, retail timing, or retail determinism contract.
 
+E-0058 adds `omega::app::RunReplaySession`, a concrete move-only `omega_app_core` value above the
+lower capture replay cursor. It is not a service, is non-hot-reloadable, and is exclusive to one
+game thread after publication. The factory first validates and creates a fresh `FrameScheduler`
+from caller-supplied synthetic timing configuration, validates entity capacity, and creates a fresh
+empty `SimulationWorld` whose fixed step matches that scheduler. Only then does it validate and
+take the `RunCaptureTracePair`; an expected creation failure therefore preserves the pair.
+
+For a successful elapsed publication, `Next` feeds the exact signed captured duration to the owned
+scheduler, executes every step in the resulting plan on the owned world, and publishes a move-only
+frame with the reconstructed input and owned plan. Scheduler and simulation observers return owned
+snapshots.
+A lower replay read or reconstruction failure leaves the wrapper state, scheduler, and world
+unchanged for exact-frame retry. A terminal publication has no elapsed plan, completes the session,
+and does not mutate either subsystem. The defensive representation branch is unreachable under the
+current 65,536-frame, 64-step-per-frame, and one-second-step bounds. If those bounds expand and the
+branch is reached after a plan is consumed, prior steps may already be committed, so the wrapper
+enters a permanent failed state.
+
+The owned scheduler and world always begin fresh under the caller's configuration. The capture pair
+contains no checkpoint from either subsystem, and reconstructed input is observable but is not
+consumed by `SimulationWorld`. This layer therefore does not restore captured app state, inject
+input, reproduce captured gameplay, synthesize host events, restore entities or RNG, own pacing or
+a host clock, replay an existing `OmegaApp`, add a CLI route, render, mix audio, dispatch jobs,
+persist data, define a file/wire/stable ABI or cross-process contract, seek, rewind, loop, roll
+back, or claim retail timing or determinism.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

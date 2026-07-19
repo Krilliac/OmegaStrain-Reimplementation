@@ -544,6 +544,24 @@ simulation checkpointing, RNG restore, or world mutation; render, audio, or job 
 serialization, file/wire/stable ABI, or cross-process contract; seek, rewind, looping, rollback, or
 retail timing or determinism claim.
 
+E-0058 adds the portable app-layer `RunReplaySession`. It owns a lower replay cursor, a fresh
+scheduler created from caller-provided synthetic timing configuration, and a fresh empty simulation
+world with the matching fixed step. Reported creation failures preserve the capture pair until all
+fresh owners are ready. Successfully published elapsed frames advance the scheduler and execute
+every planned world step; terminal frames complete without changing either subsystem. Lower replay
+failures are retryable and transactional. The defensive representation branch is unreachable under
+the current 65,536-frame, 64-step-per-frame, and one-second-step bounds. If those bounds expand and
+it is reached, consumed replay/scheduler work and earlier world steps make the session permanently
+failed. Move-only frame
+publications and owned scheduler/world snapshots expose the resulting fresh timeline without
+borrowing mutable subsystem state.
+
+This is not captured scheduler/world restoration or replay into an existing `OmegaApp`. Input is
+reconstructed for observation but not injected into simulation. The milestone adds no captured
+entity or RNG checkpoint, gameplay reconstruction, host-event synthesis, pacing or clock ownership,
+CLI route, render, audio, jobs, persistence, file/wire/stable ABI, cross-process compatibility,
+seek, rewind, looping, rollback, or retail timing or determinism claim.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.
