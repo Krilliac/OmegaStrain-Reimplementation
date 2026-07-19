@@ -594,6 +594,18 @@ shipping dependencies or execution mechanisms.
     Every identifier, binding, coordinate, axis, unit, speed, diagonal rule, and capacity is a
     project diagnostic choice. E-0060 claims no retail player, input map, analog behavior, transform,
     collision, gravity, camera, rendering, animation, weapons, AI, mission, or determinism semantics.
+46. E-0061 starts with an unwired portable diagnostic-menu value in `omega_app_core`.
+    `DiagnosticMenuState` is trivially copyable and its constexpr/noexcept reducer toggles only from
+    an already-routed press edge. Action 6 is reserved but has no keyboard or gamepad binding yet.
+    `BuildProjectDiagnosticMenuImage` returns an independent owned 128x72 opaque RGBA8 image built
+    only from integer rectangles and project-authored 3x5 `DEV` glyph masks. Its 36,864 bytes use
+    exactly four colors; complete FNV-1a-64 is `0xdaf00c60d17f05b5`.
+    The standalone test freezes state transitions, dimensions, ownership, determinism, opacity,
+    color populations, representative geometry, and the complete digest in normal and
+    runtime-disabled builds. No `OmegaApp`, SDL, input tracker, GPU upload, draw list, render packet,
+    capture, replay, file, decoded asset, or private input consumes this value yet. It establishes
+    no retail menu art, text, palette, layout, controls, navigation, selection, activation, pause,
+    timing, asset provenance, or UI behavior.
 
 ## Disc observations
 

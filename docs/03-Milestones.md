@@ -601,6 +601,14 @@ positions. This remains an invisible debug actor, not a retail player implementa
 no retail controls, coordinates, rate, analog behavior, physics, camera, animation, mission, asset,
 network, or determinism semantics.
 
+The first E-0061 slice adds `DiagnosticMenuState`, its pure toggle-edge reducer, and a deterministic
+project-generated `DEV` diagnostic card to `omega_app_core`. The standalone test freezes dimensions,
+independent ownership, full opacity, geometry, exact color populations, and complete byte digest in
+normal and runtime-disabled builds. Action 6 is reserved only; no host binding exists. The card is
+not uploaded or rendered, and this slice establishes no retail-menu art, text, palette, layout,
+navigation, selection, activation, pause, control-layout, timing, asset, persistence, replay, or UI
+behavior semantics.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

@@ -186,6 +186,7 @@ else()
 endif()
 
 add_library(omega_app_core STATIC
+    native/apps/openomega/diagnostic_menu.cpp
     native/apps/openomega/run_capture.cpp
     native/apps/openomega/run_replay_session.cpp
 )
@@ -608,6 +609,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_gameplay_tests COMMAND omega_gameplay_tests)
     set_tests_properties(omega_gameplay_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_diagnostic_menu_tests
+        native/tests/diagnostic_menu_tests.cpp
+    )
+    target_link_libraries(omega_diagnostic_menu_tests PRIVATE omega_app_core)
+    if(MSVC)
+        target_compile_options(omega_diagnostic_menu_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_diagnostic_menu_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_diagnostic_menu_tests COMMAND omega_diagnostic_menu_tests)
+    set_tests_properties(omega_diagnostic_menu_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_render_texture_pool_tests
         native/tests/render_texture_pool_tests.cpp

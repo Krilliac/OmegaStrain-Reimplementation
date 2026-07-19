@@ -482,6 +482,13 @@ retail instruction blocks, or PS2 execution layer.
   This diagnostic actor is not the retail player. Its identifiers, bindings, origin, axes, integer
   unit, step rate, and diagonal policy establish no retail controls, coordinates, movement,
   physics, collision, camera, animation, mission, network, asset, or rendering semantics.
+- E-0061 begins with a portable project-owned diagnostic-menu value and deterministic 128x72
+  opaque RGBA8 `DEV` card. The pure toggle-edge reducer and integer-only image generator use no
+  files, platform APIs, decoded assets, or retail inputs. The complete 36,864-byte output contains
+  four project-authored colors and is frozen by FNV-1a-64 `0xdaf00c60d17f05b5`. Action 6 is
+  reserved only; this first slice is not bound to a physical control, uploaded to the GPU, rendered,
+  serialized, or replayed. It establishes no retail menu art, text, palette, layout, controls,
+  navigation, selection, activation, pause behavior, timing, asset provenance, or UI semantics.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
