@@ -180,9 +180,17 @@ project-owned work. Entity and component capacities are synthetic host limits, n
 population claims.
 
 Each rendered frame now crosses an explicit owned `RenderFramePacket` boundary containing the host
-frame index, deterministic world clock, and live-entity count. The SDL host consumes it
-synchronously and still renders only the content-free diagnostic; component/render scene snapshots
-remain future project-owned work.
+frame index, deterministic world clock, live-entity count, and E-0044's default-invalid fixed-width
+diagnostic texture handle. The packet remains trivially copyable and standard layout. The new
+SDL-free `RenderTexturePool` preallocates fixed metadata slots; validates exact, overflow-checked,
+tightly packed project-owned RGBA8 extents; supports transactional `Reserve`/`Publish`/`Rollback`;
+rejects default, foreign, stale, and released handles; refunds logical bytes on explicit release; and
+retires a maximum generation rather than wrapping. Defaults are 64 slots and 64 MiB logical RGBA8,
+with a hard 8,192-slot maximum. A clean MSVC build had zero warnings or errors, the focused test and
+100 repeats passed, and full 19/19 CTest passed. The SDL host consumes the frame packet synchronously
+but does not yet consume this handle. The pool creates no GPU object, and the existing one-off debug
+upload remains unchanged; no GPU upload, blit, residency, `AssetService` bridge, TDX/VUM/material
+binding, display semantics, component snapshot, or render scene is established.
 
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.

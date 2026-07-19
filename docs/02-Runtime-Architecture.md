@@ -105,6 +105,15 @@ acceptance, waits only this service's in-flight counter rather than `JobService`
 resets the service identity so public handles expire deterministically even if the final worker-held
 implementation survives through lambda teardown.
 
+`RenderTexturePool::Reserve`, `Publish`, `Rollback`, `Get`, `Release`, and `Snapshot` are
+main/render-thread operations and require external serialization. The pool preallocates all slots at
+creation and owns only portable metadata: a backend will keep opaque GPU resources separately by slot
+index. `Reserve` validates an exact overflow-checked tightly packed RGBA8 extent and charges combined
+reserved/resident logical bytes; a backend may publish only after its own creation/upload succeeds and
+must roll back every failure. `Release` refunds resident logical bytes and advances the generation;
+the maximum generation retires instead of wrapping. Default, foreign, stale, reserved, and released
+handles fail closed at resident lookup.
+
 ## Initial contracts
 
 - `VirtualFileSystem` mounts physical directories, ISO views, and HOG archives behind
@@ -154,7 +163,8 @@ implementation survives through lambda teardown.
   borrowed value pointers; neither storage nor pointers cross a reload boundary.
 - `RenderService` receives owned renderer-neutral frame packets and exposes no retail-format
   details. The initial packet carries only host frame index, deterministic simulation clock, and
-  live-entity count; future scene values must enter as independently owned canonical state.
+  live-entity count plus E-0044's default-invalid fixed-width diagnostic texture handle; future scene values
+  must enter as independently owned canonical state. The handle is currently unconsumed.
 - `SdlInputService` is an app-owned, non-hot-reloadable main-thread leaf. It owns the ref-counted
   SDL gamepad subsystem, pumps the global SDL event queue, and owns at most one primary gamepad.
   Button events are accepted only when their instance ID matches that primary. Window focus loss
@@ -351,6 +361,20 @@ may now construct the optional service, but still issues no asset request and se
 `RenderFramePacket`, `RenderService`, `SimulationWorld`, a material catalog, or any upload path. The
 service performs no VUM-name/material lookup, alias resolution, material/texture/cell/mesh/draw
 binding, display-pixel expansion, placement, visibility, or rendering.
+
+E-0044 adds one independent SDL-free `RenderTexturePool` policy boundary. Its defaults are 64 fixed
+slots and 64 MiB of logical tightly packed RGBA8 bytes, with a hard 8,192-slot maximum. Every live
+pool receives a unique nonzero process-local identity; handles add slot and 64-bit generation values,
+and slot reuse is explicit and generation-safe. `RenderFramePacket` remains trivially copyable and
+standard layout after receiving its default-invalid diagnostic handle. A clean MSVC build produced
+zero warnings and errors, the focused test and 100 repeated focused runs passed, and the full 19/19
+CTest suite passed.
+
+The pool creates and owns no SDL or GPU object. `SdlGpuHost` and `OmegaApp` do not yet reserve,
+publish, resolve, release, or consume its handles, so the existing one-off debug-image upload remains
+the only diagnostic upload path. E-0044 validates no GPU upload, blit, synchronization, allocation, or
+residency behavior and makes no connection to `AssetService`, TDX storage, VUM names, materials,
+bindings, display pixels, placement, visibility, or rendering semantics.
 
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
