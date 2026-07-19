@@ -259,6 +259,27 @@ retail instruction blocks, or PS2 execution layer.
   Contain, Stretch, flip, cycle, mip, layer, alpha interpretation, blending, sRGB/HDR, color-space,
   presentation, swapchain, asynchronous lifetime, cross-backend, retail-rendering, asset-binding,
   or gameplay guarantee.
+- E-0051 changes no production/runtime code or public interface. The added smoke fixture uses the
+  existing private offscreen probe with two simultaneously resident synthetic sources. A's first
+  texel from its 8x8 source is stretched over the fixed 4x4 target, then B's first texel from its
+  4x8 source overwrites the center 2x2. Exact colors A=`{32, 192, 224, 255}` and
+  B=`{224, 80, 32, 255}` produce the exact row-major fixed-4x4 grid
+  `AAAA/ABBA/ABBA/AAAA` with source-order `LOAD` blits on the observed `direct3d12` path. The
+  complete host snapshot remains unchanged, and the production packet is reset before the existing
+  A/B submission flow. This closes only E-0050's same-handle fixture gap by confirming that the two
+  tested commands select their respective live generation/backend texture.
+  The one-file MSVC build completed with zero warnings or errors. Default CTest passed 20/20. One
+  initial plus 20 repeated `direct3d12` GPU smokes passed with unchanged exact totals of four
+  uploads/656 cumulative logical bytes, four releases, two production blit frames/four draws, one
+  clear-only submission, one stale rejection, zero unavailable submissions, and zero residual
+  residency. The opt-in configuration passed 21/21, was restored to OFF, and listed 20 default
+  tests. A public two-frame D3D12 `openomega` smoke passed with dummy audio. Publication CI is
+  tracked separately.
+  This proves only the two tested handles, first-texel crops, colors, commands, and fixed 4x4
+  result. It establishes no arbitrary multi-texture, slot/generation, crop, target, Stretch,
+  Nearest, interpolation, edge, aspect, rounding, Linear, Contain, alpha, blending, color-space,
+  swapchain, asynchronous-lifetime, cross-backend, asset-binding, retail-rendering, or gameplay
+  guarantee.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

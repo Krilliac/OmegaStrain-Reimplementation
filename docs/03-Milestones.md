@@ -376,6 +376,29 @@ Contain/Stretch, flip/cycle/mip/layer, alpha interpretation, blending, sRGB/HDR/
 presentation/swapchain, cross-backend, asynchronous-lifetime, ABI/serialization, asset-binding,
 retail-rendering, or gameplay guarantee.
 
+E-0051 changes no production/runtime code or public interface. The added smoke fixture uses the
+existing private fixed-4x4 readback with two simultaneously resident sources. A's first texel
+supplies exact RGBA8 `{32, 192, 224, 255}` across the target; B's later first-texel command
+overwrites center `[1,1,3,3)` with `{224, 80, 32, 255}`. The exact source-order Stretch+Nearest
+result is
+`AAAA/ABBA/ABBA/AAAA` on the observed D3D12 path. Full snapshot equality confirms unchanged
+production counters and portable texture-pool snapshot fields, and the diagnostic packet remains
+isolated from production.
+This closes only E-0050's same-handle fixture gap for the two tested live backend sources.
+
+The one-file MSVC build completed with zero warnings or errors. Default CTest passed 20/20. One
+initial plus 20 repeated `direct3d12` smokes passed with unchanged exact totals of four uploads/656
+cumulative logical bytes, four releases, two production blit frames/four draws, one clear-only
+submission, one stale rejection, zero unavailable submissions, and zero residual residency. The
+opt-in configuration passed 21/21, was restored to OFF, and listed 20 default tests. A public
+two-frame D3D12 `openomega` smoke passed with dummy audio. Publication CI remains separate.
+
+This proves only the two tested handles, first-texel crops, colors, commands, and fixed 4x4 result.
+It establishes no arbitrary multi-texture list, slot/generation, crop/target, Stretch/Nearest,
+interpolation, edge, aspect, rounding, Linear/Contain, alpha/blending/color-space,
+swapchain/presentation, asynchronous lifetime, cross-backend, public readback, asset-binding,
+retail-rendering, or gameplay guarantee.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

@@ -414,6 +414,84 @@ int main()
             after_upload_b.textures.retired_slots != 0U)
             return Fail("texture A/B upload counters or residency are inconsistent");
 
+        const std::array distinct_resident_commands{
+            omega::runtime::RenderTextureBlitCommand{
+                .texture = *uploaded_a,
+                .source = omega::runtime::RenderSourceRectQ16{
+                    .left = 0U,
+                    .top = 0U,
+                    .right = 8'192U,
+                    .bottom = 8'192U,
+                },
+                .destination = omega::runtime::RenderTargetRectQ16{
+                    .left = 0U,
+                    .top = 0U,
+                    .right = omega::runtime::kNormalizedRenderExtent,
+                    .bottom = omega::runtime::kNormalizedRenderExtent,
+                },
+                .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+                .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+            },
+            omega::runtime::RenderTextureBlitCommand{
+                .texture = *uploaded_b,
+                .source = omega::runtime::RenderSourceRectQ16{
+                    .left = 0U,
+                    .top = 0U,
+                    .right = 16'384U,
+                    .bottom = 8'192U,
+                },
+                .destination = omega::runtime::RenderTargetRectQ16{
+                    .left = 16'384U,
+                    .top = 16'384U,
+                    .right = 49'152U,
+                    .bottom = 49'152U,
+                },
+                .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+                .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+            },
+        };
+        auto distinct_resident_draw_list =
+            omega::runtime::RenderDrawList::Create(distinct_resident_commands);
+        if (!distinct_resident_draw_list)
+            return Fail("distinct-resident readback draw-list creation failed");
+
+        omega::runtime::RenderFramePacket distinct_resident_packet;
+        distinct_resident_packet.clear_color = opaque_black;
+        distinct_resident_packet.draw_list = *distinct_resident_draw_list;
+
+        constexpr omega::runtime::RenderClearColorRgba8 distinct_a_color{
+            .red = 32U,
+            .green = 192U,
+            .blue = 224U,
+            .alpha = 255U,
+        };
+        constexpr omega::runtime::RenderClearColorRgba8 distinct_b_color{
+            .red = 224U,
+            .green = 80U,
+            .blue = 32U,
+            .alpha = 255U,
+        };
+        constexpr std::array expected_distinct_resident_readback{
+            distinct_a_color, distinct_a_color, distinct_a_color, distinct_a_color,
+            distinct_a_color, distinct_b_color, distinct_b_color, distinct_a_color,
+            distinct_a_color, distinct_b_color, distinct_b_color, distinct_a_color,
+            distinct_a_color, distinct_a_color, distinct_a_color, distinct_a_color,
+        };
+        const omega::app::GpuHostSnapshot before_distinct_resident_readback = host.Snapshot();
+        auto distinct_resident_readback = omega::app::detail::SdlGpuHostTestAccess::
+            ReadbackBlitsForTesting(host, distinct_resident_packet);
+        if (!distinct_resident_readback)
+        {
+            return Fail(
+                "distinct-resident blit readback failed", distinct_resident_readback.error());
+        }
+        if (*distinct_resident_readback != expected_distinct_resident_readback)
+            return Fail("distinct-resident blit readback did not match the exact RGBA8 grid");
+        if (host.Snapshot() != before_distinct_resident_readback)
+            return Fail("distinct-resident blit readback mutated production host state");
+
+        packet = omega::runtime::RenderFramePacket{};
+
         constexpr std::uint32_t half_extent =
             omega::runtime::kNormalizedRenderExtent / 2U;
         constexpr omega::runtime::RenderTargetRectQ16 left_half{
