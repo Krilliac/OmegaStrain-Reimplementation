@@ -415,6 +415,29 @@ menu dimensions, draw geometry, Controls and topology pixels, upload count, resi
 capture/replay, and teardown are unchanged. These labels establish no retail UI or startup-state
 semantics.
 
+E-0072 keeps startup errors typed until the final process-presentation edge.
+`DescribeContentStartupError` is a nonallocating, reentrant, `noexcept` borrowed adapter over the
+existing aggregate. It accepts only `InvalidOptions` and `DebugImage` with no nested error,
+`GameData` with only `game_data_error`, and `LevelTextures` with only `level_texture_error`; every
+valid shape also requires a nonempty outer message. Unknown outer or nested codes, missing required
+nested errors, unexpected nested errors, and both-nested shapes return typed
+`InconsistentRepresentation`.
+Valid category selection is the existing nested code name for game-data/texture failures and the
+existing outer code name otherwise. The returned message aliases the aggregate's outer string.
+The underlying nested code-name functions retain their stable `unknown` fallback, but the adapter
+rejects those enum values rather than presenting them.
+
+The composition root describes a failed `StartContent` result before streaming it. Valid stderr is
+therefore byte-for-byte unchanged. An inconsistent aggregate emits only
+`content startup [inconsistent-error]: content startup error representation is inconsistent` and
+exits nonzero through the existing path. The process contract creates an empty synthetic data root
+and fixes its result at empty stdout plus
+`content startup [missing-required-file]: game-data root is missing SYSTEM.CNF`, before any
+SDL/audio/GPU work or owner input. `StartContent` remains all-or-error, menu and DiagnosticPlay
+gating are unchanged, and no retry, picker, fallback, persistence, schema, capture, or replay path
+is introduced. Focused/full MSVC, direct core/process, 30/34/30 CTest, runtime-off, dependency,
+tooling, and compile-all validation passed. Publication remains unclaimed.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

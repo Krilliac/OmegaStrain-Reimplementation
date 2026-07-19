@@ -1,5 +1,6 @@
 #include "omega/content/game_data_service.h"
 #include "omega/runtime/content_startup.h"
+#include "omega/runtime/content_startup_diagnostic.h"
 #include "pop_commands.h"
 
 #include <algorithm>
@@ -486,6 +487,140 @@ void Check(const bool condition, const std::string_view message)
     }
 }
 
+void CheckStartupDiagnostic(const omega::runtime::ContentStartupError& error,
+    const std::string_view expected_category, const std::string_view message)
+{
+    const auto diagnostic = omega::runtime::DescribeContentStartupError(error);
+    Check(diagnostic && diagnostic->category == expected_category &&
+              diagnostic->message == error.message &&
+              diagnostic->message.data() == error.message.data(),
+        message);
+}
+
+void RunContentStartupDiagnosticShapeTests()
+{
+    constexpr std::array codes{
+        omega::runtime::ContentStartupErrorCode::InvalidOptions,
+        omega::runtime::ContentStartupErrorCode::GameData,
+        omega::runtime::ContentStartupErrorCode::LevelTextures,
+        omega::runtime::ContentStartupErrorCode::DebugImage,
+    };
+    constexpr std::array<std::uint8_t, 4> required_nested_masks{0U, 1U, 2U, 0U};
+    constexpr std::array<std::string_view, 4> expected_categories{
+        "invalid-options",
+        "missing-required-file",
+        "invalid-reference",
+        "debug-image",
+    };
+
+    for (std::size_t code_index = 0; code_index < codes.size(); ++code_index)
+    {
+        for (std::uint8_t nested_mask = 0U; nested_mask < 4U; ++nested_mask)
+        {
+            omega::runtime::ContentStartupError error{
+                .code = codes[code_index],
+                .message = "borrowed startup diagnostic",
+            };
+            if ((nested_mask & 1U) != 0U)
+            {
+                error.game_data_error.emplace();
+                error.game_data_error->code =
+                    omega::content::GameDataErrorCode::MissingRequiredFile;
+            }
+            if ((nested_mask & 2U) != 0U)
+            {
+                error.level_texture_error.emplace();
+                error.level_texture_error->code =
+                    omega::content::LevelTextureStoreErrorCode::InvalidReference;
+            }
+
+            const auto diagnostic = omega::runtime::DescribeContentStartupError(error);
+            const bool should_succeed = nested_mask == required_nested_masks[code_index];
+            Check(diagnostic.has_value() == should_succeed,
+                "the startup diagnostic adapter accepts only the nested shape for its outer code");
+            if (diagnostic)
+            {
+                Check(diagnostic->category == expected_categories[code_index] &&
+                          diagnostic->message == error.message &&
+                          diagnostic->message.data() == error.message.data(),
+                    "a valid startup diagnostic borrows the outer message and stable category");
+            }
+            else
+            {
+                Check(diagnostic.error() ==
+                          omega::runtime::ContentStartupDiagnosticErrorCode::
+                              InconsistentRepresentation,
+                    "an invalid startup diagnostic shape has the stable typed error");
+            }
+        }
+    }
+
+    omega::runtime::ContentStartupError empty_message{
+        .code = omega::runtime::ContentStartupErrorCode::InvalidOptions,
+    };
+    const auto empty_message_diagnostic =
+        omega::runtime::DescribeContentStartupError(empty_message);
+    Check(!empty_message_diagnostic &&
+              empty_message_diagnostic.error() ==
+                  omega::runtime::ContentStartupDiagnosticErrorCode::
+                      InconsistentRepresentation,
+        "an empty outer startup message is rejected");
+
+    omega::runtime::ContentStartupError invalid_outer{
+        .code = static_cast<omega::runtime::ContentStartupErrorCode>(0xFFU),
+        .message = "invalid outer code",
+    };
+    const auto invalid_outer_diagnostic =
+        omega::runtime::DescribeContentStartupError(invalid_outer);
+    Check(!invalid_outer_diagnostic &&
+              invalid_outer_diagnostic.error() ==
+                  omega::runtime::ContentStartupDiagnosticErrorCode::
+                      InconsistentRepresentation &&
+              omega::runtime::ContentStartupErrorCodeName(invalid_outer.code) == "unknown",
+        "an unknown outer startup code is rejected despite its stable code-name fallback");
+
+    omega::runtime::ContentStartupError invalid_game_data_code{
+        .code = omega::runtime::ContentStartupErrorCode::GameData,
+        .message = "unknown nested game-data code",
+    };
+    invalid_game_data_code.game_data_error.emplace();
+    invalid_game_data_code.game_data_error->code =
+        static_cast<omega::content::GameDataErrorCode>(0xFFU);
+    const auto invalid_game_data_diagnostic =
+        omega::runtime::DescribeContentStartupError(invalid_game_data_code);
+    Check(!invalid_game_data_diagnostic &&
+              invalid_game_data_diagnostic.error() ==
+                  omega::runtime::ContentStartupDiagnosticErrorCode::
+                      InconsistentRepresentation &&
+              omega::content::GameDataErrorCodeName(
+                  invalid_game_data_code.game_data_error->code) == "unknown",
+        "an unknown nested game-data code is rejected despite its stable name fallback");
+
+    omega::runtime::ContentStartupError invalid_level_texture_code{
+        .code = omega::runtime::ContentStartupErrorCode::LevelTextures,
+        .message = "unknown nested level-texture code",
+    };
+    invalid_level_texture_code.level_texture_error.emplace();
+    invalid_level_texture_code.level_texture_error->code =
+        static_cast<omega::content::LevelTextureStoreErrorCode>(0xFFU);
+    const auto invalid_level_texture_diagnostic =
+        omega::runtime::DescribeContentStartupError(invalid_level_texture_code);
+    Check(!invalid_level_texture_diagnostic &&
+              invalid_level_texture_diagnostic.error() ==
+                  omega::runtime::ContentStartupDiagnosticErrorCode::
+                      InconsistentRepresentation &&
+              omega::content::LevelTextureStoreErrorCodeName(
+                  invalid_level_texture_code.level_texture_error->code) == "unknown",
+        "an unknown nested level-texture code is rejected despite its stable name fallback");
+
+    const omega::runtime::ContentStartupError debug_image_error{
+        .code = omega::runtime::ContentStartupErrorCode::DebugImage,
+        .message = "synthetic debug-image failure",
+    };
+    CheckStartupDiagnostic(debug_image_error, "debug-image",
+        "a direct debug-image startup error has a borrowed stable diagnostic");
+}
+
 template <typename Value>
 void CheckError(const std::expected<Value, omega::content::GameDataError>& result,
     const omega::content::GameDataErrorCode code, const std::string_view message)
@@ -789,6 +924,7 @@ int GameDataServiceFailureCount()
 {
     static_assert(sizeof(omega::runtime::ContentStartupStage) == 1U);
     static_assert(sizeof(omega::runtime::ContentStartupStateErrorCode) == 1U);
+    static_assert(sizeof(omega::runtime::ContentStartupDiagnosticErrorCode) == 1U);
     static_assert(static_cast<std::uint8_t>(
                       omega::runtime::ContentStartupStage::NoContent) == 0U);
     static_assert(static_cast<std::uint8_t>(
@@ -798,8 +934,15 @@ int GameDataServiceFailureCount()
     static_assert(static_cast<std::uint8_t>(
                       omega::runtime::ContentStartupStateErrorCode::InconsistentOwnership) ==
                   0U);
+    static_assert(static_cast<std::uint8_t>(
+                      omega::runtime::ContentStartupDiagnosticErrorCode::
+                          InconsistentRepresentation) == 0U);
     static_assert(noexcept(omega::runtime::ClassifyContentStartupState(
         std::declval<const omega::runtime::ContentStartupState&>())));
+    static_assert(noexcept(omega::runtime::DescribeContentStartupError(
+        std::declval<const omega::runtime::ContentStartupError&>())));
+
+    RunContentStartupDiagnosticShapeTests();
 
     const omega::runtime::ContentStartupState empty_startup_state;
     const auto empty_startup_stage =
@@ -1011,6 +1154,11 @@ int GameDataServiceFailureCount()
     Check(!invalid && invalid.error().code ==
               omega::runtime::ContentStartupErrorCode::InvalidOptions,
         "application startup independently enforces its data-root invariant");
+    if (!invalid)
+    {
+        CheckStartupDiagnostic(invalid.error(), "invalid-options",
+            "the synthetic invalid-options startup failure has a borrowed diagnostic");
+    }
 
     omega::runtime::LaunchOptions service_only_options;
     service_only_options.data_root = root;
@@ -1128,6 +1276,11 @@ int GameDataServiceFailureCount()
               malformed_texture_startup.error().level_texture_error->code ==
                   omega::content::LevelTextureStoreErrorCode::MalformedArchive,
         "startup returns no partial state and preserves the typed malformed-texture error");
+    if (!malformed_texture_startup)
+    {
+        CheckStartupDiagnostic(malformed_texture_startup.error(), "malformed-archive",
+            "the synthetic malformed-texture startup failure has a borrowed diagnostic");
+    }
     Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "TEX.HOG", MakeEmptyHog()),
         "the empty primary texture fixture is restored after the typed startup failure");
 
@@ -1473,6 +1626,11 @@ int GameDataServiceFailureCount()
                       failed_material_startup.error().game_data_error->decode_error->code ==
                           omega::asset::DecodeErrorCode::InvalidReference,
                 "startup returns no partial state when one cell lacks its canonical VUM catalog");
+            if (!failed_material_startup)
+            {
+                CheckStartupDiagnostic(failed_material_startup.error(), "decode-failed",
+                    "the synthetic game-data startup failure has a borrowed diagnostic");
+            }
 
             const auto two_vum_cell = MakeHog(
                 {HogMember{.name = "CeLlA.vUm", .payload = spatial_fixture.vum_a},

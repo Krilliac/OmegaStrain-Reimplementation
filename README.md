@@ -685,6 +685,22 @@ retail instruction blocks, or PS2 execution layer.
   render the `NoContent` card. Controls remains `0xcfa7cc57696aae0a`, topology remains
   `0xb56c8db088c5a9fe`, and no action, reducer, capture/replay, file, schema, asset decoding, retail
   presentation, or platform lifecycle contract changes.
+- E-0072 adds a borrowed `DescribeContentStartupError` presentation adapter for the existing
+  all-or-error startup boundary. It accepts only the four representations that `StartContent`
+  publishes: `InvalidOptions` and `DebugImage` with no nested error, `GameData` with only its
+  `GameDataError`, and `LevelTextures` with only its `LevelTextureStoreError`. Empty messages,
+  unknown outer or nested codes, missing or unexpected nested errors, and both-nested shapes fail
+  closed to the fixed process diagnostic
+  `content startup [inconsistent-error]: content startup error representation is inconsistent`.
+  Valid output is byte-for-byte unchanged and borrows the outer message. The underlying name
+  functions retain their stable `unknown` fallback even though the adapter rejects those values. A
+  CMake-created empty root now fixes the pre-SDL process contract at
+  `content startup [missing-required-file]: game-data root is missing SYSTEM.CNF`. This synthetic
+  error-presentation seam adds no retry, picker, fallback, persistence, menu, resource, asset,
+  capture/replay, schema, or retail-input behavior. Focused and full MSVC builds were clean;
+  `omega_core_tests`, the process contract, and 30/34/30 default/GPU/restored CTest matrices passed.
+  Runtime-off checks retained 27 registrations, the dependency gate checked 157 native files, all
+  209 tooling tests passed, and Python compile-all passed. Publication remains unclaimed.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
