@@ -257,6 +257,7 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
 
     runtime::RenderTextureHandle diagnostic_texture;
     runtime::RenderTextureHandle diagnostic_menu_texture;
+    runtime::RenderTextureHandle diagnostic_controls_texture;
     std::array<runtime::RenderTextureBlitCommand, 3U> diagnostic_commands{};
     std::size_t diagnostic_command_count = 0U;
     if (content_owner->debug_image)
@@ -297,6 +298,7 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
         return std::unexpected(std::string(error));
     }
     auto diagnostic_hidden_draw_list = std::move(*created_hidden_draw_list);
+    const std::size_t diagnostic_base_command_count = diagnostic_command_count;
 
     const runtime::DebugImage menu_image = BuildProjectDiagnosticMenuImage();
     auto uploaded_menu = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
@@ -346,6 +348,40 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
         diagnostic_visible_draw_lists[row] = std::move(*created_visible_draw_list);
     }
 
+    const runtime::DebugImage controls_image = BuildProjectDiagnosticControlsImage();
+    auto uploaded_controls = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+        .width = controls_image.width,
+        .height = controls_image.height,
+        .pixels = controls_image.pixels(),
+    });
+    if (!uploaded_controls)
+    {
+        const std::string error =
+            "SDL/GPU diagnostic controls texture upload: " + uploaded_controls.error();
+        log->Error("startup", error);
+        return std::unexpected(error);
+    }
+    diagnostic_controls_texture = *uploaded_controls;
+    diagnostic_commands[diagnostic_base_command_count] =
+        runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_controls_texture,
+            .source = full_source,
+            .destination = menu_target,
+            .fit_mode = runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        };
+    auto created_controls_draw_list = runtime::RenderDrawList::Create(
+        std::span<const runtime::RenderTextureBlitCommand>{
+            diagnostic_commands.data(), diagnostic_base_command_count + 1U});
+    if (!created_controls_draw_list)
+    {
+        constexpr std::string_view error =
+            "SDL/GPU diagnostic controls draw-list creation failed";
+        log->Error("startup", error);
+        return std::unexpected(std::string(error));
+    }
+    auto diagnostic_controls_draw_list = std::move(*created_controls_draw_list);
+
     log->Info("startup", "runtime services ready with " +
                              std::to_string(jobs->worker_count()) + " workers and " +
                              std::string(audio->driver_name()) + " audio");
@@ -355,8 +391,9 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
         std::move(frame_scheduler), std::move(input), std::move(simulation),
         debug_locomotion_entity,
         std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
-        diagnostic_texture, diagnostic_menu_texture,
-        std::move(diagnostic_hidden_draw_list), std::move(diagnostic_visible_draw_lists));
+        diagnostic_texture, diagnostic_menu_texture, diagnostic_controls_texture,
+        std::move(diagnostic_hidden_draw_list), std::move(diagnostic_visible_draw_lists),
+        std::move(diagnostic_controls_draw_list));
 }
 
 OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
@@ -375,9 +412,11 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<SdlGpuHost> host,
     const runtime::RenderTextureHandle diagnostic_texture,
     const runtime::RenderTextureHandle diagnostic_menu_texture,
+    const runtime::RenderTextureHandle diagnostic_controls_texture,
     runtime::RenderDrawList diagnostic_hidden_draw_list,
     std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
-        diagnostic_visible_draw_lists) noexcept
+        diagnostic_visible_draw_lists,
+    runtime::RenderDrawList diagnostic_controls_draw_list) noexcept
     : config_(std::move(config)), content_(std::move(content)),
       stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)),
       log_(std::move(log)), jobs_(std::move(jobs)), assets_(std::move(assets)),
@@ -387,17 +426,20 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
       sdl_input_(std::move(sdl_input)), audio_(std::move(audio)), host_(std::move(host)),
       diagnostic_texture_(diagnostic_texture),
       diagnostic_menu_texture_(diagnostic_menu_texture),
+      diagnostic_controls_texture_(diagnostic_controls_texture),
       diagnostic_hidden_draw_list_(std::move(diagnostic_hidden_draw_list)),
       diagnostic_visible_draw_lists_(std::move(diagnostic_visible_draw_lists)),
+      diagnostic_controls_draw_list_(std::move(diagnostic_controls_draw_list)),
       diagnostic_menu_state_(InitialDiagnosticMenuState())
 {
 }
 
 OmegaApp::~OmegaApp() noexcept
 {
-    diagnostic_hidden_draw_list_ = {};
+    diagnostic_controls_draw_list_ = {};
     for (runtime::RenderDrawList& draw_list : diagnostic_visible_draw_lists_)
         draw_list = {};
+    diagnostic_hidden_draw_list_ = {};
 
     const auto release_texture = [this](const runtime::RenderTextureHandle texture,
                                      const std::string_view failure_message) noexcept
@@ -429,10 +471,13 @@ OmegaApp::~OmegaApp() noexcept
         }
     };
 
+    release_texture(diagnostic_controls_texture_,
+        "diagnostic controls texture release failed; SDL/GPU host cleanup will retry");
     release_texture(diagnostic_menu_texture_,
         "diagnostic menu texture release failed; SDL/GPU host cleanup will retry");
     release_texture(diagnostic_texture_,
         "diagnostic texture release failed; SDL/GPU host cleanup will retry");
+    diagnostic_controls_texture_ = {};
     diagnostic_menu_texture_ = {};
     diagnostic_texture_ = {};
 }
@@ -761,14 +806,21 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
 
 const runtime::RenderDrawList& OmegaApp::CurrentDiagnosticDrawList() const noexcept
 {
-    if (diagnostic_menu_state_.mode != DiagnosticMenuMode::MainMenu)
-        return diagnostic_hidden_draw_list_;
-
     const std::size_t selected_row =
         static_cast<std::size_t>(diagnostic_menu_state_.selected_row);
     if (selected_row >= diagnostic_visible_draw_lists_.size())
         return diagnostic_hidden_draw_list_;
-    return diagnostic_visible_draw_lists_[selected_row];
+
+    switch (diagnostic_menu_state_.mode)
+    {
+    case DiagnosticMenuMode::MainMenu:
+        return diagnostic_visible_draw_lists_[selected_row];
+    case DiagnosticMenuMode::Controls:
+        return diagnostic_controls_draw_list_;
+    case DiagnosticMenuMode::DiagnosticPlay:
+        return diagnostic_hidden_draw_list_;
+    }
+    return diagnostic_hidden_draw_list_;
 }
 
 std::string_view OmegaApp::driver_name() const noexcept

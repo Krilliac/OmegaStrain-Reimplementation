@@ -1084,6 +1084,63 @@ and 26 tests were registered. The dependency gate checked 152 native files, all 
 passed, Python compile-all passed, and the public-tree gate checked 239 indexed text blobs.
 Publication CI remains separate and unclaimed.
 
+E-0065 extends the same app-layer value with `DiagnosticMenuMode::Controls = 2` and renames row byte
+1 to `DiagnosticMenuRow::ShowControls`; the fixed one-byte enum representations, two-byte state,
+safe default, and explicit startup state otherwise remain unchanged. The complete reducer domain is
+three modes by three rows by eight input-edge masks. Invalid mode or row bytes return
+`InitialDiagnosticMenuState()` before consuming input. Primary is evaluated first: DiagnosticPlay
+always returns main row zero, Controls always returns main row one, main row zero enters
+DiagnosticPlay, main row one enters Controls, and main row two is inert. Previous/next navigation is
+accepted only in MainMenu, clamps at the two bounds, and treats equal edge values as neutral. The
+simulation predicate accepts every valid DiagnosticPlay row and rejects MainMenu, Controls, and all
+invalid representations.
+
+The generated main card replaces `RESERVED SLOT 1` with `CONTROLS`. Its exact 128x72 opaque RGBA8
+background/cyan/slate/amber populations are 3,739/1,491/3,506/480 and its full FNV-1a-64 is
+`0x5303b94979cd74d6`. `BuildProjectDiagnosticControlsImage()` allocates an independent owned image
+of the same dimensions and draws `CONTROLS`, `W FORWARD`, `S REVERSE`, `A LEFT`, `D RIGHT`,
+`F1 RETURN`, and `ESC QUIT` with the same bounded integer-only glyph and rectangle primitives. Its
+four populations are 2,104/1,326/5,373/413 and full FNV-1a-64 is `0xa68873cc7444bdf6`. Neither card
+reads a font, path, decoded asset, texture IR, retail payload, or private input.
+
+`OmegaApp::Create` uploads both generated cards once and retains distinct menu and controls texture
+handles. The existing three MainMenu draw lists remain optional-base, full-main-card, then row
+marker. A fourth immutable Controls list contains the same optional base prefix followed by the full
+controls card at target `{2048,2048,26624,15872}` with `Stretch` and `Nearest`; it contains no row
+marker. `CurrentDiagnosticDrawList` validates the row before selecting MainMenu, Controls, or hidden
+DiagnosticPlay presentation, and invalid state returns the hidden list. In the public zero-file host,
+the optional base is absent, so startup owns exactly two uploads and 73,728 resident logical bytes;
+MainMenu submits two blits, Controls submits one, and DiagnosticPlay is clear-only. Destruction drops
+the Controls list, all MainMenu lists, and the hidden list before attempting controls, menu, and base
+texture release in that order. Any failed explicit release and every early startup return retain the
+GPU host's authoritative slot cleanup.
+
+Live and opt-in replay require no new orchestration. Terminal input is still captured and resolved
+before the reducer. Each ordinary row reduces state before `DiagnosticMenuAllowsSimulation` chooses
+actual or zero scheduler elapsed. Thus entry into Controls is modal on the transition frame, held
+primary levels cannot repeat, return to MainMenu row one remains modal, and later DiagnosticPlay
+activation schedules only its own captured elapsed instead of accumulated menu time. Replay terminal
+rows likewise preserve Controls without reducer or scheduler/world mutation. An absent
+`RunReplaySessionConfig::initial_diagnostic_menu_state` still selects legacy nonmodal replay.
+
+No logical action, physical binding, action ordering, `InputSnapshot`, input trace, elapsed trace,
+capture, checkpoint, persistence, serialization, CLI syntax/output, file format, wire format, or
+stable-ABI schema changes. The row rename preserves ordinal 1, the new mode remains an in-process
+project value, and no menu state is written into capture evidence. E-0065 validation used only
+public, project-generated zero-file fixtures. The final MSVC build was clean. Portable diagnostic
+and replay tests passed directly plus 20/20 repetitions; the Direct3D12 host passed directly plus
+20/20; default CTest passed 29/29, opt-in GPU CTest passed 33/33, and restored-default CTest passed
+29/29. A 20-frame capture/replay and 20/20 short repetitions passed. Runtime-off focused direct and
+CTest checks passed with 26 registrations. The dependency gate checked 152 native files, all 209
+tooling tests passed, Python compile-all passed, and the public-tree gate checked 239 indexed text
+blobs. During validation, three test-only `SimulationState` comparisons that produced MSVC C2676
+were changed to a fieldwise helper. A direct configure outside `vcvars` also
+contaminated generated cache state; the exact MSVC linker, archiver, and flags were restored without
+a source change. No private data, disc image, retail executable, emulator, or PCSX2 input was used.
+These project labels, controls, transitions, and modal behavior establish no retail title/menu art,
+font, layout, input map, pause behavior, timing, persistence, private-input result, or emulator
+equivalence. Publication CI remains separate and is not claimed for E-0065.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

@@ -1001,13 +1001,9 @@ void CheckDiagnosticMenuModalGate()
         InputTransition{.code = 1U, .pressed = false}};
     constexpr std::array primary_down{
         InputTransition{.code = 2U, .pressed = true}};
-    constexpr std::array primary_up_next_down{
+    constexpr std::array primary_up_next_up{
         InputTransition{.code = 2U, .pressed = false},
-        InputTransition{.code = 1U, .pressed = true},
-    };
-    constexpr std::array next_up_primary_down{
         InputTransition{.code = 1U, .pressed = false},
-        InputTransition{.code = 2U, .pressed = true},
     };
     constexpr std::array primary_up_previous_down{
         InputTransition{.code = 2U, .pressed = false},
@@ -1015,8 +1011,6 @@ void CheckDiagnosticMenuModalGate()
     };
     constexpr std::array previous_up{
         InputTransition{.code = 0U, .pressed = false}};
-    constexpr std::array previous_down{
-        InputTransition{.code = 0U, .pressed = true}};
     const std::array modal_frames{
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = no_transitions},
@@ -1027,15 +1021,17 @@ void CheckDiagnosticMenuModalGate()
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = primary_down},
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up_next_down},
+            .transitions = no_transitions},
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = next_up_primary_down},
+            .transitions = next_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up_next_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = no_transitions},
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = primary_up_previous_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = previous_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = previous_down},
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = previous_up},
         ScriptedElapsedFrame{.elapsed = milliseconds{15},
@@ -1045,23 +1041,31 @@ void CheckDiagnosticMenuModalGate()
         DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
             .selected_row = DiagnosticMenuRow::StartDiagnosticPlay},
         DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
-            .selected_row = DiagnosticMenuRow::ReservedProjectOne},
+            .selected_row = DiagnosticMenuRow::ShowControls},
         DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
-            .selected_row = DiagnosticMenuRow::ReservedProjectOne},
+            .selected_row = DiagnosticMenuRow::ShowControls},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::Controls,
+            .selected_row = DiagnosticMenuRow::ShowControls},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::Controls,
+            .selected_row = DiagnosticMenuRow::ShowControls},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::Controls,
+            .selected_row = DiagnosticMenuRow::ShowControls},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::Controls,
+            .selected_row = DiagnosticMenuRow::ShowControls},
         DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
-            .selected_row = DiagnosticMenuRow::ReservedProjectOne},
+            .selected_row = DiagnosticMenuRow::ShowControls},
         DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
-            .selected_row = DiagnosticMenuRow::ReservedProjectTwo},
-        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
-            .selected_row = DiagnosticMenuRow::ReservedProjectTwo},
-        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
-            .selected_row = DiagnosticMenuRow::ReservedProjectOne},
-        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
-            .selected_row = DiagnosticMenuRow::ReservedProjectOne},
+            .selected_row = DiagnosticMenuRow::ShowControls},
         DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
             .selected_row = DiagnosticMenuRow::StartDiagnosticPlay},
         DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
             .selected_row = DiagnosticMenuRow::StartDiagnosticPlay},
+    };
+    constexpr std::array expected_primary_held{
+        false, false, false, true, true, true, false, true, true, false, false,
+    };
+    constexpr std::array expected_primary_pressed{
+        false, false, false, true, false, false, false, true, false, false, false,
     };
     RunCaptureTracePair modal_pair = BuildScriptedPair(menu_actions, modal_frames);
     RunReplaySessionConfig modal_config = ValidConfig();
@@ -1079,6 +1083,12 @@ void CheckDiagnosticMenuModalGate()
         auto frame = modal.Next();
         const auto plan = frame ? frame->frame_plan() : std::nullopt;
         Check(frame && frame->elapsed() == std::chrono::seconds{4} && plan &&
+                  frame->input().IsHeld(
+                      omega::app::kDiagnosticMenuPrimaryAction) ==
+                      expected_primary_held[index] &&
+                  frame->input().WasPressed(
+                      omega::app::kDiagnosticMenuPrimaryAction) ==
+                      expected_primary_pressed[index] &&
                   plan->simulation_steps == 0U &&
                   plan->interpolation_alpha == 0.0 && !plan->clamped_delta &&
                   !plan->dropped_time &&
@@ -1086,7 +1096,7 @@ void CheckDiagnosticMenuModalGate()
                   modal.scheduler_state() == modal_scheduler_origin &&
                   SameSimulation(modal.simulation_state(), modal_world_origin) &&
                   modal.debug_locomotion_position() == modal_position_origin,
-            "idle, navigation, and reserved-primary modal samples preserve actual elapsed and freeze all simulation owners");
+            "main-menu and controls-card edges preserve held-versus-pressed input, discard elapsed, and freeze every simulation owner");
     }
     auto activated = modal.Next();
     const auto activated_plan = activated ? activated->frame_plan() : std::nullopt;
@@ -1184,7 +1194,10 @@ void CheckDiagnosticMenuModalGate()
         TerminalReasons{.host_quit_requested = true}, terminal_transition);
     RunReplaySessionConfig terminal_config = ValidConfig();
     terminal_config.enable_debug_locomotion = true;
-    terminal_config.initial_diagnostic_menu_state = DiagnosticMenuState{};
+    terminal_config.initial_diagnostic_menu_state = DiagnosticMenuState{
+        .mode = DiagnosticMenuMode::Controls,
+        .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+    };
     auto terminal_created =
         RunReplaySession::Create(std::move(terminal_pair), terminal_config);
     RunReplaySession terminal =
@@ -1204,7 +1217,7 @@ void CheckDiagnosticMenuModalGate()
               terminal.debug_locomotion_position() == terminal_position_before &&
               terminal.state() == RunReplaySessionState::Complete &&
               terminal.remaining_frames() == 0U,
-        "terminal resolution consumes a menu edge without mutating menu, scheduler, world, or position");
+        "terminal resolution precedes the reducer and cannot return a controls state or mutate any simulation owner");
 }
 
 void CheckMoveLifecycle()

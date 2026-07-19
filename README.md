@@ -562,6 +562,42 @@ retail instruction blocks, or PS2 execution layer.
   portable target and focused CTest passed with 26 tests registered. The native dependency gate
   checked 152 files, all 209 tooling tests passed, Python compile-all passed, and the public-tree
   gate checked 239 indexed text blobs. Publication CI remains separate and is not claimed here.
+- E-0065 replaces main-menu row one with `CONTROLS` and adds the synthetic
+  `DiagnosticMenuMode::Controls` value without adding an action or retail meaning. The explicit
+  startup state remains `MainMenu` / `StartDiagnosticPlay`, the safe default remains
+  `DiagnosticPlay` / `StartDiagnosticPlay`, and invalid mode or row bytes reset to startup before
+  consuming an edge. Primary still has reducer priority: main row zero enters diagnostic play,
+  main row one enters Controls while retaining row one, main row two is inert, any valid
+  DiagnosticPlay row returns to main row zero, and any valid Controls row returns to main row one.
+  Previous/next navigation is MainMenu-only, clamped, press-edge-only, and neutral when simultaneous.
+  Only a fully valid DiagnosticPlay state permits simulation; MainMenu, Controls, and invalid states
+  remain modal while input/capture, rendering, audio, and jobs continue.
+  The main card now labels row one `CONTROLS`. A second independent project-generated 128x72 opaque
+  RGBA8 card labels `CONTROLS`, `W FORWARD`, `S REVERSE`, `A LEFT`, `D RIGHT`, `F1 RETURN`, and
+  `ESC QUIT`. The main image has exact background/cyan/slate/amber populations
+  3,739/1,491/3,506/480 and FNV-1a-64 `0x5303b94979cd74d6`; the Controls image has
+  2,104/1,326/5,373/413 and FNV-1a-64 `0xa68873cc7444bdf6`. Startup uploads both generated cards once.
+  In the zero-file host that is exactly two uploads and 73,728 resident logical bytes. Retained
+  Controls presentation contains the optional base diagnostic draw followed by one controls-card
+  draw; main-menu presentation retains the optional base draw, main card, and row marker. Teardown
+  clears every retained list before releasing controls, menu, and optional base textures.
+  Live and opt-in replay use the established reducer-before-gate rule, discard modal elapsed from
+  scheduling without later catch-up, and resolve terminal input before reduction. Null replay menu
+  ownership remains legacy nonmodal. Action IDs and bindings, input/elapsed trace schemas, captures,
+  checkpoints, serialization, CLI syntax/output, and file/wire/stable-ABI surfaces do not change.
+  E-0065 validation used only public, project-generated zero-file fixtures. The final MSVC build was
+  clean; diagnostic and replay tests passed directly plus 20/20 repetitions; the Direct3D12 host
+  passed directly plus 20/20; default CTest passed 29/29, the opt-in GPU matrix passed 33/33, and
+  restored-default CTest passed 29/29. A 20-frame capture/replay passed, as did 20/20 short
+  repetitions. Runtime-off focused direct and CTest runs passed with 26 registrations. The native
+  dependency gate checked 152 files, all 209 tooling tests passed, Python compile-all passed, and the
+  public-tree gate checked 239 indexed text blobs. During validation, three test-only
+  `SimulationState` C2676 comparisons were corrected to the fieldwise helper; a direct configure
+  outside `vcvars` also contaminated generated cache settings, which were restored to the exact MSVC
+  linker, archiver, and flags without a source change. No private data, disc image, retail executable,
+  emulator, or PCSX2 input was used. This establishes only synthetic developer UI and no retail menu,
+  controls, pause, timing, persistence, private-input, or emulator-equivalence semantics.
+  Publication CI remains separate and is not claimed for E-0065.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

@@ -23,11 +23,13 @@ constexpr Color kSlateColor{
 constexpr Color kAmberColor{
     std::byte{255U}, std::byte{196U}, std::byte{64U}, std::byte{255U}};
 
-// Frozen only after an independent byte-level calculation of the project-owned
-// image layout. BuildProjectDiagnosticMenuImage() is also hashed and reported
-// at runtime so a future intentional layout change has an actionable value.
+// Frozen only after independent byte-level calculations from the project-owned
+// card contract. Both builders are hashed and reported at runtime so a future
+// intentional layout change has an actionable value.
 constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
-    UINT64_C(0xab88661e41e7a14e);
+    UINT64_C(0x5303b94979cd74d6);
+constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
+    UINT64_C(0xa68873cc7444bdf6);
 
 [[nodiscard]] Color PixelAt(const omega::runtime::DebugImage& image,
     const std::uint32_t x, const std::uint32_t y)
@@ -81,6 +83,7 @@ constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
     {
     case DiagnosticMenuMode::MainMenu:
     case DiagnosticMenuMode::DiagnosticPlay:
+    case DiagnosticMenuMode::Controls:
         break;
     default:
         return initial;
@@ -88,7 +91,7 @@ constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
     switch (state.selected_row)
     {
     case DiagnosticMenuRow::StartDiagnosticPlay:
-    case DiagnosticMenuRow::ReservedProjectOne:
+    case DiagnosticMenuRow::ShowControls:
     case DiagnosticMenuRow::ReservedProjectTwo:
         break;
     default:
@@ -99,12 +102,21 @@ constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
     {
         if (state.mode == DiagnosticMenuMode::DiagnosticPlay)
             return initial;
+        if (state.mode == DiagnosticMenuMode::Controls)
+        {
+            return DiagnosticMenuState{
+                .mode = DiagnosticMenuMode::MainMenu,
+                .selected_row = DiagnosticMenuRow::ShowControls,
+            };
+        }
         if (state.selected_row == DiagnosticMenuRow::StartDiagnosticPlay)
             state.mode = DiagnosticMenuMode::DiagnosticPlay;
+        else if (state.selected_row == DiagnosticMenuRow::ShowControls)
+            state.mode = DiagnosticMenuMode::Controls;
         return state;
     }
 
-    if (state.mode == DiagnosticMenuMode::DiagnosticPlay ||
+    if (state.mode != DiagnosticMenuMode::MainMenu ||
         input.previous_pressed == input.next_pressed)
     {
         return state;
@@ -116,11 +128,11 @@ constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
         {
         case DiagnosticMenuRow::StartDiagnosticPlay:
             break;
-        case DiagnosticMenuRow::ReservedProjectOne:
+        case DiagnosticMenuRow::ShowControls:
             state.selected_row = DiagnosticMenuRow::StartDiagnosticPlay;
             break;
         case DiagnosticMenuRow::ReservedProjectTwo:
-            state.selected_row = DiagnosticMenuRow::ReservedProjectOne;
+            state.selected_row = DiagnosticMenuRow::ShowControls;
             break;
         }
     }
@@ -129,9 +141,9 @@ constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
         switch (state.selected_row)
         {
         case DiagnosticMenuRow::StartDiagnosticPlay:
-            state.selected_row = DiagnosticMenuRow::ReservedProjectOne;
+            state.selected_row = DiagnosticMenuRow::ShowControls;
             break;
-        case DiagnosticMenuRow::ReservedProjectOne:
+        case DiagnosticMenuRow::ShowControls:
             state.selected_row = DiagnosticMenuRow::ReservedProjectTwo;
             break;
         case DiagnosticMenuRow::ReservedProjectTwo:
@@ -144,6 +156,7 @@ constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
 
 int main()
 {
+    using omega::app::BuildProjectDiagnosticControlsImage;
     using omega::app::BuildProjectDiagnosticMenuImage;
     using omega::app::DiagnosticMenuAllowsSimulation;
     using omega::app::DiagnosticMenuInputEdges;
@@ -163,6 +176,8 @@ int main()
     static_assert(omega::app::kDiagnosticMenuImageHeight == 72U);
     static_assert(sizeof(DiagnosticMenuMode) == 1U);
     static_assert(sizeof(DiagnosticMenuRow) == 1U);
+    static_assert(static_cast<std::uint8_t>(DiagnosticMenuMode::Controls) == 2U);
+    static_assert(static_cast<std::uint8_t>(DiagnosticMenuRow::ShowControls) == 1U);
     static_assert(std::is_trivially_copyable_v<DiagnosticMenuMode>);
     static_assert(std::is_standard_layout_v<DiagnosticMenuMode>);
     static_assert(std::is_trivially_copyable_v<DiagnosticMenuRow>);
@@ -200,8 +215,32 @@ int main()
                       InitialDiagnosticMenuState(),
                       DiagnosticMenuInputEdges{.primary_pressed = true}) ==
                   DiagnosticMenuState{});
+    static_assert(UpdateDiagnosticMenu(
+                      DiagnosticMenuState{
+                          .mode = DiagnosticMenuMode::MainMenu,
+                          .selected_row = DiagnosticMenuRow::ShowControls,
+                      },
+                      DiagnosticMenuInputEdges{.primary_pressed = true}) ==
+                  DiagnosticMenuState{
+                      .mode = DiagnosticMenuMode::Controls,
+                      .selected_row = DiagnosticMenuRow::ShowControls,
+                  });
+    static_assert(UpdateDiagnosticMenu(
+                      DiagnosticMenuState{
+                          .mode = DiagnosticMenuMode::Controls,
+                          .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+                      },
+                      DiagnosticMenuInputEdges{.primary_pressed = true}) ==
+                  DiagnosticMenuState{
+                      .mode = DiagnosticMenuMode::MainMenu,
+                      .selected_row = DiagnosticMenuRow::ShowControls,
+                  });
     static_assert(DiagnosticMenuAllowsSimulation(DiagnosticMenuState{}));
     static_assert(!DiagnosticMenuAllowsSimulation(InitialDiagnosticMenuState()));
+    static_assert(!DiagnosticMenuAllowsSimulation(DiagnosticMenuState{
+        .mode = DiagnosticMenuMode::Controls,
+        .selected_row = DiagnosticMenuRow::ShowControls,
+    }));
 
     int failures = 0;
     const auto Check = [&failures](
@@ -229,10 +268,11 @@ int main()
     constexpr std::array modes{
         DiagnosticMenuMode::MainMenu,
         DiagnosticMenuMode::DiagnosticPlay,
+        DiagnosticMenuMode::Controls,
     };
     constexpr std::array rows{
         DiagnosticMenuRow::StartDiagnosticPlay,
-        DiagnosticMenuRow::ReservedProjectOne,
+        DiagnosticMenuRow::ShowControls,
         DiagnosticMenuRow::ReservedProjectTwo,
     };
     std::size_t exhaustive_cases = 0U;
@@ -259,14 +299,14 @@ int main()
             }
         }
     }
-    Check(exhaustive_cases == 48U,
-        "the exhaustive reducer matrix covers two modes, three rows, and eight edge masks");
-    Check(simulation_predicate_cases == 6U,
+    Check(exhaustive_cases == 72U,
+        "the exhaustive reducer matrix covers three modes, three rows, and eight edge masks");
+    Check(simulation_predicate_cases == 9U,
         "the simulation predicate covers every valid mode and row combination");
 
     constexpr std::array invalid_states{
         DiagnosticMenuState{
-            .mode = static_cast<DiagnosticMenuMode>(2U),
+            .mode = static_cast<DiagnosticMenuMode>(3U),
             .selected_row = DiagnosticMenuRow::StartDiagnosticPlay,
         },
         DiagnosticMenuState{
@@ -282,7 +322,11 @@ int main()
             .selected_row = static_cast<DiagnosticMenuRow>(255U),
         },
         DiagnosticMenuState{
-            .mode = static_cast<DiagnosticMenuMode>(2U),
+            .mode = DiagnosticMenuMode::Controls,
+            .selected_row = static_cast<DiagnosticMenuRow>(3U),
+        },
+        DiagnosticMenuState{
+            .mode = static_cast<DiagnosticMenuMode>(3U),
             .selected_row = static_cast<DiagnosticMenuRow>(3U),
         },
     };
@@ -299,7 +343,7 @@ int main()
             ++invalid_cases;
         }
     }
-    Check(invalid_cases == 40U,
+    Check(invalid_cases == 48U,
         "invalid mode, row, and combined states consume all eight edge masks");
 
     const DiagnosticMenuState first_row = InitialDiagnosticMenuState();
@@ -321,7 +365,22 @@ int main()
     Check(UpdateDiagnosticMenu(
               DiagnosticMenuState{
                   .mode = DiagnosticMenuMode::MainMenu,
-                  .selected_row = DiagnosticMenuRow::ReservedProjectOne,
+                  .selected_row = DiagnosticMenuRow::ShowControls,
+              },
+              DiagnosticMenuInputEdges{
+                  .primary_pressed = true,
+                  .previous_pressed = true,
+                  .next_pressed = true,
+              }) ==
+              DiagnosticMenuState{
+                  .mode = DiagnosticMenuMode::Controls,
+                  .selected_row = DiagnosticMenuRow::ShowControls,
+              },
+        "primary has priority over navigation when entering the controls card");
+    Check(UpdateDiagnosticMenu(
+              DiagnosticMenuState{
+                  .mode = DiagnosticMenuMode::Controls,
+                  .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
               },
               DiagnosticMenuInputEdges{
                   .primary_pressed = true,
@@ -330,9 +389,20 @@ int main()
               }) ==
               DiagnosticMenuState{
                   .mode = DiagnosticMenuMode::MainMenu,
-                  .selected_row = DiagnosticMenuRow::ReservedProjectOne,
+                  .selected_row = DiagnosticMenuRow::ShowControls,
               },
-        "primary consumes navigation while reserved project rows remain inert");
+        "primary returns every controls-card row to main-menu row one");
+    Check(UpdateDiagnosticMenu(
+              DiagnosticMenuState{
+                  .mode = DiagnosticMenuMode::MainMenu,
+                  .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+              },
+              DiagnosticMenuInputEdges{.primary_pressed = true}) ==
+              DiagnosticMenuState{
+                  .mode = DiagnosticMenuMode::MainMenu,
+                  .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+              },
+        "the final reserved project row remains inert on primary");
 
     Check(omega::app::kDiagnosticMenuToggleAction == 6U &&
               omega::app::kDiagnosticMenuPrimaryAction == 6U &&
@@ -383,8 +453,8 @@ int main()
             ++unknown_pixels;
     }
     Check(all_alpha_opaque, "every menu pixel has fully opaque alpha");
-    Check(background_pixels == 3'739U && cyan_pixels == 1'537U &&
-              slate_pixels == 3'460U && amber_pixels == 480U &&
+    Check(background_pixels == 3'739U && cyan_pixels == 1'491U &&
+              slate_pixels == 3'506U && amber_pixels == 480U &&
               unknown_pixels == 0U,
         "the four project-authored colors have their exact independent pixel counts");
 
@@ -393,7 +463,7 @@ int main()
         std::array{9U, 8U}, std::array{40U, 12U}, std::array{8U, 23U},
         std::array{9U, 22U}, std::array{52U, 22U}, std::array{9U, 30U},
         std::array{16U, 30U}, std::array{17U, 30U}, std::array{77U, 30U},
-        std::array{72U, 45U}, std::array{73U, 45U}, std::array{72U, 60U},
+        std::array{16U, 45U}, std::array{17U, 45U}, std::array{72U, 60U},
         std::array{72U, 61U},
     };
     constexpr std::array probe_colors{
@@ -417,6 +487,97 @@ int main()
               << std::setfill('0') << std::setw(16) << digest << std::dec << '\n';
     Check(digest == kExpectedDiagnosticMenuFnv1a64,
         "the complete deterministic RGBA8 image matches the independently frozen digest");
+
+    const omega::runtime::DebugImage controls_first =
+        BuildProjectDiagnosticControlsImage();
+    const omega::runtime::DebugImage controls_second =
+        BuildProjectDiagnosticControlsImage();
+    const bool controls_shape_is_safe = controls_first.width == 128U &&
+                                        controls_first.height == 72U &&
+                                        controls_first.rgba8_pixels.size() == kExpectedBytes &&
+                                        controls_first.pixels().size() == kExpectedBytes;
+    Check(controls_shape_is_safe,
+        "the controls card is one fully owned tightly packed 128x72 RGBA8 image");
+    if (!controls_shape_is_safe)
+        return EXIT_FAILURE;
+    Check(controls_second.width == controls_first.width &&
+              controls_second.height == controls_first.height &&
+              controls_second.rgba8_pixels == controls_first.rgba8_pixels &&
+              controls_second.rgba8_pixels.data() !=
+                  controls_first.rgba8_pixels.data() &&
+              controls_first.rgba8_pixels != first.rgba8_pixels,
+        "independent controls-card builds own distinct byte-identical buffers separate from the menu card");
+
+    bool controls_alpha_opaque =
+        controls_first.rgba8_pixels.size() == kExpectedBytes;
+    std::size_t controls_background_pixels = 0U;
+    std::size_t controls_cyan_pixels = 0U;
+    std::size_t controls_slate_pixels = 0U;
+    std::size_t controls_amber_pixels = 0U;
+    std::size_t controls_unknown_pixels = 0U;
+    for (std::size_t offset = 0U;
+         offset + 3U < controls_first.rgba8_pixels.size(); offset += 4U)
+    {
+        const Color pixel{controls_first.rgba8_pixels[offset],
+            controls_first.rgba8_pixels[offset + 1U],
+            controls_first.rgba8_pixels[offset + 2U],
+            controls_first.rgba8_pixels[offset + 3U]};
+        controls_alpha_opaque =
+            controls_alpha_opaque && pixel[3] == std::byte{255U};
+        if (pixel == kBackgroundColor)
+            ++controls_background_pixels;
+        else if (pixel == kCyanColor)
+            ++controls_cyan_pixels;
+        else if (pixel == kSlateColor)
+            ++controls_slate_pixels;
+        else if (pixel == kAmberColor)
+            ++controls_amber_pixels;
+        else
+            ++controls_unknown_pixels;
+    }
+    Check(controls_alpha_opaque,
+        "every controls-card pixel has fully opaque alpha");
+    Check(controls_background_pixels == 2'104U &&
+              controls_cyan_pixels == 1'326U &&
+              controls_slate_pixels == 5'373U &&
+              controls_amber_pixels == 413U && controls_unknown_pixels == 0U,
+        "the controls card has the exact independently calculated four-color histogram");
+
+    // These probes independently cover the frame, shared header, controls title, both panels,
+    // their gap, and one lit pixel from each of the six frozen control labels.
+    constexpr std::array controls_probe_coordinates{
+        std::array{0U, 0U}, std::array{4U, 4U}, std::array{8U, 8U},
+        std::array{9U, 8U}, std::array{40U, 12U}, std::array{43U, 11U},
+        std::array{7U, 24U}, std::array{8U, 24U}, std::array{12U, 25U},
+        std::array{13U, 32U}, std::array{13U, 39U}, std::array{12U, 46U},
+        std::array{8U, 52U}, std::array{8U, 54U}, std::array{12U, 55U},
+        std::array{12U, 62U},
+    };
+    constexpr std::array controls_probe_colors{
+        kCyanColor, kBackgroundColor, kSlateColor, kCyanColor,
+        kAmberColor, kCyanColor, kBackgroundColor, kSlateColor,
+        kCyanColor, kCyanColor, kCyanColor, kCyanColor,
+        kBackgroundColor, kSlateColor, kCyanColor, kCyanColor,
+    };
+    bool controls_probes_match = true;
+    for (std::size_t index = 0U; index < controls_probe_coordinates.size();
+         ++index)
+    {
+        controls_probes_match = controls_probes_match &&
+                                PixelAt(controls_first,
+                                    controls_probe_coordinates[index][0],
+                                    controls_probe_coordinates[index][1]) ==
+                                    controls_probe_colors[index];
+    }
+    Check(controls_probes_match,
+        "sixteen independent probes cover every controls-card label and region");
+
+    const std::uint64_t controls_digest = Fnv1a64(controls_first.pixels());
+    std::cout << "diagnostic controls FNV-1a-64: 0x" << std::hex
+              << std::setfill('0') << std::setw(16) << controls_digest
+              << std::dec << '\n';
+    Check(controls_digest == kExpectedDiagnosticControlsFnv1a64,
+        "the complete controls-card RGBA8 image matches the independently frozen digest");
 
     if (failures != 0)
     {

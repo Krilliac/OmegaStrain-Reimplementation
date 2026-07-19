@@ -25,12 +25,13 @@ enum class DiagnosticMenuMode : std::uint8_t
 {
     MainMenu = 0U,
     DiagnosticPlay = 1U,
+    Controls = 2U,
 };
 
 enum class DiagnosticMenuRow : std::uint8_t
 {
     StartDiagnosticPlay = 0U,
-    ReservedProjectOne = 1U,
+    ShowControls = 1U,
     ReservedProjectTwo = 2U,
 };
 
@@ -75,7 +76,7 @@ struct DiagnosticMenuInputEdges
     switch (state.selected_row)
     {
     case DiagnosticMenuRow::StartDiagnosticPlay:
-    case DiagnosticMenuRow::ReservedProjectOne:
+    case DiagnosticMenuRow::ShowControls:
     case DiagnosticMenuRow::ReservedProjectTwo:
         return true;
     }
@@ -84,14 +85,16 @@ struct DiagnosticMenuInputEdges
 
 // [any thread; reentrant] Consumes already-routed logical press edges. Invalid input state fails
 // closed to the initial main menu before considering any edge. Primary has priority over
-// navigation; simultaneous previous/next edges are neutral; navigation clamps at both bounds.
+// navigation; the controls screen returns to its main-menu row on primary; simultaneous
+// previous/next edges are neutral; main-menu navigation clamps at both bounds.
 [[nodiscard]] constexpr DiagnosticMenuState UpdateDiagnosticMenu(
     DiagnosticMenuState state, const DiagnosticMenuInputEdges input) noexcept
 {
     const bool valid_mode = state.mode == DiagnosticMenuMode::MainMenu ||
-                            state.mode == DiagnosticMenuMode::DiagnosticPlay;
+                            state.mode == DiagnosticMenuMode::DiagnosticPlay ||
+                            state.mode == DiagnosticMenuMode::Controls;
     const bool valid_row = state.selected_row == DiagnosticMenuRow::StartDiagnosticPlay ||
-                           state.selected_row == DiagnosticMenuRow::ReservedProjectOne ||
+                           state.selected_row == DiagnosticMenuRow::ShowControls ||
                            state.selected_row == DiagnosticMenuRow::ReservedProjectTwo;
     if (!valid_mode || !valid_row)
         return InitialDiagnosticMenuState();
@@ -100,8 +103,17 @@ struct DiagnosticMenuInputEdges
     {
         if (state.mode == DiagnosticMenuMode::DiagnosticPlay)
             return InitialDiagnosticMenuState();
+        if (state.mode == DiagnosticMenuMode::Controls)
+        {
+            return DiagnosticMenuState{
+                .mode = DiagnosticMenuMode::MainMenu,
+                .selected_row = DiagnosticMenuRow::ShowControls,
+            };
+        }
         if (state.selected_row == DiagnosticMenuRow::StartDiagnosticPlay)
             state.mode = DiagnosticMenuMode::DiagnosticPlay;
+        else if (state.selected_row == DiagnosticMenuRow::ShowControls)
+            state.mode = DiagnosticMenuMode::Controls;
         return state;
     }
 
@@ -114,15 +126,15 @@ struct DiagnosticMenuInputEdges
     if (input.previous_pressed)
     {
         if (state.selected_row == DiagnosticMenuRow::ReservedProjectTwo)
-            state.selected_row = DiagnosticMenuRow::ReservedProjectOne;
-        else if (state.selected_row == DiagnosticMenuRow::ReservedProjectOne)
+            state.selected_row = DiagnosticMenuRow::ShowControls;
+        else if (state.selected_row == DiagnosticMenuRow::ShowControls)
             state.selected_row = DiagnosticMenuRow::StartDiagnosticPlay;
     }
     else
     {
         if (state.selected_row == DiagnosticMenuRow::StartDiagnosticPlay)
-            state.selected_row = DiagnosticMenuRow::ReservedProjectOne;
-        else if (state.selected_row == DiagnosticMenuRow::ReservedProjectOne)
+            state.selected_row = DiagnosticMenuRow::ShowControls;
+        else if (state.selected_row == DiagnosticMenuRow::ShowControls)
             state.selected_row = DiagnosticMenuRow::ReservedProjectTwo;
     }
     return state;
@@ -131,6 +143,10 @@ struct DiagnosticMenuInputEdges
 // [any thread; reentrant] Returns a fully owned, project-generated opaque RGBA8 diagnostic card.
 // It performs no file I/O and consumes no platform object, decoded asset, or retail input.
 [[nodiscard]] runtime::DebugImage BuildProjectDiagnosticMenuImage();
+
+// [any thread; reentrant] Returns a fully owned, project-generated opaque RGBA8 controls card.
+// It performs no file I/O and consumes no platform object, decoded asset, or retail input.
+[[nodiscard]] runtime::DebugImage BuildProjectDiagnosticControlsImage();
 
 static_assert(std::is_trivially_copyable_v<DiagnosticMenuState>);
 static_assert(std::is_standard_layout_v<DiagnosticMenuState>);

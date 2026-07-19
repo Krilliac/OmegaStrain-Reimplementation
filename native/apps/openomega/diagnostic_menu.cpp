@@ -37,13 +37,14 @@ constexpr Color kAmberColor{
 
 // Project-authored 3x5 block masks for the diagnostic labels below. Each row's three mask bits are
 // read left-to-right after integer promotion; no font or external glyph data is involved.
-constexpr std::array<Glyph, 23U> kDiagnosticGlyphs{{
+constexpr std::array<Glyph, 24U> kDiagnosticGlyphs{{
     {'A', {{0b010U, 0b101U, 0b111U, 0b101U, 0b101U}}},
     {'C', {{0b011U, 0b100U, 0b100U, 0b100U, 0b011U}}},
     {'D', {{0b110U, 0b101U, 0b101U, 0b101U, 0b110U}}},
     {'E', {{0b111U, 0b100U, 0b110U, 0b100U, 0b111U}}},
     {'F', {{0b111U, 0b100U, 0b110U, 0b100U, 0b100U}}},
     {'G', {{0b011U, 0b100U, 0b101U, 0b101U, 0b011U}}},
+    {'H', {{0b101U, 0b101U, 0b111U, 0b101U, 0b101U}}},
     {'I', {{0b111U, 0b010U, 0b010U, 0b010U, 0b111U}}},
     {'L', {{0b100U, 0b100U, 0b100U, 0b100U, 0b111U}}},
     {'M', {{0b101U, 0b111U, 0b111U, 0b101U, 0b101U}}},
@@ -129,9 +130,8 @@ void DrawLabel(runtime::DebugImage& image, const char (&label)[Size],
             origin_y);
     }
 }
-} // namespace
 
-runtime::DebugImage BuildProjectDiagnosticMenuImage()
+[[nodiscard]] runtime::DebugImage BuildDiagnosticCardBase()
 {
     constexpr std::size_t output_bytes =
         static_cast<std::size_t>(kDiagnosticMenuImageWidth) *
@@ -153,12 +153,24 @@ runtime::DebugImage BuildProjectDiagnosticMenuImage()
         image.height - kBorderPixels, kCyanColor);
     FillRectangle(image, image.width - kBorderPixels, kBorderPixels,
         image.width, image.height - kBorderPixels, kCyanColor);
+    return image;
+}
 
-    // Synthetic title region and fixed control legend.
+void DrawOpenOmegaHeader(runtime::DebugImage& image) noexcept
+{
     FillRectangle(image, 6U, 6U, 122U, 20U, kSlateColor);
     DrawLabel(image, "OPEN", 8U, 8U);
     DrawLabel(image, "OMEGA", 8U, 14U);
     FillRectangle(image, 36U, 10U, 116U, 16U, kAmberColor);
+}
+} // namespace
+
+runtime::DebugImage BuildProjectDiagnosticMenuImage()
+{
+    runtime::DebugImage image = BuildDiagnosticCardBase();
+
+    // Synthetic title region and fixed control legend.
+    DrawOpenOmegaHeader(image);
     DrawLabel(image, "W/S SELECT", 8U, 22U);
     DrawLabel(image, "F1 START", 52U, 22U);
     DrawLabel(image, "ESC QUIT", 88U, 22U);
@@ -169,11 +181,30 @@ runtime::DebugImage BuildProjectDiagnosticMenuImage()
     DrawLabel(image, "START DIAGNOSTIC", 16U, 30U);
     FillRectangle(image, 8U, 43U, 104U, 53U, kSlateColor);
     FillRectangle(image, 8U, 43U, 12U, 53U, kCyanColor);
-    DrawLabel(image, "RESERVED SLOT 1", 16U, 45U);
+    DrawLabel(image, "CONTROLS", 16U, 45U);
     FillRectangle(image, 8U, 58U, 88U, 68U, kSlateColor);
     FillRectangle(image, 8U, 58U, 12U, 68U, kCyanColor);
     DrawLabel(image, "RESERVED SLOT 2", 16U, 60U);
 
+    return image;
+}
+
+runtime::DebugImage BuildProjectDiagnosticControlsImage()
+{
+    runtime::DebugImage image = BuildDiagnosticCardBase();
+
+    DrawOpenOmegaHeader(image);
+    DrawLabel(image, "CONTROLS", 42U, 11U);
+
+    FillRectangle(image, 8U, 24U, 120U, 52U, kSlateColor);
+    DrawLabel(image, "W FORWARD", 12U, 25U);
+    DrawLabel(image, "S REVERSE", 12U, 32U);
+    DrawLabel(image, "A LEFT", 12U, 39U);
+    DrawLabel(image, "D RIGHT", 12U, 46U);
+
+    FillRectangle(image, 8U, 54U, 120U, 68U, kSlateColor);
+    DrawLabel(image, "F1 RETURN", 12U, 55U);
+    DrawLabel(image, "ESC QUIT", 12U, 62U);
     return image;
 }
 } // namespace omega::app
