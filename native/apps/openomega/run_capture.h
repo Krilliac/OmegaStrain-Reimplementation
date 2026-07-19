@@ -168,4 +168,12 @@ private:
     std::optional<std::string> failure_;
     std::optional<runtime::RunCaptureTracePair> trace_pair_;
 };
+
+namespace detail
+{
+// App-private success policy for the explicit finite-capture command path. This validates only
+// owned outcome/trace consistency; scheduler snapshots are absolute observations, not deltas.
+[[nodiscard]] bool IsCompleteRunCaptureOutcome(
+    const RunCaptureOutcome& outcome, int requested_frames) noexcept;
+} // namespace detail
 } // namespace omega::app

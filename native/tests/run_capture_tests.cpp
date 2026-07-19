@@ -123,28 +123,37 @@ void Check(const bool condition, const std::string_view message)
     return TakePair(finished);
 }
 
-[[nodiscard]] RunCaptureTracePair BuildNormalPair()
+[[nodiscard]] RunCaptureTracePair BuildNonTerminalPair(
+    const std::size_t maximum_frames, const std::size_t captured_frames)
 {
+    constexpr std::array elapsed_samples{milliseconds{3}, milliseconds{17}};
+    if (maximum_frames == 0U || captured_frames > maximum_frames ||
+        captured_frames > elapsed_samples.size())
+    {
+        std::abort();
+    }
+
     constexpr std::array actions{kQuitAction};
     InputTracker tracker = MakeTracker();
     auto created = RunCaptureSession::Create(
-        RunCaptureSessionConfig{.maximum_frames = 2U}, actions);
+        RunCaptureSessionConfig{.maximum_frames = maximum_frames}, actions);
     RunCaptureSession session = TakeSession(created);
-
-    const auto first = tracker.EndFrame();
-    if (!session.AppendInput(first) ||
-        !session.AppendElapsed(milliseconds{3}))
+    for (std::size_t frame = 0U; frame < captured_frames; ++frame)
     {
-        std::abort();
-    }
-    const auto second = tracker.EndFrame();
-    if (!session.AppendInput(second) ||
-        !session.AppendElapsed(milliseconds{17}))
-    {
-        std::abort();
+        const auto input = tracker.EndFrame();
+        if (!session.AppendInput(input) ||
+            !session.AppendElapsed(elapsed_samples[frame]))
+        {
+            std::abort();
+        }
     }
     auto finished = std::move(session).Finish();
     return TakePair(finished);
+}
+
+[[nodiscard]] RunCaptureTracePair BuildNormalPair()
+{
+    return BuildNonTerminalPair(2U, 2U);
 }
 
 [[nodiscard]] RunCaptureTracePair BuildTerminalPair(
@@ -234,6 +243,8 @@ void CheckContract()
     static_assert(noexcept(std::declval<const RunCaptureOutcome&>().has_traces()));
     static_assert(noexcept(std::declval<const RunCaptureOutcome&>().trace_pair()));
     static_assert(noexcept(std::declval<const RunCaptureOutcome&>().terminal_input()));
+    static_assert(noexcept(omega::app::detail::IsCompleteRunCaptureOutcome(
+        std::declval<const RunCaptureOutcome&>(), 1)));
 
     constexpr std::array completions{
         RunCaptureCompletion::Inert,
@@ -536,6 +547,114 @@ void CheckTerminalAndFailureOutcomes()
                   std::optional<std::string_view>{"capture finalization failed"},
         "failure ownership transfers while the source becomes inert");
 }
+
+void CheckCompleteOutcomePolicy()
+{
+    using omega::app::detail::IsCompleteRunCaptureOutcome;
+    constexpr RunResult complete_result{
+        .rendered_frames = 2,
+        .planned_simulation_steps = 3U,
+        .executed_simulation_steps = 3U,
+        .input_frames = 2U,
+    };
+
+    RunCaptureOutcome complete = MakeOutcome(2U, complete_result,
+        RunCaptureCompletion::FrameLimitReached, std::nullopt,
+        std::optional<RunCaptureTracePair>{BuildNormalPair()});
+    Check(IsCompleteRunCaptureOutcome(complete, 2),
+        "a complete positive finite capture satisfies the app-private policy");
+    Check(!IsCompleteRunCaptureOutcome(complete, 0) &&
+              !IsCompleteRunCaptureOutcome(complete, -1),
+        "nonpositive requested frame counts fail closed");
+
+    RunCaptureOutcome requested_mismatch = MakeOutcome(1U, complete_result,
+        RunCaptureCompletion::FrameLimitReached, std::nullopt,
+        std::optional<RunCaptureTracePair>{BuildNormalPair()});
+    Check(!IsCompleteRunCaptureOutcome(requested_mismatch, 2),
+        "outcome and command requested-frame mismatch fails closed");
+
+    constexpr std::array incomplete_completions{
+        RunCaptureCompletion::Inert,
+        RunCaptureCompletion::QuitRequested,
+        RunCaptureCompletion::OperationalFailure,
+        RunCaptureCompletion::CaptureFailure,
+    };
+    for (const RunCaptureCompletion completion : incomplete_completions)
+    {
+        RunCaptureOutcome incomplete = MakeOutcome(2U, complete_result, completion,
+            std::nullopt, std::optional<RunCaptureTracePair>{BuildNormalPair()});
+        Check(!IsCompleteRunCaptureOutcome(incomplete, 2),
+            "every non-frame-limit completion fails closed");
+    }
+
+    RunCaptureOutcome failed = MakeOutcome(2U, complete_result,
+        RunCaptureCompletion::FrameLimitReached,
+        std::optional<std::string>{"owned failure"},
+        std::optional<RunCaptureTracePair>{BuildNormalPair()});
+    Check(!IsCompleteRunCaptureOutcome(failed, 2),
+        "owned failure text fails closed without changing borrow semantics");
+
+    RunResult rendered_mismatch_result = complete_result;
+    rendered_mismatch_result.rendered_frames = 1;
+    RunCaptureOutcome rendered_mismatch = MakeOutcome(2U, rendered_mismatch_result,
+        RunCaptureCompletion::FrameLimitReached, std::nullopt,
+        std::optional<RunCaptureTracePair>{BuildNormalPair()});
+    Check(!IsCompleteRunCaptureOutcome(rendered_mismatch, 2),
+        "rendered-frame mismatch fails closed");
+
+    RunResult input_mismatch_result = complete_result;
+    input_mismatch_result.input_frames = 1U;
+    RunCaptureOutcome input_mismatch = MakeOutcome(2U, input_mismatch_result,
+        RunCaptureCompletion::FrameLimitReached, std::nullopt,
+        std::optional<RunCaptureTracePair>{BuildNormalPair()});
+    Check(!IsCompleteRunCaptureOutcome(input_mismatch, 2),
+        "input-frame mismatch fails closed");
+
+    RunResult quit_result = complete_result;
+    quit_result.quit_requested = true;
+    RunCaptureOutcome quit = MakeOutcome(2U, quit_result,
+        RunCaptureCompletion::FrameLimitReached, std::nullopt,
+        std::optional<RunCaptureTracePair>{BuildNormalPair()});
+    Check(!IsCompleteRunCaptureOutcome(quit, 2),
+        "a quit result fails closed even with otherwise complete traces");
+
+    RunResult step_mismatch_result = complete_result;
+    step_mismatch_result.executed_simulation_steps = 2U;
+    RunCaptureOutcome step_mismatch = MakeOutcome(2U, step_mismatch_result,
+        RunCaptureCompletion::FrameLimitReached, std::nullopt,
+        std::optional<RunCaptureTracePair>{BuildNormalPair()});
+    Check(!IsCompleteRunCaptureOutcome(step_mismatch, 2),
+        "planned and executed simulation-step mismatch fails closed");
+
+    RunCaptureOutcome absent_pair = MakeOutcome(2U, complete_result,
+        RunCaptureCompletion::FrameLimitReached, std::nullopt, std::nullopt);
+    Check(!IsCompleteRunCaptureOutcome(absent_pair, 2),
+        "an absent trace pair fails closed");
+
+    constexpr RunResult terminal_result{
+        .rendered_frames = 1,
+        .planned_simulation_steps = 1U,
+        .executed_simulation_steps = 1U,
+        .input_frames = 1U,
+    };
+    RunCaptureOutcome terminal_pair = MakeOutcome(1U, terminal_result,
+        RunCaptureCompletion::FrameLimitReached, std::nullopt,
+        std::optional<RunCaptureTracePair>{BuildTerminalPair(true, false)});
+    Check(!IsCompleteRunCaptureOutcome(terminal_pair, 1),
+        "a terminal trace pair fails closed");
+
+    RunCaptureOutcome capacity_mismatch = MakeOutcome(2U, complete_result,
+        RunCaptureCompletion::FrameLimitReached, std::nullopt,
+        std::optional<RunCaptureTracePair>{BuildNonTerminalPair(3U, 2U)});
+    Check(!IsCompleteRunCaptureOutcome(capacity_mismatch, 2),
+        "trace capacity mismatch fails closed even when active counts match");
+
+    RunCaptureOutcome count_mismatch = MakeOutcome(2U, complete_result,
+        RunCaptureCompletion::FrameLimitReached, std::nullopt,
+        std::optional<RunCaptureTracePair>{BuildNonTerminalPair(2U, 1U)});
+    Check(!IsCompleteRunCaptureOutcome(count_mismatch, 2),
+        "trace active-count mismatch fails closed even when capacities match");
+}
 } // namespace
 
 int main()
@@ -545,6 +664,7 @@ int main()
     CheckFormatter();
     CheckEmptyAndNormalOutcomes();
     CheckTerminalAndFailureOutcomes();
+    CheckCompleteOutcomePolicy();
 
     if (failures == 0)
         std::cout << "omega_run_capture_tests: passed\n";

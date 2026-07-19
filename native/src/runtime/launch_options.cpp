@@ -1,7 +1,10 @@
 #include "omega/runtime/launch_options.h"
 
+#include "omega/runtime/run_capture_session.h"
+
 #include <algorithm>
 #include <charconv>
+#include <limits>
 #include <system_error>
 #include <utility>
 
@@ -14,6 +17,14 @@ constexpr std::string_view kDataRootPrefix = "--data-root=";
 constexpr std::string_view kLevelPrefix = "--level=";
 constexpr std::string_view kConfigPrefix = "--config=";
 constexpr std::string_view kSetPrefix = "--set=";
+static_assert(kMaximumRunCaptureSessionFrames <=
+              static_cast<std::size_t>(std::numeric_limits<int>::max()));
+
+[[nodiscard]] std::string CaptureRunFrameRangeError()
+{
+    return "--capture-run requires --frames in the range 1.." +
+           std::to_string(kMaximumRunCaptureSessionFrames);
+}
 
 [[nodiscard]] std::string_view TrimConfigBlanks(std::string_view value) noexcept
 {
@@ -51,6 +62,7 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     bool saw_data_root = false;
     bool saw_level = false;
     bool saw_config = false;
+    bool saw_capture_run = false;
     bool saw_probe_only = false;
     bool saw_help = false;
 
@@ -147,6 +159,14 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
             result.probe_only = true;
             continue;
         }
+        if (argument == "--capture-run")
+        {
+            if (saw_capture_run)
+                return std::unexpected("--capture-run may be specified only once");
+            saw_capture_run = true;
+            result.capture_run = true;
+            continue;
+        }
         if (argument == "--help" || argument == "-h")
         {
             if (saw_help)
@@ -166,12 +186,21 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
         return std::unexpected("--probe-only cannot be combined with --frames");
     if (result.show_help && arguments.size() != 1U)
         return std::unexpected("--help cannot be combined with other options");
+    if (result.capture_run && !saw_frames)
+        return std::unexpected("--capture-run requires --frames");
+    if (result.capture_run &&
+        (result.frame_limit == 0 ||
+            static_cast<std::size_t>(result.frame_limit) >
+                kMaximumRunCaptureSessionFrames))
+        return std::unexpected(CaptureRunFrameRangeError());
     return result;
 }
 
 std::string_view LaunchUsage() noexcept
 {
-    return "usage: openomega [--config=PATH] [--set=KEY=VALUE ...] [--frames=N] "
+    return "usage: openomega [-h|--help]\n"
+           "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
+           "[--frames=N [--capture-run]] "
            "[--data-root=PATH [--level=CODE] [--probe-only]]\n";
 }
 } // namespace omega::runtime
