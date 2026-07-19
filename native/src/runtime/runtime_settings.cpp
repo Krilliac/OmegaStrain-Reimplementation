@@ -12,7 +12,7 @@ namespace omega::runtime
 {
 namespace
 {
-constexpr std::array<std::string_view, 8> kKnownSettings{
+constexpr std::array<std::string_view, 10> kKnownSettings{
     "log.minimum_severity",
     "log.ring_capacity",
     "jobs.worker_count",
@@ -21,7 +21,119 @@ constexpr std::array<std::string_view, 8> kKnownSettings{
     "frame.max_steps_per_frame",
     "frame.max_delta_ns",
     "input.max_events_per_frame",
+    "content.data_root",
+    "content.level_code",
 };
+
+constexpr std::string_view kContentDataRootKey = "content.data_root";
+constexpr std::string_view kContentLevelCodeKey = "content.level_code";
+constexpr std::string_view kMissingDataRootMessage =
+    "content.data_root is required when content.level_code is set";
+constexpr std::string_view kInvalidDataRootMessage =
+    "content.data_root must be a non-empty valid path";
+constexpr std::string_view kInvalidLevelCodeMessage =
+    "content.level_code must contain 1 to 32 ASCII alphanumeric characters";
+constexpr std::string_view kInvalidOptionsMessage =
+    "direct content launch options are inconsistent";
+
+[[nodiscard]] ContentLaunchProfileError MakeContentLaunchProfileError(
+    const ContentLaunchProfileErrorCode code)
+{
+    std::string_view message;
+    switch (code)
+    {
+    case ContentLaunchProfileErrorCode::MissingDataRoot:
+        message = kMissingDataRootMessage;
+        break;
+    case ContentLaunchProfileErrorCode::InvalidDataRoot:
+        message = kInvalidDataRootMessage;
+        break;
+    case ContentLaunchProfileErrorCode::InvalidLevelCode:
+        message = kInvalidLevelCodeMessage;
+        break;
+    case ContentLaunchProfileErrorCode::InvalidOptions:
+        message = kInvalidOptionsMessage;
+        break;
+    }
+    return ContentLaunchProfileError{.code = code, .message = std::string(message)};
+}
+
+[[nodiscard]] bool IsValidContentLevelCode(const std::string_view value) noexcept
+{
+    if (value.empty() || value.size() > 32U)
+        return false;
+    for (const unsigned char character : value)
+    {
+        const bool upper = character >= static_cast<unsigned char>('A') &&
+                           character <= static_cast<unsigned char>('Z');
+        const bool lower = character >= static_cast<unsigned char>('a') &&
+                           character <= static_cast<unsigned char>('z');
+        const bool digit = character >= static_cast<unsigned char>('0') &&
+                           character <= static_cast<unsigned char>('9');
+        if (!upper && !lower && !digit)
+            return false;
+    }
+    return true;
+}
+
+[[nodiscard]] std::string NormalizeContentLevelCode(const std::string_view value)
+{
+    std::string normalized;
+    normalized.reserve(value.size());
+    for (const unsigned char character : value)
+    {
+        const bool lower = character >= static_cast<unsigned char>('a') &&
+                           character <= static_cast<unsigned char>('z');
+        normalized.push_back(
+            static_cast<char>(lower ? character - ('a' - 'A') : character));
+    }
+    return normalized;
+}
+
+[[nodiscard]] std::expected<std::optional<ContentLaunchProfile>, ContentLaunchProfileError>
+ResolveConfiguredContentLaunchProfile(const ConfigStore& config)
+{
+    const auto configured_root = config.GetString(kContentDataRootKey);
+    const auto configured_level = config.GetString(kContentLevelCodeKey);
+    if (!configured_root && !configured_level)
+        return std::optional<ContentLaunchProfile>{};
+    if (!configured_root)
+    {
+        return std::unexpected(
+            MakeContentLaunchProfileError(ContentLaunchProfileErrorCode::MissingDataRoot));
+    }
+
+    std::filesystem::path data_root;
+    try
+    {
+        data_root = std::filesystem::path(*configured_root);
+    }
+    catch (...)
+    {
+        return std::unexpected(
+            MakeContentLaunchProfileError(ContentLaunchProfileErrorCode::InvalidDataRoot));
+    }
+    if (data_root.empty())
+    {
+        return std::unexpected(
+            MakeContentLaunchProfileError(ContentLaunchProfileErrorCode::InvalidDataRoot));
+    }
+
+    std::optional<std::string> level_code;
+    if (configured_level)
+    {
+        if (!IsValidContentLevelCode(*configured_level))
+        {
+            return std::unexpected(
+                MakeContentLaunchProfileError(ContentLaunchProfileErrorCode::InvalidLevelCode));
+        }
+        level_code = NormalizeContentLevelCode(*configured_level);
+    }
+    return std::optional<ContentLaunchProfile>{ContentLaunchProfile{
+        .data_root = std::move(data_root),
+        .level_code = std::move(level_code),
+    }};
+}
 
 [[nodiscard]] std::expected<std::int64_t, std::string> ReadBoundedInteger(
     const ConfigStore& config, const std::string_view key, const std::int64_t default_value,
@@ -141,5 +253,36 @@ std::expected<RuntimeSettings, std::string> ResolveRuntimeSettings(const ConfigS
         return std::unexpected(input_events.error());
     settings.max_input_events_per_frame = static_cast<std::size_t>(*input_events);
     return settings;
+}
+
+std::expected<std::optional<ContentLaunchProfile>, ContentLaunchProfileError>
+ResolveContentLaunchProfile(const LaunchOptions& options, const ConfigStore& config)
+{
+    // Validate the effective file-plus-override tuple even when a direct CLI pair will win.
+    auto configured = ResolveConfiguredContentLaunchProfile(config);
+    if (!configured)
+        return std::unexpected(std::move(configured).error());
+
+    if (options.level_code && !options.data_root)
+    {
+        return std::unexpected(
+            MakeContentLaunchProfileError(ContentLaunchProfileErrorCode::InvalidOptions));
+    }
+    if (!options.data_root)
+        return configured;
+    if (options.data_root->empty() ||
+        (options.level_code && !IsValidContentLevelCode(*options.level_code)))
+    {
+        return std::unexpected(
+            MakeContentLaunchProfileError(ContentLaunchProfileErrorCode::InvalidOptions));
+    }
+
+    std::optional<std::string> level_code;
+    if (options.level_code)
+        level_code = NormalizeContentLevelCode(*options.level_code);
+    return std::optional<ContentLaunchProfile>{ContentLaunchProfile{
+        .data_root = *options.data_root,
+        .level_code = std::move(level_code),
+    }};
 }
 } // namespace omega::runtime

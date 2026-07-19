@@ -16,6 +16,7 @@ endfunction()
 function(run_openomega_case case_name expect_success expected_stdout expected_stderr)
     execute_process(
         COMMAND "${OPENOMEGA_EXECUTABLE}" ${ARGN}
+        WORKING_DIRECTORY "${process_working_directory}"
         RESULT_VARIABLE actual_result
         OUTPUT_VARIABLE actual_stdout
         ERROR_VARIABLE actual_stderr
@@ -56,10 +57,54 @@ string(CONCAT openomega_usage
 )
 set(zero_frame_stdout "OpenOmega native shell: rendered_frames=0\n")
 set(empty_data_root "${CMAKE_CURRENT_BINARY_DIR}/openomega-process-contract-empty-data-root")
+set(process_working_directory
+    "${CMAKE_CURRENT_BINARY_DIR}/openomega-process-contract-working-directory")
 file(REMOVE_RECURSE "${empty_data_root}")
 file(MAKE_DIRECTORY "${empty_data_root}")
+file(REMOVE_RECURSE "${process_working_directory}")
+file(MAKE_DIRECTORY "${process_working_directory}")
+
+# E-0074 does not perform ambient/default discovery. This malformed neighboring file must be
+# ignored unless its path is selected explicitly with --config.
+file(WRITE "${process_working_directory}/openomega.cfg"
+    "content.level_code = AMBIENT1\n")
+
+set(missing_root_config "${process_working_directory}/missing-root.cfg")
+file(WRITE "${missing_root_config}" "content.level_code = MINSK\n")
+set(empty_root_config "${process_working_directory}/empty-root.cfg")
+file(WRITE "${empty_root_config}" "content.data_root =\n")
+set(invalid_level_config "${process_working_directory}/invalid-level.cfg")
+file(WRITE "${invalid_level_config}"
+    "content.data_root = secret-configured-root\n"
+    "content.level_code = secret-invalid-level\n")
+set(configured_root_config "${process_working_directory}/configured-root.cfg")
+file(WRITE "${configured_root_config}" "content.data_root = ${empty_data_root}\n")
 
 run_openomega_case(zero_frames TRUE "${zero_frame_stdout}" "" --frames=0)
+run_openomega_case(config_missing_root FALSE ""
+    "content launch profile [missing-data-root]: content.data_root is required when content.level_code is set\n"
+    "--config=${missing_root_config}" --frames=0
+)
+run_openomega_case(config_empty_root FALSE ""
+    "content launch profile [invalid-data-root]: content.data_root must be a non-empty valid path\n"
+    "--config=${empty_root_config}" --frames=0
+)
+run_openomega_case(config_invalid_level FALSE ""
+    "content launch profile [invalid-level-code]: content.level_code must contain 1 to 32 ASCII alphanumeric characters\n"
+    "--config=${invalid_level_config}" --frames=0
+)
+run_openomega_case(config_invalid_even_with_direct_cli FALSE ""
+    "content launch profile [invalid-level-code]: content.level_code must contain 1 to 32 ASCII alphanumeric characters\n"
+    "--config=${invalid_level_config}" "--data-root=${empty_data_root}" --frames=0
+)
+run_openomega_case(configured_root_reaches_startup FALSE ""
+    "content startup [missing-required-file]: game-data root is missing SYSTEM.CNF\n"
+    "--config=${configured_root_config}" --frames=0
+)
+run_openomega_case(set_supplies_missing_root FALSE ""
+    "content startup [missing-required-file]: game-data root is missing SYSTEM.CNF\n"
+    "--config=${missing_root_config}" "--set=content.data_root=${empty_data_root}" --frames=0
+)
 run_openomega_case(missing_system_config FALSE ""
     "content startup [missing-required-file]: game-data root is missing SYSTEM.CNF\n"
     "--data-root=${empty_data_root}"

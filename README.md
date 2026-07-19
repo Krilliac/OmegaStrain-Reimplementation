@@ -720,6 +720,23 @@ retail instruction blocks, or PS2 execution layer.
   and full MSVC builds, direct and repeated diagnostic/replay/GPU checks, 30/34/30
   default/GPU/restored CTest, capture-replay, runtime-off, dependency, tooling, and compile-all
   validation passed. Publication remains unclaimed.
+- E-0074 adds an explicit content launch profile to the existing strict runtime configuration.
+  `content.data_root` plus optional `content.level_code` are read only from a selected `--config`
+  file and its validated `--set` overrides; no neighboring or per-user file is discovered. The
+  effective configuration tuple is validated even when direct CLI content options are present.
+  A direct `--data-root` plus optional `--level` then wins atomically and never inherits the
+  configured level. A configured level without a root, an empty/unrepresentable native root, an
+  invalid level, and a defensive malformed direct pair return the stable categories
+  `missing-data-root`, `invalid-data-root`, `invalid-level-code`, and `invalid-options` with fixed
+  diagnostics that echo no path or invalid level bytes. Valid level codes are 1 to 32 ASCII
+  alphanumeric bytes and normalize to uppercase before the unchanged `StartContent` boundary.
+  With neither content key and no direct root, startup remains zero-file. `/openomega.cfg` is ignored
+  because it can contain a private local path. This slice adds no ambient/default discovery,
+  persistence, picker, filesystem probing in the resolver, asset semantics, retail UI, or
+  emulator-equivalence claim. Focused and full MSVC builds, `omega_core_tests`, the process
+  contract, 30/34/30 default/GPU/restored CTest, runtime-off checks with 27 registrations, the
+  157-file dependency gate, all 209 tooling tests, and Python compile-all passed. Publication
+  remains unclaimed.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
@@ -858,11 +875,15 @@ built, but hardware/display-dependent CTest registration is off by default for h
 Configure with `-DOMEGA_RUN_GPU_SMOKE_TEST=ON` to register it as a serial GPU integration test.
 
 The optional project-owned configuration file uses strict `lower_snake_case` dotted keys and
-`key = value` lines. `--set=KEY=VALUE` applies one validated command-line override per key. Current
-keys are `log.minimum_severity`, `log.ring_capacity`, `jobs.worker_count`,
-`jobs.max_pending_jobs`, `frame.simulation_step_ns`, `frame.max_steps_per_frame`,
-`frame.max_delta_ns`, and `input.max_events_per_frame`. Frame defaults are synthetic host-shell
-engineering values, not claims about the retail tick rate.
+`key = value` lines. It is loaded only when selected with `--config=PATH`.
+`--set=KEY=VALUE` applies one validated command-line override per key. Current keys are
+`log.minimum_severity`, `log.ring_capacity`, `jobs.worker_count`, `jobs.max_pending_jobs`,
+`frame.simulation_step_ns`, `frame.max_steps_per_frame`, `frame.max_delta_ns`,
+`input.max_events_per_frame`, `content.data_root`, and `content.level_code`. The content root plus
+optional level form one profile; direct `--data-root`/`--level` options override that profile as one
+pair. Frame defaults are synthetic host-shell engineering values, not claims about the retail tick
+rate. A local root-level `openomega.cfg` is ignored by version control because it may contain a
+private filesystem path.
 
 Architecture and completion criteria are versioned in
 [`docs/02-Runtime-Architecture.md`](docs/02-Runtime-Architecture.md) and

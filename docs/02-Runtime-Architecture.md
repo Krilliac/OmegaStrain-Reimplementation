@@ -475,6 +475,34 @@ repetitions; default, opt-in GPU, and restored CTest passed 30/34/30. A 20-frame
 registrations. The dependency gate checked 157 native files, all 209 tooling tests passed, and
 Python compile-all passed. Publication remains unclaimed.
 
+E-0074 keeps configuration parsing, runtime-service settings, content selection, and content startup
+as separate composition-root stages. `LoadRuntimeConfig` still loads only an explicitly selected
+`--config` file (or an empty store) and applies the existing validated `--set` sequence. Both
+`content.data_root` and `content.level_code` are strict known keys, so the service-settings resolver
+accepts them without consuming them. `ResolveContentLaunchProfile` then validates the effective
+configured content tuple before considering direct CLI content options. This order deliberately
+makes malformed configured content fatal even when direct CLI would otherwise win.
+
+The resolver returns `expected<optional<ContentLaunchProfile>, ContentLaunchProfileError>`. Neither
+configured content key means no configured profile. A configured level without a root is
+`missing-data-root`; an empty root or exception while converting its opaque bytes to a native
+`filesystem::path` is `invalid-data-root`. A configured level must be 1 to 32 ASCII alphanumeric
+bytes and is copied uppercase, otherwise it is `invalid-level-code`. Once configuration is valid, a
+direct root and its optional direct level replace that whole tuple; the configured level is never
+inherited. Programmatically inconsistent direct options return defensive `invalid-options`.
+Diagnostics are fixed, sanitized strings and do not include path or invalid level bytes.
+
+Main resolves this profile after service settings and projects it back into the existing
+`LaunchOptions` content fields immediately before `StartContent`; the E-0072 error adapter remains
+the following failure boundary. The resolver performs no filesystem existence check or other I/O.
+There is no ambient/default profile discovery, persistence, picker, hot reload, new schema, asset
+semantic, retail behavior, or emulator-equivalence claim. `/openomega.cfg` is ignored solely as a
+privacy boundary for a possible local path. Focused and full MSVC builds were clean;
+`omega_core_tests`, the process contract, and default/GPU/restored CTest passed 30/34/30.
+Runtime-off direct and focused checks retained 27 registrations. The dependency gate checked 157
+native files, all 209 tooling tests passed, and Python compile-all passed. Publication remains
+unclaimed.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

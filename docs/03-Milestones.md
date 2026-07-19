@@ -812,6 +812,20 @@ emulator equivalence. Focused/full MSVC, direct and 20/20 repeated diagnostic/re
 registrations, the 157-file dependency gate, 209 tooling tests, and Python compile-all passed.
 Publication remains unclaimed.
 
+E-0074 adds a typed, explicit-only configuration path for content selection. The effective
+`--config` plus `--set` store recognizes `content.data_root` and `content.level_code` and is always
+validated before direct CLI precedence. A valid direct root plus optional level wins as one tuple;
+it never inherits a configured level. No content keys preserve zero-file startup. A configured level
+without a root, an empty or unrepresentable native root, an invalid level, and an inconsistent direct
+pair map to four fixed sanitized error categories. Valid levels contain 1 to 32 ASCII alphanumeric
+bytes and normalize uppercase. Main resolves this tuple after service settings and before unchanged
+content startup and E-0072 diagnostics. The root-level local `openomega.cfg` is ignored for privacy,
+but E-0074 does not discover it or any other ambient/default file. It adds no persistence, picker,
+path existence validation, content decoding, retail UI, or emulator-equivalence behavior. Local
+focused/full MSVC, direct core/process, 30/34/30 default/GPU/restored CTest, runtime-off with 27
+registrations, the 157-file dependency gate, 209 tooling tests, and Python compile-all passed.
+Publication remains unclaimed.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

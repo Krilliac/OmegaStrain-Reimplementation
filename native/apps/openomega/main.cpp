@@ -20,6 +20,14 @@
 
 namespace
 {
+void PrintContentLaunchProfileError(
+    const omega::runtime::ContentLaunchProfileError& error)
+{
+    std::cerr << "content launch profile ["
+              << omega::runtime::ContentLaunchProfileErrorCodeName(error.code)
+              << "]: " << error.message << '\n';
+}
+
 void PrintContentError(const omega::runtime::ContentStartupError& error)
 {
     const auto diagnostic = omega::runtime::DescribeContentStartupError(error);
@@ -249,6 +257,20 @@ int main(const int argc, char** argv)
     {
         std::cerr << "runtime configuration: " << settings.error() << '\n';
         return EXIT_FAILURE;
+    }
+
+    auto content_profile = omega::runtime::ResolveContentLaunchProfile(*options, *config);
+    if (!content_profile)
+    {
+        PrintContentLaunchProfileError(content_profile.error());
+        return EXIT_FAILURE;
+    }
+    options->data_root.reset();
+    options->level_code.reset();
+    if (content_profile->has_value())
+    {
+        options->data_root = (*content_profile)->data_root;
+        options->level_code = (*content_profile)->level_code;
     }
 
     auto startup = omega::runtime::StartContent(*options);
