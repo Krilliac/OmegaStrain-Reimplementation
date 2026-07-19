@@ -67,6 +67,12 @@ remains separate aggregate-only evidence. Other scene decoders remain incomplete
   and 42,631 dense name references. Its passive payload pass validates 91,460 pairs, 38,023
   normalized targets, 134,122 middle-to-final references, and 365,840 ordered Q/P references,
   with zero errors.
+- The bounded analysis-only full-normalized-member-name lexical-coherence rerun scans 18/18 levels
+  with zero errors and reproduces the native level/cell/catalog/name/material/reference and
+  source/locator populations. All 34,267 VUM name occurrences and 37,893 dense references lack
+  terminal `.TDX`, so none enters the eligible exact lookup branch and all 5,801 class-qualified
+  locators remain unreached. This is narrow negative evidence only; no alias family, retail lookup,
+  material binding, class priority, or runtime integration is established.
 - The first privacy-safe VUM consumer trace has one strict-validator-accepted complete 120-frame
   pair from one selected runtime copy. Its repeat is byte-identical; each validated report contains
   two EE-read aggregate rows, two anonymous-site rows, and zero VIF1 chunk rows. Post-run

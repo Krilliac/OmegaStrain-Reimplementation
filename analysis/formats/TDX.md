@@ -143,6 +143,21 @@ rather than a whole-disc ownership claim.
 python -B tools/measure_level_texture_container_topology.py private/extracted-disc
 ```
 
+## Cross-format exact-name candidate experiment
+
+The separate VUM-name experiment uses exactly the two direct normalized `.TDX` locator classes
+measured above. Each locator occurrence is class-qualified, so the same complete normalized member
+string in both containers would contribute two locator occurrences and an ambiguous cross-class
+candidate rather than a priority decision.
+
+Only exact equality of complete normalized member strings, restricted to VUM names ending `.TDX`,
+is tested. No basename, stem, extensionless, suffix-substitution, nested-container, fuzzy, or other
+alias relationship is included. The confirmed rerun reaches zero locator occurrences uniquely,
+zero only ambiguously, and leaves all 5,801 unreached because all 34,267 accepted VUM name
+occurrences lack terminal `.TDX` and never enter the lookup branch. This is narrow lexical coverage,
+not retail ownership, material binding, source priority, or runtime lookup evidence. Detailed
+name/reference classification and privacy constraints are documented in `analysis/formats/VUM.md`.
+
 ## Display-layout hypothesis scoring
 
 `score_tdx_layout_hypotheses.py` is a bounded, aggregate-only experiment for the remaining indexed
