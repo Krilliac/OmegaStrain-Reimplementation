@@ -9,8 +9,12 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
+#include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
 
 namespace omega::runtime
 {
@@ -40,6 +44,43 @@ struct RuntimeSettings
     std::size_t max_input_events_per_frame = kDefaultMaxInputEventsPerFrame;
 };
 
+struct ContentLaunchProfile
+{
+    std::filesystem::path data_root;
+    std::optional<std::string> level_code;
+};
+
+enum class ContentLaunchProfileErrorCode : std::uint8_t
+{
+    MissingDataRoot = 0U,
+    InvalidDataRoot,
+    InvalidLevelCode,
+    InvalidOptions,
+};
+
+[[nodiscard]] constexpr std::string_view ContentLaunchProfileErrorCodeName(
+    const ContentLaunchProfileErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case ContentLaunchProfileErrorCode::MissingDataRoot:
+        return "missing-data-root";
+    case ContentLaunchProfileErrorCode::InvalidDataRoot:
+        return "invalid-data-root";
+    case ContentLaunchProfileErrorCode::InvalidLevelCode:
+        return "invalid-level-code";
+    case ContentLaunchProfileErrorCode::InvalidOptions:
+        return "invalid-options";
+    }
+    return "unknown";
+}
+
+struct ContentLaunchProfileError
+{
+    ContentLaunchProfileErrorCode code = ContentLaunchProfileErrorCode::InvalidOptions;
+    std::string message;
+};
+
 // [game thread, startup] Loads the optional project-owned configuration file, or an empty store
 // when no path was supplied, then applies validated --set overrides in source order.
 [[nodiscard]] std::expected<ConfigStore, std::string> LoadRuntimeConfig(
@@ -49,4 +90,10 @@ struct RuntimeSettings
 // and values outside the service-owned bounds are rejected rather than ignored or clamped.
 [[nodiscard]] std::expected<RuntimeSettings, std::string> ResolveRuntimeSettings(
     const ConfigStore& config);
+
+// [game thread, startup] Validates the effective configuration content tuple before considering
+// direct launch options. A direct data-root/optional-level pair then wins atomically and never
+// inherits a configured level. No filesystem access or ambient profile discovery occurs here.
+[[nodiscard]] std::expected<std::optional<ContentLaunchProfile>, ContentLaunchProfileError>
+ResolveContentLaunchProfile(const LaunchOptions& options, const ConfigStore& config);
 } // namespace omega::runtime

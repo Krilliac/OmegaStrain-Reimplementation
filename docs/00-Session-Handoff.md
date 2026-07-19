@@ -881,6 +881,23 @@ shipping dependencies or execution mechanisms.
     diagnostic/replay/D3D12 host checks, 30/34/30 default/GPU/restored CTest, 20-frame and 20/20
     short capture-replay, runtime-off with 27 registrations, the 157-file dependency gate, all 209
     tooling tests, and Python compile-all passed. Publication remains unclaimed.
+59. E-0074 introduces one typed content launch profile at the composition root without changing the
+    launch parser or `StartContent`. `content.data_root` and optional `content.level_code` are known
+    strict keys in the effective store produced by an explicitly selected `--config` file plus
+    source-order `--set` overrides. The resolver validates that configured tuple first, even when a
+    direct CLI content pair will win. A direct root plus optional level then replaces the configured
+    tuple atomically, so a root-only CLI selection cannot inherit a configured level. No content
+    keys and no direct root resolve to no profile and retain zero-file startup. Configured levels
+    require a nonempty representable native path, and every level is 1 to 32 ASCII alphanumeric
+    bytes normalized uppercase. Fixed, non-echoing errors use `missing-data-root`,
+    `invalid-data-root`, `invalid-level-code`, or defensive `invalid-options`; main presents them as
+    `content launch profile [category]: message` after runtime-setting validation and before the
+    existing E-0072 startup diagnostic. Only `/openomega.cfg` is newly ignored because it may hold a
+    private path. This slice performs no ambient/default discovery, persistence, picker, path
+    existence check, asset decode, or retail inference. Focused/full MSVC, direct core and process
+    checks, 30/34/30 default/GPU/restored CTest, runtime-off direct/focused checks with 27
+    registrations, the 157-file dependency gate, all 209 tooling tests, and Python compile-all
+    passed. Publication remains unclaimed.
 
 ## Disc observations
 

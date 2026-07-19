@@ -1,6 +1,8 @@
 # User-owned proprietary inputs. Never commit or redistribute these.
 /private/
 /runtime/
+# User-local native launch profile may contain private filesystem paths.
+/openomega.cfg
 *.iso
 *.bin
 *.rom0
