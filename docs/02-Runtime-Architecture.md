@@ -1041,6 +1041,49 @@ with 26 tests registered. The native dependency gate checked 152 files, all 209 
 passed, Python compile-all passed, and the public-tree gate checked 239 indexed text blobs.
 Publication CI remains separate and unclaimed.
 
+E-0064 keeps the same host-side texture and draw-list ownership while replacing the card's
+geometric-only presentation with readable project-authored labels. The integer-only 3x5 glyph table
+draws `OPEN OMEGA`, `W/S SELECT`, `F1 START`, `ESC QUIT`, `START DIAGNOSTIC`,
+`RESERVED SLOT 1`, and `RESERVED SLOT 2` into the generated 128x72 opaque RGBA8 image. It reads no
+font, file, decoded asset, or retail input. `OmegaApp::Create` still uploads that one image once and
+retains one hidden/base draw list plus the same three immutable base/card/amber-marker lists. Their
+source crops, destinations, fit/filter policy, ordering, selection, and teardown ownership do not
+change; neither another GPU upload nor per-frame menu allocation is introduced.
+
+The app loop treats the post-reducer menu state as a narrow simulation gate. Input pumping and
+snapshot capture run first, and terminal input still exits before menu mutation. A nonterminal row
+then reduces the current state. `DiagnosticMenuAllowsSimulation` accepts only a fully valid
+`DiagnosticPlay` state; `MainMenu` and invalid representations fail closed. The host samples actual
+elapsed time and appends that unmodified value to an active capture, then supplies either that value
+or zero to `FrameScheduler::BeginFrame`. Zero elapsed yields no newly planned fixed steps, and
+locomotion planning is skipped while gated. Because reduction precedes this choice, entering
+`MainMenu` freezes on the transition frame and entering `DiagnosticPlay` resumes on its transition
+frame. The live `previous_frame` baseline advances in both modes, so elapsed menu time cannot become
+a later catch-up burst. Rendering still publishes the selected diagnostic draw list each frame;
+input/capture, audio operation and health checks, and job-service ownership also remain active.
+
+`RunReplaySessionConfig::initial_diagnostic_menu_state` is an optional caller-owned policy value.
+When present, the replay session owns it, applies the same reducer to each reconstructed nonterminal
+input row before planning, exposes the current state as an owned optional value, and gates the exact
+captured elapsed value in the same way. When absent, replay performs no menu reduction or gating,
+which preserves every legacy nonmodal caller. The finite capture/replay path explicitly supplies
+`InitialDiagnosticMenuState()` so live and fresh replay use the same synthetic startup policy, but
+this is internal orchestration: CLI arguments and output remain unchanged.
+
+No action identifier or physical binding, `InputSnapshot` or trace schema, captured scheduler/world
+or menu checkpoint, persistence, serialization, wire/stable ABI, or CLI surface changes. Capture
+continues to store actual elapsed rather than gated scheduler input and does not contain the replay
+initial state. The readable labels and modal simulation rule remain project diagnostics and define
+no retail title/menu sequence, pause behavior, timing, art/font, persistence, or PCSX2 equivalence.
+E-0064 local validation completed with a warning-free final incremental MSVC build. The portable
+diagnostic and replay tests each passed directly plus 20/20 repetitions; the Direct3D12 host smoke
+passed directly plus 20/20 repetitions; default CTest passed 29/29 before and after the opt-in
+33/33 GPU matrix; and the capture/replay CLI passed 20/20 repetitions plus one 20-frame run. The
+runtime-disabled configuration built and ran the exact portable target, its focused CTest passed,
+and 26 tests were registered. The dependency gate checked 152 native files, all 209 tooling tests
+passed, Python compile-all passed, and the public-tree gate checked 239 indexed text blobs.
+Publication CI remains separate and unclaimed.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

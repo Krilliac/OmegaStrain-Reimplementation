@@ -27,7 +27,7 @@ constexpr Color kAmberColor{
 // image layout. BuildProjectDiagnosticMenuImage() is also hashed and reported
 // at runtime so a future intentional layout change has an actionable value.
 constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
-    UINT64_C(0xdaf00c60d17f05b5);
+    UINT64_C(0xab88661e41e7a14e);
 
 [[nodiscard]] Color PixelAt(const omega::runtime::DebugImage& image,
     const std::uint32_t x, const std::uint32_t y)
@@ -145,6 +145,7 @@ constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
 int main()
 {
     using omega::app::BuildProjectDiagnosticMenuImage;
+    using omega::app::DiagnosticMenuAllowsSimulation;
     using omega::app::DiagnosticMenuInputEdges;
     using omega::app::DiagnosticMenuMode;
     using omega::app::DiagnosticMenuRow;
@@ -175,6 +176,7 @@ int main()
             DiagnosticMenuState{}, DiagnosticMenuInputEdges{})),
         DiagnosticMenuState>);
     static_assert(noexcept(InitialDiagnosticMenuState()));
+    static_assert(noexcept(DiagnosticMenuAllowsSimulation(DiagnosticMenuState{})));
     static_assert(noexcept(UpdateDiagnosticMenu(
         DiagnosticMenuState{}, DiagnosticMenuInputEdges{})));
     static_assert(DiagnosticMenuState{} ==
@@ -198,6 +200,8 @@ int main()
                       InitialDiagnosticMenuState(),
                       DiagnosticMenuInputEdges{.primary_pressed = true}) ==
                   DiagnosticMenuState{});
+    static_assert(DiagnosticMenuAllowsSimulation(DiagnosticMenuState{}));
+    static_assert(!DiagnosticMenuAllowsSimulation(InitialDiagnosticMenuState()));
 
     int failures = 0;
     const auto Check = [&failures](
@@ -232,16 +236,21 @@ int main()
         DiagnosticMenuRow::ReservedProjectTwo,
     };
     std::size_t exhaustive_cases = 0U;
+    std::size_t simulation_predicate_cases = 0U;
     for (const DiagnosticMenuMode mode : modes)
     {
         for (const DiagnosticMenuRow row : rows)
         {
+            const DiagnosticMenuState source{
+                .mode = mode,
+                .selected_row = row,
+            };
+            Check(DiagnosticMenuAllowsSimulation(source) ==
+                      (mode == DiagnosticMenuMode::DiagnosticPlay),
+                "simulation is allowed by every valid diagnostic-play row only");
+            ++simulation_predicate_cases;
             for (std::uint32_t mask = 0U; mask < 8U; ++mask)
             {
-                const DiagnosticMenuState source{
-                    .mode = mode,
-                    .selected_row = row,
-                };
                 const DiagnosticMenuInputEdges input = InputFromMask(mask);
                 Check(UpdateDiagnosticMenu(source, input) ==
                           ReferenceUpdate(source, input),
@@ -252,6 +261,8 @@ int main()
     }
     Check(exhaustive_cases == 48U,
         "the exhaustive reducer matrix covers two modes, three rows, and eight edge masks");
+    Check(simulation_predicate_cases == 6U,
+        "the simulation predicate covers every valid mode and row combination");
 
     constexpr std::array invalid_states{
         DiagnosticMenuState{
@@ -278,6 +289,8 @@ int main()
     std::size_t invalid_cases = 0U;
     for (const DiagnosticMenuState invalid : invalid_states)
     {
+        Check(!DiagnosticMenuAllowsSimulation(invalid),
+            "every invalid mode or row fails closed to modal simulation");
         for (std::uint32_t mask = 0U; mask < 8U; ++mask)
         {
             Check(UpdateDiagnosticMenu(invalid, InputFromMask(mask)) ==
@@ -370,36 +383,34 @@ int main()
             ++unknown_pixels;
     }
     Check(all_alpha_opaque, "every menu pixel has fully opaque alpha");
-    Check(background_pixels == 3'928U && cyan_pixels == 1'020U &&
-              slate_pixels == 3'788U && amber_pixels == 480U &&
+    Check(background_pixels == 3'739U && cyan_pixels == 1'537U &&
+              slate_pixels == 3'460U && amber_pixels == 480U &&
               unknown_pixels == 0U,
         "the four project-authored colors have their exact independent pixel counts");
 
-    Check(PixelAt(first, 4U, 4U) == kBackgroundColor &&
-              PixelAt(first, 2U, 2U) == kBackgroundColor,
-        "interior pixels outside the card geometry retain the background");
-    Check(PixelAt(first, 0U, 0U) == kCyanColor &&
-              PixelAt(first, 1U, 35U) == kCyanColor &&
-              PixelAt(first, 126U, 35U) == kCyanColor &&
-              PixelAt(first, 64U, 70U) == kCyanColor &&
-              PixelAt(first, 2U, 2U) != kCyanColor,
-        "the cyan frame occupies exactly two pixels on every edge");
-    Check(PixelAt(first, 7U, 7U) == kSlateColor &&
-              PixelAt(first, 20U, 30U) == kSlateColor &&
-              PixelAt(first, 20U, 45U) == kSlateColor &&
-              PixelAt(first, 20U, 60U) == kSlateColor,
-        "the title panel and all three geometric rows use slate");
-    Check(PixelAt(first, 40U, 12U) == kAmberColor &&
-              PixelAt(first, 115U, 15U) == kAmberColor,
-        "the header status bar uses the exact amber half-open rectangle");
-    Check(PixelAt(first, 8U, 8U) == kCyanColor &&
-              PixelAt(first, 16U, 8U) == kCyanColor &&
-              PixelAt(first, 24U, 8U) == kCyanColor &&
-              PixelAt(first, 28U, 8U) == kCyanColor &&
-              PixelAt(first, 26U, 16U) == kCyanColor &&
-              PixelAt(first, 10U, 10U) == kSlateColor &&
-              PixelAt(first, 24U, 16U) == kSlateColor,
-        "representative filled and empty cells preserve the project-authored DEV glyph masks");
+    constexpr std::array probe_coordinates{
+        std::array{4U, 4U}, std::array{0U, 0U}, std::array{8U, 8U},
+        std::array{9U, 8U}, std::array{40U, 12U}, std::array{8U, 23U},
+        std::array{9U, 22U}, std::array{52U, 22U}, std::array{9U, 30U},
+        std::array{16U, 30U}, std::array{17U, 30U}, std::array{77U, 30U},
+        std::array{72U, 45U}, std::array{73U, 45U}, std::array{72U, 60U},
+        std::array{72U, 61U},
+    };
+    constexpr std::array probe_colors{
+        kBackgroundColor, kCyanColor, kSlateColor, kCyanColor,
+        kAmberColor, kCyanColor, kBackgroundColor, kCyanColor,
+        kCyanColor, kSlateColor, kCyanColor, kCyanColor,
+        kSlateColor, kCyanColor, kCyanColor, kSlateColor,
+    };
+    bool probes_match = true;
+    for (std::size_t index = 0U; index < probe_coordinates.size(); ++index)
+    {
+        probes_match = probes_match &&
+                       PixelAt(first, probe_coordinates[index][0],
+                           probe_coordinates[index][1]) == probe_colors[index];
+    }
+    Check(probes_match,
+        "sixteen independent probes cover the frame, labels, legend, and all menu rows");
 
     const std::uint64_t digest = Fnv1a64(first.pixels());
     std::cout << "diagnostic menu FNV-1a-64: 0x" << std::hex

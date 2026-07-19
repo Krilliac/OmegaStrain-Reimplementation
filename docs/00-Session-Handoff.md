@@ -665,6 +665,37 @@ shipping dependencies or execution mechanisms.
     dependency gate checked 152 files, all 209 tooling tests passed, Python compile-all passed, and
     the public-tree gate checked 239 indexed text blobs. Publication CI remains separate and is not
     claimed here.
+49. E-0064 makes the existing generated 128x72 card readable and narrows modal behavior to the
+    simulation boundary. Project-authored 3x5 masks draw `OPEN OMEGA`, the fixed
+    `W/S SELECT` / `F1 START` / `ESC QUIT` legend, `START DIAGNOSTIC`, and the two
+    `RESERVED SLOT` labels without a font, file, decoded asset, or private input. Startup still owns
+    one menu texture upload, one hidden/base list, and three immutable base/card/amber-marker lists.
+    Existing source/target rectangles, `Stretch`/`Nearest` choices, list selection, teardown order,
+    and the no-additional-upload/no-per-frame-menu-allocation contract remain unchanged.
+    On a nonterminal live frame, `OmegaApp` captures the input row, applies the menu reducer, samples
+    actual elapsed time, and appends that actual value to capture. A fully valid resulting
+    `DiagnosticPlay` state feeds the measured elapsed value into `FrameScheduler`; `MainMenu` and
+    invalid state feed zero, skip locomotion planning, and therefore execute no world steps. The
+    transition into the menu freezes immediately on that frame, and the transition into diagnostic
+    play resumes immediately on that frame. The live clock baseline advances on every modal frame,
+    preventing accumulated menu time from becoming catch-up simulation. Input pumping and capture,
+    render publication, audio operation/health checks, and job-service ownership remain active.
+    Replay can opt into identical behavior through caller-owned
+    `RunReplaySessionConfig::initial_diagnostic_menu_state`. Each reconstructed nonterminal row
+    reduces that state before the same elapsed gate; the session exposes its current owned state.
+    The optional value defaults absent, which preserves legacy nonmodal replay for existing callers.
+    The finite capture/replay route supplies `InitialDiagnosticMenuState()` internally but retains
+    its exact CLI syntax and output surface. No action or binding, input/trace schema, captured menu
+    checkpoint, scheduler/world checkpoint, serialization, or CLI contract changes. Captures keep
+    raw elapsed values and never infer or embed the replay's initial menu state. This remains
+    synthetic developer UI, not a retail pause, title/menu, timing, persistence, or equivalence
+    claim. The final incremental MSVC build was warning-free. Portable diagnostic and replay tests
+    each passed directly plus 20/20 repetitions; the Direct3D12 host smoke passed directly plus
+    20/20 repetitions; default CTest passed 29/29 before and after the opt-in 33/33 GPU matrix; and
+    capture/replay CLI passed 20/20 repetitions plus one 20-frame run. Runtime-off built and ran the
+    exact portable target, its focused CTest passed, and 26 tests were registered. The dependency
+    gate checked 152 native files, all 209 tooling tests passed, Python compile-all passed, and the
+    public-tree gate checked 239 indexed text blobs. Publication CI remains separate and unclaimed.
 
 ## Disc observations
 

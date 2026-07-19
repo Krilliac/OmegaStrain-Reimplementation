@@ -64,6 +64,24 @@ struct DiagnosticMenuInputEdges
     };
 }
 
+// [any thread; reentrant] Simulation is enabled only by a fully valid diagnostic-play state.
+// Invalid enum values fail closed even when the mode byte resembles DiagnosticPlay.
+[[nodiscard]] constexpr bool DiagnosticMenuAllowsSimulation(
+    const DiagnosticMenuState state) noexcept
+{
+    if (state.mode != DiagnosticMenuMode::DiagnosticPlay)
+        return false;
+
+    switch (state.selected_row)
+    {
+    case DiagnosticMenuRow::StartDiagnosticPlay:
+    case DiagnosticMenuRow::ReservedProjectOne:
+    case DiagnosticMenuRow::ReservedProjectTwo:
+        return true;
+    }
+    return false;
+}
+
 // [any thread; reentrant] Consumes already-routed logical press edges. Invalid input state fails
 // closed to the initial main menu before considering any edge. Primary has priority over
 // navigation; simultaneous previous/next edges are neutral; navigation clamps at both bounds.

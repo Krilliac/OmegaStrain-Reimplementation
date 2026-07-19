@@ -534,6 +534,34 @@ retail instruction blocks, or PS2 execution layer.
   menu target directly and through CTest, with 26 tests registered. The native dependency gate
   checked 152 files, all 209 tooling tests passed, Python compile-all passed, and the public-tree
   gate checked 239 indexed text blobs. Publication CI remains separate and is not claimed here.
+- E-0064 replaces the card's geometric-only presentation with readable project-authored 3x5 labels:
+  `OPEN OMEGA`, `W/S SELECT`, `F1 START`, `ESC QUIT`, `START DIAGNOSTIC`, and the two
+  `RESERVED SLOT` rows. The card remains a generated 128x72 opaque RGBA8 image with no external
+  font or asset input. Host ownership is unchanged: startup performs one menu-texture upload,
+  retains the same hidden list and three base/card/amber-marker lists, and selects a prebuilt list
+  per frame without another upload, list construction, or menu allocation.
+  The resulting menu state now gates only app-layer simulation. On each nonterminal live frame,
+  input capture and menu reduction happen before the gate: a valid `DiagnosticPlay` state supplies
+  actual elapsed time to the scheduler, while `MainMenu` or an invalid state supplies zero and
+  skips locomotion planning and world steps. Entering the menu freezes that same frame; entering
+  diagnostic play resumes that same frame, and the live clock baseline still advances while modal,
+  so menu wall time is not replayed as catch-up work. Capture stores the actual measured elapsed
+  value rather than the gated zero. Input pumping/capture, rendering, audio, and job-service
+  boundaries continue while the menu is modal.
+  `RunReplaySessionConfig` can optionally own an initial diagnostic-menu state and applies the same
+  reducer-before-gate rule to reconstructed rows. Its default remains no menu state, preserving the
+  legacy nonmodal replay contract; the finite capture/replay route explicitly supplies the native
+  startup state without changing CLI syntax or output. No action ID or binding, input/trace schema,
+  captured checkpoint, serialization, or CLI surface changes, and no menu state is inferred from or
+  embedded in a capture. These labels and modal rules remain synthetic project diagnostics, not a
+  retail-menu, timing, pause, persistence, or PCSX2-equivalence claim. E-0064 local validation is
+  green: the final incremental MSVC build was warning-free; the portable diagnostic and replay
+  tests each passed directly plus 20/20 repetitions; the real Direct3D12 host smoke passed directly
+  plus 20/20 repetitions; default CTest passed 29/29 before and after the opt-in 33/33 GPU matrix;
+  and the capture/replay CLI passed 20/20 repetitions plus one 20-frame run. The exact runtime-off
+  portable target and focused CTest passed with 26 tests registered. The native dependency gate
+  checked 152 files, all 209 tooling tests passed, Python compile-all passed, and the public-tree
+  gate checked 239 indexed text blobs. Publication CI remains separate and is not claimed here.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

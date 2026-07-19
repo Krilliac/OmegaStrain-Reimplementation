@@ -1,5 +1,7 @@
 #pragma once
 
+#include "diagnostic_menu.h"
+
 #include "omega/runtime/frame_scheduler.h"
 #include "omega/runtime/run_capture_replay.h"
 #include "omega/simulation/simulation_world.h"
@@ -27,6 +29,9 @@ struct RunReplaySessionConfig
     // Project-owned diagnostic input policy. Disabled preserves the E0059 replay behavior even
     // when a trace happens to contain the synthetic movement action identifiers.
     bool enable_debug_locomotion = false;
+    // Null preserves legacy nonmodal replay. A supplied value enables replay-owned menu reduction
+    // and gates simulation from each resulting state without changing the captured elapsed value.
+    std::optional<DiagnosticMenuState> initial_diagnostic_menu_state;
 
     friend constexpr bool operator==(
         const RunReplaySessionConfig&, const RunReplaySessionConfig&) noexcept = default;
@@ -224,18 +229,23 @@ public:
     // locomotion option created its positioned diagnostic entity.
     [[nodiscard]] std::optional<simulation::Position3>
     debug_locomotion_position() const noexcept;
+    // [game thread; no concurrent use] Null means this session uses legacy nonmodal replay.
+    [[nodiscard]] std::optional<DiagnosticMenuState>
+    diagnostic_menu_state() const noexcept;
 
 private:
     RunReplaySession(runtime::FrameScheduler&& scheduler,
         simulation::SimulationWorld&& simulation,
         runtime::RunCaptureReplaySession&& replay,
-        std::optional<simulation::EntityId> debug_locomotion_entity) noexcept;
+        std::optional<simulation::EntityId> debug_locomotion_entity,
+        std::optional<DiagnosticMenuState> diagnostic_menu_state) noexcept;
     void NormalizeInert() noexcept;
 
     std::optional<runtime::FrameScheduler> scheduler_;
     std::optional<simulation::SimulationWorld> simulation_;
     std::optional<runtime::RunCaptureReplaySession> replay_;
     std::optional<simulation::EntityId> debug_locomotion_entity_;
+    std::optional<DiagnosticMenuState> diagnostic_menu_state_;
     RunReplaySessionState state_ = RunReplaySessionState::Inert;
 };
 } // namespace omega::app
