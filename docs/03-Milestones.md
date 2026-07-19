@@ -795,6 +795,23 @@ synthetic-only. Focused/full MSVC, direct core/process, 30/34/30 CTest, runtime-
 registrations, 157-file dependency, 209-tooling-test, and compile-all validation passed.
 Publication remains unclaimed.
 
+E-0073 replaces clear-only no-level `DiagnosticPlay` presentation with one synthetic project-owned
+placeholder while leaving level-content rendering intact. The independent opaque 128x72 RGBA8
+builder draws the existing frame/header plus `DIAGNOSTIC PLAY`, `NO LEVEL IMAGE`, `F1/ENTER MENU`,
+and `ESC QUIT`; its exact four-color populations are 3,327/1,285/4,124/480 and FNV-1a-64 is
+`0x37f823d27a4cb3ce`. Valid owner images still win. Otherwise the placeholder uses the existing
+diagnostic upload/error/handle/list path before menu, controls, and topology, yielding four distinct
+zero-file textures and exactly 122,880 resident logical bytes. MainMenu now draws base/card/marker,
+Controls and AssetTopology draw base/card, and no-level DiagnosticPlay draws the one full-target
+`Contain`/`Nearest` base. Reverse teardown is unchanged. START DIAGNOSTIC stays available in
+`NoContent` and `DataMounted`; reducer, simulation, locomotion, elapsed, return, terminal, capture,
+and replay contracts are unchanged. The byte total is no-level-only. This is not retail UI, level
+selection, full-framebuffer identity, DataMounted hardware coverage, private-input evidence, or
+emulator equivalence. Focused/full MSVC, direct and 20/20 repeated diagnostic/replay/GPU checks,
+30/34/30 default/GPU/restored CTest, 20-frame and 20/20 short capture-replay, runtime-off with 27
+registrations, the 157-file dependency gate, 209 tooling tests, and Python compile-all passed.
+Publication remains unclaimed.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

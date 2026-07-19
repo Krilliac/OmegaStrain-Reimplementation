@@ -860,6 +860,27 @@ shipping dependencies or execution mechanisms.
     `omega_core_tests`, process-contract, 30/34/30 CTest, runtime-off with 27 registrations,
     157-file dependency, 209-tooling-test, and Python compile-all validation passed. Publication is
     not yet claimed.
+58. E-0073 adds one project-generated no-level `DiagnosticPlay` placeholder while retaining the
+    complete level-content image path. `BuildProjectDiagnosticNoLevelImage` returns an independent
+    opaque 128x72 RGBA8 allocation without file I/O, platform work, an asset request, or retail
+    input. The existing frame and `OPEN OMEGA` header surround `DIAGNOSTIC PLAY`, `NO LEVEL IMAGE`,
+    `F1/ENTER MENU`, and `ESC QUIT`. Its exact background/cyan/slate/amber populations are
+    3,327/1,285/4,124/480 and its FNV-1a-64 is `0x37f823d27a4cb3ce`.
+    After the E-0071 classifier accepts an owner aggregate, an existing owner `debug_image` wins;
+    otherwise the app builds the placeholder and sends it through the unchanged diagnostic upload
+    and draw path. Zero-file order is placeholder, menu, controls, topology. The four distinct
+    resident textures own exactly 122,880 logical bytes. The hidden list is now one full-source,
+    full-target `Contain`/`Nearest` base blit; MainMenu lists contain base/card/marker, and Controls
+    and AssetTopology contain base/card. Teardown still clears every list before reverse topology,
+    controls, menu, diagnostic release. These residency totals describe no-level startup only.
+    START DIAGNOSTIC remains available in `NoContent` and `DataMounted`; simulation, locomotion,
+    elapsed, return, terminal priority, reducer, capture, and replay contracts do not change. This
+    proves only a synthetic missing-level presentation contract, not typed allocation recovery,
+    full-framebuffer identity, retail UI or level selection, private-input behavior, DataMounted
+    hardware coverage, or emulator equivalence. Focused/full MSVC, direct and 20/20 repeated
+    diagnostic/replay/D3D12 host checks, 30/34/30 default/GPU/restored CTest, 20-frame and 20/20
+    short capture-replay, runtime-off with 27 registrations, the 157-file dependency gate, all 209
+    tooling tests, and Python compile-all passed. Publication remains unclaimed.
 
 ## Disc observations
 

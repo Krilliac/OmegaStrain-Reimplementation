@@ -210,6 +210,13 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     const simulation::EntityId debug_locomotion_entity =
         *created_debug_locomotion_entity;
 
+    runtime::DebugImage no_level_diagnostic_image;
+    if (!content_owner->debug_image)
+        no_level_diagnostic_image = BuildProjectDiagnosticNoLevelImage();
+    const runtime::DebugImage& diagnostic_image = content_owner->debug_image
+                                                      ? *content_owner->debug_image
+                                                      : no_level_diagnostic_image;
+
     auto built_asset_topology = BuildProjectDiagnosticAssetTopologyImage();
     if (!built_asset_topology)
     {
@@ -306,32 +313,28 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     runtime::RenderTextureHandle diagnostic_asset_topology_texture;
     std::array<runtime::RenderTextureBlitCommand, 3U> diagnostic_commands{};
     std::size_t diagnostic_command_count = 0U;
-    if (content_owner->debug_image)
+    auto uploaded = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+        .width = diagnostic_image.width,
+        .height = diagnostic_image.height,
+        .pixels = diagnostic_image.pixels(),
+    });
+    if (!uploaded)
     {
-        const runtime::DebugImage& image = *content_owner->debug_image;
-        auto uploaded = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
-            .width = image.width,
-            .height = image.height,
-            .pixels = image.pixels(),
-        });
-        if (!uploaded)
-        {
-            const std::string error =
-                "SDL/GPU diagnostic texture upload: " + uploaded.error();
-            log->Error("startup", error);
-            return std::unexpected(error);
-        }
-
-        diagnostic_texture = *uploaded;
-        diagnostic_commands[diagnostic_command_count++] =
-            runtime::RenderTextureBlitCommand{
-                .texture = diagnostic_texture,
-                .source = full_source,
-                .destination = full_target,
-                .fit_mode = runtime::RenderTextureFitMode::Contain,
-                .filter_mode = runtime::RenderTextureFilterMode::Nearest,
-            };
+        const std::string error =
+            "SDL/GPU diagnostic texture upload: " + uploaded.error();
+        log->Error("startup", error);
+        return std::unexpected(error);
     }
+
+    diagnostic_texture = *uploaded;
+    diagnostic_commands[diagnostic_command_count++] =
+        runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_texture,
+            .source = full_source,
+            .destination = full_target,
+            .fit_mode = runtime::RenderTextureFitMode::Contain,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        };
 
     auto created_hidden_draw_list = runtime::RenderDrawList::Create(
         std::span<const runtime::RenderTextureBlitCommand>{

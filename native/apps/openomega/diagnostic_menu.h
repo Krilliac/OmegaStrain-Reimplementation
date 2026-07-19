@@ -158,6 +158,11 @@ struct DiagnosticMenuInputEdges
 [[nodiscard]] runtime::DebugImage BuildProjectDiagnosticMenuImage(
     runtime::ContentStartupStage content_stage);
 
+// [any thread; reentrant] Returns a fully owned, project-generated opaque RGBA8 no-level
+// DiagnosticPlay placeholder. It performs no file I/O and consumes no platform object, decoded
+// asset, or retail input.
+[[nodiscard]] runtime::DebugImage BuildProjectDiagnosticNoLevelImage();
+
 // [any thread; reentrant] Returns a fully owned, project-generated opaque RGBA8 controls card.
 // It performs no file I/O and consumes no platform object, decoded asset, or retail input.
 [[nodiscard]] runtime::DebugImage BuildProjectDiagnosticControlsImage();

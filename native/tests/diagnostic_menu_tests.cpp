@@ -25,7 +25,7 @@ constexpr Color kAmberColor{
     std::byte{255U}, std::byte{196U}, std::byte{64U}, std::byte{255U}};
 
 // Frozen only after independent byte-level calculations from the project-owned
-// card contract. Both builders are hashed and reported at runtime so a future
+// card contract. Every builder is hashed and reported at runtime so a future
 // intentional layout change has an actionable value.
 constexpr std::uint64_t kExpectedNoContentMenuFnv1a64 =
     UINT64_C(0x8e8e3f7fff4f971a);
@@ -33,6 +33,8 @@ constexpr std::uint64_t kExpectedDataMountedMenuFnv1a64 =
     UINT64_C(0x517ad52bbf1fbe61);
 constexpr std::uint64_t kExpectedLevelContentMenuFnv1a64 =
     UINT64_C(0x08405186aa105db1);
+constexpr std::uint64_t kExpectedDiagnosticNoLevelFnv1a64 =
+    UINT64_C(0x37f823d27a4cb3ce);
 constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
     UINT64_C(0xcfa7cc57696aae0a);
 constexpr std::uint64_t kExpectedDiagnosticAssetTopologyFnv1a64 =
@@ -215,6 +217,7 @@ int main()
     using omega::app::BuildProjectDiagnosticControlsImage;
     using omega::app::BuildProjectDiagnosticAssetTopologyImage;
     using omega::app::BuildProjectDiagnosticMenuImage;
+    using omega::app::BuildProjectDiagnosticNoLevelImage;
     using omega::app::DiagnosticMenuAllowsSimulation;
     using omega::app::DiagnosticMenuInputEdges;
     using omega::app::DiagnosticMenuMode;
@@ -574,6 +577,71 @@ int main()
               data_mounted_first.rgba8_pixels.data() !=
                   level_content_first.rgba8_pixels.data(),
         "every content-stage build owns a distinct pixel buffer");
+
+    const omega::runtime::DebugImage no_level_first =
+        BuildProjectDiagnosticNoLevelImage();
+    const omega::runtime::DebugImage no_level_second =
+        BuildProjectDiagnosticNoLevelImage();
+    const bool no_level_shape_is_safe =
+        no_level_first.width == 128U && no_level_first.height == 72U &&
+        no_level_first.rgba8_pixels.size() == kExpectedBytes &&
+        no_level_first.pixels().size() == kExpectedBytes;
+    Check(no_level_shape_is_safe,
+        "the no-level DiagnosticPlay placeholder is one tightly packed 128x72 RGBA8 image");
+    if (!no_level_shape_is_safe)
+        return EXIT_FAILURE;
+    Check(no_level_second.width == no_level_first.width &&
+              no_level_second.height == no_level_first.height &&
+              no_level_second.rgba8_pixels == no_level_first.rgba8_pixels &&
+              no_level_second.rgba8_pixels.data() !=
+                  no_level_first.rgba8_pixels.data() &&
+              no_level_first.rgba8_pixels != no_content_first.rgba8_pixels,
+        "independent no-level builds own distinct byte-identical storage separate from the menu");
+
+    const ColorHistogram no_level_histogram = CountColors(no_level_first);
+    Check(no_level_histogram == ColorHistogram{
+              .background = 3'327U,
+              .cyan = 1'285U,
+              .slate = 4'124U,
+              .amber = 480U,
+              .unknown = 0U,
+              .all_alpha_opaque = true,
+          },
+        "the no-level placeholder has its exact opaque four-color histogram");
+
+    constexpr std::array no_level_probe_coordinates{
+        std::array{0U, 0U}, std::array{4U, 4U}, std::array{8U, 8U},
+        std::array{9U, 8U}, std::array{40U, 12U}, std::array{33U, 24U},
+        std::array{34U, 24U}, std::array{7U, 34U}, std::array{8U, 34U},
+        std::array{35U, 40U}, std::array{36U, 40U}, std::array{8U, 52U},
+        std::array{8U, 56U}, std::array{12U, 59U}, std::array{83U, 59U},
+        std::array{84U, 59U},
+    };
+    constexpr std::array no_level_probe_colors{
+        kCyanColor, kBackgroundColor, kSlateColor, kCyanColor,
+        kAmberColor, kBackgroundColor, kCyanColor, kBackgroundColor,
+        kSlateColor, kSlateColor, kCyanColor, kBackgroundColor,
+        kSlateColor, kCyanColor, kSlateColor, kCyanColor,
+    };
+    bool no_level_probes_match = true;
+    for (std::size_t index = 0U; index < no_level_probe_coordinates.size();
+         ++index)
+    {
+        no_level_probes_match = no_level_probes_match &&
+                                PixelAt(no_level_first,
+                                    no_level_probe_coordinates[index][0],
+                                    no_level_probe_coordinates[index][1]) ==
+                                    no_level_probe_colors[index];
+    }
+    Check(no_level_probes_match,
+        "sixteen probes cover the no-level frame, header, title, message, and footer");
+
+    const std::uint64_t no_level_digest = Fnv1a64(no_level_first.pixels());
+    std::cout << "diagnostic no-level FNV-1a-64: 0x" << std::hex
+              << std::setfill('0') << std::setw(16) << no_level_digest
+              << std::dec << '\n';
+    Check(no_level_digest == kExpectedDiagnosticNoLevelFnv1a64,
+        "the complete no-level placeholder matches its independently frozen digest");
 
     const ColorHistogram no_content_histogram = CountColors(no_content_first);
     const ColorHistogram data_mounted_histogram = CountColors(data_mounted_first);
