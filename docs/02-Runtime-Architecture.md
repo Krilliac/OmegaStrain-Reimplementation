@@ -323,6 +323,9 @@ catalog item/output cost; it never resets limits per cell. VUM semantic scratch 
 depth ends at the cell-HOG edge. The fully owned `LevelMaterialCatalogsIR` preserves manifest order,
 cardinality, and repeated references without deduplication. It exposes only the already-confirmed
 name table and dense MTRL-to-name index relationships; passive VUM payloads remain retail-only.
+Offline exact equality of complete normalized names ending `.TDX` does not cross this service
+boundary: `GameDataService`, `LevelContentIR`, and `LevelTextureStore` perform no catalog-name-to-
+locator lookup or alias resolution and expose no material-to-texture binding.
 
 `LoadLevelContent` is the startup composition boundary for those two canonical collections. It
 reads and indexes the common archive chain and each referenced cell HOG once, then decodes the

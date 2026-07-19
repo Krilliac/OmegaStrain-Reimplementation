@@ -81,6 +81,15 @@ retail instruction blocks, or PS2 execution layer.
   A separate retail-only passive descriptor validates 91,460 payload pairs, 38,023 normalized
   targets, 134,122 middle-to-final references, and 365,840 ordered Q/P references without
   exposing payload bytes, render geometry, or console instructions.
+- A bounded analysis-only lexical-coherence pass compares complete normalized VUM member-name
+  occurrences only against exact complete direct locator strings when the VUM name ends `.TDX`.
+  Two passes are byte-identical, scan 18/18 levels with zero errors, and exactly reproduce the native
+  cell/catalog/name/material/reference and container/locator populations. All 34,267 VUM name
+  occurrences and 37,893 dense references classify as non-`.TDX`; no name enters the eligible
+  exact-candidate lookup branch, and all 5,801 class-qualified locators remain unreached. This narrow
+  negative result tests no alias family, observes no native or retail lookup, establishes no texture
+  role, material binding, source priority, or runtime integration, and exposes no identities or
+  proprietary data.
 - The first privacy-safe VUM consumer trace has one strict-validator-accepted complete 120-frame pair
   from one selected runtime copy. Its repeat is byte-identical; each validated report contains two
   EE-read aggregate rows, two anonymous-site rows, and zero VIF1 chunk rows. Post-run containment

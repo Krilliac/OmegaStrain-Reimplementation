@@ -137,6 +137,16 @@ shipping dependencies or execution mechanisms.
     tuple is asserted to co-occur. This confirms native conformity to the published hypothesis family
     only, not section boundaries, counts, records, payload meaning, placement, visibility, rendering,
     or gameplay.
+26. Added and reran the bounded full-normalized-member-name lexical-coherence experiment over
+    manifest-scoped VUM names and the two explicit direct TDX locator classes. It scans 18/18 levels
+    with zero errors, and its cell/catalog/name/material/reference and container/locator totals match
+    the native validation populations exactly. All 34,267 VUM name occurrences and 37,893 dense
+    references lack terminal `.TDX`; no name enters the eligible exact lookup branch, all 34,589
+    material records have an ineligible reference, and all 5,801 class-qualified locators remain
+    unreached. The experiment compares complete normalized strings only and excludes basename, stem,
+    extension addition/removal, suffix substitution, nested-container, fuzzy, and other alias
+    hypotheses. This narrow negative result establishes no retail lookup, texture-name role, material
+    binding, class priority, or runtime integration.
 
 ## Disc observations
 
@@ -166,15 +176,20 @@ shipping dependencies or execution mechanisms.
    vertex, material, packet, draw, placement, visibility, or gameplay semantics from the current
    header-only aggregate rows or the absence of VIF1 chunks. A zero VIF1 count does not rule out
    copied buffers or consumption outside the bounded observation window.
-2. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
+2. Use E-0041's ineligible partition only to prioritize controlled observations of retail name
+   lookup and MTRL-record consumption. Test one-pass extension removal, basename/stem/suffix, or
+   other alias behavior as separate bounded experiments because E-0041 excludes them. Do not connect
+   `MaterialCatalogIR` to `LevelTextureStore` until lookup behavior and material consumption are
+   independently observed and corroborated.
+3. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
    independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.
-3. Continue POP beyond the now-native guarded hypothesis envelope only through independent evidence.
+4. Continue POP beyond the now-native guarded hypothesis envelope only through independent evidence.
    Test record-internal invariants and controlled behavioral consumption before promoting any literal
    to a boundary or any observed word/stride to count or record semantics; independently connect
    consumed fields to placement or visibility behavior. Passive-descriptor acceptance is a
    conformity check, not semantic corroboration.
-4. Capture PS Rewired network behavior separately before designing any replacement service.
+5. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools
 

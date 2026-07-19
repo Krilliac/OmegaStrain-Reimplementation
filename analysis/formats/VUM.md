@@ -241,3 +241,63 @@ magic/reserved bytes, dense name-reference families and bounds, P/Q/T metadata r
 midstream target-block normalization, duplicate/decreasing targets, middle-span families,
 combined reference ordering, final suffix size, the empty family, hostile counts, and
 exact/one-below input, item, and output budgets.
+
+## Full normalized member-name equality restricted to `.TDX`
+
+`tools/measure_level_material_texture_name_candidates.py` is a bounded analysis-only comparison
+between VUM name occurrences and the two explicit level-scoped direct TDX locator classes. Its
+accepted population has exact aggregate level, cell, catalog, name, material, reference, container,
+and locator cardinality parity with the native `GameDataService` and `LevelTextureStore` verifiers.
+That is validation-scope parity only: the Python experiment does not execute a native lookup and
+does not establish that retail code performs one.
+
+The sole eligible branch compares complete normalized member strings, after the existing bounded
+ASCII case and separator normalization, and requires the VUM string to end exactly in `.TDX`.
+The experiment does not compare basenames or stems, add or remove an extension, substitute a suffix,
+fuzzy-match, search nested containers, or test any alias family. An unsafe name is
+`invalid_member_candidate`; a valid name without terminal `.TDX` is `non_tdx_suffix`; and
+`unmatched` means only that an eligible full-string exact candidate was absent. None of those
+classes excludes a relationship through an untested alias or representation.
+
+A complete normalized string present in exactly one locator class would be classified
+`unique_primary` or `unique_map`; presence in both would be `ambiguous_cross_class`, with no class
+priority. These are candidate classes, not asset identity or binding. Dense MTRL references merely
+inherit the class of the referenced name occurrence, and overlapping material-record flags summarize
+those inherited classes without assigning a texture to a material.
+
+The confirmed byte-identical rerun reports:
+
+| Class | VUM name occurrences | Dense name-reference occurrences |
+| --- | ---: | ---: |
+| Invalid normalized member candidate | 0 | 0 |
+| Non-`.TDX` terminal suffix | 34,267 | 37,893 |
+| Eligible full-string exact candidate unmatched | 0 | 0 |
+| Unique primary-class candidate | 0 | 0 |
+| Unique map-class candidate | 0 | 0 |
+| Ambiguous across both classes | 0 | 0 |
+
+All 34,589 material records have at least one ineligible reference; the all-unique, any-unique,
+any-unmatched, and any-ambiguous flags are all zero. All 5,801 class-qualified locator occurrences
+are unreached; none is reached uniquely or only ambiguously. The zero `unmatched` count does not
+mean that names matched: no name was eligible to enter that branch because every accepted name
+lacked terminal `.TDX`.
+
+The run discovers and atomically scans all 18 levels, traverses 5,351 manifest cell occurrences,
+validates 5,351 VUM catalog occurrences with 34,267 name occurrences, 34,589 material records, and
+37,893 dense references, and compares against 5,801 class-qualified locator occurrences from 36
+exact sibling containers, with zero errors. Independent maxima are 140 names per catalog, 140
+materials per catalog, 142 dense references per catalog, 730 locators per level, and zero candidate
+locators per name.
+
+This exact-equality negative result does not prove that catalog names are texture names, that a
+material record binds a texture, that retail code performs this lookup, that either container class
+has priority, or that a locator binds a cell, mesh, draw, placement, visibility, or renderer
+resource. It does not exclude implicit extensions, extension removal, aliases, basenames, stems,
+indirection, alternate representations, or other lookup mechanisms, and it does not justify runtime
+integration. The fixed report emits no paths, archive/member/catalog names, hashes, offsets, payload
+bytes, per-level rows, locator identities, or inferred semantics. Private strings exist only in
+bounded per-level working sets and are discarded before the next level.
+
+```powershell
+python -B tools/measure_level_material_texture_name_candidates.py private/extracted-disc
+```
