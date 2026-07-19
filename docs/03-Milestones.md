@@ -609,6 +609,22 @@ not uploaded or rendered, and this slice establishes no retail-menu art, text, p
 navigation, selection, activation, pause, control-layout, timing, asset, persistence, replay, or UI
 behavior semantics.
 
+E-0062 connects the value to the native host as synthetic nonmodal developer UI. F1 and gamepad
+Start produce action 6; capture retains the ordinary input row, terminal handling precedes the
+toggle, and normal toggle frames continue through movement and simulation. Startup uploads the
+128x72 card once and builds fixed hidden/base and visible/base-plus-menu draw lists. The menu command
+uses Q16 source `{0,0,65536,65536}`, exact destination `{2048,2048,26624,15872}`, `Stretch`, and
+`Nearest`; frame publication only selects a list. Replay reconstructs action 6 but owns no menu
+state, terminal input does not change host visibility, and the existing fresh-replay CLI line is
+unchanged. This adds no retail menu, pause, navigation, selection, layout, timing, rendering,
+persistence, or replay semantics.
+
+E-0062 local validation is green: a clean zero-warning MSVC build; focused portable and real-host
+passes; 20/20 repeated host runs; 29/29 default and 33/33 opt-in GPU CTest; 20/20 unchanged
+capture/replay CLI repetitions; an exact runtime-off portable target build/run with 26 registered
+tests; 152 native dependency files; 209 tooling tests; Python compile-all; and 239 indexed public
+text blobs. Publication CI has not run for this slice.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

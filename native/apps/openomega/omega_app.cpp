@@ -7,8 +7,10 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <limits>
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -87,6 +89,16 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
             .device = runtime::InputDevice::GamepadButton,
             .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_BACK),
             .action = kQuitAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_F1),
+            .action = kDiagnosticMenuToggleAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::GamepadButton,
+            .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_START),
+            .action = kDiagnosticMenuToggleAction,
         },
         runtime::InputBinding{
             .device = runtime::InputDevice::Keyboard,
@@ -197,8 +209,29 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     }
     auto host = std::make_unique<SdlGpuHost>(std::move(*created_host));
 
+    constexpr runtime::RenderSourceRectQ16 full_source{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    constexpr runtime::RenderTargetRectQ16 full_target{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    constexpr runtime::RenderTargetRectQ16 menu_target{
+        .left = 2048U,
+        .top = 2048U,
+        .right = 26624U,
+        .bottom = 15872U,
+    };
+
     runtime::RenderTextureHandle diagnostic_texture;
-    runtime::RenderDrawList diagnostic_draw_list;
+    runtime::RenderTextureHandle diagnostic_menu_texture;
+    std::array<runtime::RenderTextureBlitCommand, 2U> diagnostic_commands{};
+    std::size_t diagnostic_command_count = 0U;
     if (content_owner->debug_image)
     {
         const runtime::DebugImage& image = *content_owner->debug_image;
@@ -215,39 +248,63 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
             return std::unexpected(error);
         }
 
-        constexpr runtime::RenderSourceRectQ16 full_source{
-            .left = 0U,
-            .top = 0U,
-            .right = runtime::kNormalizedRenderExtent,
-            .bottom = runtime::kNormalizedRenderExtent,
-        };
-        constexpr runtime::RenderTargetRectQ16 full_target{
-            .left = 0U,
-            .top = 0U,
-            .right = runtime::kNormalizedRenderExtent,
-            .bottom = runtime::kNormalizedRenderExtent,
-        };
-        const std::array commands{
+        diagnostic_texture = *uploaded;
+        diagnostic_commands[diagnostic_command_count++] =
             runtime::RenderTextureBlitCommand{
-                .texture = *uploaded,
+                .texture = diagnostic_texture,
                 .source = full_source,
                 .destination = full_target,
                 .fit_mode = runtime::RenderTextureFitMode::Contain,
                 .filter_mode = runtime::RenderTextureFilterMode::Nearest,
-            },
-        };
-        auto created_draw_list = runtime::RenderDrawList::Create(commands);
-        if (!created_draw_list)
-        {
-            constexpr std::string_view error =
-                "SDL/GPU diagnostic draw-list creation failed";
-            log->Error("startup", error);
-            return std::unexpected(std::string(error));
-        }
-
-        diagnostic_texture = *uploaded;
-        diagnostic_draw_list = std::move(*created_draw_list);
+            };
     }
+
+    auto created_hidden_draw_list = runtime::RenderDrawList::Create(
+        std::span<const runtime::RenderTextureBlitCommand>{
+            diagnostic_commands.data(), diagnostic_command_count});
+    if (!created_hidden_draw_list)
+    {
+        constexpr std::string_view error =
+            "SDL/GPU diagnostic hidden draw-list creation failed";
+        log->Error("startup", error);
+        return std::unexpected(std::string(error));
+    }
+    auto diagnostic_hidden_draw_list = std::move(*created_hidden_draw_list);
+
+    const runtime::DebugImage menu_image = BuildProjectDiagnosticMenuImage();
+    auto uploaded_menu = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+        .width = menu_image.width,
+        .height = menu_image.height,
+        .pixels = menu_image.pixels(),
+    });
+    if (!uploaded_menu)
+    {
+        const std::string error =
+            "SDL/GPU diagnostic menu texture upload: " + uploaded_menu.error();
+        log->Error("startup", error);
+        return std::unexpected(error);
+    }
+    diagnostic_menu_texture = *uploaded_menu;
+    diagnostic_commands[diagnostic_command_count++] =
+        runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_menu_texture,
+            .source = full_source,
+            .destination = menu_target,
+            .fit_mode = runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        };
+
+    auto created_visible_draw_list = runtime::RenderDrawList::Create(
+        std::span<const runtime::RenderTextureBlitCommand>{
+            diagnostic_commands.data(), diagnostic_command_count});
+    if (!created_visible_draw_list)
+    {
+        constexpr std::string_view error =
+            "SDL/GPU diagnostic visible draw-list creation failed";
+        log->Error("startup", error);
+        return std::unexpected(std::string(error));
+    }
+    auto diagnostic_visible_draw_list = std::move(*created_visible_draw_list);
 
     log->Info("startup", "runtime services ready with " +
                              std::to_string(jobs->worker_count()) + " workers and " +
@@ -258,7 +315,8 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
         std::move(frame_scheduler), std::move(input), std::move(simulation),
         debug_locomotion_entity,
         std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
-        diagnostic_texture, std::move(diagnostic_draw_list));
+        diagnostic_texture, diagnostic_menu_texture,
+        std::move(diagnostic_hidden_draw_list), std::move(diagnostic_visible_draw_list));
 }
 
 OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
@@ -276,7 +334,9 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<SdlAudioService> audio,
     std::unique_ptr<SdlGpuHost> host,
     const runtime::RenderTextureHandle diagnostic_texture,
-    runtime::RenderDrawList diagnostic_draw_list) noexcept
+    const runtime::RenderTextureHandle diagnostic_menu_texture,
+    runtime::RenderDrawList diagnostic_hidden_draw_list,
+    runtime::RenderDrawList diagnostic_visible_draw_list) noexcept
     : config_(std::move(config)), content_(std::move(content)),
       stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)),
       log_(std::move(log)), jobs_(std::move(jobs)), assets_(std::move(assets)),
@@ -285,19 +345,27 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
       debug_locomotion_entity_(debug_locomotion_entity), platform_(std::move(platform)),
       sdl_input_(std::move(sdl_input)), audio_(std::move(audio)), host_(std::move(host)),
       diagnostic_texture_(diagnostic_texture),
-      diagnostic_draw_list_(std::move(diagnostic_draw_list))
+      diagnostic_menu_texture_(diagnostic_menu_texture),
+      diagnostic_hidden_draw_list_(std::move(diagnostic_hidden_draw_list)),
+      diagnostic_visible_draw_list_(std::move(diagnostic_visible_draw_list))
 {
 }
 
 OmegaApp::~OmegaApp() noexcept
 {
-    diagnostic_draw_list_ = {};
-    if (host_ != nullptr && diagnostic_texture_.valid())
+    diagnostic_hidden_draw_list_ = {};
+    diagnostic_visible_draw_list_ = {};
+
+    const auto release_texture = [this](const runtime::RenderTextureHandle texture,
+                                     const std::string_view failure_message) noexcept
     {
+        if (host_ == nullptr || !texture.valid())
+            return;
+
         bool release_failed = false;
         try
         {
-            release_failed = !host_->ReleaseTexture(diagnostic_texture_);
+            release_failed = !host_->ReleaseTexture(texture);
         }
         catch (...)
         {
@@ -309,15 +377,20 @@ OmegaApp::~OmegaApp() noexcept
         {
             try
             {
-                log_->Warning("shutdown",
-                    "diagnostic texture release failed; SDL/GPU host cleanup will retry");
+                log_->Warning("shutdown", failure_message);
             }
             catch (...)
             {
                 // Destruction remains noexcept even if bounded shutdown logging cannot allocate.
             }
         }
-    }
+    };
+
+    release_texture(diagnostic_menu_texture_,
+        "diagnostic menu texture release failed; SDL/GPU host cleanup will retry");
+    release_texture(diagnostic_texture_,
+        "diagnostic texture release failed; SDL/GPU host cleanup will retry");
+    diagnostic_menu_texture_ = {};
     diagnostic_texture_ = {};
 }
 OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
@@ -476,6 +549,9 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             break;
         }
 
+        diagnostic_menu_state_ = UpdateDiagnosticMenu(diagnostic_menu_state_,
+            input_snapshot.WasPressed(kDiagnosticMenuToggleAction));
+
         const auto planned_translation = gameplay::PlanDebugLocomotionStep(
             gameplay::DigitalMoveCommand{
                 .lateral = static_cast<std::int8_t>(
@@ -573,7 +649,9 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             .simulated_time = simulation_snapshot.simulated_time,
             .alive_entities = simulation_snapshot.alive_entities,
             .clear_color = runtime::kDefaultRenderClearColor,
-            .draw_list = diagnostic_draw_list_,
+            .draw_list = diagnostic_menu_state_.visible
+                             ? diagnostic_visible_draw_list_
+                             : diagnostic_hidden_draw_list_,
         };
         auto rendered = host_->RenderFrame(render_packet);
         if (!rendered)
