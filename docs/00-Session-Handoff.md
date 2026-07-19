@@ -629,7 +629,42 @@ shipping dependencies or execution mechanisms.
     unchanged capture/replay CLI repetitions. Runtime-off validation built and ran the exact
     portable menu target and registered 26 tests. The native dependency gate checked 152 files,
     all 209 tooling tests passed, Python compile-all passed, and the public-tree gate checked 239
-    indexed text blobs. Publication CI has not run for E-0062.
+    indexed text blobs. The exact E-0062 main tree subsequently passed the Windows x86-64 native,
+    Linux x86-64 native, and public-tree safety publication-CI jobs.
+48. E-0063 replaces the host's visibility bit with a portable two-mode, three-row state machine.
+    Default construction remains the safe `DiagnosticPlay`/`StartDiagnosticPlay` value, while
+    `InitialDiagnosticMenuState()` explicitly starts `OmegaApp` in `MainMenu` on that first row.
+    Invalid mode or row values reset to that startup state before any edge is consumed. The reducer
+    remains constexpr/noexcept and observes only press edges from existing actions 2/3/6: W/S plus
+    gamepad D-pad Up/Down and F1 plus gamepad Start. Primary has priority, opens main-menu row zero
+    from play, enters play from the first row, and is inert on both reserved rows. Previous and next
+    clamp at the boundaries; simultaneous navigation edges are neutral.
+    Capture publication and host/logical terminal handling still precede the reducer. Normal menu
+    frames remain nonmodal: the same actions 2/3 continue as held locomotion input, and scheduling,
+    simulation, audio, rendering, capture, and fresh replay are not suppressed. Terminal rows may
+    retain the action edges without changing menu, scheduler, world, or renderer state.
+    `RunReplaySession` reconstructs the ordinary actions and still consumes 2/3 only for synthetic
+    locomotion; it owns no menu mode, row, or transition.
+    Startup performs no additional texture upload. It reuses the one 128x72 card texture and owns
+    one immutable hidden/base list plus three immutable base/card/amber-marker lists. The full card
+    uses source `{0,0,65536,65536}` and target `{2048,2048,26624,15872}`. The marker reuses crop
+    `{18432,9103,59392,14563}` at row targets `{3584,7424,4352,9344}`,
+    `{3584,10304,4352,12224}`, and `{3584,13184,4352,15104}`; every card and marker command uses
+    `Stretch` and `Nearest`. Frames only select a prebuilt list, with no per-frame menu upload, list
+    construction, or allocation.
+    Every mode, row, binding reuse, clamp, priority, crop, and target is synthetic project behavior.
+    E-0063 establishes no retail title/menu sequence, art, text, control map, wrapping, selection,
+    activation, pause, transition timing, persistence, replay UI state, private-input result, or
+    PCSX2 equivalence. E-0063 local validation used project-generated zero-file fixtures only and
+    no private inputs. A clean incremental MSVC build completed with zero warnings and errors. The
+    focused portable executable passed directly plus 20/20 repetitions, and the real
+    `direct3d12` host smoke passed directly plus 20/20 repetitions. Default CTest passed 29/29 both
+    before and after restoring GPU registration; the opt-in GPU configuration passed 33/33. The
+    unchanged capture/replay CLI smoke passed 20/20. Runtime-off validation built and ran the exact
+    portable menu target directly and through CTest, with 26 tests registered. The native
+    dependency gate checked 152 files, all 209 tooling tests passed, Python compile-all passed, and
+    the public-tree gate checked 239 indexed text blobs. Publication CI remains separate and is not
+    claimed here.
 
 ## Disc observations
 
