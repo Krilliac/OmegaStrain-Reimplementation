@@ -417,6 +417,28 @@ scheduler timing/pacing, quit/run-control, simulation/gameplay state, replay exe
 event/device capture, serialization, a file/wire/stable ABI, concurrent recorder use, or a retail
 limit, timing, or determinism claim.
 
+E-0053 adds the bounded scheduler-elapsed capture foundation. A move-only game-thread recorder
+pre-sizes one private `int64_t` record for each of 1 through 65,536 configured slots after
+validating a nonoverflowing contiguous `uint64_t` frame range. At the hard maximum, those record
+elements contain exactly 524,288 bytes (512 KiB) of element payload, excluding excess vector
+capacity, allocator/object overhead, and process RSS. Allocation-free atomic appends preserve
+every signed nanosecond value with recorder-state, capacity, then frame-discontinuity failure
+priority. Allocation-free expected finalization publishes an immutable move-only trace, including
+a valid empty trace; `FrameAt` returns owned values. Published trace reads are reentrant on any
+thread when no read races move or destruction.
+
+A paired `FrameScheduler` test confirms identical per-frame plans, accumulator state,
+planned-step totals, and dropped-time totals for direct and trace-retrieved elapsed values under the
+tested configuration. The final MSVC build of the signed-nanosecond implementation completed with
+zero warnings or errors. The focused `omega_scheduler_elapsed_trace_tests` executable passed once
+plus 100/100 repeated runs; default CTest passed 22/22. The opt-in Direct3D12 configuration passed
+23/23, was restored to `OFF`, and left 22 tests in the default list. The static native dependency
+gate passed 133 files, and all 204 tooling tests passed. Publication CI remains separate. This is
+capture/storage/query infrastructure only, not a clock source or timestamp-accuracy guarantee,
+`FramePlan` capture or checkpoint restoration, input alignment beyond caller indices,
+quit/run-control, simulation/gameplay, injection/replay/app wiring, CLI, persistence, a
+file/wire/stable ABI, retail tick claim, or cross-configuration determinism.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

@@ -400,6 +400,30 @@ shipping dependencies or execution mechanisms.
     playback, scheduler timing/pacing, quit/run-control, simulation/gameplay state, replay
     execution, host event/device capture, serialization, file/wire/stable ABI, concurrent recorder
     use, or retail limit/timing claim.
+38. E-0053 adds bounded in-process scheduler-elapsed capture through the move-only
+    `SchedulerElapsedTraceRecorder` and immutable `SchedulerElapsedTrace`. Creation validates a
+    synthetic capacity from 1 through 65,536 frames and a nonoverflowing contiguous `uint64_t`
+    range before allocation, then pre-sizes one private `int64_t` record per slot. At the hard
+    maximum, the 65,536 record elements contain exactly 524,288 bytes (512 KiB) of element payload.
+    This excludes excess vector capacity, allocator/object overhead, and process RSS.
+    Allocation-free atomic `Append` preserves the exact caller-supplied signed nanoseconds,
+    including negative, zero, minimum, and maximum values. Failures have recorder-state, capacity,
+    then frame-discontinuity priority. Allocation-free expected `Finish` permits an open empty
+    recording and makes the source inert. `FrameAt` returns an owned value. Recorder use is
+    game-thread exclusive. Published immutable trace reads are reentrant on any thread when no read
+    races move or destruction. A paired `FrameScheduler` test produces identical per-frame plans,
+    accumulator state, planned-step totals, and dropped-time totals from direct and trace-retrieved
+    elapsed values under the tested configuration.
+    The final MSVC build of the signed-nanosecond implementation completed with zero warnings or
+    errors. The focused `omega_scheduler_elapsed_trace_tests` executable passed once plus 100/100
+    repeated runs; default CTest passed 22/22. The opt-in Direct3D12 configuration passed 23/23,
+    was restored to `OFF`, and left 22 tests in the default list. The static native dependency gate
+    passed 133 files, and all 204 tooling tests passed. Publication CI remains separate.
+    This is only bounded elapsed-value capture/storage/query infrastructure. It adds no clock
+    source or timestamp-accuracy claim, `FramePlan` capture or checkpoint restoration, input
+    alignment beyond caller indices, quit/run-control, simulation/gameplay, injection, replay, app
+    wiring, CLI, persistence, file/wire/stable ABI, retail tick claim, or cross-configuration
+    determinism.
 
 ## Disc observations
 

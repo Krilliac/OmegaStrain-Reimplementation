@@ -302,6 +302,29 @@ retail instruction blocks, or PS2 execution layer.
   It provides no input injection, playback, scheduler timing or pacing, quit/run-control,
   simulation or gameplay state, replay execution, host event/device capture, serialization,
   file/wire/stable ABI contract, concurrent recorder use, or retail limit or timing semantics.
+- E-0053 adds a bounded, move-only `SchedulerElapsedTraceRecorder` and immutable
+  `SchedulerElapsedTrace` for exact caller-supplied scheduler elapsed values. `Create` validates a
+  capacity of 1 through the synthetic hard maximum of 65,536 and a nonoverflowing contiguous
+  `uint64_t` frame range before allocation, then pre-sizes one private `int64_t` record per slot.
+  At the hard maximum, those record elements contain exactly 524,288 bytes (512 KiB) of element
+  payload. This excludes excess vector capacity, allocator/object overhead, and process RSS.
+  Allocation-free atomic `Append` preserves every signed nanosecond value and fails in fixed
+  recorder-state, capacity, then frame-discontinuity priority. Allocation-free expected `Finish`
+  accepts an open empty recorder and leaves the source inert. `FrameAt` returns an owned value.
+  Recorder use is game-thread exclusive, while a published immutable trace supports reentrant
+  const reads on any thread when no read races its move or destruction. A paired
+  `FrameScheduler` test proves direct and trace-retrieved elapsed values produce identical plans,
+  accumulator state, planned-step totals, and dropped-time totals for the tested configuration.
+  The final MSVC build of the signed-nanosecond implementation completed with zero warnings or
+  errors. The focused `omega_scheduler_elapsed_trace_tests` executable passed once plus 100/100
+  repeated runs, and default CTest passed 22/22. The opt-in Direct3D12 configuration passed 23/23,
+  after which registration was restored to `OFF` and the default list returned to 22 tests. The
+  static native dependency gate passed 133 files, and all 204 tooling tests passed. Publication CI
+  remains separate.
+  This establishes no clock source or timestamp accuracy, `FramePlan` capture or checkpoint
+  restoration, input alignment beyond caller indices, quit/run-control, simulation/gameplay,
+  injection/replay/app wiring, CLI, persistence, file/wire/stable ABI, retail tick rate, or
+  cross-configuration determinism.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
