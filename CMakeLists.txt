@@ -77,6 +77,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/config_service.cpp
     native/src/runtime/content_startup.cpp
     native/src/runtime/frame_scheduler.cpp
+    native/src/runtime/input_trace.cpp
     native/src/runtime/input_tracker.cpp
     native/src/runtime/job_service.cpp
     native/src/runtime/launch_options.cpp
@@ -338,6 +339,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_asset_service_tests COMMAND omega_asset_service_tests)
     set_tests_properties(omega_asset_service_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_input_trace_tests
+        native/tests/input_trace_tests.cpp
+    )
+    target_link_libraries(omega_input_trace_tests PRIVATE omega_runtime)
+    if(MSVC)
+        target_compile_options(omega_input_trace_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_input_trace_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_input_trace_tests COMMAND omega_input_trace_tests)
+    set_tests_properties(omega_input_trace_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_render_texture_pool_tests
         native/tests/render_texture_pool_tests.cpp

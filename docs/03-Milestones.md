@@ -399,6 +399,24 @@ interpolation, edge, aspect, rounding, Linear/Contain, alpha/blending/color-spac
 swapchain/presentation, asynchronous lifetime, cross-backend, public readback, asset-binding,
 retail-rendering, or gameplay guarantee.
 
+E-0052 adds the bounded logical input-capture foundation. A move-only game-thread recorder copies
+one validated nonempty, ascending, unique schema of at most 64 actions and pre-sizes 1 through
+65,536 private 32-byte frame records without permitting contiguous `uint64_t` frame-index overflow.
+At the hard maximum, those record elements plus the fixed 64-slot `uint32_t` schema backing contain
+exactly 2,097,408 bytes of element payload. This does not measure excess vector capacity,
+allocator/object overhead, or process RSS. Allocation-free atomic appends capture only post-binding
+held/pressed/released masks and accepted/rejected counts. Allocation-free expected finalization
+publishes an immutable move-only trace, including a valid empty trace; owned frame/action queries
+remain distinct from the one borrowed schema view.
+
+The final MSVC build completed with zero warnings or errors. The focused public zero-file test
+passed once plus 100 repeated runs; default CTest passed 21/21. The opt-in Direct3D12 configuration
+passed 22/22, was restored to `OFF`, and left 21 tests in the default list. Publication CI remains
+separate. This is capture/storage/query infrastructure only, not input injection or playback,
+scheduler timing/pacing, quit/run-control, simulation/gameplay state, replay execution, host
+event/device capture, serialization, a file/wire/stable ABI, concurrent recorder use, or a retail
+limit, timing, or determinism claim.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.
