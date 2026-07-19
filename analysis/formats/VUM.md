@@ -301,3 +301,68 @@ bounded per-level working sets and are discarded before the next level.
 ```powershell
 python -B tools/measure_level_material_texture_name_candidates.py private/extracted-disc
 ```
+
+## Exact-first one-terminal-extension candidate family
+
+The scanner's separate `one-terminal-extension` family is an additive schema-version-2 experiment.
+The default `exact-terminal-tdx` family and its schema-version-1 output remain unchanged and are
+guarded byte-for-byte for both success and sanitized configuration failure. The new family retains
+the same bounded manifest-scoped VUM population and the same two direct normalized `.TDX` locator
+classes; it does not admit non-`.TDX` container members or traverse another container.
+
+Both complete strings are safely normalized before comparison. Full normalized equality is tested
+first and, when present, retains exact provenance. Otherwise the policy independently removes at
+most one syntactic extension from the final component of the VUM string and the direct `.TDX`
+locator string, then performs one more exact full-string comparison. A syntactic extension requires
+a dot after the first character of the final component and at least one character after that dot.
+Consequently `.HIDDEN`, `NAME.`, and an extensionless component remain unchanged, while `A.B.C`
+becomes `A.B`. Directory components are never removed, and no second extension is stripped.
+
+Candidate results retain the original class-qualified locator, not the extension-elided comparison
+key. Exact candidates take precedence over extension-elided candidates. A valid normalized name
+with no candidate after the one permitted transformation is
+`unmatched_after_one_terminal_extension`; unsafe normalization remains
+`invalid_member_candidate`. Unique and ambiguous statuses separately record exact and
+extension-elided provenance without assigning either container class a priority.
+
+The two byte-identical confirmed passes report:
+
+| Class | VUM name occurrences | Dense name-reference occurrences |
+| --- | ---: | ---: |
+| Invalid normalized member candidate | 0 | 0 |
+| Unmatched after one terminal extension | 0 | 0 |
+| Exact unique primary-class candidate | 0 | 0 |
+| Exact unique map-class candidate | 0 | 0 |
+| Exact ambiguous cross-class candidate | 0 | 0 |
+| Extension-elided unique primary-class candidate | 34,267 | 37,893 |
+| Extension-elided unique map-class candidate | 0 | 0 |
+| Extension-elided ambiguous cross-class candidate | 0 | 0 |
+
+All 34,589 material records have all references unique, have at least one unique candidate, and have
+at least one extension-elided candidate. The any-unmatched, any-ambiguous, and any-ineligible flags
+are zero. These flags only inherit lexical classes from dense MTRL-to-name indices; they do not
+assign a texture to a material record.
+
+Coverage is counted over original class-qualified direct `.TDX` locator occurrences. None is reached
+only through full-string exact equality, 5,690 are reached only through extension elision, none is
+reached through both routes, and 111 remain unreached. Repeated candidate names do not multiply an
+original locator occurrence. The run atomically scans all 18 levels with zero errors and retains the
+same 5,351 manifest cells, 5,351 VUM catalogs, 34,267 names, 34,589 material records, 37,893 dense
+references, 36 direct containers, and 5,801 original locator occurrences as the exact family.
+Independent maxima are 140 names per catalog, 140 materials per catalog, 142 dense references per
+catalog, 730 locators per level, and one candidate locator per name.
+
+This result does not establish that one-terminal-extension removal is a retail alias rule. Retail
+name lookup, retail material-record consumption, and retail extension elision remain unobserved. It
+does not prove that catalog names are texture names, that material records bind textures, that either
+container class has priority, that a locator binds a cell, mesh, draw, placement, visibility, or
+renderer resource, or that runtime integration is justified. It also does not test basename, stem,
+substring, fuzzy, suffix-family, repeated-extension, indirection, alternate-representation, or other
+alias behavior. The fixed report emits no paths, archive/member/catalog names, hashes, offsets,
+payload bytes, per-level rows, transformed keys, locator identities, or inferred semantics. Private
+strings remain bounded per-level working data and are discarded before the next level.
+
+```powershell
+python -B tools/measure_level_material_texture_name_candidates.py private/extracted-disc `
+  --candidate-family one-terminal-extension
+```

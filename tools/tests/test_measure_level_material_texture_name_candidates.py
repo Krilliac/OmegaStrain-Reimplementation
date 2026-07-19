@@ -227,6 +227,73 @@ def exact_branch(result: dict[str, object]) -> dict[str, object]:
     return result["candidate_classes"]["normalized_exact_terminal_name"]
 
 
+def one_extension_branch(result: dict[str, object]) -> dict[str, object]:
+    return result["candidate_classes"]["normalized_one_terminal_extension"]
+
+
+_E0041_DEFAULT_SUCCESS_STDOUT = (
+    '{"candidate_classes":{"normalized_exact_terminal_name":{"dense_name_referenc'
+    'es":{"ambiguous_cross_class":0,"invalid_member_candidate":0,"non_tdx_suffix"'
+    ':0,"unique_map":0,"unique_primary":1,"unmatched":0},"material_record_flags":'
+    '{"all_references_unique":1,"any_ambiguous":0,"any_ineligible":0,"any_unique"'
+    ':1,"any_unmatched":0},"name_occurrences":{"ambiguous_cross_class":0,"invalid'
+    '_member_candidate":0,"non_tdx_suffix":0,"unique_map":0,"unique_primary":1,"u'
+    'nmatched":0},"tdx_locator_occurrences":{"reached_by_unique_candidate":1,"rea'
+    'ched_only_ambiguously":0,"unreached":1}}},"error_categories":{"aggregate_ove'
+    'rflow":0,"archive_name_invalid":0,"cell_hog_malformed":0,"cell_reference_inv'
+    'alid":0,"common_hog_malformed":0,"config":0,"filesystem_limit":0,"io":0,"mis'
+    'sing_level_input":0,"missing_texture_container":0,"normalized_collision":0,"'
+    'pop_limit_exceeded":0,"pop_malformed":0,"pop_truncated":0,"texture_container'
+    '_malformed":0,"unsafe_input":0,"vum_duplicate":0,"vum_limit_exceeded":0,"vum'
+    '_malformed":0,"vum_missing":0},"maxima":{"candidate_locators_per_name":1,"de'
+    'nse_name_references_per_catalog":1,"material_records_per_catalog":1,"tdx_loc'
+    'ators_per_level":2,"vum_names_per_catalog":1},"measurement_gaps":{"independe'
+    'nt_behavioral_corroboration":1,"retail_material_record_consumption_observed"'
+    ':1,"retail_name_lookup_observed":1},"non_claims":{"catalog_names_are_texture'
+    '_names":1,"container_class_implies_priority":1,"locator_implies_cell_mesh_or'
+    '_draw_binding":1,"material_records_bind_textures":1,"normalized_equality_is_'
+    'retail_lookup":1,"runtime_integration_is_justified":1},"schema_version":1,"s'
+    'cope":"fixed aggregate normalized exact terminal .TDX lexical-coherence expe'
+    'riment only; candidate equality is not a retail binding; no paths, names, ha'
+    'shes, offsets, payloads, per-level rows, locator identities, or inferred sem'
+    'antics","totals":{"dense_name_references":1,"errors":0,"levels_discovered":1'
+    ',"levels_scanned":1,"manifest_cell_occurrences":1,"material_records":1,"tdx_'
+    'locator_occurrences":2,"texture_containers":2,"vum_catalogs":1,"vum_name_occ'
+    'urrences":1}}\n'
+)
+
+_E0041_CONFIG_FAILURE_STDOUT = (
+    '{"candidate_classes":{"normalized_exact_terminal_name":{"dense_name_referenc'
+    'es":{"ambiguous_cross_class":0,"invalid_member_candidate":0,"non_tdx_suffix"'
+    ':0,"unique_map":0,"unique_primary":0,"unmatched":0},"material_record_flags":'
+    '{"all_references_unique":0,"any_ambiguous":0,"any_ineligible":0,"any_unique"'
+    ':0,"any_unmatched":0},"name_occurrences":{"ambiguous_cross_class":0,"invalid'
+    '_member_candidate":0,"non_tdx_suffix":0,"unique_map":0,"unique_primary":0,"u'
+    'nmatched":0},"tdx_locator_occurrences":{"reached_by_unique_candidate":0,"rea'
+    'ched_only_ambiguously":0,"unreached":0}}},"error_categories":{"aggregate_ove'
+    'rflow":0,"archive_name_invalid":0,"cell_hog_malformed":0,"cell_reference_inv'
+    'alid":0,"common_hog_malformed":0,"config":1,"filesystem_limit":0,"io":0,"mis'
+    'sing_level_input":0,"missing_texture_container":0,"normalized_collision":0,"'
+    'pop_limit_exceeded":0,"pop_malformed":0,"pop_truncated":0,"texture_container'
+    '_malformed":0,"unsafe_input":0,"vum_duplicate":0,"vum_limit_exceeded":0,"vum'
+    '_malformed":0,"vum_missing":0},"maxima":{"candidate_locators_per_name":0,"de'
+    'nse_name_references_per_catalog":0,"material_records_per_catalog":0,"tdx_loc'
+    'ators_per_level":0,"vum_names_per_catalog":0},"measurement_gaps":{"independe'
+    'nt_behavioral_corroboration":1,"retail_material_record_consumption_observed"'
+    ':1,"retail_name_lookup_observed":1},"non_claims":{"catalog_names_are_texture'
+    '_names":1,"container_class_implies_priority":1,"locator_implies_cell_mesh_or'
+    '_draw_binding":1,"material_records_bind_textures":1,"normalized_equality_is_'
+    'retail_lookup":1,"runtime_integration_is_justified":1},"schema_version":1,"s'
+    'cope":"fixed aggregate normalized exact terminal .TDX lexical-coherence expe'
+    'riment only; candidate equality is not a retail binding; no paths, names, ha'
+    'shes, offsets, payloads, per-level rows, locator identities, or inferred sem'
+    'antics","totals":{"dense_name_references":0,"errors":1,"levels_discovered":0'
+    ',"levels_scanned":0,"manifest_cell_occurrences":0,"material_records":0,"tdx_'
+    'locator_occurrences":0,"texture_containers":0,"vum_catalogs":0,"vum_name_occ'
+    'urrences":0}}\n'
+)
+
+
 class VumMaterialCatalogContractParityTests(unittest.TestCase):
     def validate(
         self, data: bytes | bytearray, maximum_items: int = 1 << 20
@@ -533,6 +600,537 @@ class LevelMaterialTextureNameCandidateTests(unittest.TestCase):
         encoded = json.dumps(result, sort_keys=True)
         self.assertNotIn(secret, encoded)
         self.assertNotIn(str(root), encoded)
+
+    def test_implicit_default_e0041_success_stdout_is_byte_frozen(self) -> None:
+        vum = make_vum(["ALPHA.TDX"], [(0,)])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_level(
+                root,
+                "LEVEL_A",
+                [("CELL.VUM", vum)],
+                [("ALPHA.TDX", b"one")],
+                [("MAP.TDX", b"two")],
+            )
+            output = io.StringIO()
+            errors = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(errors):
+                exit_code = candidates.main([str(root)])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(errors.getvalue(), "")
+        self.assertEqual(output.getvalue(), _E0041_DEFAULT_SUCCESS_STDOUT)
+
+    def test_implicit_default_e0041_config_failure_stdout_is_byte_frozen(
+        self,
+    ) -> None:
+        secret = "PRIVATE_CONFIG_SENTINEL"
+        output = io.StringIO()
+        errors = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            exit_code = candidates.main([secret, f"{secret}_EXTRA"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(errors.getvalue(), "")
+        self.assertEqual(output.getvalue(), _E0041_CONFIG_FAILURE_STDOUT)
+        self.assertNotIn(secret, output.getvalue())
+
+    def test_one_terminal_extension_transform_table_is_frozen(self) -> None:
+        cases = {
+            "A.B.C": "A.B",
+            "DIR/A.B.C": "DIR/A.B",
+            "DIR.WITH.DOTS/A.B": "DIR.WITH.DOTS/A",
+            "A.B.C.D": "A.B.C",
+            "A..B": "A.",
+            ".HIDDEN.TDX": ".HIDDEN",
+            "DIR/.HIDDEN.TDX": "DIR/.HIDDEN",
+            ".HIDDEN": ".HIDDEN",
+            "DIR/.HIDDEN": "DIR/.HIDDEN",
+            "NAME.": "NAME.",
+            "NAME": "NAME",
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                self.assertEqual(
+                    candidates._strip_one_terminal_extension(value), expected
+                )
+
+    def test_one_terminal_extension_classifier_preserves_full_paths_and_provenance(
+        self,
+    ) -> None:
+        exact_lookup = {
+            "DIR/EXACT.TDX": frozenset(("primary",)),
+            "EXACT_MAP.TDX": frozenset(("map",)),
+            "SHARED_EXACT.TDX": frozenset(("primary", "map")),
+            "BOTH.TDX": frozenset(("primary",)),
+        }
+        extension_lookup = {
+            "DIR/ELIDED": (("primary", "DIR/ELIDED.TDX"),),
+            "SHARED_ELIDED": (
+                ("map", "SHARED_ELIDED.TDX"),
+                ("primary", "SHARED_ELIDED.TDX"),
+            ),
+            "BARE": (("primary", "BARE.TDX"),),
+            "NAME.": (("primary", "NAME..TDX"),),
+            ".HIDDEN": (("map", ".HIDDEN.TDX"),),
+            "A.B": (("primary", "A.B.TDX"),),
+            "FOOBAR": (("primary", "FOOBAR.TDX"),),
+            "BOTH": (("primary", "BOTH.TDX"),),
+        }
+        cases = (
+            (
+                "dir/exact.tdx",
+                "exact_unique_primary",
+                (("primary", "DIR/EXACT.TDX"),),
+            ),
+            (
+                "exact_map.tdx",
+                "exact_unique_map",
+                (("map", "EXACT_MAP.TDX"),),
+            ),
+            (
+                "shared_exact.tdx",
+                "exact_ambiguous_cross_class",
+                (
+                    ("map", "SHARED_EXACT.TDX"),
+                    ("primary", "SHARED_EXACT.TDX"),
+                ),
+            ),
+            (
+                "DIR/ELIDED.DDS",
+                "extension_elided_unique_primary",
+                (("primary", "DIR/ELIDED.TDX"),),
+            ),
+            (
+                "SHARED_ELIDED.PNG",
+                "extension_elided_ambiguous_cross_class",
+                extension_lookup["SHARED_ELIDED"],
+            ),
+            (
+                "BARE",
+                "extension_elided_unique_primary",
+                (("primary", "BARE.TDX"),),
+            ),
+            (
+                "NAME.",
+                "extension_elided_unique_primary",
+                (("primary", "NAME..TDX"),),
+            ),
+            (
+                ".HIDDEN",
+                "extension_elided_unique_map",
+                (("map", ".HIDDEN.TDX"),),
+            ),
+            (
+                "A.B.C",
+                "extension_elided_unique_primary",
+                (("primary", "A.B.TDX"),),
+            ),
+            (
+                "BOTH.TDX",
+                "exact_unique_primary",
+                (("primary", "BOTH.TDX"),),
+            ),
+            ("OTHER/ELIDED.DDS", "unmatched_after_one_terminal_extension", ()),
+            ("BAR.DDS", "unmatched_after_one_terminal_extension", ()),
+            ("A.B.C.D", "unmatched_after_one_terminal_extension", ()),
+            ("../PRIVATE_ESCAPE.DDS", "invalid_member_candidate", ()),
+        )
+        for value, expected_status, expected_locators in cases:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    candidates._classify_one_terminal_extension_candidate(
+                        value, exact_lookup, extension_lookup, 4096
+                    ),
+                    (expected_status, expected_locators),
+                )
+
+    def test_explicit_exact_mode_matches_implicit_e0041_byte_goldens(self) -> None:
+        vum = make_vum(["ALPHA.TDX"], [(0,)])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_level(
+                root,
+                "LEVEL_A",
+                [("CELL.VUM", vum)],
+                [("ALPHA.TDX", b"one")],
+                [("MAP.TDX", b"two")],
+            )
+            for arguments in (
+                [str(root)],
+                [str(root), "--candidate-family", "exact-terminal-tdx"],
+                ["--candidate-family", "exact-terminal-tdx", str(root)],
+            ):
+                with self.subTest(arguments=arguments):
+                    output = io.StringIO()
+                    errors = io.StringIO()
+                    with redirect_stdout(output), redirect_stderr(errors):
+                        exit_code = candidates.main(arguments)
+                    self.assertEqual(exit_code, 0)
+                    self.assertEqual(errors.getvalue(), "")
+                    self.assertEqual(output.getvalue(), _E0041_DEFAULT_SUCCESS_STDOUT)
+
+        implicit_failure = io.StringIO()
+        explicit_failure = io.StringIO()
+        implicit_errors = io.StringIO()
+        explicit_errors = io.StringIO()
+        with redirect_stdout(implicit_failure), redirect_stderr(implicit_errors):
+            implicit_exit = candidates.main(["PRIVATE_CONFIG", "EXTRA"])
+        with redirect_stdout(explicit_failure), redirect_stderr(explicit_errors):
+            explicit_exit = candidates.main(
+                [
+                    "PRIVATE_CONFIG",
+                    "EXTRA",
+                    "--candidate-family",
+                    "exact-terminal-tdx",
+                ]
+            )
+        self.assertEqual(implicit_exit, 1)
+        self.assertEqual(explicit_exit, 1)
+        self.assertEqual(implicit_errors.getvalue(), "")
+        self.assertEqual(explicit_errors.getvalue(), "")
+        self.assertEqual(implicit_failure.getvalue(), _E0041_CONFIG_FAILURE_STDOUT)
+        self.assertEqual(explicit_failure.getvalue(), _E0041_CONFIG_FAILURE_STDOUT)
+
+    def test_unknown_and_abbreviated_candidate_family_cli_is_sanitized(self) -> None:
+        secret = "PRIVATE_CANDIDATE_FAMILY_VALUE"
+        invocations = (
+            [secret, "--candidate-family", f"{secret}_UNKNOWN"],
+            [secret, "--candidate-fam", "one-terminal-extension"],
+        )
+        for arguments in invocations:
+            with self.subTest(arguments=arguments):
+                output = io.StringIO()
+                errors = io.StringIO()
+                with redirect_stdout(output), redirect_stderr(errors):
+                    exit_code = candidates.main(arguments)
+                self.assertEqual(exit_code, 1)
+                self.assertEqual(errors.getvalue(), "")
+                self.assertEqual(output.getvalue(), _E0041_CONFIG_FAILURE_STDOUT)
+                self.assertNotIn(secret, output.getvalue())
+
+    def test_one_terminal_extension_end_to_end_fixed_v2_schema_and_provenance(
+        self,
+    ) -> None:
+        secret = "PRIVATE_E0042_LEVEL"
+        names = [
+            "EXACT_PRIMARY.TDX",
+            "EXACT_MAP.TDX",
+            "ELIDED_PRIMARY.DDS",
+            "ELIDED_MAP.PNG",
+            "SHARED_EXACT.TDX",
+            "SHARED_ELIDED.DDS",
+            "BOTH.TDX",
+            "BOTH.DDS",
+            "MISSING.DDS",
+            "../INVALID.DDS",
+            "NONLOCATOR.DDS",
+            "BAR.DDS",
+            "MULTI.A.B.C",
+            "ELIDED_PRIMARY.JPG",
+        ]
+        materials = [
+            (0, 2, 8),
+            (4, 5, 9),
+            (1, 6, 7),
+            (0, 3, 10),
+            (11, 12, 8),
+        ]
+        primary_entries = [
+            ("EXACT_PRIMARY.TDX", b"one"),
+            ("ELIDED_PRIMARY.TDX", b"one"),
+            ("BOTH.TDX", b"one"),
+            ("SHARED_EXACT.TDX", b"one"),
+            ("SHARED_ELIDED.TDX", b"one"),
+            ("UNREACHED_PRIMARY.TDX", b"one"),
+            ("FOOBAR.TDX", b"one"),
+            ("MULTI.A.TDX", b"one"),
+            ("NONLOCATOR.DDS", b"not-a-direct-tdx-locator"),
+        ]
+        map_entries = [
+            ("EXACT_MAP.TDX", b"two"),
+            ("ELIDED_MAP.TDX", b"two"),
+            ("SHARED_EXACT.TDX", b"two"),
+            ("SHARED_ELIDED.TDX", b"two"),
+            ("UNREACHED_MAP.TDX", b"two"),
+        ]
+        with tempfile.TemporaryDirectory(prefix=secret) as directory:
+            root = Path(directory)
+            write_level(
+                root,
+                secret,
+                [("CELL.VUM", make_vum(names, materials))],
+                primary_entries,
+                map_entries,
+            )
+            result = candidates.scan_disc(
+                root, candidate_family="one-terminal-extension"
+            )
+            output = io.StringIO()
+            errors = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(errors):
+                exit_code = candidates.main(
+                    [
+                        str(root),
+                        "--candidate-family",
+                        "one-terminal-extension",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(errors.getvalue(), "")
+        self.assertEqual(json.loads(output.getvalue()), result)
+        encoded = json.dumps(result, sort_keys=True)
+        self.assertNotIn(secret, encoded)
+        self.assertNotIn(str(root), encoded)
+        self.assertEqual(
+            set(result),
+            {
+                "schema_version",
+                "scope",
+                "totals",
+                "candidate_classes",
+                "maxima",
+                "error_categories",
+                "measurement_gaps",
+                "non_claims",
+            },
+        )
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(
+            result["scope"],
+            "fixed aggregate normalized exact-first one-terminal-extension "
+            "lexical-coherence experiment only; terminal extension removal is not a "
+            "retail alias rule; candidate equality is not a retail binding; no paths, "
+            "names, hashes, offsets, payloads, per-level rows, locator identities, or "
+            "inferred semantics",
+        )
+        self.assertEqual(
+            result["totals"],
+            {
+                "levels_discovered": 1,
+                "levels_scanned": 1,
+                "manifest_cell_occurrences": 1,
+                "vum_catalogs": 1,
+                "vum_name_occurrences": 14,
+                "material_records": 5,
+                "dense_name_references": 15,
+                "texture_containers": 2,
+                "tdx_locator_occurrences": 13,
+                "errors": 0,
+            },
+        )
+        self.assertEqual(
+            set(result["candidate_classes"]),
+            {"normalized_one_terminal_extension"},
+        )
+        branch = one_extension_branch(result)
+        self.assertEqual(
+            branch["name_occurrences"],
+            {
+                "invalid_member_candidate": 1,
+                "unmatched_after_one_terminal_extension": 4,
+                "exact_unique_primary": 2,
+                "exact_unique_map": 1,
+                "exact_ambiguous_cross_class": 1,
+                "extension_elided_unique_primary": 3,
+                "extension_elided_unique_map": 1,
+                "extension_elided_ambiguous_cross_class": 1,
+            },
+        )
+        self.assertEqual(
+            branch["dense_name_references"],
+            {
+                "invalid_member_candidate": 1,
+                "unmatched_after_one_terminal_extension": 5,
+                "exact_unique_primary": 3,
+                "exact_unique_map": 1,
+                "exact_ambiguous_cross_class": 1,
+                "extension_elided_unique_primary": 2,
+                "extension_elided_unique_map": 1,
+                "extension_elided_ambiguous_cross_class": 1,
+            },
+        )
+        self.assertEqual(
+            branch["material_record_flags"],
+            {
+                "all_references_unique": 1,
+                "any_unique": 3,
+                "any_unmatched": 3,
+                "any_ambiguous": 1,
+                "any_ineligible": 1,
+                "any_extension_elided": 4,
+            },
+        )
+        self.assertEqual(
+            branch["tdx_locator_occurrences"],
+            {
+                "reached_by_exact_only": 4,
+                "reached_by_extension_elided_only": 4,
+                "reached_by_exact_and_extension_elided": 1,
+                "unreached": 4,
+            },
+        )
+        self.assertEqual(
+            result["maxima"],
+            {
+                "vum_names_per_catalog": 14,
+                "material_records_per_catalog": 5,
+                "dense_name_references_per_catalog": 15,
+                "tdx_locators_per_level": 13,
+                "candidate_locators_per_name": 2,
+            },
+        )
+        self.assertEqual(
+            set(result["measurement_gaps"]),
+            {
+                "retail_name_lookup_observed",
+                "retail_material_record_consumption_observed",
+                "independent_behavioral_corroboration",
+                "retail_extension_elision_observed",
+            },
+        )
+        self.assertTrue(all(value == 1 for value in result["measurement_gaps"].values()))
+        self.assertEqual(
+            set(result["non_claims"]),
+            {
+                "catalog_names_are_texture_names",
+                "material_records_bind_textures",
+                "normalized_equality_is_retail_lookup",
+                "container_class_implies_priority",
+                "locator_implies_cell_mesh_or_draw_binding",
+                "runtime_integration_is_justified",
+                "one_terminal_extension_removal_is_retail_alias_rule",
+            },
+        )
+        self.assertTrue(all(value == 1 for value in result["non_claims"].values()))
+        self.assertEqual(set(result["error_categories"]), set(candidates.ERROR_CATEGORIES))
+        self.assertTrue(all(value == 0 for value in result["error_categories"].values()))
+
+    def test_candidate_families_keep_late_malformed_level_atomic_and_private(
+        self,
+    ) -> None:
+        secret = "PRIVATE_LATE_MALFORMED_LEVEL"
+        valid = make_vum(["ALPHA.TDX"], [(0,)])
+        common = make_hog(
+            [
+                ("A.HOG", make_cell([("A.VUM", valid)])),
+                ("B.HOG", make_cell([("B.VUM", b"not-vum")])),
+            ]
+        )
+        for candidate_family in candidates.CANDIDATE_FAMILIES:
+            with self.subTest(candidate_family=candidate_family):
+                with tempfile.TemporaryDirectory(prefix=secret) as directory:
+                    root = Path(directory)
+                    write_level(
+                        root,
+                        secret,
+                        [],
+                        [("ALPHA.TDX", b"one")],
+                        [("MAP.TDX", b"two")],
+                        pop=make_pop(["A.COL", "B.COL"]),
+                        common=common,
+                    )
+                    result = candidates.scan_disc(
+                        root, candidate_family=candidate_family
+                    )
+
+                expected_totals = {field: 0 for field in candidates.TOTAL_FIELDS}
+                expected_totals["levels_discovered"] = 1
+                expected_totals["errors"] = 1
+                self.assertEqual(result["totals"], expected_totals)
+                self.assertEqual(result["error_categories"]["vum_malformed"], 1)
+                self.assertEqual(sum(result["error_categories"].values()), 1)
+                branch = (
+                    exact_branch(result)
+                    if candidate_family == candidates.DEFAULT_CANDIDATE_FAMILY
+                    else one_extension_branch(result)
+                )
+                for field_group in branch.values():
+                    self.assertTrue(
+                        all(value == 0 for value in field_group.values())
+                    )
+                self.assertTrue(
+                    all(value == 0 for value in result["maxima"].values())
+                )
+                encoded = json.dumps(result, sort_keys=True)
+                self.assertNotIn(secret, encoded)
+                self.assertNotIn(str(root), encoded)
+
+    def test_one_terminal_extension_aggregate_overflow_is_transactional(self) -> None:
+        targets = (
+            ("name_occurrences", "extension_elided_ambiguous_cross_class"),
+            ("dense_name_references", "extension_elided_ambiguous_cross_class"),
+            ("material_record_flags", "any_extension_elided"),
+            (
+                "locator_coverage",
+                "reached_by_exact_and_extension_elided",
+            ),
+        )
+        for target_attribute, target_field in targets:
+            with self.subTest(
+                target_attribute=target_attribute, target_field=target_field
+            ):
+                aggregate = candidates.OneTerminalExtensionAggregate()
+                for index, field in enumerate(candidates.TOTAL_FIELDS):
+                    aggregate.totals[field] = index + 1
+                for index, field in enumerate(
+                    candidates.ONE_TERMINAL_EXTENSION_STATUS_FIELDS
+                ):
+                    aggregate.name_occurrences[field] = index + 11
+                    aggregate.dense_name_references[field] = index + 21
+                for index, field in enumerate(
+                    candidates.ONE_TERMINAL_EXTENSION_MATERIAL_RECORD_FLAG_FIELDS
+                ):
+                    aggregate.material_record_flags[field] = index + 31
+                for index, field in enumerate(
+                    candidates.ONE_TERMINAL_EXTENSION_LOCATOR_COVERAGE_FIELDS
+                ):
+                    aggregate.locator_coverage[field] = index + 41
+                for index, field in enumerate(candidates.MAXIMUM_FIELDS):
+                    aggregate.maxima[field] = index + 51
+                aggregate.errors["io"] = 61
+                getattr(aggregate, target_attribute)[target_field] = (1 << 64) - 1
+                before = (
+                    dict(aggregate.totals),
+                    dict(aggregate.name_occurrences),
+                    dict(aggregate.dense_name_references),
+                    dict(aggregate.material_record_flags),
+                    dict(aggregate.locator_coverage),
+                    dict(aggregate.maxima),
+                    dict(aggregate.errors),
+                )
+
+                measured = candidates.LevelMeasurement()
+                for field in candidates.TOTAL_FIELDS:
+                    measured.totals[field] = 1
+                for field in candidates.ONE_TERMINAL_EXTENSION_STATUS_FIELDS:
+                    measured.name_occurrences[field] = 1
+                    measured.dense_name_references[field] = 1
+                for field in (
+                    candidates.ONE_TERMINAL_EXTENSION_MATERIAL_RECORD_FLAG_FIELDS
+                ):
+                    measured.material_record_flags[field] = 1
+                for field in candidates.ONE_TERMINAL_EXTENSION_LOCATOR_COVERAGE_FIELDS:
+                    measured.locator_coverage[field] = 1
+                measured.maxima[candidates.MAXIMUM_FIELDS[0]] = 999
+
+                with self.assertRaises(candidates.ScanFailure) as caught:
+                    aggregate.merge_level(measured)
+
+                self.assertEqual(caught.exception.category, "aggregate_overflow")
+                self.assertEqual(
+                    (
+                        dict(aggregate.totals),
+                        dict(aggregate.name_occurrences),
+                        dict(aggregate.dense_name_references),
+                        dict(aggregate.material_record_flags),
+                        dict(aggregate.locator_coverage),
+                        dict(aggregate.maxima),
+                        dict(aggregate.errors),
+                    ),
+                    before,
+                )
 
     def test_exact_casefolded_candidates_references_flags_and_locator_coverage(self) -> None:
         names = [

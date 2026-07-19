@@ -73,6 +73,13 @@ remains separate aggregate-only evidence. Other scene decoders remain incomplete
   terminal `.TDX`, so none enters the eligible exact lookup branch and all 5,801 class-qualified
   locators remain unreached. This is narrow negative evidence only; no alias family, retail lookup,
   material binding, class priority, or runtime integration is established.
+- The additive exact-first one-terminal-extension family leaves that default result and the direct
+  `.TDX` locator universe unchanged. Two byte-identical passes scan 18/18 levels with zero errors;
+  all 34,267 names and 37,893 dense references are extension-elided unique-primary candidates, and
+  all 34,589 material records inherit a unique extension-elided candidate. Of the 5,801 original
+  class-qualified locators, 5,690 are reached only through extension elision and 111 remain
+  unreached. This remains offline lexical evidence: retail extension removal, lookup, material
+  consumption, texture binding, class priority, and runtime integration are not established.
 - The first privacy-safe VUM consumer trace has one strict-validator-accepted complete 120-frame
   pair from one selected runtime copy. Its repeat is byte-identical; each validated report contains
   two EE-read aggregate rows, two anonymous-site rows, and zero VIF1 chunk rows. Post-run
