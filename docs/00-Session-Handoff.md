@@ -827,6 +827,22 @@ shipping dependencies or execution mechanisms.
     failure order, and reverse teardown remain unchanged. Up/Down also alias the intentionally
     shared synthetic forward/reverse diagnostic actions; no retail input or movement meaning is
     claimed.
+56. E-0071 classifies the content composition root before `OmegaApp` creates any owner or service.
+    `ClassifyContentStartupState` is a nonallocating `noexcept` borrow that accepts exactly three
+    shapes: all five optionals empty (`NoContent`), only `game_data` engaged (`DataMounted`), or all
+    five `game_data`, `level_texture_store`, `level_manifest`, `level_content`, and `debug_image`
+    engaged (`LevelContent`). Every other shape returns typed `InconsistentOwnership`.
+    `OmegaApp::Create` copies that one-byte stage, rejects inconsistent input with exact text
+    `content startup state: inconsistent-ownership`, and only then moves the valid content state
+    once into its owner. Rejection precedes config/content allocation, logging, jobs, scheduling,
+    input, simulation, the topology fixture, and all SDL/audio/GPU work.
+    The project main card adds `CONTENT` plus `NONE`, `DATA`, or `LEVEL`; invalid stage bytes render
+    `NONE`. The three exact background/cyan/slate/amber populations are
+    3,593/1,627/3,516/480, 3,600/1,620/3,516/480, and 3,594/1,626/3,516/480, with respective
+    FNV-1a-64 values `0x8e8e3f7fff4f971a`, `0x517ad52bbf1fbe61`, and
+    `0x08405186aa105db1`. Controls and topology remain `0xcfa7cc57696aae0a` and
+    `0xb56c8db088c5a9fe`. This synthetic owner-health label uses no private input and establishes no
+    retail startup stage, UI, content availability meaning, or emulator-equivalence behavior.
 
 ## Disc observations
 

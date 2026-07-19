@@ -769,6 +769,18 @@ upper clamping while preserving modal owner state. The project legends become `W
 modal timing, topology, resources, and teardown remain unchanged. Up/Down also alias the shared
 synthetic diagnostic locomotion actions and establish no retail input or movement semantics.
 
+E-0071 adds a fail-closed startup-owner classifier before `OmegaApp` allocation and platform work.
+Only empty, game-data-only, and complete five-owner level-content states classify as `NoContent`,
+`DataMounted`, and `LevelContent`; every partial shape returns typed `InconsistentOwnership`.
+`OmegaApp::Create` copies the valid stage, moves content once, and otherwise returns exact text
+`content startup state: inconsistent-ownership` without touching SDL. The stage appears only on the
+project-generated main card as `CONTENT NONE`, `CONTENT DATA`, or `CONTENT LEVEL`; invalid stage bytes
+render `NONE`. The exact hashes are `0x8e8e3f7fff4f971a`, `0x517ad52bbf1fbe61`, and
+`0x08405186aa105db1`. Controls remains `0xcfa7cc57696aae0a`, topology remains
+`0xb56c8db088c5a9fe`, and resource counts, draw geometry, input, reducer, modal timing,
+capture/replay, teardown, and all retail-data boundaries are unchanged. This is synthetic developer
+owner-health presentation, not a retail startup or UI claim.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

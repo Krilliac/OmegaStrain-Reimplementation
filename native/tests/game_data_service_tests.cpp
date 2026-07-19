@@ -787,6 +787,45 @@ void RunSourceResolverTests(const std::filesystem::path& root)
 
 int GameDataServiceFailureCount()
 {
+    static_assert(sizeof(omega::runtime::ContentStartupStage) == 1U);
+    static_assert(sizeof(omega::runtime::ContentStartupStateErrorCode) == 1U);
+    static_assert(static_cast<std::uint8_t>(
+                      omega::runtime::ContentStartupStage::NoContent) == 0U);
+    static_assert(static_cast<std::uint8_t>(
+                      omega::runtime::ContentStartupStage::DataMounted) == 1U);
+    static_assert(static_cast<std::uint8_t>(
+                      omega::runtime::ContentStartupStage::LevelContent) == 2U);
+    static_assert(static_cast<std::uint8_t>(
+                      omega::runtime::ContentStartupStateErrorCode::InconsistentOwnership) ==
+                  0U);
+    static_assert(noexcept(omega::runtime::ClassifyContentStartupState(
+        std::declval<const omega::runtime::ContentStartupState&>())));
+
+    const omega::runtime::ContentStartupState empty_startup_state;
+    const auto empty_startup_stage =
+        omega::runtime::ClassifyContentStartupState(empty_startup_state);
+    Check(empty_startup_stage &&
+              *empty_startup_stage == omega::runtime::ContentStartupStage::NoContent,
+        "an empty startup ownership state classifies as NoContent");
+
+    omega::runtime::ContentStartupState manifest_only_state;
+    manifest_only_state.level_manifest.emplace();
+    const auto manifest_only_stage =
+        omega::runtime::ClassifyContentStartupState(manifest_only_state);
+    Check(!manifest_only_stage &&
+              manifest_only_stage.error() ==
+                  omega::runtime::ContentStartupStateErrorCode::InconsistentOwnership,
+        "a manifest-only startup ownership state is rejected");
+
+    omega::runtime::ContentStartupState debug_only_state;
+    debug_only_state.debug_image.emplace();
+    const auto debug_only_stage =
+        omega::runtime::ClassifyContentStartupState(debug_only_state);
+    Check(!debug_only_stage &&
+              debug_only_stage.error() ==
+                  omega::runtime::ContentStartupStateErrorCode::InconsistentOwnership,
+        "a debug-image-only startup ownership state is rejected");
+
     Check(omega::asset::DecodeLimits{}.maximum_input_bytes == 64ULL * 1024ULL * 1024ULL,
         "standalone decoders retain their narrower default input budget");
     Check(omega::content::GameDataServiceConfig{}.decode_limits.maximum_input_bytes ==
@@ -980,6 +1019,23 @@ int GameDataServiceFailureCount()
               !service_only->level_content && !service_only->debug_image &&
               !service_only->level_texture_store,
         "startup without a level leaves the level texture inventory disengaged");
+    if (service_only)
+    {
+        const auto service_only_stage =
+            omega::runtime::ClassifyContentStartupState(*service_only);
+        Check(service_only_stage &&
+                  *service_only_stage ==
+                      omega::runtime::ContentStartupStage::DataMounted,
+            "a service-only startup ownership state classifies as DataMounted");
+
+        service_only->level_manifest.emplace();
+        const auto incomplete_level_stage =
+            omega::runtime::ClassifyContentStartupState(*service_only);
+        Check(!incomplete_level_stage &&
+                  incomplete_level_stage.error() ==
+                      omega::runtime::ContentStartupStateErrorCode::InconsistentOwnership,
+            "an incomplete level-content startup ownership state is rejected");
+    }
 
     auto small_read_config = omega::content::GameDataServiceConfig{.root = root};
     small_read_config.maximum_pop_bytes = 8;
@@ -1026,6 +1082,13 @@ int GameDataServiceFailureCount()
               startup->debug_image && startup->level_texture_store,
         "the exact non-SDL startup path owns validated manifest, spatial, material, debug, and "
         "texture-inventory data");
+    if (startup)
+    {
+        const auto startup_stage = omega::runtime::ClassifyContentStartupState(*startup);
+        Check(startup_stage &&
+                  *startup_stage == omega::runtime::ContentStartupStage::LevelContent,
+            "a complete startup ownership state classifies as LevelContent");
+    }
 
     const auto direct_tdx = MakeDirect24Tdx(0x52);
     Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "TEX.HOG",

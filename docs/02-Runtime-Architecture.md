@@ -396,6 +396,25 @@ full opacity, topology pixels, draw-list geometry, three-texture 86,016-byte res
 teardown remain unchanged. This establishes no retail key map, held-key repeat, navigation wrapping,
 mouse selection, or controller-label semantics.
 
+E-0071 inserts a borrowed validation seam at the start of `OmegaApp::Create`.
+`ClassifyContentStartupState` is `noexcept`, allocates nothing, and recognizes only the three states
+that `StartContent` can publish: no owners, `GameDataService` alone, or the complete five-owner
+level-content state. A manifest-only, debug-image-only, incomplete level, or any other mixed shape
+returns typed `InconsistentOwnership`. The app copies the resulting `ContentStartupStage`, moves the
+valid aggregate exactly once into its existing owner, and rejects an invalid aggregate with
+`content startup state: inconsistent-ownership` before config/content owner allocation, service
+construction, topology generation, or any SDL/audio/GPU mutation. The classifier adds no stable ABI,
+wire, file, config, or replay schema.
+
+The copied stage is consumed only while generating the existing startup menu texture. `CONTENT NONE`,
+`CONTENT DATA`, and `CONTENT LEVEL` are project-authored owner-health labels; an invalid enum fails
+closed to `NONE`. Their exact FNV-1a-64 values are `0x8e8e3f7fff4f971a`,
+`0x517ad52bbf1fbe61`, and `0x08405186aa105db1`, with background/cyan/slate/amber populations
+3,593/1,627/3,516/480, 3,600/1,620/3,516/480, and 3,594/1,626/3,516/480. Full opacity,
+menu dimensions, draw geometry, Controls and topology pixels, upload count, residency, reducer,
+capture/replay, and teardown are unchanged. These labels establish no retail UI or startup-state
+semantics.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

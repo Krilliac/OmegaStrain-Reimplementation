@@ -27,8 +27,12 @@ constexpr Color kAmberColor{
 // Frozen only after independent byte-level calculations from the project-owned
 // card contract. Both builders are hashed and reported at runtime so a future
 // intentional layout change has an actionable value.
-constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
-    UINT64_C(0x9a4662f8f943521d);
+constexpr std::uint64_t kExpectedNoContentMenuFnv1a64 =
+    UINT64_C(0x8e8e3f7fff4f971a);
+constexpr std::uint64_t kExpectedDataMountedMenuFnv1a64 =
+    UINT64_C(0x517ad52bbf1fbe61);
+constexpr std::uint64_t kExpectedLevelContentMenuFnv1a64 =
+    UINT64_C(0x08405186aa105db1);
 constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
     UINT64_C(0xcfa7cc57696aae0a);
 constexpr std::uint64_t kExpectedDiagnosticAssetTopologyFnv1a64 =
@@ -55,6 +59,45 @@ constexpr std::uint64_t kExpectedDiagnosticAssetTopologyFnv1a64 =
         hash *= kPrime;
     }
     return hash;
+}
+
+struct ColorHistogram
+{
+    std::size_t background = 0U;
+    std::size_t cyan = 0U;
+    std::size_t slate = 0U;
+    std::size_t amber = 0U;
+    std::size_t unknown = 0U;
+    bool all_alpha_opaque = true;
+
+    friend constexpr bool operator==(
+        const ColorHistogram&, const ColorHistogram&) noexcept = default;
+};
+
+[[nodiscard]] ColorHistogram CountColors(
+    const omega::runtime::DebugImage& image) noexcept
+{
+    ColorHistogram result;
+    for (std::size_t offset = 0U; offset + 3U < image.rgba8_pixels.size();
+         offset += 4U)
+    {
+        const Color pixel{image.rgba8_pixels[offset],
+            image.rgba8_pixels[offset + 1U], image.rgba8_pixels[offset + 2U],
+            image.rgba8_pixels[offset + 3U]};
+        result.all_alpha_opaque =
+            result.all_alpha_opaque && pixel[3] == std::byte{255U};
+        if (pixel == kBackgroundColor)
+            ++result.background;
+        else if (pixel == kCyanColor)
+            ++result.cyan;
+        else if (pixel == kSlateColor)
+            ++result.slate;
+        else if (pixel == kAmberColor)
+            ++result.amber;
+        else
+            ++result.unknown;
+    }
+    return result;
 }
 
 [[nodiscard]] constexpr omega::app::DiagnosticMenuInputEdges InputFromMask(
@@ -473,50 +516,95 @@ int main()
               omega::app::kDiagnosticMenuImageHeight == 72U,
         "the project action identifiers, row count, and image dimensions remain exact");
 
-    const omega::runtime::DebugImage first = BuildProjectDiagnosticMenuImage();
-    const omega::runtime::DebugImage second = BuildProjectDiagnosticMenuImage();
+    const omega::runtime::DebugImage no_content_first =
+        BuildProjectDiagnosticMenuImage(
+            omega::runtime::ContentStartupStage::NoContent);
+    const omega::runtime::DebugImage no_content_second =
+        BuildProjectDiagnosticMenuImage(
+            omega::runtime::ContentStartupStage::NoContent);
+    const omega::runtime::DebugImage data_mounted_first =
+        BuildProjectDiagnosticMenuImage(
+            omega::runtime::ContentStartupStage::DataMounted);
+    const omega::runtime::DebugImage data_mounted_second =
+        BuildProjectDiagnosticMenuImage(
+            omega::runtime::ContentStartupStage::DataMounted);
+    const omega::runtime::DebugImage level_content_first =
+        BuildProjectDiagnosticMenuImage(
+            omega::runtime::ContentStartupStage::LevelContent);
+    const omega::runtime::DebugImage level_content_second =
+        BuildProjectDiagnosticMenuImage(
+            omega::runtime::ContentStartupStage::LevelContent);
+    const omega::runtime::DebugImage invalid_stage =
+        BuildProjectDiagnosticMenuImage(
+            static_cast<omega::runtime::ContentStartupStage>(255U));
+    const omega::runtime::DebugImage& first = no_content_first;
     constexpr std::size_t kExpectedBytes = 128U * 72U * 4U;
-    const bool first_shape_is_safe = first.width == 128U && first.height == 72U &&
-                                     first.rgba8_pixels.size() == kExpectedBytes &&
-                                     first.pixels().size() == kExpectedBytes;
-    Check(first_shape_is_safe,
-        "the menu is one fully owned tightly packed 128x72 RGBA8 image");
-    if (!first_shape_is_safe)
-        return EXIT_FAILURE;
-    Check(second.width == first.width && second.height == first.height &&
-              second.rgba8_pixels == first.rgba8_pixels,
-        "two independent menu builds are byte-identical");
-
-    bool all_alpha_opaque = first.rgba8_pixels.size() == kExpectedBytes;
-    std::size_t background_pixels = 0U;
-    std::size_t cyan_pixels = 0U;
-    std::size_t slate_pixels = 0U;
-    std::size_t amber_pixels = 0U;
-    std::size_t unknown_pixels = 0U;
-    for (std::size_t offset = 0U; offset + 3U < first.rgba8_pixels.size();
-         offset += 4U)
+    const std::array<const omega::runtime::DebugImage*, 7U> all_menu_images{
+        &no_content_first, &no_content_second, &data_mounted_first,
+        &data_mounted_second, &level_content_first, &level_content_second,
+        &invalid_stage,
+    };
+    bool every_menu_shape_is_safe = true;
+    for (const omega::runtime::DebugImage* image : all_menu_images)
     {
-        const Color pixel{first.rgba8_pixels[offset],
-            first.rgba8_pixels[offset + 1U], first.rgba8_pixels[offset + 2U],
-            first.rgba8_pixels[offset + 3U]};
-        all_alpha_opaque =
-            all_alpha_opaque && pixel[3] == std::byte{255U};
-        if (pixel == kBackgroundColor)
-            ++background_pixels;
-        else if (pixel == kCyanColor)
-            ++cyan_pixels;
-        else if (pixel == kSlateColor)
-            ++slate_pixels;
-        else if (pixel == kAmberColor)
-            ++amber_pixels;
-        else
-            ++unknown_pixels;
+        every_menu_shape_is_safe = every_menu_shape_is_safe && image->width == 128U &&
+                                   image->height == 72U &&
+                                   image->rgba8_pixels.size() == kExpectedBytes &&
+                                   image->pixels().size() == kExpectedBytes;
     }
-    Check(all_alpha_opaque, "every menu pixel has fully opaque alpha");
-    Check(background_pixels == 3'702U && cyan_pixels == 1'518U &&
-              slate_pixels == 3'516U && amber_pixels == 480U &&
-              unknown_pixels == 0U,
-        "the four project-authored colors have their exact independent pixel counts");
+    Check(every_menu_shape_is_safe,
+        "every content-stage menu is a fully owned tightly packed 128x72 RGBA8 image");
+    if (!every_menu_shape_is_safe)
+        return EXIT_FAILURE;
+    Check(no_content_second.rgba8_pixels == no_content_first.rgba8_pixels &&
+              data_mounted_second.rgba8_pixels == data_mounted_first.rgba8_pixels &&
+              level_content_second.rgba8_pixels == level_content_first.rgba8_pixels &&
+              invalid_stage.rgba8_pixels == no_content_first.rgba8_pixels,
+        "each valid content-stage menu is deterministic and invalid enum values render NoContent");
+    Check(no_content_second.rgba8_pixels.data() !=
+                  no_content_first.rgba8_pixels.data() &&
+              data_mounted_second.rgba8_pixels.data() !=
+                  data_mounted_first.rgba8_pixels.data() &&
+              level_content_second.rgba8_pixels.data() !=
+                  level_content_first.rgba8_pixels.data() &&
+              invalid_stage.rgba8_pixels.data() !=
+                  no_content_first.rgba8_pixels.data() &&
+              no_content_first.rgba8_pixels.data() !=
+                  data_mounted_first.rgba8_pixels.data() &&
+              data_mounted_first.rgba8_pixels.data() !=
+                  level_content_first.rgba8_pixels.data(),
+        "every content-stage build owns a distinct pixel buffer");
+
+    const ColorHistogram no_content_histogram = CountColors(no_content_first);
+    const ColorHistogram data_mounted_histogram = CountColors(data_mounted_first);
+    const ColorHistogram level_content_histogram = CountColors(level_content_first);
+    Check(no_content_histogram == ColorHistogram{
+              .background = 3'593U,
+              .cyan = 1'627U,
+              .slate = 3'516U,
+              .amber = 480U,
+              .unknown = 0U,
+              .all_alpha_opaque = true,
+          },
+        "the NoContent menu has its exact opaque four-color histogram");
+    Check(data_mounted_histogram == ColorHistogram{
+              .background = 3'600U,
+              .cyan = 1'620U,
+              .slate = 3'516U,
+              .amber = 480U,
+              .unknown = 0U,
+              .all_alpha_opaque = true,
+          },
+        "the DataMounted menu has its exact opaque four-color histogram");
+    Check(level_content_histogram == ColorHistogram{
+              .background = 3'594U,
+              .cyan = 1'626U,
+              .slate = 3'516U,
+              .amber = 480U,
+              .unknown = 0U,
+              .all_alpha_opaque = true,
+          },
+        "the LevelContent menu has its exact opaque four-color histogram");
 
     constexpr std::array probe_coordinates{
         std::array{4U, 4U}, std::array{0U, 0U}, std::array{8U, 8U},
@@ -532,21 +620,81 @@ int main()
         kCyanColor, kSlateColor, kCyanColor, kCyanColor,
         kSlateColor, kCyanColor, kCyanColor, kCyanColor,
     };
+    const std::array<const omega::runtime::DebugImage*, 3U> stage_menu_images{
+        &no_content_first, &data_mounted_first, &level_content_first};
     bool probes_match = true;
-    for (std::size_t index = 0U; index < probe_coordinates.size(); ++index)
+    for (const omega::runtime::DebugImage* image : stage_menu_images)
     {
-        probes_match = probes_match &&
-                       PixelAt(first, probe_coordinates[index][0],
-                           probe_coordinates[index][1]) == probe_colors[index];
+        for (std::size_t index = 0U; index < probe_coordinates.size(); ++index)
+        {
+            probes_match = probes_match &&
+                           PixelAt(*image, probe_coordinates[index][0],
+                               probe_coordinates[index][1]) == probe_colors[index];
+        }
     }
     Check(probes_match,
-        "sixteen independent probes cover the frame, labels, legend, and all menu rows");
+        "sixteen shared probes cover the frame, labels, legend, and all menu rows in every stage");
 
-    const std::uint64_t digest = Fnv1a64(first.pixels());
-    std::cout << "diagnostic menu FNV-1a-64: 0x" << std::hex
-              << std::setfill('0') << std::setw(16) << digest << std::dec << '\n';
-    Check(digest == kExpectedDiagnosticMenuFnv1a64,
-        "the complete deterministic RGBA8 image matches the independently frozen digest");
+    constexpr std::array content_boundary_coordinates{
+        std::array{91U, 54U}, std::array{93U, 54U}, std::array{117U, 58U},
+        std::array{119U, 58U}, std::array{95U, 61U}, std::array{96U, 61U},
+        std::array{115U, 65U},
+    };
+    constexpr std::array content_boundary_colors{
+        kBackgroundColor, kCyanColor, kCyanColor, kBackgroundColor,
+        kBackgroundColor, kCyanColor, kBackgroundColor,
+    };
+    bool content_boundaries_match = true;
+    for (const omega::runtime::DebugImage* image : stage_menu_images)
+    {
+        for (std::size_t index = 0U; index < content_boundary_coordinates.size();
+             ++index)
+        {
+            content_boundaries_match = content_boundaries_match &&
+                                       PixelAt(*image,
+                                           content_boundary_coordinates[index][0],
+                                           content_boundary_coordinates[index][1]) ==
+                                           content_boundary_colors[index];
+        }
+    }
+    Check(content_boundaries_match,
+        "the CONTENT and stage labels retain exact shared boundary pixels");
+
+    constexpr std::array stage_discriminator_coordinates{
+        std::array{97U, 61U}, std::array{98U, 61U}, std::array{100U, 61U},
+    };
+    constexpr std::array stage_discriminator_colors{
+        std::array{kBackgroundColor, kCyanColor, kBackgroundColor},
+        std::array{kCyanColor, kBackgroundColor, kBackgroundColor},
+        std::array{kBackgroundColor, kBackgroundColor, kCyanColor},
+    };
+    bool stage_discriminators_match = true;
+    for (std::size_t stage = 0U; stage < stage_menu_images.size(); ++stage)
+    {
+        for (std::size_t index = 0U;
+             index < stage_discriminator_coordinates.size(); ++index)
+        {
+            stage_discriminators_match = stage_discriminators_match &&
+                                         PixelAt(*stage_menu_images[stage],
+                                             stage_discriminator_coordinates[index][0],
+                                             stage_discriminator_coordinates[index][1]) ==
+                                             stage_discriminator_colors[stage][index];
+        }
+    }
+    Check(stage_discriminators_match,
+        "three exact discriminator pixels distinguish NONE, DATA, and LEVEL");
+
+    const std::uint64_t no_content_digest = Fnv1a64(no_content_first.pixels());
+    const std::uint64_t data_mounted_digest = Fnv1a64(data_mounted_first.pixels());
+    const std::uint64_t level_content_digest = Fnv1a64(level_content_first.pixels());
+    std::cout << "diagnostic menu NoContent/DataMounted/LevelContent FNV-1a-64: 0x"
+              << std::hex << std::setfill('0') << std::setw(16) << no_content_digest
+              << "/0x" << std::setw(16) << data_mounted_digest << "/0x"
+              << std::setw(16) << level_content_digest << std::dec << '\n';
+    Check(no_content_digest == kExpectedNoContentMenuFnv1a64 &&
+              data_mounted_digest == kExpectedDataMountedMenuFnv1a64 &&
+              level_content_digest == kExpectedLevelContentMenuFnv1a64,
+        "all three deterministic content-stage menus match their independently frozen digests");
 
     const omega::runtime::DebugImage controls_first =
         BuildProjectDiagnosticControlsImage();
