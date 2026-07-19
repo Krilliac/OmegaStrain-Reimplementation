@@ -144,6 +144,7 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     auto host = std::make_unique<SdlGpuHost>(std::move(*created_host));
 
     runtime::RenderTextureHandle diagnostic_texture;
+    runtime::RenderDrawList diagnostic_draw_list;
     if (content_owner->debug_image)
     {
         const runtime::DebugImage& image = *content_owner->debug_image;
@@ -159,7 +160,30 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
             log->Error("startup", error);
             return std::unexpected(error);
         }
+
+        constexpr runtime::RenderTargetRectQ16 full_target{
+            .left = 0U,
+            .top = 0U,
+            .right = runtime::kNormalizedRenderExtent,
+            .bottom = runtime::kNormalizedRenderExtent,
+        };
+        const std::array commands{
+            runtime::RenderTextureBlitCommand{
+                .texture = *uploaded,
+                .destination = full_target,
+            },
+        };
+        auto created_draw_list = runtime::RenderDrawList::Create(commands);
+        if (!created_draw_list)
+        {
+            constexpr std::string_view error =
+                "SDL/GPU diagnostic draw-list creation failed";
+            log->Error("startup", error);
+            return std::unexpected(std::string(error));
+        }
+
         diagnostic_texture = *uploaded;
+        diagnostic_draw_list = std::move(*created_draw_list);
     }
 
     log->Info("startup", "runtime services ready with " +
@@ -170,7 +194,7 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
         std::move(ring_sink), std::move(log), std::move(jobs), std::move(assets),
         std::move(frame_scheduler), std::move(input), std::move(simulation),
         std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
-        diagnostic_texture);
+        diagnostic_texture, std::move(diagnostic_draw_list));
 }
 
 OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
@@ -186,19 +210,22 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<SdlInputService> sdl_input,
     std::unique_ptr<SdlAudioService> audio,
     std::unique_ptr<SdlGpuHost> host,
-    const runtime::RenderTextureHandle diagnostic_texture) noexcept
+    const runtime::RenderTextureHandle diagnostic_texture,
+    runtime::RenderDrawList diagnostic_draw_list) noexcept
     : config_(std::move(config)), content_(std::move(content)),
       stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)),
       log_(std::move(log)), jobs_(std::move(jobs)), assets_(std::move(assets)),
       frame_scheduler_(std::move(frame_scheduler)), input_(std::move(input)),
       simulation_(std::move(simulation)), platform_(std::move(platform)),
       sdl_input_(std::move(sdl_input)), audio_(std::move(audio)), host_(std::move(host)),
-      diagnostic_texture_(diagnostic_texture)
+      diagnostic_texture_(diagnostic_texture),
+      diagnostic_draw_list_(std::move(diagnostic_draw_list))
 {
 }
 
 OmegaApp::~OmegaApp() noexcept
 {
+    diagnostic_draw_list_ = {};
     if (host_ != nullptr && diagnostic_texture_.valid())
     {
         bool release_failed = false;
@@ -302,7 +329,7 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
             .completed_simulation_steps = simulation_snapshot.completed_steps,
             .simulated_time = simulation_snapshot.simulated_time,
             .alive_entities = simulation_snapshot.alive_entities,
-            .diagnostic_texture = diagnostic_texture_,
+            .draw_list = diagnostic_draw_list_,
         };
         auto rendered = host_->RenderFrame(render_packet);
         if (!rendered)

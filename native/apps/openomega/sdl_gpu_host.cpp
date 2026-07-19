@@ -2,15 +2,18 @@
 
 #include "sdl_platform_service.h"
 
+#include "omega/runtime/render_draw_list.h"
 #include "omega/runtime/render_texture_pool.h"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <new>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,6 +34,38 @@ namespace
 {
     return std::string(operation) + ": " +
            std::string(runtime::RenderTextureErrorCodeName(error.code));
+}
+
+constexpr std::size_t kPostAcquireErrorCapacity = 512U;
+
+void AppendBounded(std::string& destination, const std::string_view text) noexcept
+{
+    const std::size_t remaining = destination.capacity() - destination.size();
+    destination.append(text.data(), std::min(remaining, text.size()));
+}
+
+void SetSdlErrorBounded(
+    std::string& destination, const std::string_view operation) noexcept
+{
+    destination.clear();
+    AppendBounded(destination, operation);
+    AppendBounded(destination, ": ");
+    const char* detail = SDL_GetError();
+    AppendBounded(destination,
+        detail != nullptr && detail[0] != '\0' ? std::string_view(detail)
+                                                : std::string_view("unknown SDL error"));
+}
+
+void AppendSdlErrorBounded(
+    std::string& destination, const std::string_view operation) noexcept
+{
+    AppendBounded(destination, "; ");
+    AppendBounded(destination, operation);
+    AppendBounded(destination, ": ");
+    const char* detail = SDL_GetError();
+    AppendBounded(destination,
+        detail != nullptr && detail[0] != '\0' ? std::string_view(detail)
+                                                : std::string_view("unknown SDL error"));
 }
 
 class ReservationRollbackGuard final
@@ -182,6 +217,14 @@ enum class FrameSubmissionKind
     UnavailableSwapchain,
 };
 
+struct ResolvedTextureBlit
+{
+    SDL_GPUTexture* texture = nullptr;
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+    runtime::RenderTargetRectQ16 destination;
+};
+
 } // namespace
 
 struct SdlGpuHost::Impl
@@ -227,6 +270,7 @@ struct SdlGpuHost::Impl
     std::uint64_t successful_releases = 0U;
     std::uint64_t frame_submissions = 0U;
     std::uint64_t blit_submissions = 0U;
+    std::uint64_t successful_blit_draws = 0U;
     std::uint64_t clear_submissions = 0U;
     std::uint64_t unavailable_swapchain_submissions = 0U;
     std::uint64_t rejected_nondefault_texture_handles = 0U;
@@ -446,17 +490,19 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
 {
     try
     {
-        SDL_GPUTexture* frame_texture = nullptr;
-        std::uint32_t texture_width = 0U;
-        std::uint32_t texture_height = 0U;
-        if (!IsDefaultHandle(packet.diagnostic_texture))
+        const std::span<const runtime::RenderTextureBlitCommand> draw_commands =
+            packet.draw_list.commands();
+        std::array<ResolvedTextureBlit,
+            runtime::kMaximumRenderTextureBlitsPerFrame> resolved_blits{};
+        for (std::size_t index = 0U; index < draw_commands.size(); ++index)
         {
-            auto metadata = impl_->texture_pool.Get(packet.diagnostic_texture);
+            const runtime::RenderTextureBlitCommand& draw = draw_commands[index];
+            auto metadata = impl_->texture_pool.Get(draw.texture);
             if (!metadata)
             {
                 SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
                 return std::unexpected(
-                    PoolError("render frame diagnostic texture resolve", metadata.error()));
+                    PoolError("render frame draw texture resolve", metadata.error()));
             }
 
             const std::uint32_t slot_index = metadata->handle.slot_index;
@@ -465,115 +511,144 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
             {
                 SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
                 return std::unexpected(
-                    "render frame diagnostic texture backend slot invariant failed");
+                    "render frame draw texture backend slot invariant failed");
             }
-            frame_texture = impl_->texture_slots[slot_index];
-            texture_width = metadata->width;
-            texture_height = metadata->height;
+            resolved_blits[index] = ResolvedTextureBlit{
+                .texture = impl_->texture_slots[slot_index],
+                .width = metadata->width,
+                .height = metadata->height,
+                .destination = draw.destination,
+            };
         }
 
-        SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
-        if (commands == nullptr)
-            return std::unexpected(SdlError("SDL_AcquireGPUCommandBuffer"));
-        CommandBufferGuard command_guard(commands);
+        // Reserve all error storage before acquiring the command buffer. The active command
+        // path below uses only fixed-capacity values and bounded writes into this existing buffer.
+        std::string post_acquire_error;
+        post_acquire_error.reserve(kPostAcquireErrorCapacity);
+
+        SDL_GPUCommandBuffer* gpu_commands = SDL_AcquireGPUCommandBuffer(impl_->device);
+        if (gpu_commands == nullptr)
+        {
+            SetSdlErrorBounded(post_acquire_error, "SDL_AcquireGPUCommandBuffer");
+            return std::unexpected(std::move(post_acquire_error));
+        }
+        CommandBufferGuard command_guard(gpu_commands);
 
         SDL_GPUTexture* swapchain = nullptr;
         std::uint32_t width = 0U;
         std::uint32_t height = 0U;
         if (!SDL_WaitAndAcquireGPUSwapchainTexture(
-                commands, impl_->window, &swapchain, &width, &height))
+                gpu_commands, impl_->window, &swapchain, &width, &height))
         {
-            std::string error = SdlError("SDL_WaitAndAcquireGPUSwapchainTexture");
+            SetSdlErrorBounded(
+                post_acquire_error, "SDL_WaitAndAcquireGPUSwapchainTexture");
             if (!command_guard.Cancel())
             {
-                error += "; " +
-                         SdlError("SDL_CancelGPUCommandBuffer after acquire failure");
+                AppendSdlErrorBounded(post_acquire_error,
+                    "SDL_CancelGPUCommandBuffer after acquire failure");
             }
-            return std::unexpected(std::move(error));
+            return std::unexpected(std::move(post_acquire_error));
         }
         command_guard.SubmitOnUnwind();
 
         FrameSubmissionKind submission_kind = FrameSubmissionKind::UnavailableSwapchain;
-        if (swapchain != nullptr && width != 0U && height != 0U && frame_texture != nullptr)
+        if (swapchain != nullptr && width != 0U && height != 0U)
         {
-            submission_kind = FrameSubmissionKind::Blit;
-            std::uint32_t destination_width = width;
-            std::uint32_t destination_height = height;
-            if (static_cast<std::uint64_t>(width) * texture_height <=
-                static_cast<std::uint64_t>(height) * texture_width)
+            submission_kind = draw_commands.empty() ? FrameSubmissionKind::Clear
+                                                     : FrameSubmissionKind::Blit;
+            SDL_GPUColorTargetInfo target{};
+            target.texture = swapchain;
+            if (draw_commands.empty())
             {
-                destination_height = std::max(1U, static_cast<std::uint32_t>(
-                    static_cast<std::uint64_t>(width) * texture_height / texture_width));
+                const float pulse =
+                    static_cast<float>((packet.rendered_frame_index % 240U) / 239.0);
+                target.clear_color = SDL_FColor{
+                    0.025F + pulse * 0.025F, 0.035F, 0.065F + pulse * 0.04F, 1.0F};
             }
             else
             {
-                destination_width = std::max(1U, static_cast<std::uint32_t>(
-                    static_cast<std::uint64_t>(height) * texture_width / texture_height));
+                target.clear_color = SDL_FColor{0.015F, 0.02F, 0.04F, 1.0F};
             }
-            const SDL_GPUBlitInfo blit{
-                .source = {
-                    .texture = frame_texture,
-                    .mip_level = 0,
-                    .layer_or_depth_plane = 0,
-                    .x = 0,
-                    .y = 0,
-                    .w = texture_width,
-                    .h = texture_height,
-                },
-                .destination = {
-                    .texture = swapchain,
-                    .mip_level = 0,
-                    .layer_or_depth_plane = 0,
-                    .x = (width - destination_width) / 2U,
-                    .y = (height - destination_height) / 2U,
-                    .w = destination_width,
-                    .h = destination_height,
-                },
-                .load_op = SDL_GPU_LOADOP_CLEAR,
-                .clear_color = {0.015F, 0.02F, 0.04F, 1.0F},
-                .flip_mode = SDL_FLIP_NONE,
-                .filter = SDL_GPU_FILTER_NEAREST,
-                .cycle = false,
-                .padding1 = 0,
-                .padding2 = 0,
-                .padding3 = 0,
-            };
-            SDL_BlitGPUTexture(commands, &blit);
-        }
-        else if (swapchain != nullptr && width != 0U && height != 0U)
-        {
-            submission_kind = FrameSubmissionKind::Clear;
-            const float pulse =
-                static_cast<float>((packet.rendered_frame_index % 240U) / 239.0);
-            SDL_GPUColorTargetInfo target{};
-            target.texture = swapchain;
-            target.clear_color = SDL_FColor{
-                0.025F + pulse * 0.025F, 0.035F, 0.065F + pulse * 0.04F, 1.0F};
             target.load_op = SDL_GPU_LOADOP_CLEAR;
             target.store_op = SDL_GPU_STOREOP_STORE;
             SDL_GPURenderPass* pass =
-                SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
+                SDL_BeginGPURenderPass(gpu_commands, &target, 1, nullptr);
             if (pass == nullptr)
             {
-                std::string error = SdlError("SDL_BeginGPURenderPass");
+                SetSdlErrorBounded(post_acquire_error, "SDL_BeginGPURenderPass");
                 if (!command_guard.Submit())
                 {
-                    error += "; " +
-                             SdlError("empty command-buffer submit after render-pass failure");
+                    AppendSdlErrorBounded(post_acquire_error,
+                        "command-buffer submit after render-pass failure");
                 }
-                return std::unexpected(std::move(error));
+                return std::unexpected(std::move(post_acquire_error));
             }
             SDL_EndGPURenderPass(pass);
+
+            for (std::size_t index = 0U; index < draw_commands.size(); ++index)
+            {
+                const ResolvedTextureBlit& resolved = resolved_blits[index];
+                const auto destination = runtime::PlanContainedTextureBlit(
+                    resolved.destination, resolved.width, resolved.height, width, height);
+                if (!destination)
+                {
+                    post_acquire_error.clear();
+                    AppendBounded(post_acquire_error,
+                        "render frame contained blit planning failed: ");
+                    AppendBounded(post_acquire_error, destination.error().message);
+                    if (!command_guard.Submit())
+                    {
+                        AppendSdlErrorBounded(post_acquire_error,
+                            "command-buffer submit after blit planning failure");
+                    }
+                    return std::unexpected(std::move(post_acquire_error));
+                }
+
+                const SDL_GPUBlitInfo blit{
+                    .source = {
+                        .texture = resolved.texture,
+                        .mip_level = 0,
+                        .layer_or_depth_plane = 0,
+                        .x = 0,
+                        .y = 0,
+                        .w = resolved.width,
+                        .h = resolved.height,
+                    },
+                    .destination = {
+                        .texture = swapchain,
+                        .mip_level = 0,
+                        .layer_or_depth_plane = 0,
+                        .x = destination->left,
+                        .y = destination->top,
+                        .w = destination->right - destination->left,
+                        .h = destination->bottom - destination->top,
+                    },
+                    .load_op = SDL_GPU_LOADOP_LOAD,
+                    .clear_color = {},
+                    .flip_mode = SDL_FLIP_NONE,
+                    .filter = SDL_GPU_FILTER_NEAREST,
+                    .cycle = false,
+                    .padding1 = 0,
+                    .padding2 = 0,
+                    .padding3 = 0,
+                };
+                SDL_BlitGPUTexture(gpu_commands, &blit);
+            }
         }
 
         if (!command_guard.Submit())
-            return std::unexpected(SdlError("SDL_SubmitGPUCommandBuffer"));
+        {
+            SetSdlErrorBounded(post_acquire_error, "SDL_SubmitGPUCommandBuffer");
+            return std::unexpected(std::move(post_acquire_error));
+        }
 
         SaturatingIncrement(impl_->frame_submissions);
         switch (submission_kind)
         {
         case FrameSubmissionKind::Blit:
             SaturatingIncrement(impl_->blit_submissions);
+            SaturatingAdd(impl_->successful_blit_draws,
+                static_cast<std::uint64_t>(draw_commands.size()));
             break;
         case FrameSubmissionKind::Clear:
             SaturatingIncrement(impl_->clear_submissions);
@@ -608,6 +683,7 @@ GpuHostSnapshot SdlGpuHost::Snapshot() const noexcept
         .successful_releases = impl_->successful_releases,
         .frame_submissions = impl_->frame_submissions,
         .blit_submissions = impl_->blit_submissions,
+        .successful_blit_draws = impl_->successful_blit_draws,
         .clear_submissions = impl_->clear_submissions,
         .unavailable_swapchain_submissions = impl_->unavailable_swapchain_submissions,
         .rejected_nondefault_texture_handles =

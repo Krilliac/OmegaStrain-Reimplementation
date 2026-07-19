@@ -180,42 +180,76 @@ No speculative gameplay component is instantiated; concrete components and syste
 project-owned work. Entity and component capacities are synthetic host limits, not retail
 population claims.
 
-Each rendered frame now crosses an explicit owned `RenderFramePacket` boundary containing the host
-frame index, deterministic world clock, live-entity count, and E-0044's default-invalid fixed-width
-diagnostic texture handle. The packet remains trivially copyable and standard layout. The new
-SDL-free `RenderTexturePool` preallocates fixed metadata slots; validates exact, overflow-checked,
-tightly packed project-owned RGBA8 extents; supports transactional `Reserve`/`Publish`/`Rollback`;
-rejects default, foreign, stale, and released handles; refunds logical bytes on explicit release; and
-retires a maximum generation rather than wrapping. Defaults are 64 slots and 64 MiB logical RGBA8,
-with a hard 8,192-slot maximum. A clean MSVC build had zero warnings or errors, the focused test and
-100 repeats passed, and full 19/19 CTest passed. At E-0044 the SDL host consumed the frame packet
+At E-0044, each rendered frame crossed an explicit owned `RenderFramePacket` boundary containing the
+host frame index, deterministic world clock, live-entity count, and a default-invalid fixed-width
+diagnostic texture handle. The packet remained trivially copyable and standard layout. The SDL-free
+`RenderTexturePool` preallocated fixed metadata slots; validated exact, overflow-checked, tightly
+packed project-owned RGBA8 extents; supported transactional `Reserve`/`Publish`/`Rollback`;
+rejected default, foreign, stale, and released handles; refunded logical bytes on explicit release;
+and retired a maximum generation rather than wrapping. Defaults were 64 slots and 64 MiB logical
+RGBA8, with a hard 8,192-slot maximum. A clean MSVC build had zero warnings or errors, the focused
+test and 100 repeats passed, and full 19/19 CTest passed. The SDL host consumed the frame packet
 synchronously but did not consume this handle; the pool created no GPU object and the existing
 one-off debug upload remained unchanged. Those are historical E-0044 boundaries.
 
-E-0045 supersedes the historical host non-consumption and one-off-upload state. `SdlGpuHost` now
-owns a fixed SDL texture table parallel to the portable pool. Project-owned RGBA8 upload is an RAII
-transaction across `Reserve`, backend create/copy/submit, and `Publish`; failures roll back residency
-and acquired backend resources. Release waits for idle, packets select the resident generation for
-blitting, and the aggregate snapshot exposes no identities. `OmegaApp` uploads its existing
-project-generated diagnostic image, stores only the handle, and explicitly releases it before host
-fallback teardown. Post-swapchain command-buffer unwinding submits rather than taking SDL's illegal
-cancel path. Pool defaults remain 64 slots and 64 MiB logical RGBA8, hard-limited to 8,192 slots.
+At E-0045, the host integration superseded the historical host non-consumption and one-off-upload
+state. `SdlGpuHost` owned a fixed SDL texture table parallel to the portable pool. Project-owned
+RGBA8 upload was an RAII transaction across `Reserve`, backend create/copy/submit, and `Publish`;
+failures rolled back residency and acquired backend resources. Release waited for idle, packets
+selected the resident generation for blitting, and the aggregate snapshot exposed no identities.
+`OmegaApp` uploaded its existing project-generated diagnostic image, stored only the handle, and
+explicitly released it before host fallback teardown. Post-swapchain command-buffer unwinding
+submitted rather than taking SDL's illegal cancel path. Pool defaults remained 64 slots and 64 MiB
+logical RGBA8, hard-limited to 8,192 slots.
 
-A clean MSVC build completed with zero warnings and errors and default CTest passed 19/19. One
-initial plus 20 repeated zero-file GPU smokes all passed on `direct3d12` (21 total), and a public
-two-frame `openomega` smoke passed. Each GPU smoke uses capacity one/budget 256 bytes; clears once;
-uploads, blits, and releases opaque 8x8 A (256 bytes); rejects its stale handle before GPU access;
-reuses the same slot at a new generation for opaque 4x8 B (128 bytes); blits and releases B; then
-checks idle. Exact totals are two uploads/384 cumulative logical bytes, two releases, two blits, one
-clear, one rejection, zero unavailable submissions, and final capacity one/free one with zero
-reserved, resident, retired, or charged bytes. This proves command submission and idle, not
-framebuffer identity or readback. The target always compiles with tests plus the SDL backend, but
-hardware CTest registration is off by default and opt-in via `OMEGA_RUN_GPU_SMOKE_TEST`.
+The E-0045 validation completed with a clean MSVC build at zero warnings and errors, and default
+CTest passed 19/19. One initial plus 20 repeated zero-file GPU smokes all passed on `direct3d12` (21
+total), and a public two-frame `openomega` smoke passed. Each GPU smoke used capacity one/budget 256
+bytes; submitted one clear-only frame; uploaded, blitted, and released opaque 8x8 A (256 bytes);
+rejected its stale handle before GPU access; reused the same slot at a new generation for opaque 4x8
+B (128 bytes); blitted and released B; then checked idle. Exact totals were two uploads/384
+cumulative logical bytes, two releases, two blits, one clear-only submission, one rejection, zero
+unavailable submissions, and final capacity one/free one with zero reserved, resident, retired, or
+charged bytes. This proved command submission and idle, not framebuffer identity or readback. At
+E-0045 the target compiled with tests plus the SDL backend, while hardware CTest registration was
+off by default and opt-in via `OMEGA_RUN_GPU_SMOKE_TEST`.
 
-This slice establishes no `TextureStorageIR`/`AssetService` bridge; TDX plane/palette consumption;
+E-0045 established no `TextureStorageIR`/`AssetService` bridge; TDX plane/palette consumption;
 channel, alpha, nibble, palette, swizzle, mip, or display expansion; VUM/material/alias/binding;
 scene placement/visibility; retail rendering; gameplay; measured GPU bytes; streaming/eviction;
 asynchronous upload; or fence design.
+
+E-0046 supersedes E-0045's single diagnostic-texture packet field with an owned, fixed-capacity
+`RenderDrawList`. Its fully zeroed backing store holds at most 16 commands, and construction
+validates every handle and nonempty normalized target rectangle while preserving order and
+duplicates. The normalized extent is 65,536. Deterministic 64-bit planning floors left/top edges,
+ceilings right/bottom edges, and centers an aspect-contained source rectangle. The list, its command
+values, and the containing packet remain trivially copyable and standard layout.
+
+Commands neither own nor pin textures; the current synchronous caller keeps their generations
+resident. `SdlGpuHost` pre-resolves every handle into fixed storage before acquiring a GPU command
+buffer, so a stale handle anywhere rejects the list before any valid prefix can be submitted. An
+available nonempty frame clears the full target, then records nearest-filtered `LOAD` blits in
+source order; an empty list remains clear-only. `OmegaApp` separately retains the handle needed for
+release and one otherwise-immutable full-target diagnostic draw list, clears the list during
+destruction, then releases the handle.
+
+A clean MSVC build completed with zero warnings and errors; the focused checks and 100 repeats
+passed; and default CTest passed 20/20. One initial plus 20 repeated public zero-file GPU smokes
+passed on `direct3d12` (21 total). With capacity two and a 384-byte logical-residency budget, each
+completed run ended at exactly three uploads/640 cumulative bytes, three releases, two blit
+frames/four successful draws, one clear-only submission, one stale-list rejection, zero unavailable
+submissions, and zero residual residency. The opt-in GPU CTest passed as test 21, after which
+registration was restored to default off and the default suite to 20 tests. A public two-frame
+`openomega` smoke with dummy audio passed.
+
+This proves host-side stale-handle rejection before prefix GPU work, not texture ownership or pins,
+arbitrary backend-failure atomicity, framebuffer identity, or readback. The command limit, order,
+normalized coordinates, aspect containment, nearest filter, clear/compositing behavior, and
+diagnostic placement are project-owned policy rather than retail semantics. No retail order,
+coordinates, filtering, clearing, composition, placement, camera, material, mesh, or gameplay
+meaning is assigned. No asset-service/storage bridge, display expansion, measured GPU allocation,
+streaming/eviction, asynchronous upload/rendering, pin contract, or fence design is established.
 
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.

@@ -12,6 +12,7 @@
 #include "omega/runtime/input_tracker.h"
 #include "omega/runtime/job_service.h"
 #include "omega/runtime/log_service.h"
+#include "omega/runtime/render_draw_list.h"
 #include "omega/runtime/render_texture.h"
 #include "omega/runtime/runtime_settings.h"
 #include "omega/simulation/simulation_world.h"
@@ -78,7 +79,8 @@ private:
         std::unique_ptr<SdlInputService> sdl_input,
         std::unique_ptr<SdlAudioService> audio,
         std::unique_ptr<SdlGpuHost> host,
-        runtime::RenderTextureHandle diagnostic_texture) noexcept;
+        runtime::RenderTextureHandle diagnostic_texture,
+        runtime::RenderDrawList diagnostic_draw_list) noexcept;
 
     // Declaration order is ownership order; destruction is the required reverse order.
     std::unique_ptr<runtime::ConfigStore> config_;
@@ -98,5 +100,7 @@ private:
     // Non-owning generation-scoped identity. The host remains the backend-resource owner and a
     // default-moved-from app cannot release this copied value because its host_ is null.
     runtime::RenderTextureHandle diagnostic_texture_;
+    // Immutable non-owning draw data, retained independently from the explicit release handle.
+    runtime::RenderDrawList diagnostic_draw_list_;
 };
 } // namespace omega::app
