@@ -524,6 +524,26 @@ printing, replay, injection/playback, restore, delta interpretation, checkpoint,
 rollback, interactive or zero-frame capture command, probe composition, ordinary-above-65,536
 execution claim, or retail timing or determinism semantics.
 
+E-0057 adds the SDL-free `omega_runtime` `RunCaptureReplaySession`. This concrete move-only value
+owns a moved `RunCaptureTracePair` and advances one exclusive game-thread cursor. It validates both
+leaf traces, shared capacity/origin, normal-versus-terminal counts, and terminal reason/index before
+taking ownership; rejection leaves the caller's pair unchanged. Each successful `Next` publishes a
+`RunCaptureReplayFrame` with an exact owned immutable `InputSnapshot`, retaining the recorded frame
+index and schema, held/pressed/released masks, and accepted/rejected event counts. The snapshot is
+paired with exactly one owned successor: the captured signed elapsed value for a normal frame or
+the independent host-quit/logical-quit flags for a terminal frame.
+`RunCaptureOutcome::TakeTracePair` is
+rvalue-only; it transfers the optional pair and normalizes the whole outcome inert even when no
+pair exists.
+`InputSnapshot` reconstruction allocation or defensive trace-read failure does not advance the
+cursor; exhausted and moved-from sessions report distinct complete and invalid-state errors.
+
+This milestone adds no SDL, `OmegaApp`, or CLI replay path; input injection, `InputTracker`
+mutation, or synthetic physical events; scheduler creation, feeding, pacing, clocking, or restore;
+simulation checkpointing, RNG restore, or world mutation; render, audio, or job work; persistence,
+serialization, file/wire/stable ABI, or cross-process contract; seek, rewind, looping, rollback, or
+retail timing or determinism claim.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

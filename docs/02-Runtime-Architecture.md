@@ -828,6 +828,38 @@ per-frame printing, replay, injection/playback, scheduler restore or delta inter
 simulation checkpoint, RNG state, rollback, interactive or zero-frame capture command, probe
 composition, ordinary-above-65,536 execution claim, or retail timing or determinism semantics.
 
+E-0057 adds `RunCaptureReplaySession`, a concrete SDL-free, move-only `omega_runtime` value that
+owns one moved `RunCaptureTracePair`. It is not a service and is non-hot-reloadable. Creation may
+validate and take ownership on any thread; after publication, the replay cursor is exclusive to one
+game thread and has no concurrent-use contract.
+
+`Create` validates both leaf traces before moving from the caller. It requires valid trace metadata
+and input schema, equal capacities and first frame indices, equal normal input/elapsed counts or one
+extra terminal input, and a terminal at the final input index with at least one quit reason. Failure
+leaves the caller's pair unchanged.
+
+Each successful `Next` publishes a `RunCaptureReplayFrame` and reconstructs the recorded logical
+input as a new owned immutable `InputSnapshot`. Reconstruction preserves the frame index, schema
+order, held/pressed/released masks, and accepted/rejected event counts. A normal frame couples that
+snapshot to the exact signed elapsed value. A terminal frame couples it to the owned independent
+host-quit and logical-quit flags and exposes no elapsed value. The session therefore yields exactly
+the captured input-plus-elapsed or input-plus-terminal sequence without borrowing a snapshot or
+mutating an input source.
+`InputSnapshot` reconstruction allocation or defensive trace-read failure leaves the cursor
+unchanged. `Next` distinguishes clean exhaustion from a moved-from inert session with fixed
+complete and invalid-state errors.
+
+`RunCaptureOutcome::TakeTracePair` is an rvalue-only ownership bridge from app capture to replay.
+It moves out the optional pair and normalizes the complete outcome to its inert state whether the
+pair was present or absent. Existing outcome borrows end at extraction, as they do at outcome move
+or destruction.
+
+This replay layer does not call SDL or add an `OmegaApp`/CLI path. It performs no input injection,
+`InputTracker` mutation, synthetic physical event generation, scheduler creation/feed/pacing,
+clock sampling, scheduler restore, simulation checkpoint or RNG restore, world mutation, render,
+audio, or job work. It defines no persistence, serialization, file/wire/stable ABI, cross-process,
+seek, rewind, loop, rollback, retail timing, or retail determinism contract.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

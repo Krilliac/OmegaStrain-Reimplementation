@@ -121,9 +121,9 @@ class OmegaApp;
 
 // Immutable in-process result of one finite captured host-loop invocation. It owns no app,
 // service, clock, SDL object, or borrowed scheduler state. After publication, const reads are
-// [any thread; reentrant] when no read races outcome move or destruction. Failure views, trace
-// references, and trace pointers are invalidated by outcome move or destruction. This value is
-// non-hot-reloadable.
+// [any thread; reentrant] when no read races outcome move, destructive trace extraction, or
+// destruction. Failure views, trace references, and trace pointers are invalidated by any of
+// those events. This value is non-hot-reloadable.
 class RunCaptureOutcome final
 {
 public:
@@ -138,14 +138,21 @@ public:
     [[nodiscard]] RunCaptureCompletion completion() const noexcept;
     [[nodiscard]] runtime::FrameSchedulerState scheduler_state_before() const noexcept;
     [[nodiscard]] runtime::FrameSchedulerState scheduler_state_after() const noexcept;
-    // Borrowed until this outcome moves or is destroyed.
+    // Borrowed until this outcome moves, destructively extracts its trace pair, or is destroyed.
     [[nodiscard]] std::optional<std::string_view> failure() const noexcept;
     [[nodiscard]] bool has_traces() const noexcept;
 
-    // Borrowed until this outcome moves or is destroyed.
+    // Borrowed until this outcome moves, destructively extracts its trace pair, or is destroyed.
     [[nodiscard]] const runtime::RunCaptureTracePair* trace_pair() const noexcept;
 
-    // Owned copy independent of subsequent outcome move or destruction.
+    // [any thread; exclusive ownership] Transfers the trace pair when present, then normalizes
+    // every source field to inert. The call invalidates all prior failure views, trace references,
+    // trace pointers, and values borrowed through them even when no pair is present.
+    [[nodiscard]] std::optional<runtime::RunCaptureTracePair>
+    TakeTracePair() && noexcept;
+
+    // Owned copy independent of subsequent outcome move, destructive trace extraction, or
+    // destruction.
     [[nodiscard]] std::optional<runtime::RunCaptureTerminalInput> terminal_input() const noexcept;
 
 private:

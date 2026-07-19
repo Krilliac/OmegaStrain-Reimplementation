@@ -507,6 +507,27 @@ shipping dependencies or execution mechanisms.
     printing, replay, injection/playback, restore, delta interpretation, checkpoint, RNG state,
     rollback, interactive or zero-frame capture command, probe composition, ordinary-above-65,536
     execution claim, or retail timing or determinism semantics.
+42. E-0057 adds the SDL-free `omega_runtime` `RunCaptureReplaySession`. The concrete move-only
+    session owns a moved `RunCaptureTracePair` and advances one exclusive game-thread cursor. The
+    pair is validated before ownership transfer; invalid leaf state, capacity/origin alignment,
+    normal-versus-terminal counts, or terminal reason/index leaves the caller's pair unchanged. Each
+    successful `Next` publishes a `RunCaptureReplayFrame` with an exact owned immutable
+    `InputSnapshot`, retaining the recorded frame index, schema, held/pressed/released masks, and
+    accepted/rejected event counts. A normal frame owns the exact signed elapsed value. A terminal
+    frame instead owns the independent host-quit and logical-quit flags, so the same frame never
+    exposes elapsed and terminal data.
+    `InputSnapshot` reconstruction allocation or defensive trace-read failure leaves the cursor
+    unchanged. Exhausted and moved-from sessions produce distinct complete and invalid-state
+    errors.
+    `RunCaptureOutcome::TakeTracePair` is rvalue-only. It transfers the optional pair and normalizes
+    the entire source outcome to the same inert state used after move construction, including when
+    no pair exists.
+    This milestone is only bounded in-process replay data access. It adds no SDL, `OmegaApp`, or CLI
+    replay path; input injection, `InputTracker` mutation, or synthetic physical events; scheduler
+    creation, feeding, pacing, clocking, or state restoration; simulation checkpointing, RNG
+    restoration, or world mutation; rendering, audio, or job work; persistence, serialization,
+    file/wire/stable ABI, or cross-process contract; seek, rewind, looping, rollback, or retail
+    timing or determinism claim.
 
 ## Disc observations
 

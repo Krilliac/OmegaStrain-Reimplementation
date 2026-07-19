@@ -4,6 +4,7 @@
 
 #include <array>
 #include <chrono>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -60,6 +61,13 @@ using omega::runtime::RunCaptureSessionOperation;
 using omega::runtime::RunCaptureTerminalInput;
 using omega::runtime::RunCaptureTracePair;
 using omega::runtime::SchedulerElapsedTraceErrorCode;
+
+template <typename T>
+concept TracePairExtractable = requires(T&& outcome) {
+    {
+        std::forward<T>(outcome).TakeTracePair()
+    } -> std::same_as<std::optional<RunCaptureTracePair>>;
+};
 
 constexpr std::uint32_t kQuitAction = 10U;
 constexpr std::uint16_t kQuitCode = 7U;
@@ -185,6 +193,38 @@ void Check(const bool condition, const std::string_view message)
     return TakePair(finished);
 }
 
+[[nodiscard]] RunCaptureTracePair BuildElapsedThenTerminalPair()
+{
+    constexpr std::array actions{kQuitAction};
+    InputTracker tracker = MakeTracker();
+    auto created = RunCaptureSession::Create(
+        RunCaptureSessionConfig{.maximum_frames = 2U}, actions);
+    RunCaptureSession session = TakeSession(created);
+
+    const auto first = tracker.EndFrame();
+    if (!session.AppendInput(first) ||
+        !session.AppendElapsed(milliseconds{13}))
+    {
+        std::abort();
+    }
+    if (!tracker.PushEvent(InputEvent{
+            .device = InputDevice::Keyboard,
+            .code = kQuitCode,
+            .pressed = true,
+        }))
+    {
+        std::abort();
+    }
+    const auto terminal = tracker.EndFrame();
+    if (!session.AppendInput(terminal) ||
+        !session.MarkTerminal(false, true))
+    {
+        std::abort();
+    }
+    auto finished = std::move(session).Finish();
+    return TakePair(finished);
+}
+
 [[nodiscard]] constexpr FrameSchedulerConfig SchedulerConfig()
 {
     return FrameSchedulerConfig{
@@ -224,6 +264,17 @@ void Check(const bool condition, const std::string_view message)
         std::move(trace_pair));
 }
 
+[[nodiscard]] bool IsFullyInert(const RunCaptureOutcome& outcome)
+{
+    return outcome.requested_frame_limit() == 0U &&
+           outcome.result() == RunResult{} &&
+           outcome.completion() == RunCaptureCompletion::Inert &&
+           outcome.scheduler_state_before() == FrameSchedulerState{} &&
+           outcome.scheduler_state_after() == FrameSchedulerState{} &&
+           !outcome.failure() && !outcome.has_traces() &&
+           outcome.trace_pair() == nullptr && !outcome.terminal_input();
+}
+
 void CheckContract()
 {
     static_assert(std::is_nothrow_move_constructible_v<RunCaptureOutcome>);
@@ -243,6 +294,17 @@ void CheckContract()
     static_assert(noexcept(std::declval<const RunCaptureOutcome&>().has_traces()));
     static_assert(noexcept(std::declval<const RunCaptureOutcome&>().trace_pair()));
     static_assert(noexcept(std::declval<const RunCaptureOutcome&>().terminal_input()));
+    using ExtractedTracePair = decltype(
+        std::declval<RunCaptureOutcome&&>().TakeTracePair());
+    static_assert(std::same_as<ExtractedTracePair,
+        std::optional<RunCaptureTracePair>>);
+    static_assert(std::is_nothrow_move_constructible_v<ExtractedTracePair>);
+    static_assert(!std::is_copy_constructible_v<ExtractedTracePair>);
+    static_assert(TracePairExtractable<RunCaptureOutcome>);
+    static_assert(!TracePairExtractable<RunCaptureOutcome&>);
+    static_assert(!TracePairExtractable<const RunCaptureOutcome>);
+    static_assert(noexcept(
+        std::declval<RunCaptureOutcome&&>().TakeTracePair()));
     static_assert(noexcept(omega::app::detail::IsCompleteRunCaptureOutcome(
         std::declval<const RunCaptureOutcome&>(), 1)));
 
@@ -548,6 +610,84 @@ void CheckTerminalAndFailureOutcomes()
         "failure ownership transfers while the source becomes inert");
 }
 
+void CheckTracePairExtraction()
+{
+    RunCaptureOutcome present = MakeOutcome(2U,
+        RunResult{.input_frames = 2U, .quit_requested = true},
+        RunCaptureCompletion::OperationalFailure,
+        std::optional<std::string>{"owned failure"},
+        std::optional<RunCaptureTracePair>{BuildElapsedThenTerminalPair()});
+    const auto borrowed_failure = present.failure();
+    const RunCaptureTracePair* const borrowed_pair = present.trace_pair();
+    Check(borrowed_failure == std::optional<std::string_view>{"owned failure"} &&
+              borrowed_pair != nullptr,
+        "the extraction fixture exposes the borrows that extraction invalidates");
+
+    auto extracted = std::move(present).TakeTracePair();
+    Check(IsFullyInert(present),
+        "present extraction normalizes every source field to inert");
+    const auto input_frame = extracted
+        ? extracted->input_trace().FrameAt(1U)
+        : std::nullopt;
+    const auto quit_action = extracted
+        ? extracted->input_trace().ActionAt(1U, kQuitAction)
+        : std::nullopt;
+    const auto elapsed_frame = extracted
+        ? extracted->scheduler_elapsed_trace().FrameAt(0U)
+        : std::nullopt;
+    const auto terminal = extracted
+        ? extracted->terminal_input()
+        : std::nullopt;
+    Check(extracted &&
+              extracted->input_trace().first_frame_index() == 0U &&
+              extracted->input_trace().maximum_frames() == 2U &&
+              extracted->input_trace().frame_count() == 2U &&
+              extracted->input_trace().actions().size() == 1U &&
+              extracted->input_trace().actions()[0] == kQuitAction &&
+              input_frame && input_frame->frame_index == 1U &&
+              input_frame->accepted_event_count == 1U &&
+              input_frame->rejected_event_count == 0U &&
+              quit_action && quit_action->held && quit_action->pressed &&
+              !quit_action->released &&
+              extracted->scheduler_elapsed_trace().first_frame_index() == 0U &&
+              extracted->scheduler_elapsed_trace().maximum_frames() == 2U &&
+              extracted->scheduler_elapsed_trace().frame_count() == 1U &&
+              elapsed_frame && elapsed_frame->frame_index == 0U &&
+              elapsed_frame->elapsed == milliseconds{13} &&
+              !extracted->scheduler_elapsed_trace().FrameAt(1U) &&
+              terminal == RunCaptureTerminalInput{
+                              .frame_index = 1U,
+                              .host_quit_requested = false,
+                              .logical_quit_pressed = true,
+                          },
+        "present extraction preserves exact trace schema, frame, action, and terminal data");
+
+    auto second_extraction = std::move(present).TakeTracePair();
+    Check(!second_extraction && IsFullyInert(present),
+        "an already extracted inert outcome remains absent and inert");
+
+    RunCaptureOutcome absent = MakeOutcome(9U,
+        RunResult{.rendered_frames = 4, .input_frames = 4U},
+        RunCaptureCompletion::CaptureFailure,
+        std::optional<std::string>{"no trace pair"}, std::nullopt);
+    Check(absent.failure() == std::optional<std::string_view>{"no trace pair"} &&
+              !absent.has_traces(),
+        "the absent extraction fixture begins with owned nontrace state");
+    auto absent_extraction = std::move(absent).TakeTracePair();
+    Check(!absent_extraction && IsFullyInert(absent),
+        "absent extraction returns none and normalizes every source field");
+
+    RunCaptureOutcome move_source = MakeOutcome(0U, RunResult{},
+        RunCaptureCompletion::FrameLimitReached, std::nullopt,
+        std::optional<RunCaptureTracePair>{BuildEmptyPair(23U)});
+    RunCaptureOutcome move_target = std::move(move_source);
+    auto moved_source_extraction = std::move(move_source).TakeTracePair();
+    Check(!moved_source_extraction && IsFullyInert(move_source) &&
+              move_target.has_traces() && move_target.trace_pair() != nullptr &&
+              move_target.trace_pair()->input_trace().first_frame_index() == 23U,
+        "a moved-from outcome extracts none without disturbing the new owner");
+}
+
 void CheckCompleteOutcomePolicy()
 {
     using omega::app::detail::IsCompleteRunCaptureOutcome;
@@ -664,6 +804,7 @@ int main()
     CheckFormatter();
     CheckEmptyAndNormalOutcomes();
     CheckTerminalAndFailureOutcomes();
+    CheckTracePairExtraction();
     CheckCompleteOutcomePolicy();
 
     if (failures == 0)

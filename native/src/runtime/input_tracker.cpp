@@ -135,6 +135,18 @@ std::uint32_t InputSnapshot::rejected_event_count() const noexcept
     return rejected_event_count_;
 }
 
+InputSnapshot::InputSnapshot(const std::uint64_t frame_index,
+    const std::span<const std::uint32_t> actions,
+    const std::span<const ActionRow> rows,
+    const std::uint32_t accepted_event_count,
+    const std::uint32_t rejected_event_count)
+    : frame_index_(frame_index), actions_(actions.begin(), actions.end()),
+      rows_(rows.begin(), rows.end()),
+      accepted_event_count_(accepted_event_count),
+      rejected_event_count_(rejected_event_count)
+{
+}
+
 InputTracker::InputTracker(InputBindingTable table, const std::size_t max_events_per_frame)
     : table_(std::move(table)),
       max_events_per_frame_(max_events_per_frame)
