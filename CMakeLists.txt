@@ -18,6 +18,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT Embedded)
 
 option(OMEGA_BUILD_RUNTIME "Build the OpenOmega native host shell" ON)
+option(OMEGA_RUN_GPU_SMOKE_TEST
+    "Register the hardware/display-dependent SDL GPU smoke with CTest"
+    OFF
+)
 
 add_library(omega_core STATIC
     native/src/archive/hog_archive.cpp
@@ -229,6 +233,13 @@ if(OMEGA_BUILD_RUNTIME)
 endif()
 
 include(CTest)
+if(OMEGA_RUN_GPU_SMOKE_TEST AND NOT BUILD_TESTING)
+    message(FATAL_ERROR "OMEGA_RUN_GPU_SMOKE_TEST requires BUILD_TESTING=ON")
+endif()
+if(OMEGA_RUN_GPU_SMOKE_TEST AND NOT TARGET omega_sdl_backend)
+    message(FATAL_ERROR "OMEGA_RUN_GPU_SMOKE_TEST requires OMEGA_BUILD_RUNTIME=ON and SDL GPU support")
+endif()
+
 if(BUILD_TESTING)
     add_executable(omega_pop_post_terrain_commands_tests
         native/tests/pop_post_terrain_commands_tests.cpp
@@ -347,6 +358,41 @@ if(BUILD_TESTING)
     set_tests_properties(omega_render_texture_pool_tests PROPERTIES TIMEOUT 5)
 
     if(TARGET omega_sdl_backend)
+        add_executable(omega_sdl_gpu_texture_smoke
+            native/tests/sdl_gpu_texture_smoke.cpp
+        )
+        target_link_libraries(omega_sdl_gpu_texture_smoke
+            PRIVATE
+                omega_sdl_backend
+                omega_runtime
+        )
+        if(MSVC)
+            target_compile_options(omega_sdl_gpu_texture_smoke PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_sdl_gpu_texture_smoke PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+        if(OMEGA_RUN_GPU_SMOKE_TEST)
+            add_test(NAME omega_sdl_gpu_texture_smoke COMMAND omega_sdl_gpu_texture_smoke)
+            set_tests_properties(omega_sdl_gpu_texture_smoke PROPERTIES
+                TIMEOUT 15
+                RUN_SERIAL TRUE
+                LABELS "gpu;integration"
+            )
+        endif()
+
         add_executable(omega_sdl_audio_tests
             native/tests/sdl_audio_service_tests.cpp
         )

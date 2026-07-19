@@ -141,7 +141,8 @@ places meshes in source-order tiles and projects each mesh along its two largest
 clean-room diagnostic, not world placement or reconstructed geometry, and makes no VUM, TDX, or
 other retail semantic claim. Headless named-level startup owns the complete canonical spatial and
 material collections plus an inventory-only texture store. It does not load texture storage, bind
-materials, expand display pixels, upload GPU resources, or render textures.
+materials, or expand display pixels; no store payload enters GPU upload or rendering. The rendered
+host path uploads only the existing project-generated diagnostic RGBA8 image.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
@@ -187,10 +188,34 @@ tightly packed project-owned RGBA8 extents; supports transactional `Reserve`/`Pu
 rejects default, foreign, stale, and released handles; refunds logical bytes on explicit release; and
 retires a maximum generation rather than wrapping. Defaults are 64 slots and 64 MiB logical RGBA8,
 with a hard 8,192-slot maximum. A clean MSVC build had zero warnings or errors, the focused test and
-100 repeats passed, and full 19/19 CTest passed. The SDL host consumes the frame packet synchronously
-but does not yet consume this handle. The pool creates no GPU object, and the existing one-off debug
-upload remains unchanged; no GPU upload, blit, residency, `AssetService` bridge, TDX/VUM/material
-binding, display semantics, component snapshot, or render scene is established.
+100 repeats passed, and full 19/19 CTest passed. At E-0044 the SDL host consumed the frame packet
+synchronously but did not consume this handle; the pool created no GPU object and the existing
+one-off debug upload remained unchanged. Those are historical E-0044 boundaries.
+
+E-0045 supersedes the historical host non-consumption and one-off-upload state. `SdlGpuHost` now
+owns a fixed SDL texture table parallel to the portable pool. Project-owned RGBA8 upload is an RAII
+transaction across `Reserve`, backend create/copy/submit, and `Publish`; failures roll back residency
+and acquired backend resources. Release waits for idle, packets select the resident generation for
+blitting, and the aggregate snapshot exposes no identities. `OmegaApp` uploads its existing
+project-generated diagnostic image, stores only the handle, and explicitly releases it before host
+fallback teardown. Post-swapchain command-buffer unwinding submits rather than taking SDL's illegal
+cancel path. Pool defaults remain 64 slots and 64 MiB logical RGBA8, hard-limited to 8,192 slots.
+
+A clean MSVC build completed with zero warnings and errors and default CTest passed 19/19. One
+initial plus 20 repeated zero-file GPU smokes all passed on `direct3d12` (21 total), and a public
+two-frame `openomega` smoke passed. Each GPU smoke uses capacity one/budget 256 bytes; clears once;
+uploads, blits, and releases opaque 8x8 A (256 bytes); rejects its stale handle before GPU access;
+reuses the same slot at a new generation for opaque 4x8 B (128 bytes); blits and releases B; then
+checks idle. Exact totals are two uploads/384 cumulative logical bytes, two releases, two blits, one
+clear, one rejection, zero unavailable submissions, and final capacity one/free one with zero
+reserved, resident, retired, or charged bytes. This proves command submission and idle, not
+framebuffer identity or readback. The target always compiles with tests plus the SDL backend, but
+hardware CTest registration is off by default and opt-in via `OMEGA_RUN_GPU_SMOKE_TEST`.
+
+This slice establishes no `TextureStorageIR`/`AssetService` bridge; TDX plane/palette consumption;
+channel, alpha, nibble, palette, swizzle, mip, or display expansion; VUM/material/alias/binding;
+scene placement/visibility; retail rendering; gameplay; measured GPU bytes; streaming/eviction;
+asynchronous upload; or fence design.
 
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.

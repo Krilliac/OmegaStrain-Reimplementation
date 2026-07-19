@@ -2,7 +2,7 @@
 
 #include "sdl_platform_service.h"
 
-#include "omega/runtime/debug_image.h"
+#include "omega/runtime/render_texture_pool.h"
 
 #include <SDL3/SDL.h>
 
@@ -10,8 +10,10 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <new>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace omega::app
 {
@@ -24,17 +26,185 @@ namespace
            (detail != nullptr && detail[0] != '\0' ? detail : "unknown SDL error");
 }
 
+[[nodiscard]] std::string PoolError(
+    const std::string_view operation, const runtime::RenderTextureError& error)
+{
+    return std::string(operation) + ": " +
+           std::string(runtime::RenderTextureErrorCodeName(error.code));
+}
+
+class ReservationRollbackGuard final
+{
+public:
+    ReservationRollbackGuard(runtime::RenderTexturePool& pool,
+        const runtime::RenderTextureReservation& reservation) noexcept
+        : pool_(&pool), reservation_(&reservation)
+    {
+    }
+
+    ~ReservationRollbackGuard()
+    {
+        if (pool_ != nullptr)
+            static_cast<void>(pool_->Rollback(*reservation_));
+    }
+
+    ReservationRollbackGuard(const ReservationRollbackGuard&) = delete;
+    ReservationRollbackGuard& operator=(const ReservationRollbackGuard&) = delete;
+
+    void Dismiss() noexcept
+    {
+        pool_ = nullptr;
+        reservation_ = nullptr;
+    }
+
+private:
+    runtime::RenderTexturePool* pool_ = nullptr;
+    const runtime::RenderTextureReservation* reservation_ = nullptr;
+};
+
+class TextureGuard final
+{
+public:
+    TextureGuard(SDL_GPUDevice* device, SDL_GPUTexture* texture) noexcept
+        : device_(device), texture_(texture)
+    {
+    }
+
+    ~TextureGuard()
+    {
+        if (texture_ != nullptr)
+            SDL_ReleaseGPUTexture(device_, texture_);
+    }
+
+    TextureGuard(const TextureGuard&) = delete;
+    TextureGuard& operator=(const TextureGuard&) = delete;
+
+    void Dismiss() noexcept { texture_ = nullptr; }
+
+private:
+    SDL_GPUDevice* device_ = nullptr;
+    SDL_GPUTexture* texture_ = nullptr;
+};
+
+class TransferBufferGuard final
+{
+public:
+    TransferBufferGuard(SDL_GPUDevice* device, SDL_GPUTransferBuffer* transfer) noexcept
+        : device_(device), transfer_(transfer)
+    {
+    }
+
+    ~TransferBufferGuard()
+    {
+        if (transfer_ != nullptr)
+            SDL_ReleaseGPUTransferBuffer(device_, transfer_);
+    }
+
+    TransferBufferGuard(const TransferBufferGuard&) = delete;
+    TransferBufferGuard& operator=(const TransferBufferGuard&) = delete;
+
+private:
+    SDL_GPUDevice* device_ = nullptr;
+    SDL_GPUTransferBuffer* transfer_ = nullptr;
+};
+
+enum class CommandBufferUnwindAction
+{
+    Cancel,
+    Submit,
+};
+
+class CommandBufferGuard final
+{
+public:
+    explicit CommandBufferGuard(SDL_GPUCommandBuffer* commands) noexcept
+        : commands_(commands)
+    {
+    }
+
+    ~CommandBufferGuard()
+    {
+        if (commands_ == nullptr)
+            return;
+        if (unwind_action_ == CommandBufferUnwindAction::Submit)
+            static_cast<void>(SDL_SubmitGPUCommandBuffer(commands_));
+        else
+            static_cast<void>(SDL_CancelGPUCommandBuffer(commands_));
+    }
+
+    CommandBufferGuard(const CommandBufferGuard&) = delete;
+    CommandBufferGuard& operator=(const CommandBufferGuard&) = delete;
+
+    void SubmitOnUnwind() noexcept
+    {
+        unwind_action_ = CommandBufferUnwindAction::Submit;
+    }
+
+    [[nodiscard]] bool Cancel() noexcept
+    {
+        SDL_GPUCommandBuffer* commands = std::exchange(commands_, nullptr);
+        return commands != nullptr && SDL_CancelGPUCommandBuffer(commands);
+    }
+
+    [[nodiscard]] bool Submit() noexcept
+    {
+        SDL_GPUCommandBuffer* commands = std::exchange(commands_, nullptr);
+        return commands != nullptr && SDL_SubmitGPUCommandBuffer(commands);
+    }
+
+private:
+    SDL_GPUCommandBuffer* commands_ = nullptr;
+    CommandBufferUnwindAction unwind_action_ = CommandBufferUnwindAction::Cancel;
+};
+
+void SaturatingIncrement(std::uint64_t& value) noexcept
+{
+    if (value != std::numeric_limits<std::uint64_t>::max())
+        ++value;
+}
+
+void SaturatingAdd(std::uint64_t& value, const std::uint64_t added) noexcept
+{
+    const std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max();
+    value = added > maximum - value ? maximum : value + added;
+}
+
+[[nodiscard]] constexpr bool IsDefaultHandle(
+    const runtime::RenderTextureHandle& handle) noexcept
+{
+    return handle == runtime::RenderTextureHandle{};
+}
+
+enum class FrameSubmissionKind
+{
+    Blit,
+    Clear,
+    UnavailableSwapchain,
+};
+
 } // namespace
 
 struct SdlGpuHost::Impl
 {
+    explicit Impl(runtime::RenderTexturePool pool)
+        : texture_pool(std::move(pool)),
+          texture_slots(texture_pool.Snapshot().slot_capacity, nullptr)
+    {
+    }
+
     ~Impl()
     {
         if (device != nullptr)
         {
             SDL_WaitForGPUIdle(device);
-            if (debug_texture != nullptr)
-                SDL_ReleaseGPUTexture(device, debug_texture);
+            for (SDL_GPUTexture*& texture : texture_slots)
+            {
+                if (texture != nullptr)
+                {
+                    SDL_ReleaseGPUTexture(device, texture);
+                    texture = nullptr;
+                }
+            }
             if (window_claimed && window != nullptr)
                 SDL_ReleaseWindowFromGPUDevice(device, window);
             SDL_DestroyGPUDevice(device);
@@ -45,24 +215,44 @@ struct SdlGpuHost::Impl
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
     }
 
+    runtime::RenderTexturePool texture_pool;
+    std::vector<SDL_GPUTexture*> texture_slots;
     bool subsystems_initialized = false;
     bool window_claimed = false;
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;
-    SDL_GPUTexture* debug_texture = nullptr;
-    std::uint32_t debug_width = 0;
-    std::uint32_t debug_height = 0;
     std::string driver;
+    std::uint64_t successful_uploads = 0U;
+    std::uint64_t successful_upload_logical_bytes = 0U;
+    std::uint64_t successful_releases = 0U;
+    std::uint64_t frame_submissions = 0U;
+    std::uint64_t blit_submissions = 0U;
+    std::uint64_t clear_submissions = 0U;
+    std::uint64_t unavailable_swapchain_submissions = 0U;
+    std::uint64_t rejected_nondefault_texture_handles = 0U;
 };
 
 std::expected<SdlGpuHost, std::string> SdlGpuHost::Create(
-    const SdlPlatformService& platform,
-    const runtime::DebugImage* debug_image, const bool debug_device)
+    const SdlPlatformService& platform, const bool debug_device,
+    const runtime::RenderTexturePoolConfig texture_config)
 {
     if (!platform.ready())
         return std::unexpected("SDL platform service is not ready");
 
-    auto impl = std::make_unique<Impl>();
+    auto created_pool = runtime::RenderTexturePool::Create(texture_config);
+    if (!created_pool)
+        return std::unexpected(PoolError("render texture pool creation", created_pool.error()));
+
+    std::unique_ptr<Impl> impl;
+    try
+    {
+        impl = std::make_unique<Impl>(std::move(*created_pool));
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected("render texture backend table allocation failed");
+    }
+
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
         return std::unexpected(SdlError("SDL_InitSubSystem(video)"));
     impl->subsystems_initialized = true;
@@ -83,85 +273,6 @@ std::expected<SdlGpuHost, std::string> SdlGpuHost::Create(
 
     const char* driver = SDL_GetGPUDeviceDriver(impl->device);
     impl->driver = driver != nullptr ? driver : "unknown";
-
-    if (debug_image == nullptr)
-        return SdlGpuHost(std::move(impl));
-    if (debug_image->width == 0 || debug_image->height == 0 ||
-        debug_image->pixels().size() !=
-            static_cast<std::uint64_t>(debug_image->width) * debug_image->height * 4U ||
-        debug_image->pixels().size() > std::numeric_limits<std::uint32_t>::max())
-        return std::unexpected("debug image has invalid RGBA8 dimensions");
-
-    const SDL_GPUTextureCreateInfo texture_info{
-        .type = SDL_GPU_TEXTURETYPE_2D,
-        .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-        .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
-        .width = debug_image->width,
-        .height = debug_image->height,
-        .layer_count_or_depth = 1,
-        .num_levels = 1,
-        .sample_count = SDL_GPU_SAMPLECOUNT_1,
-        .props = 0,
-    };
-    impl->debug_texture = SDL_CreateGPUTexture(impl->device, &texture_info);
-    if (impl->debug_texture == nullptr)
-        return std::unexpected(SdlError("SDL_CreateGPUTexture"));
-    impl->debug_width = debug_image->width;
-    impl->debug_height = debug_image->height;
-
-    const SDL_GPUTransferBufferCreateInfo transfer_info{
-        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-        .size = static_cast<std::uint32_t>(debug_image->pixels().size()),
-        .props = 0,
-    };
-    SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(impl->device, &transfer_info);
-    if (transfer == nullptr)
-        return std::unexpected(SdlError("SDL_CreateGPUTransferBuffer"));
-    void* mapped = SDL_MapGPUTransferBuffer(impl->device, transfer, false);
-    if (mapped == nullptr)
-    {
-        SDL_ReleaseGPUTransferBuffer(impl->device, transfer);
-        return std::unexpected(SdlError("SDL_MapGPUTransferBuffer"));
-    }
-    std::memcpy(mapped, debug_image->pixels().data(), debug_image->pixels().size());
-    SDL_UnmapGPUTransferBuffer(impl->device, transfer);
-
-    SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl->device);
-    if (commands == nullptr)
-    {
-        SDL_ReleaseGPUTransferBuffer(impl->device, transfer);
-        return std::unexpected(SdlError("SDL_AcquireGPUCommandBuffer"));
-    }
-    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
-    if (copy == nullptr)
-    {
-        SDL_CancelGPUCommandBuffer(commands);
-        SDL_ReleaseGPUTransferBuffer(impl->device, transfer);
-        return std::unexpected(SdlError("SDL_BeginGPUCopyPass"));
-    }
-    const SDL_GPUTextureTransferInfo source{
-        .transfer_buffer = transfer,
-        .offset = 0,
-        .pixels_per_row = debug_image->width,
-        .rows_per_layer = debug_image->height,
-    };
-    const SDL_GPUTextureRegion destination{
-        .texture = impl->debug_texture,
-        .mip_level = 0,
-        .layer = 0,
-        .x = 0,
-        .y = 0,
-        .z = 0,
-        .w = debug_image->width,
-        .h = debug_image->height,
-        .d = 1,
-    };
-    SDL_UploadToGPUTexture(copy, &source, &destination, false);
-    SDL_EndGPUCopyPass(copy);
-    const bool submitted = SDL_SubmitGPUCommandBuffer(commands);
-    SDL_ReleaseGPUTransferBuffer(impl->device, transfer);
-    if (!submitted)
-        return std::unexpected(SdlError("SDL_SubmitGPUCommandBuffer"));
     return SdlGpuHost(std::move(impl));
 }
 
@@ -173,91 +284,335 @@ SdlGpuHost::SdlGpuHost(std::unique_ptr<Impl> impl) noexcept
 SdlGpuHost::~SdlGpuHost() = default;
 SdlGpuHost::SdlGpuHost(SdlGpuHost&&) noexcept = default;
 
+std::expected<runtime::RenderTextureHandle, std::string> SdlGpuHost::UploadRgba8Texture(
+    const runtime::Rgba8TextureUploadView upload)
+{
+    try
+    {
+        auto reservation = impl_->texture_pool.Reserve(upload);
+        if (!reservation)
+            return std::unexpected(PoolError("render texture reserve", reservation.error()));
+        ReservationRollbackGuard reservation_guard(impl_->texture_pool, *reservation);
+
+        const std::uint32_t slot_index = reservation->handle.slot_index;
+        if (slot_index >= impl_->texture_slots.size() ||
+            impl_->texture_slots[slot_index] != nullptr)
+        {
+            return std::unexpected("render texture backend slot invariant failed");
+        }
+        if (upload.pixels.size() > std::numeric_limits<std::uint32_t>::max())
+        {
+            return std::unexpected(
+                "render texture upload exceeds the SDL transfer-buffer size limit");
+        }
+
+        const SDL_GPUTextureCreateInfo texture_info{
+            .type = SDL_GPU_TEXTURETYPE_2D,
+            .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+            .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
+            .width = reservation->width,
+            .height = reservation->height,
+            .layer_count_or_depth = 1,
+            .num_levels = 1,
+            .sample_count = SDL_GPU_SAMPLECOUNT_1,
+            .props = 0,
+        };
+        SDL_GPUTexture* texture = SDL_CreateGPUTexture(impl_->device, &texture_info);
+        if (texture == nullptr)
+            return std::unexpected(SdlError("render texture create"));
+        TextureGuard texture_guard(impl_->device, texture);
+
+        const SDL_GPUTransferBufferCreateInfo transfer_info{
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            .size = static_cast<std::uint32_t>(upload.pixels.size()),
+            .props = 0,
+        };
+        SDL_GPUTransferBuffer* transfer =
+            SDL_CreateGPUTransferBuffer(impl_->device, &transfer_info);
+        if (transfer == nullptr)
+            return std::unexpected(SdlError("render texture transfer-buffer create"));
+        TransferBufferGuard transfer_guard(impl_->device, transfer);
+
+        void* mapped = SDL_MapGPUTransferBuffer(impl_->device, transfer, false);
+        if (mapped == nullptr)
+            return std::unexpected(SdlError("render texture transfer-buffer map"));
+        std::memcpy(mapped, upload.pixels.data(), upload.pixels.size());
+        SDL_UnmapGPUTransferBuffer(impl_->device, transfer);
+
+        SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
+        if (commands == nullptr)
+            return std::unexpected(SdlError("render texture command-buffer acquire"));
+        CommandBufferGuard command_guard(commands);
+
+        SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+        if (copy == nullptr)
+        {
+            std::string error = SdlError("render texture copy-pass begin");
+            if (!command_guard.Cancel())
+                error += "; " + SdlError("render texture command-buffer cancel");
+            return std::unexpected(std::move(error));
+        }
+
+        const SDL_GPUTextureTransferInfo source{
+            .transfer_buffer = transfer,
+            .offset = 0,
+            .pixels_per_row = reservation->width,
+            .rows_per_layer = reservation->height,
+        };
+        const SDL_GPUTextureRegion destination{
+            .texture = texture,
+            .mip_level = 0,
+            .layer = 0,
+            .x = 0,
+            .y = 0,
+            .z = 0,
+            .w = reservation->width,
+            .h = reservation->height,
+            .d = 1,
+        };
+        SDL_UploadToGPUTexture(copy, &source, &destination, false);
+        SDL_EndGPUCopyPass(copy);
+        if (!command_guard.Submit())
+            return std::unexpected(SdlError("render texture command-buffer submit"));
+
+        auto published = impl_->texture_pool.Publish(*reservation);
+        if (!published)
+        {
+            std::string error = PoolError("render texture publish", published.error());
+            if (auto idle = WaitForIdle(); !idle)
+                error += "; " + idle.error();
+            return std::unexpected(std::move(error));
+        }
+
+        impl_->texture_slots[slot_index] = texture;
+        texture_guard.Dismiss();
+        reservation_guard.Dismiss();
+        SaturatingIncrement(impl_->successful_uploads);
+        SaturatingAdd(impl_->successful_upload_logical_bytes, reservation->logical_bytes);
+        return *published;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected("render texture upload error allocation failed");
+    }
+    catch (...)
+    {
+        return std::unexpected("render texture upload failed unexpectedly");
+    }
+}
+
+std::expected<void, std::string> SdlGpuHost::ReleaseTexture(
+    const runtime::RenderTextureHandle& handle)
+{
+    auto metadata = impl_->texture_pool.Get(handle);
+    if (!metadata)
+    {
+        if (!IsDefaultHandle(handle))
+            SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
+        return std::unexpected(PoolError("render texture resolve for release", metadata.error()));
+    }
+
+    const std::uint32_t slot_index = metadata->handle.slot_index;
+    if (slot_index >= impl_->texture_slots.size() ||
+        impl_->texture_slots[slot_index] == nullptr)
+    {
+        SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
+        return std::unexpected("render texture backend slot invariant failed during release");
+    }
+
+    auto idle = WaitForIdle();
+    if (!idle)
+        return idle;
+
+    auto released = impl_->texture_pool.Release(handle);
+    if (!released)
+        return std::unexpected(PoolError("render texture release", released.error()));
+
+    SDL_ReleaseGPUTexture(impl_->device, impl_->texture_slots[slot_index]);
+    impl_->texture_slots[slot_index] = nullptr;
+    SaturatingIncrement(impl_->successful_releases);
+    return {};
+}
+
+std::expected<void, std::string> SdlGpuHost::WaitForIdle()
+{
+    if (!SDL_WaitForGPUIdle(impl_->device))
+        return std::unexpected(SdlError("SDL_WaitForGPUIdle"));
+    return {};
+}
+
 std::expected<void, std::string> SdlGpuHost::RenderFrame(
     const runtime::RenderFramePacket& packet)
 {
-    SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
-    if (commands == nullptr)
-        return std::unexpected(SdlError("SDL_AcquireGPUCommandBuffer"));
-
-    SDL_GPUTexture* swapchain = nullptr;
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-    if (!SDL_WaitAndAcquireGPUSwapchainTexture(
-            commands, impl_->window, &swapchain, &width, &height))
+    try
     {
-        SDL_CancelGPUCommandBuffer(commands);
-        return std::unexpected(SdlError("SDL_WaitAndAcquireGPUSwapchainTexture"));
-    }
+        SDL_GPUTexture* frame_texture = nullptr;
+        std::uint32_t texture_width = 0U;
+        std::uint32_t texture_height = 0U;
+        if (!IsDefaultHandle(packet.diagnostic_texture))
+        {
+            auto metadata = impl_->texture_pool.Get(packet.diagnostic_texture);
+            if (!metadata)
+            {
+                SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
+                return std::unexpected(
+                    PoolError("render frame diagnostic texture resolve", metadata.error()));
+            }
 
-    if (swapchain != nullptr && width != 0 && height != 0 && impl_->debug_texture != nullptr)
-    {
-        std::uint32_t destination_width = width;
-        std::uint32_t destination_height = height;
-        if (static_cast<std::uint64_t>(width) * impl_->debug_height <=
-            static_cast<std::uint64_t>(height) * impl_->debug_width)
-        {
-            destination_height = std::max(1U, static_cast<std::uint32_t>(
-                static_cast<std::uint64_t>(width) * impl_->debug_height /
-                impl_->debug_width));
+            const std::uint32_t slot_index = metadata->handle.slot_index;
+            if (slot_index >= impl_->texture_slots.size() ||
+                impl_->texture_slots[slot_index] == nullptr)
+            {
+                SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
+                return std::unexpected(
+                    "render frame diagnostic texture backend slot invariant failed");
+            }
+            frame_texture = impl_->texture_slots[slot_index];
+            texture_width = metadata->width;
+            texture_height = metadata->height;
         }
-        else
-        {
-            destination_width = std::max(1U, static_cast<std::uint32_t>(
-                static_cast<std::uint64_t>(height) * impl_->debug_width /
-                impl_->debug_height));
-        }
-        const SDL_GPUBlitInfo blit{
-            .source = {
-                .texture = impl_->debug_texture,
-                .mip_level = 0,
-                .layer_or_depth_plane = 0,
-                .x = 0,
-                .y = 0,
-                .w = impl_->debug_width,
-                .h = impl_->debug_height,
-            },
-            .destination = {
-                .texture = swapchain,
-                .mip_level = 0,
-                .layer_or_depth_plane = 0,
-                .x = (width - destination_width) / 2U,
-                .y = (height - destination_height) / 2U,
-                .w = destination_width,
-                .h = destination_height,
-            },
-            .load_op = SDL_GPU_LOADOP_CLEAR,
-            .clear_color = {0.015F, 0.02F, 0.04F, 1.0F},
-            .flip_mode = SDL_FLIP_NONE,
-            .filter = SDL_GPU_FILTER_NEAREST,
-            .cycle = false,
-            .padding1 = 0,
-            .padding2 = 0,
-            .padding3 = 0,
-        };
-        SDL_BlitGPUTexture(commands, &blit);
-    }
-    else if (swapchain != nullptr && width != 0 && height != 0)
-    {
-        const float pulse = static_cast<float>((packet.rendered_frame_index % 240U) / 239.0);
-        SDL_GPUColorTargetInfo target{};
-        target.texture = swapchain;
-        target.clear_color = SDL_FColor{
-            0.025F + pulse * 0.025F, 0.035F, 0.065F + pulse * 0.04F, 1.0F};
-        target.load_op = SDL_GPU_LOADOP_CLEAR;
-        target.store_op = SDL_GPU_STOREOP_STORE;
-        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
-        if (pass == nullptr)
-        {
-            SDL_CancelGPUCommandBuffer(commands);
-            return std::unexpected(SdlError("SDL_BeginGPURenderPass"));
-        }
-        SDL_EndGPURenderPass(pass);
-    }
 
-    if (!SDL_SubmitGPUCommandBuffer(commands))
-        return std::unexpected(SdlError("SDL_SubmitGPUCommandBuffer"));
-    return {};
+        SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
+        if (commands == nullptr)
+            return std::unexpected(SdlError("SDL_AcquireGPUCommandBuffer"));
+        CommandBufferGuard command_guard(commands);
+
+        SDL_GPUTexture* swapchain = nullptr;
+        std::uint32_t width = 0U;
+        std::uint32_t height = 0U;
+        if (!SDL_WaitAndAcquireGPUSwapchainTexture(
+                commands, impl_->window, &swapchain, &width, &height))
+        {
+            std::string error = SdlError("SDL_WaitAndAcquireGPUSwapchainTexture");
+            if (!command_guard.Cancel())
+            {
+                error += "; " +
+                         SdlError("SDL_CancelGPUCommandBuffer after acquire failure");
+            }
+            return std::unexpected(std::move(error));
+        }
+        command_guard.SubmitOnUnwind();
+
+        FrameSubmissionKind submission_kind = FrameSubmissionKind::UnavailableSwapchain;
+        if (swapchain != nullptr && width != 0U && height != 0U && frame_texture != nullptr)
+        {
+            submission_kind = FrameSubmissionKind::Blit;
+            std::uint32_t destination_width = width;
+            std::uint32_t destination_height = height;
+            if (static_cast<std::uint64_t>(width) * texture_height <=
+                static_cast<std::uint64_t>(height) * texture_width)
+            {
+                destination_height = std::max(1U, static_cast<std::uint32_t>(
+                    static_cast<std::uint64_t>(width) * texture_height / texture_width));
+            }
+            else
+            {
+                destination_width = std::max(1U, static_cast<std::uint32_t>(
+                    static_cast<std::uint64_t>(height) * texture_width / texture_height));
+            }
+            const SDL_GPUBlitInfo blit{
+                .source = {
+                    .texture = frame_texture,
+                    .mip_level = 0,
+                    .layer_or_depth_plane = 0,
+                    .x = 0,
+                    .y = 0,
+                    .w = texture_width,
+                    .h = texture_height,
+                },
+                .destination = {
+                    .texture = swapchain,
+                    .mip_level = 0,
+                    .layer_or_depth_plane = 0,
+                    .x = (width - destination_width) / 2U,
+                    .y = (height - destination_height) / 2U,
+                    .w = destination_width,
+                    .h = destination_height,
+                },
+                .load_op = SDL_GPU_LOADOP_CLEAR,
+                .clear_color = {0.015F, 0.02F, 0.04F, 1.0F},
+                .flip_mode = SDL_FLIP_NONE,
+                .filter = SDL_GPU_FILTER_NEAREST,
+                .cycle = false,
+                .padding1 = 0,
+                .padding2 = 0,
+                .padding3 = 0,
+            };
+            SDL_BlitGPUTexture(commands, &blit);
+        }
+        else if (swapchain != nullptr && width != 0U && height != 0U)
+        {
+            submission_kind = FrameSubmissionKind::Clear;
+            const float pulse =
+                static_cast<float>((packet.rendered_frame_index % 240U) / 239.0);
+            SDL_GPUColorTargetInfo target{};
+            target.texture = swapchain;
+            target.clear_color = SDL_FColor{
+                0.025F + pulse * 0.025F, 0.035F, 0.065F + pulse * 0.04F, 1.0F};
+            target.load_op = SDL_GPU_LOADOP_CLEAR;
+            target.store_op = SDL_GPU_STOREOP_STORE;
+            SDL_GPURenderPass* pass =
+                SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
+            if (pass == nullptr)
+            {
+                std::string error = SdlError("SDL_BeginGPURenderPass");
+                if (!command_guard.Submit())
+                {
+                    error += "; " +
+                             SdlError("empty command-buffer submit after render-pass failure");
+                }
+                return std::unexpected(std::move(error));
+            }
+            SDL_EndGPURenderPass(pass);
+        }
+
+        if (!command_guard.Submit())
+            return std::unexpected(SdlError("SDL_SubmitGPUCommandBuffer"));
+
+        SaturatingIncrement(impl_->frame_submissions);
+        switch (submission_kind)
+        {
+        case FrameSubmissionKind::Blit:
+            SaturatingIncrement(impl_->blit_submissions);
+            break;
+        case FrameSubmissionKind::Clear:
+            SaturatingIncrement(impl_->clear_submissions);
+            break;
+        case FrameSubmissionKind::UnavailableSwapchain:
+            SaturatingIncrement(impl_->unavailable_swapchain_submissions);
+            break;
+        }
+        return {};
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected("render frame error allocation failed");
+    }
+    catch (...)
+    {
+        return std::unexpected("render frame failed unexpectedly");
+    }
+}
+
+runtime::RenderTexturePoolSnapshot SdlGpuHost::TextureSnapshot() const noexcept
+{
+    return impl_->texture_pool.Snapshot();
+}
+
+GpuHostSnapshot SdlGpuHost::Snapshot() const noexcept
+{
+    return GpuHostSnapshot{
+        .textures = impl_->texture_pool.Snapshot(),
+        .successful_uploads = impl_->successful_uploads,
+        .successful_upload_logical_bytes = impl_->successful_upload_logical_bytes,
+        .successful_releases = impl_->successful_releases,
+        .frame_submissions = impl_->frame_submissions,
+        .blit_submissions = impl_->blit_submissions,
+        .clear_submissions = impl_->clear_submissions,
+        .unavailable_swapchain_submissions = impl_->unavailable_swapchain_submissions,
+        .rejected_nondefault_texture_handles =
+            impl_->rejected_nondefault_texture_handles,
+    };
 }
 
 std::string_view SdlGpuHost::driver_name() const noexcept
