@@ -641,6 +641,40 @@ slot/generation behavior, crop/target, Stretch/Nearest, interpolation, sample-ce
 aspect/rounding, Linear/Contain, alpha/blending/color-space, swapchain/presentation, asynchronous
 lifetime, cross-backend, public readback, asset-binding, retail-rendering, or gameplay guarantee.
 
+E-0052 adds a bounded post-binding logical capture boundary without changing event ownership.
+`InputTraceRecorder::Create` may run on any thread before publication. It validates configuration
+before schema before allocation: capacity is 1 through the synthetic hard maximum of 65,536,
+the configured contiguous `uint64_t` frame range cannot overflow, and the copied schema is
+nonempty, strictly ascending, unique, and at most 64 logical actions. Creation pre-sizes every
+private 32-byte frame record. At maximum configuration, 65,536 32-byte record elements plus the
+fixed 64-slot `uint32_t` schema backing contain exactly 2,097,408 bytes of element payload. This
+does not measure excess vector capacity, allocator/object overhead, or process RSS.
+
+After creation the recorder is an exclusive game-thread owner. Allocation-free `Append` observes
+a const `InputSnapshot` without retaining or mutating it. It requires the exact next contiguous
+frame and exact schema, records three 64-bit held/pressed/released masks plus accepted/rejected
+event counts, and preserves caller and recorder on failure. Error priority is invalid recorder
+state, capacity, frame discontinuity, then action-schema mismatch. Allocation-free expected
+`Finish` accepts an open zero-frame recorder, transfers the complete backing into a move-only
+immutable trace, and leaves the recorder inert. Custom nothrow moves likewise normalize sources;
+copy and move assignment are deleted.
+
+`FrameAt` and `ActionAt` return owned values. Invalid frames return `nullopt`; an unknown action on
+a valid frame returns an engaged all-false value. Only `actions()` borrows schema storage. The
+recorder view ends at recorder move, successful `Finish`, or destruction; the trace view ends at
+trace move or destruction. After ownership publication, const trace reads are reentrant on any
+thread provided no read races a trace move or destruction. The recorder and trace are
+non-hot-reloadable.
+
+The final MSVC build completed with zero warnings or errors. The focused public zero-file test
+passed once plus 100 repeated runs, and default CTest passed 21/21. The opt-in Direct3D12
+configuration passed 22/22, after which registration was restored to `OFF` and the default list
+returned to 21 tests. Publication CI remains separate. This validation covers bounded logical
+action/schema/counter capture and owned query behavior only. It establishes no input injection,
+playback, scheduler timing or pacing, quit/run-control, simulation/gameplay state, replay executor,
+host event/device capture, serialization, file/wire/stable ABI, concurrent recorder use, or retail
+limit, timing, or determinism semantics.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

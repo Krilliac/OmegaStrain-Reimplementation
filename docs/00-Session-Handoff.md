@@ -378,6 +378,28 @@ shipping dependencies or execution mechanisms.
     Stretch/Nearest, interpolation, sample-center, edge/border, aspect/rounding, Linear/Contain,
     alpha/blending/color-space, swapchain/presentation, asynchronous lifetime, cross-backend,
     public readback, asset-binding, retail-rendering, or gameplay guarantee.
+37. E-0052 adds bounded in-process post-binding logical snapshot capture through the move-only
+    `InputTraceRecorder` and immutable `InputTrace`. Creation validates a synthetic capacity from
+    1 through 65,536 frames and a nonoverflowing contiguous `uint64_t` range before a nonempty,
+    strictly ascending, unique schema of at most 64 logical actions, then pre-sizes private 32-byte
+    records.
+    At the hard maximum, 65,536 32-byte record elements plus the fixed 64-slot `uint32_t` schema
+    backing contain exactly 2,097,408 bytes of element payload. This does not measure excess vector
+    capacity, allocator/object overhead, or process RSS. Allocation-free `Append` observes but never
+    retains or mutates its const snapshot, stores only held/pressed/released masks and
+    accepted/rejected counts, and preserves both caller and recorder on every ordered failure.
+    Allocation-free expected `Finish` permits an open empty recording and makes the source inert.
+    Frame/action queries are owned values; only the schema view borrows storage. Recorder use is
+    game-thread exclusive. Published immutable trace reads are reentrant on any thread when no read
+    races move or destruction.
+    The final MSVC build completed with zero warnings or errors. The focused public zero-file test
+    passed once plus 100 repeated runs; default CTest passed 21/21. The opt-in Direct3D12
+    configuration passed 22/22, was restored to `OFF`, and left 21 tests in the default list.
+    Publication CI remains separate.
+    This is only a bounded logical capture/storage/query foundation. It adds no input injection,
+    playback, scheduler timing/pacing, quit/run-control, simulation/gameplay state, replay
+    execution, host event/device capture, serialization, file/wire/stable ABI, concurrent recorder
+    use, or retail limit/timing claim.
 
 ## Disc observations
 

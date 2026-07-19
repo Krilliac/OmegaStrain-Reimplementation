@@ -280,6 +280,28 @@ retail instruction blocks, or PS2 execution layer.
   Nearest, interpolation, edge, aspect, rounding, Linear, Contain, alpha, blending, color-space,
   swapchain, asynchronous-lifetime, cross-backend, asset-binding, retail-rendering, or gameplay
   guarantee.
+- E-0052 adds a bounded, move-only `InputTraceRecorder` and immutable `InputTrace` for in-process
+  post-binding logical snapshot capture. `Create` accepts a synthetic capacity of 1 through 65,536
+  frames whose contiguous `uint64_t` range cannot overflow and one nonempty, strictly ascending,
+  unique schema of at most 64 logical actions. It validates configuration before schema before
+  allocation and pre-sizes private 32-byte records. At the hard maximum, 65,536 record elements
+  plus the fixed 64-slot `uint32_t` schema backing contain exactly 2,097,408 bytes of element
+  payload. This does not measure excess vector capacity, allocator/object overhead, or process RSS.
+  Allocation-free `Append` observes a const caller snapshot,
+  captures held/pressed/released masks plus accepted/rejected event counts, and fails atomically in
+  fixed recorder-state, capacity, frame-discontinuity, then schema-mismatch priority.
+  Allocation-free expected `Finish` accepts an open empty recorder and leaves the source inert.
+  `FrameAt` and `ActionAt` return owned values; only `actions()` borrows storage. Recorder use is
+  game-thread exclusive, while a published immutable trace supports reentrant const reads on any
+  thread when no read races its move or destruction.
+  The final MSVC build completed with zero warnings or errors. The focused public zero-file test
+  passed once plus 100 repeated runs, and default CTest passed 21/21. The opt-in Direct3D12
+  configuration passed 22/22, after which registration was restored to `OFF` and the default list
+  returned to 21 tests. Publication CI remains separate.
+  This establishes only bounded logical action/schema/counter capture and owned query behavior.
+  It provides no input injection, playback, scheduler timing or pacing, quit/run-control,
+  simulation or gameplay state, replay execution, host event/device capture, serialization,
+  file/wire/stable ABI contract, concurrent recorder use, or retail limit or timing semantics.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
