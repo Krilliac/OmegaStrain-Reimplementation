@@ -230,12 +230,16 @@ instructions. Vertex attributes, topology, material parameters, texture binding,
 conversion remain later research.
 
 Dynamic consumer-read evidence has a separate privacy-safe publication gate. The local oracle-only
-PCSX2 tracer has been built. Its first private smoke run ended with `savestate_load_failed` before
-selecting a runtime copy or recording an event, so there is no accepted consumer-read report or
-evidence claim yet. `tools/validate_vum_read_trace.py` accepts a private expected VUM size and
-requires an exact schema, accepted lifecycle status, strict in-span bounds, deterministic ordering,
-unique keyed rows, and consistent detail/summary cross-counts. An optional repeat input must be
-byte-identical.
+PCSX2 tracer has produced the confirmed sanitized deterministic baseline: one complete 120-frame
+pair from one selected runtime copy passed strict validation with a byte-identical repeat, and an
+independently guarded second ranked trial reproduced the same aggregate counts. Across both trials,
+the accepted EE-read rows remain confined to the already-opaque header-vector block; no accepted row
+reaches counts, records, metadata, payload, VIF, or tail data. This baseline does not exclude copied
+buffers or consumption outside the bounded observation window. `tools/validate_vum_read_trace.py`
+accepts a private expected VUM size and requires an exact schema, accepted lifecycle status, strict
+in-span bounds, deterministic ordering, unique keyed rows, and consistent detail/summary
+cross-counts. Additional controlled trace pairs remain pending and must pass the same gate with a
+byte-identical repeat before any relationship is promoted.
 
 A report may contain only VUM-relative offset/width/count aggregates, anonymous site ranges and
 counts, VIF source-relative ranges and output counts, and lifecycle status. It must not contain
