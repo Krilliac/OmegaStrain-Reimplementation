@@ -950,6 +950,21 @@ unit, speed, diagonal normalization, tick rate, analog/deadzone behavior, transf
 collision, gravity, camera, animation, weapons, AI, mission, asset, network, or retail determinism
 contract.
 
+E-0061 first adds only an app-core diagnostic-menu value and owned project-generated image. The
+trivially copyable state contains one visibility bit; its constexpr/noexcept reducer receives an
+already-routed press edge and retains no input or host reference. Logical action 6 is reserved in
+the header but is not present in any binding table. The image builder allocates and returns one
+independent 128x72 opaque RGBA8 vector, then uses bounded integer rectangle and 3x5 block-glyph
+rasterization to create a visibly synthetic `DEV` card. Its exact four-color output is pinned by
+complete FNV-1a-64 `0xdaf00c60d17f05b5`.
+
+This first E-0061 slice is compiled into `omega_app_core` and remains available when
+`OMEGA_BUILD_RUNTIME=OFF`. Nothing calls the builder from `OmegaApp`; no texture is uploaded, no
+draw list or render packet references the card, and capture/replay owns no menu state. The reserved
+action has no physical binding. Consequently this slice defines no retail screen, layout, text,
+font, palette, navigation, activation, pause, timing, rendering, asset, persistence, or replay
+contract. Host input and GPU ownership are intentionally deferred to a separate milestone.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a
