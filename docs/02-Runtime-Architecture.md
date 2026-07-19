@@ -21,6 +21,12 @@ OmegaApp [game thread, sole lifetime owner]
 `- NetworkService [game thread API; I/O worker]
 ```
 
+E-0043 supersedes the historical planned/unimplemented `AssetService` labels in this tree and the
+earlier prose retained below. The current composition root owns an optional `AssetService` after
+`JobService` and only when `ContentStartupState` contains a `LevelTextureStore`. Its declaration and
+reverse-destruction order release the asset service before the worker pool and content state, so its
+non-owning `JobService`, `GameDataService`, and `LevelTextureStore` dependencies remain valid.
+
 `OmegaApp` owns every service through `std::unique_ptr` and destroys them in reverse order.
 Services never own the app or one another. Dependencies are constructor references whose
 lifetime is guaranteed by the app. Long-lived asset references are typed generation handles,
@@ -86,6 +92,19 @@ store; the moved-from store is unavailable. Handles are non-owning identity-plus
 expired, stale, out-of-range, or foreign-store handles fail closed. `Load` also rejects a different,
 moved-from, or expired `GameDataService`. No operation may race either object's move or destruction.
 
+`AssetService::Request`, `State`, `Get`, `Release`, `WaitForIdle`, and `Snapshot` are game-thread
+operations. `Request` reserves a preallocated generation slot and submits only
+`LevelTextureStore::Load` to `JobService`; the worker publishes an independently owned immutable
+`TextureStorageIR`. `Get` is valid only for `Ready`, and `Release` explicitly recycles `Ready` or
+`Failed` slots while advancing the generation. Queued or loading slots are busy and cannot be
+cancelled in v0; a slot retires rather than wrapping its maximum generation. Handles contain a weak
+service identity plus slot and generation, and retain no service, source, locator, or asset.
+
+Every accepted job captures the shared implementation through callable return. Destruction stops
+acceptance, waits only this service's in-flight counter rather than `JobService` global idle, then
+resets the service identity so public handles expire deterministically even if the final worker-held
+implementation survives through lambda teardown.
+
 ## Initial contracts
 
 - `VirtualFileSystem` mounts physical directories, ISO views, and HOG archives behind
@@ -100,6 +119,10 @@ moved-from, or expired `GameDataService`. No operation may race either object's 
   call `Load`; the planned `AssetService` remains unimplemented.
 - The planned, currently unimplemented `AssetService` will map paths to typed handles, perform async
   decode, and publish immutable CPU assets before render/audio upload.
+- E-0043 supersedes the two preceding historical `AssetService` clauses: v0 accepts an existing
+  `LevelTextureHandle`, schedules bounded asynchronous native storage loading, and publishes a
+  generation handle. It deliberately performs no path/name lookup, alias resolution, material
+  consumption or binding, display expansion, GPU upload, placement, visibility, or rendering.
 - `ScriptService` executes only project-owned native logic or declarative mission data. Retail
   executable/script modules are inspected offline and are never loaded as executable code.
 - `SimulationWorld` advances only from explicit fixed-step calls and owns deterministic completed-
@@ -299,12 +322,35 @@ The aggregate texture and storage totals are level-inventory occurrences rather 
 whole-disc asset identities. The fixed report emits no paths, names, hashes, offsets, payloads,
 per-level rows, identities, or bindings.
 
+`omega_tool asset-service-verify-tree` verifies the fixed capacity-one sequential service lifecycle
+without widening that evidence boundary. Two owned-tree passes are byte-identical schema version 1
+and accept all 18 levels, 36 explicit sources, and 5,801 texture occurrences with zero errors.
+Occurrences, requests, `Ready` observations, successful `Get` calls, releases, stale-handle
+rejections, and zero-residual checks each total 5,801. Loaded storage totals are 5,913 blocks, 7,603
+planes, 615,232 palette entries, 27,101,352 plane bytes, 2,460,928 palette bytes, and 29,562,280 owned
+bytes. Independent maxima are one active slot, one in-flight request, and 333,232 resident logical
+bytes.
+
+The verifier uses one worker, one pending job, one slot, one allowed in-flight request, and a
+524,288-byte resident-logical limit. Runtime defaults are 64 slots, 64 in-flight requests, and 64 MiB
+resident logical output; the hard slot maximum is 8,192. These are synthetic project-policy bounds,
+not retail limits or user settings. A clean MSVC build produced zero warnings and errors, the focused
+checks and full 18/18 CTest suite passed, and 100 repeated lifecycle-test runs passed. The unchanged
+E-0038 level-store verifier was revalidated. The fixed service report exposes no paths, names, hashes,
+offsets, payloads, per-level rows, identities, bindings, messages, or exception text.
+
 Startup owns `LevelManifestIR`, one `LevelContentIR`, and the inventory-only `LevelTextureStore` as
 one all-or-error content state. Store Open occurs after the synthetic debug image succeeds; startup
 does not call texture `Load`. `AssetService` remains unimplemented, and no texture locator or loaded
 storage enters `RenderFramePacket`, `RenderService`, `SimulationWorld`, material catalogs, or a
 renderer upload path. Display expansion and all ownership/binding semantics beyond this native
 level-scoped locator inventory remain explicitly unwired.
+
+E-0043 supersedes only the historical “`AssetService` remains unimplemented” clause above. Startup
+may now construct the optional service, but still issues no asset request and sends no texture data to
+`RenderFramePacket`, `RenderService`, `SimulationWorld`, a material catalog, or any upload path. The
+service performs no VUM-name/material lookup, alias resolution, material/texture/cell/mesh/draw
+binding, display-pixel expansion, placement, visibility, or rendering.
 
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are

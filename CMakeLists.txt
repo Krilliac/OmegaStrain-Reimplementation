@@ -69,6 +69,7 @@ target_link_libraries(omega_content PUBLIC omega_assets PRIVATE omega_core omega
 target_compile_features(omega_content PUBLIC cxx_std_23)
 
 add_library(omega_runtime STATIC
+    native/src/runtime/asset_service.cpp
     native/src/runtime/config_service.cpp
     native/src/runtime/content_startup.cpp
     native/src/runtime/frame_scheduler.cpp
@@ -161,7 +162,13 @@ add_executable(omega_tool
     native/apps/omega_tool/pop_post_terrain_commands.cpp
     native/apps/omega_tool/pop_commands.cpp
 )
-target_link_libraries(omega_tool PRIVATE omega_core omega_retail_formats omega_content)
+target_link_libraries(omega_tool PRIVATE
+    omega_core
+    omega_retail_formats
+    omega_content
+    omega_runtime
+    Threads::Threads
+)
 
 if(MSVC)
     target_compile_options(omega_tool PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
@@ -252,7 +259,11 @@ if(BUILD_TESTING)
     target_include_directories(omega_level_texture_commands_tests PRIVATE
         native/apps/omega_tool
     )
-    target_link_libraries(omega_level_texture_commands_tests PRIVATE omega_content)
+    target_link_libraries(omega_level_texture_commands_tests PRIVATE
+        omega_runtime
+        omega_content
+        Threads::Threads
+    )
     if(MSVC)
         target_compile_options(omega_level_texture_commands_tests PRIVATE
             /W4
@@ -290,6 +301,30 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_level_texture_store_tests COMMAND omega_level_texture_store_tests)
     set_tests_properties(omega_level_texture_store_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_asset_service_tests
+        native/tests/asset_service_tests.cpp
+    )
+    target_link_libraries(omega_asset_service_tests PRIVATE
+        omega_runtime
+        omega_content
+        omega_retail_formats
+        Threads::Threads
+    )
+    if(MSVC)
+        target_compile_options(omega_asset_service_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_asset_service_tests PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+    endif()
+    add_test(NAME omega_asset_service_tests COMMAND omega_asset_service_tests)
+    set_tests_properties(omega_asset_service_tests PROPERTIES TIMEOUT 10)
 
     if(TARGET omega_sdl_backend)
         add_executable(omega_sdl_audio_tests
@@ -388,6 +423,9 @@ if(BUILD_TESTING)
     add_test(NAME omega_tool_rejects_empty_level_texture_store_tree
         COMMAND omega_tool level-texture-store-verify-tree
             "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_rejects_empty_asset_service_tree
+        COMMAND omega_tool asset-service-verify-tree
+            "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_empty_level_material_catalogs_signature
         COMMAND omega_tool level-material-catalogs-verify-tree
             "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
@@ -402,6 +440,7 @@ if(BUILD_TESTING)
         omega_tool_rejects_empty_level_spatial_tree
         omega_tool_rejects_empty_level_material_catalogs_tree
         omega_tool_rejects_empty_level_texture_store_tree
+        omega_tool_rejects_empty_asset_service_tree
         omega_tool_rejects_empty_asset_metadata_tree
         PROPERTIES WILL_FAIL TRUE
     )

@@ -42,6 +42,29 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     }
     auto jobs = std::make_unique<runtime::JobService>(std::move(*created_jobs));
 
+    std::unique_ptr<runtime::AssetService> assets;
+    if (content_owner->level_texture_store)
+    {
+        if (!content_owner->game_data)
+        {
+            constexpr std::string_view error =
+                "asset service requires an available game-data service";
+            log->Error("startup", error);
+            return std::unexpected(std::string(error));
+        }
+
+        auto created_assets = runtime::AssetService::Create(
+            *jobs, *content_owner->game_data, *content_owner->level_texture_store);
+        if (!created_assets)
+        {
+            const std::string error = "asset service: " + std::string(
+                runtime::AssetServiceErrorCodeName(created_assets.error().code));
+            log->Error("startup", error);
+            return std::unexpected(error);
+        }
+        assets = std::move(*created_assets);
+    }
+
     auto created_scheduler = runtime::FrameScheduler::Create(settings.frame);
     if (!created_scheduler)
     {
@@ -126,9 +149,9 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
                              std::string(audio->driver_name()) + " audio");
 
     return OmegaApp(std::move(config_owner), std::move(content_owner), std::move(stderr_sink),
-        std::move(ring_sink), std::move(log), std::move(jobs), std::move(frame_scheduler),
-        std::move(input), std::move(simulation), std::move(platform), std::move(sdl_input),
-        std::move(audio), std::move(host));
+        std::move(ring_sink), std::move(log), std::move(jobs), std::move(assets),
+        std::move(frame_scheduler), std::move(input), std::move(simulation),
+        std::move(platform), std::move(sdl_input), std::move(audio), std::move(host));
 }
 
 OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
@@ -136,6 +159,7 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<runtime::StderrLogSink> stderr_sink,
     std::unique_ptr<runtime::RingLogSink> ring_sink,
     std::unique_ptr<runtime::LogService> log, std::unique_ptr<runtime::JobService> jobs,
+    std::unique_ptr<runtime::AssetService> assets,
     std::unique_ptr<runtime::FrameScheduler> frame_scheduler,
     std::unique_ptr<runtime::InputTracker> input,
     std::unique_ptr<simulation::SimulationWorld> simulation,
@@ -145,7 +169,7 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<SdlGpuHost> host) noexcept
     : config_(std::move(config)), content_(std::move(content)),
       stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)),
-      log_(std::move(log)), jobs_(std::move(jobs)),
+      log_(std::move(log)), jobs_(std::move(jobs)), assets_(std::move(assets)),
       frame_scheduler_(std::move(frame_scheduler)), input_(std::move(input)),
       simulation_(std::move(simulation)), platform_(std::move(platform)),
       sdl_input_(std::move(sdl_input)), audio_(std::move(audio)), host_(std::move(host))

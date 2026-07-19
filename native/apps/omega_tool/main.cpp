@@ -43,6 +43,7 @@ void PrintUsage()
               << "  omega_tool level-spatial-verify-tree <root>\n"
               << "  omega_tool level-material-catalogs-verify-tree <root>\n"
               << "  omega_tool level-texture-store-verify-tree <root>\n"
+              << "  omega_tool asset-service-verify-tree <root>\n"
               << "  omega_tool asset-metadata-verify-tree <root>\n";
 }
 
@@ -385,6 +386,8 @@ int main(const int argc, char** argv)
         return omega::tool::LevelMaterialCatalogsVerifyTree(argv[2]);
     if (command == "level-texture-store-verify-tree")
         return omega::tool::LevelTextureStoreVerifyTree(argv[2]);
+    if (command == "asset-service-verify-tree")
+        return omega::tool::AssetServiceVerifyTree(argv[2]);
     if (command == "asset-metadata-verify-tree")
         return omega::tool::AssetMetadataVerifyTree(argv[2]);
 

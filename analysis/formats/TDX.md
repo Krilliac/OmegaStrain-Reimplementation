@@ -260,3 +260,43 @@ The occurrence totals are not a unique whole-disc asset count. The fixed report 
 names, hashes, offsets, payloads, per-level rows, identities, or bindings, and the native path assigns
 no display pixels, channel order, nibble/palette policy, mip purpose, material relationship,
 placement, visibility, draw, GPU-upload, or retail ownership semantics.
+
+## Native asynchronous asset-service lifecycle
+
+E-0043 adds `AssetService` v0 above the immutable `LevelTextureStore`. Creation allocates a fixed
+reusable slot pool and publishes service-scoped generation handles. `Request` schedules only the
+selected store handle's existing native `Load`; `Get` exposes the independently owned immutable
+`TextureStorageIR` only after `Ready`, and `Release` explicitly recycles a `Ready` or `Failed` slot
+while advancing its generation so every earlier handle remains stale. Queued or loading work cannot
+be cancelled in v0. At generation exhaustion a slot retires instead of wrapping.
+
+Accepted `JobService` callables retain a shared service implementation through their final return.
+Service destruction stops new requests, waits for this service's accepted work rather than the
+worker pool's global idle state, and expires the public identity after publication drains. `OmegaApp`
+owns the service optionally only when startup owns a texture store, and member order destroys it
+before both `JobService` and its non-owning `GameDataService`/`LevelTextureStore` dependencies.
+
+The public-safe owned-tree verifier exercises the complete sequential lifecycle:
+
+```powershell
+build/msvc/Debug/omega_tool.exe asset-service-verify-tree private/extracted-disc
+```
+
+Two passes produce byte-identical schema-version-1 reports. Both accept 18/18 levels, 36 explicit
+sources, and 5,801 texture occurrences with zero errors. Texture occurrences, requests, `Ready`
+observations, successful `Get` calls, releases, stale-handle rejections, and zero-residual checks all
+total 5,801. Loaded storage totals are 5,913 blocks, 7,603 planes, 615,232 palette entries,
+27,101,352 plane bytes, 2,460,928 palette bytes, and 29,562,280 owned bytes. Independent maxima are
+one active slot, one in-flight request, and 333,232 resident logical bytes.
+
+The verifier deliberately uses one worker, one pending job, one service slot, one allowed in-flight
+request, and a 524,288-byte resident-logical limit. Production defaults are 64 slots, 64 in-flight
+requests, and 64 MiB resident logical output, with a hard maximum of 8,192 slots. These are synthetic
+project bounds, not observed retail limits or user-facing settings. A clean MSVC build completed with
+zero warnings and errors; the focused checks and full 18/18 CTest suite passed, as did 100 repeated
+lifecycle-test runs. The unchanged E-0038 level-store verifier was also revalidated.
+
+This service does not perform VUM-name or material lookup, alias resolution, material/texture/cell/
+mesh/draw binding, display-pixel expansion, GPU upload, placement, visibility, or rendering. The
+fixed aggregate report contains no paths, names, hashes, offsets, payloads, per-level rows,
+identities, bindings, messages, or exception text.

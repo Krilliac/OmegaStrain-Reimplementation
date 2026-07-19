@@ -73,6 +73,24 @@ retail instruction blocks, or PS2 execution layer.
   smallest nonzero headroom above measured depth zero. These values are not runtime configuration
   or `--set` keys. The verifier emits no paths, names, hashes, offsets, payloads, per-level rows,
   identities, or bindings.
+- E-0043 adds the bounded asynchronous native `AssetService` v0. `OmegaApp` owns it optionally only
+  when startup has a `LevelTextureStore`; fixed reusable generation handles and explicit release
+  govern a preallocated slot pool, while accepted `JobService` work retains a shared implementation
+  through worker return and teardown expires the public service identity. A clean MSVC build produced
+  zero warnings and errors, the focused checks and full 18/18 CTest suite passed, and 100 repeated
+  lifecycle-test runs passed. Two owned-tree verifier passes produced byte-identical schema-version-1
+  reports over 18 levels, 36 sources, and 5,801 texture occurrences with zero errors. Requests,
+  `Ready` states, successful `Get` calls, releases, stale-handle rejections, and zero-residual checks
+  each total 5,801. Loaded storage totals are 5,913 blocks, 7,603 planes, 615,232 palette entries,
+  27,101,352 plane bytes, 2,460,928 palette bytes, and 29,562,280 owned bytes; maximum active slots,
+  in-flight requests, and resident logical bytes are `1 / 1 / 333,232`. The verifier uses one worker,
+  one pending job, and service limits of one slot, one in-flight request, and 524,288 resident logical
+  bytes. Runtime defaults are 64 slots, 64 in-flight requests, and 64 MiB resident logical output,
+  with a hard 8,192-slot maximum. These bounds are synthetic project policy, not retail limits or
+  user settings. The service performs no VUM-name or material lookup, alias resolution, binding,
+  display-pixel expansion, GPU upload, placement, visibility, or rendering. Its fixed aggregate
+  report exposes no paths, names, hashes, offsets, payloads, per-level rows, identities, bindings,
+  messages, or exception text; the unchanged E-0038 store verifier was revalidated separately.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

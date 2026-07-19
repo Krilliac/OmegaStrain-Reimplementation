@@ -354,6 +354,18 @@ ToolRun RunTool(const std::filesystem::path& root)
     };
 }
 
+ToolRun RunAssetTool(const std::filesystem::path& root)
+{
+    StreamCapture output(std::cout);
+    StreamCapture error(std::cerr);
+    const int exit_code = omega::tool::AssetServiceVerifyTree(root);
+    return ToolRun{
+        .exit_code = exit_code,
+        .standard_output = output.Release(),
+        .standard_error = error.Release(),
+    };
+}
+
 enum class ErrorIndex : std::size_t
 {
     DiscoveryInvalidRoot,
@@ -731,6 +743,330 @@ UnsafeLinkCoverage CheckUnsafeLinksAreRejected()
         "discovery rejects links without following them");
     return UnsafeLinkCoverage::Exercised;
 }
+
+enum class AssetErrorIndex : std::size_t
+{
+    DiscoveryInvalidRoot,
+    DiscoveryUnsafeEntry,
+    DiscoveryLimitExceeded,
+    DiscoveryIo,
+    DiscoveryMissingGameData,
+    DiscoveryDuplicateGameData,
+    DiscoveryInvalidLevelCode,
+    DiscoveryDuplicateLevelCode,
+    DiscoveryDuplicateLevelMarker,
+    NoLevels,
+    ServiceOpen,
+    JobServiceCreate,
+    ManifestLoad,
+    StoreOpen,
+    EmptyTextureStore,
+    HandleLookup,
+    AssetServiceCreate,
+    GateSubmission,
+    AssetRequest,
+    AssetTerminalState,
+    AssetGet,
+    AssetRelease,
+    StaleHandleCheck,
+    SnapshotInvariant,
+    AggregateOverflow,
+    UnexpectedFailure,
+    Count,
+};
+
+constexpr std::array<std::string_view, static_cast<std::size_t>(AssetErrorIndex::Count)>
+    kAssetErrorNames{
+        "discovery_invalid_root",
+        "discovery_unsafe_entry",
+        "discovery_limit_exceeded",
+        "discovery_io",
+        "discovery_missing_game_data",
+        "discovery_duplicate_game_data",
+        "discovery_invalid_level_code",
+        "discovery_duplicate_level_code",
+        "discovery_duplicate_level_marker",
+        "no_levels",
+        "service_open",
+        "job_service_create",
+        "manifest_load",
+        "store_open",
+        "empty_texture_store",
+        "handle_lookup",
+        "asset_service_create",
+        "gate_submission",
+        "asset_request",
+        "asset_terminal_state",
+        "asset_get",
+        "asset_release",
+        "stale_handle_check",
+        "snapshot_invariant",
+        "aggregate_overflow",
+        "unexpected_failure",
+    };
+
+struct ExpectedAssetReport
+{
+    std::uint64_t levels_discovered = 0;
+    std::uint64_t levels_verified = 0;
+    std::uint64_t texture_sources = 0;
+    std::uint64_t texture_occurrences = 0;
+    std::uint64_t requests = 0;
+    std::uint64_t ready = 0;
+    std::uint64_t gets = 0;
+    std::uint64_t releases = 0;
+    std::uint64_t stale_handle_rejections = 0;
+    std::uint64_t zero_residual_releases = 0;
+    std::uint64_t storage_blocks = 0;
+    std::uint64_t storage_planes = 0;
+    std::uint64_t storage_palette_entries = 0;
+    std::uint64_t storage_plane_bytes = 0;
+    std::uint64_t storage_palette_bytes = 0;
+    std::uint64_t storage_owned_bytes = 0;
+    std::uint64_t maximum_active_slots = 0;
+    std::uint64_t maximum_in_flight_requests = 0;
+    std::uint64_t maximum_resident_logical_bytes = 0;
+    std::array<std::uint64_t, static_cast<std::size_t>(AssetErrorIndex::Count)> errors{};
+};
+
+std::string BuildAssetReport(const ExpectedAssetReport& report)
+{
+    std::uint64_t error_total = 0;
+    for (const std::uint64_t value : report.errors)
+        error_total += value;
+
+    std::ostringstream output;
+    output
+        << "{\"schema_version\":1,"
+           "\"scope\":\"native aggregate asset service verification; fixed capacity-one "
+           "sequential lifecycle; no paths, names, hashes, offsets, payloads, per-level rows, "
+           "identities, bindings, messages, or exception text\","
+           "\"limits\":{\"worker_count\":1,\"max_pending_jobs\":1,\"slot_capacity\":1,"
+           "\"maximum_in_flight_requests\":1,"
+           "\"maximum_resident_logical_bytes\":524288},"
+           "\"totals\":{\"levels_discovered\":"
+        << report.levels_discovered << ",\"levels_verified\":" << report.levels_verified
+        << ",\"texture_sources\":" << report.texture_sources
+        << ",\"texture_occurrences\":" << report.texture_occurrences
+        << ",\"requests\":" << report.requests << ",\"ready\":" << report.ready
+        << ",\"gets\":" << report.gets << ",\"releases\":" << report.releases
+        << ",\"stale_handle_rejections\":" << report.stale_handle_rejections
+        << ",\"zero_residual_releases\":" << report.zero_residual_releases
+        << ",\"storage_blocks\":" << report.storage_blocks
+        << ",\"storage_planes\":" << report.storage_planes
+        << ",\"storage_palette_entries\":" << report.storage_palette_entries
+        << ",\"storage_plane_bytes\":" << report.storage_plane_bytes
+        << ",\"storage_palette_bytes\":" << report.storage_palette_bytes
+        << ",\"storage_owned_bytes\":" << report.storage_owned_bytes
+        << ",\"errors\":" << error_total << "},\"maxima\":{\"active_slots\":"
+        << report.maximum_active_slots << ",\"in_flight_requests\":"
+        << report.maximum_in_flight_requests << ",\"resident_logical_bytes\":"
+        << report.maximum_resident_logical_bytes << "},\"error_categories\":{";
+    for (std::size_t index = 0; index < kAssetErrorNames.size(); ++index)
+    {
+        if (index != 0U)
+            output << ',';
+        output << '\"' << kAssetErrorNames[index] << "\":" << report.errors[index];
+    }
+    output << "}}\n";
+    return output.str();
+}
+
+ExpectedAssetReport SuccessfulAssetReport(const MeasuredExpected& measured)
+{
+    ExpectedAssetReport report;
+    report.levels_discovered = measured.report.levels_discovered;
+    report.levels_verified = measured.report.levels_verified;
+    report.texture_sources = measured.report.texture_sources;
+    report.texture_occurrences = measured.report.textures;
+    report.requests = measured.report.textures;
+    report.ready = measured.report.textures;
+    report.gets = measured.report.textures;
+    report.releases = measured.report.textures;
+    report.stale_handle_rejections = measured.report.textures;
+    report.zero_residual_releases = measured.report.textures;
+    report.storage_blocks = measured.report.storage_blocks;
+    report.storage_planes = measured.report.storage_planes;
+    report.storage_palette_entries = measured.report.storage_palette_entries;
+    report.storage_plane_bytes = measured.report.storage_plane_bytes;
+    report.storage_palette_bytes = measured.report.storage_palette_bytes;
+    report.storage_owned_bytes = measured.report.storage_owned_bytes;
+    if (report.texture_occurrences != 0U)
+    {
+        report.maximum_active_slots = 1U;
+        report.maximum_in_flight_requests = 1U;
+        report.maximum_resident_logical_bytes =
+            measured.report.load_maxima.logical_output_bytes;
+    }
+    return report;
+}
+
+void CheckAssetSuccessfulAggregateAndLegacyRegression()
+{
+    TempTree tree("asset-success-private", "gAmEdAtA");
+    const auto small_a = MakeDirect24Tdx(16, 16, 0x15);
+    const auto large = MakeDirect24Tdx(32, 32, 0x35);
+    const auto small_b = MakeDirect24Tdx(16, 16, 0x55);
+    const auto small_c = MakeDirect24Tdx(16, 16, 0x75);
+    const auto alpha_primary = MakeHog(
+        {HogMember{.name = "ALPHA.TDX", .payload = small_a}});
+    const auto alpha_map = MakeHog(
+        {HogMember{.name = "LARGE.TDX", .payload = large}});
+    const auto beta_primary = MakeHog(
+        {HogMember{.name = "BETA.TDX", .payload = small_b}});
+    const auto beta_map = MakeHog(
+        {HogMember{.name = "SMALL.TDX", .payload = small_c}});
+
+    Check(tree.ready() &&
+              tree.AddLevel("alpha", alpha_primary, alpha_map, "data.pop", "Data.Hog",
+                  "tex.hog", "mapTex.hog") &&
+              tree.AddLevel("BETA", beta_primary, beta_map),
+        "multi-level multi-texture AssetService tree is written");
+    if (!tree.ready())
+        return;
+
+    constexpr std::array<std::string_view, 2> codes{"ALPHA", "BETA"};
+    auto measured = MeasureExpected(tree.root(), codes);
+    if (!measured)
+        return;
+    const ExpectedAssetReport expected = SuccessfulAssetReport(*measured);
+    Check(expected.texture_occurrences == 4U && expected.requests == 4U &&
+              expected.requests == expected.ready && expected.ready == expected.gets &&
+              expected.gets == expected.releases &&
+              expected.releases == expected.stale_handle_rejections &&
+              expected.stale_handle_rejections == expected.zero_residual_releases,
+        "capacity-one lifecycle counters cover every texture occurrence exactly once");
+
+    const ToolRun legacy_before = RunTool(tree.root());
+    const ToolRun asset = RunAssetTool(tree.root());
+    const ToolRun legacy_after = RunTool(tree.root());
+    Check(asset.exit_code == 0 && asset.standard_output == BuildAssetReport(expected) &&
+              asset.standard_error.empty(),
+        "AssetService verifier emits the exact fixed limits, lifecycle, storage, maxima, and "
+        "zero-error report");
+    Check(legacy_before.exit_code == 0 && legacy_after.exit_code == 0 &&
+              legacy_before.standard_output == BuildReport(measured->report) &&
+              legacy_after.standard_output == legacy_before.standard_output &&
+              legacy_before.standard_error.empty() && legacy_after.standard_error.empty(),
+        "AssetService verification leaves the legacy level-texture-store schema and output "
+        "byte-unchanged");
+}
+
+void CheckAssetEmptyInputs()
+{
+    TempTree no_levels("asset-empty-level-set");
+    Check(no_levels.ready(), "empty AssetService owner root is written");
+    ExpectedAssetReport no_level_report;
+    no_level_report.errors[static_cast<std::size_t>(AssetErrorIndex::NoLevels)] = 1U;
+    const ToolRun no_level_run = RunAssetTool(no_levels.root());
+    Check(no_level_run.exit_code != 0 &&
+              no_level_run.standard_output == BuildAssetReport(no_level_report) &&
+              no_level_run.standard_error == "asset-service: no_levels\n",
+        "AssetService verifier rejects an empty level set with one fixed typed error");
+
+    TempTree no_textures("asset-empty-texture-store");
+    const auto empty_hog = MakeHog({});
+    Check(no_textures.ready() && no_textures.AddLevel("EMPTY1", empty_hog, empty_hog),
+        "empty AssetService texture-container level is written");
+    ExpectedAssetReport no_texture_report;
+    no_texture_report.levels_discovered = 1U;
+    no_texture_report.errors[
+        static_cast<std::size_t>(AssetErrorIndex::EmptyTextureStore)] = 1U;
+    const ToolRun no_texture_run = RunAssetTool(no_textures.root());
+    Check(no_texture_run.exit_code != 0 &&
+              no_texture_run.standard_output == BuildAssetReport(no_texture_report) &&
+              no_texture_run.standard_error == "asset-service: empty_texture_store\n",
+        "AssetService verifier rejects an empty store without partial lifecycle totals");
+}
+
+void CheckAssetMalformedAndPrivateDiagnostics()
+{
+    constexpr std::string_view level_marker = "ASSETSECRET42";
+    constexpr std::string_view member_marker = "PRIVATE_ASSET_MEMBER.TDX";
+    constexpr std::string_view payload_marker = "PRIVATE_ASSET_PAYLOAD_MARKER";
+    TempTree tree("PRIVATE_ASSET_ROOT_MARKER");
+    const auto malformed_texture = MakeHog({HogMember{
+        .name = std::string(member_marker),
+        .payload = TextBytes(payload_marker),
+    }});
+    Check(tree.ready() && tree.AddLevel(level_marker, malformed_texture, MakeHog({})),
+        "malformed private-marker AssetService level is written");
+
+    ExpectedAssetReport expected;
+    expected.levels_discovered = 1U;
+    expected.errors[
+        static_cast<std::size_t>(AssetErrorIndex::AssetTerminalState)] = 1U;
+    const ToolRun run = RunAssetTool(tree.root());
+    Check(run.exit_code != 0 && run.standard_output == BuildAssetReport(expected) &&
+              run.standard_error == "asset-service: asset_terminal_state\n",
+        "malformed asset fails atomically at the fixed terminal-state category");
+    const std::array<std::string, 5> forbidden{
+        tree.root().string(), tree.root().generic_string(), std::string(level_marker),
+        std::string(member_marker), std::string(payload_marker),
+    };
+    const std::string comparable_output = PrivacyComparable(run.standard_output);
+    const std::string comparable_error = PrivacyComparable(run.standard_error);
+    for (const auto& marker : forbidden)
+    {
+        const std::string comparable_marker = PrivacyComparable(marker);
+        Check(comparable_output.find(comparable_marker) == std::string::npos &&
+                  comparable_error.find(comparable_marker) == std::string::npos,
+            "AssetService aggregate diagnostics disclose no private identity markers");
+    }
+
+    TempTree malformed_archive("asset-malformed-archive");
+    const auto invalid_hog = std::vector<std::byte>(64U, std::byte{0});
+    Check(malformed_archive.ready() &&
+              malformed_archive.AddLevel("BROKEN1", invalid_hog, MakeHog({})),
+        "malformed AssetService texture archive is written");
+    ExpectedAssetReport archive_expected;
+    archive_expected.levels_discovered = 1U;
+    archive_expected.errors[static_cast<std::size_t>(AssetErrorIndex::StoreOpen)] = 1U;
+    const ToolRun archive_run = RunAssetTool(malformed_archive.root());
+    Check(archive_run.exit_code != 0 &&
+              archive_run.standard_output == BuildAssetReport(archive_expected) &&
+              archive_run.standard_error == "asset-service: store_open\n",
+        "malformed AssetService texture archive fails at the store-open stage");
+}
+
+UnsafeLinkCoverage CheckAssetUnsafeLinksAreRejected()
+{
+    TempTree tree("asset-unsafe-link");
+    const std::filesystem::path link = tree.root() / "linked-asset-data";
+    std::error_code error;
+    std::filesystem::create_directory_symlink(tree.game_data(), link, error);
+#ifdef _WIN32
+    if (error)
+    {
+        std::error_code cleanup_error;
+        std::filesystem::remove(link, cleanup_error);
+        if (!TryCreateUnprivilegedDirectorySymlink(tree.game_data(), link, error))
+        {
+            const bool explicit_skip = IsExplicitReparseCapabilitySkip(error);
+            Check(explicit_skip,
+                "AssetService unsafe-link fixture fails only for a recognized Windows reparse "
+                "capability");
+            return explicit_skip ? UnsafeLinkCoverage::ExplicitlySkipped
+                                 : UnsafeLinkCoverage::FixtureFailure;
+        }
+    }
+#else
+    if (error)
+    {
+        Check(false, "AssetService unsafe-link fixture is created on this platform");
+        return UnsafeLinkCoverage::FixtureFailure;
+    }
+#endif
+
+    ExpectedAssetReport expected;
+    expected.errors[
+        static_cast<std::size_t>(AssetErrorIndex::DiscoveryUnsafeEntry)] = 1U;
+    const ToolRun run = RunAssetTool(tree.root());
+    Check(run.exit_code != 0 && run.standard_output == BuildAssetReport(expected) &&
+              run.standard_error == "asset-service: discovery_unsafe_entry\n",
+        "AssetService discovery rejects unsafe entries without following them");
+    return UnsafeLinkCoverage::Exercised;
+}
 } // namespace
 
 int main()
@@ -746,6 +1082,20 @@ int main()
 #else
     Check(unsafe_link_coverage == UnsafeLinkCoverage::Exercised,
         "unsafe-link coverage is exercised on platforms with unprivileged symlinks");
+#endif
+
+    CheckAssetSuccessfulAggregateAndLegacyRegression();
+    CheckAssetEmptyInputs();
+    CheckAssetMalformedAndPrivateDiagnostics();
+    const UnsafeLinkCoverage asset_unsafe_link_coverage = CheckAssetUnsafeLinksAreRejected();
+#ifdef _WIN32
+    Check(asset_unsafe_link_coverage == UnsafeLinkCoverage::Exercised ||
+              asset_unsafe_link_coverage == UnsafeLinkCoverage::ExplicitlySkipped,
+        "Windows AssetService unsafe-link coverage is exercised or explicitly skipped");
+#else
+    Check(asset_unsafe_link_coverage == UnsafeLinkCoverage::Exercised,
+        "AssetService unsafe-link coverage is exercised on platforms with unprivileged "
+        "symlinks");
 #endif
 
     if (failures == 0)
