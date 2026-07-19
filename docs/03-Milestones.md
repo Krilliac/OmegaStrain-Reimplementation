@@ -730,6 +730,14 @@ executable, emulator, or PCSX2 input was used.
 Publication CI remains separate and unclaimed. This proves no retail/display/channel/swizzle/palette,
 material, geometry, asset-binding, app, or GPU semantics.
 
+E-0067 proves a test-only end-to-end composition from the generated public TDX fixture through
+`LevelTextureStore`, asynchronous `JobService`/`AssetService` publication, and the E-0066 topology
+adapter. Two distinct direct-24 payloads produce independently owned, pixel-identical 32x32 RGBA8
+images; both asset slots release back to an exact empty snapshot without invalidating either image.
+No production API, startup selection, app state, GPU upload, draw command, or retail binding is
+added. Texture display expansion and every material, geometry, placement, and visibility relationship
+remain unresolved.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

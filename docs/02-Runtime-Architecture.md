@@ -312,6 +312,21 @@ staged-tree public gate checked 242 indexed text blobs. Validation used no priva
 content, disc image, retail executable, emulator, or
 PCSX2 input. Publication CI remains separate and unclaimed.
 
+E-0067 verifies the boundary composition without expanding the production surface. The synthetic
+asset-service fixture loads two generated direct-24 TDX members with deliberately different payload
+seeds through the real `LevelTextureStore` to `JobService` to `AssetService` chain. Once both handles
+are ready, the test thread borrows each `TextureAssetView::storage` only long enough to call
+`BuildTextureStorageTopologyDebugImage`. Each result independently owns a 32x32 RGBA8 tile and 4,096
+bytes. The images are pixel-identical even though the canonical plane bytes differ. Both handles can
+then be released, returning the service to its exact empty two-slot snapshot while both images stay
+valid and unchanged.
+
+This is a test-only proof of the already-public ownership contracts, not a new service method or
+runtime policy. It does not choose an asset, wait during an app frame, upload a texture, change a draw
+list, or associate texture storage with a catalog name, material, mesh, or cell. Display expansion,
+channel/alpha conversion, nibble order, palette permutation, swizzle, placement, visibility, and
+retail behavior remain outside the boundary.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit
