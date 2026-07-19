@@ -24,6 +24,7 @@ struct GpuHostSnapshot
     std::uint64_t successful_releases = 0U;
     std::uint64_t frame_submissions = 0U;
     std::uint64_t blit_submissions = 0U;
+    std::uint64_t successful_blit_draws = 0U;
     std::uint64_t clear_submissions = 0U;
     std::uint64_t unavailable_swapchain_submissions = 0U;
     std::uint64_t rejected_nondefault_texture_handles = 0U;
@@ -63,9 +64,9 @@ public:
     // [main/render thread] Checked synchronization point; failure leaves residency unchanged.
     [[nodiscard]] std::expected<void, std::string> WaitForIdle();
 
-    // [main/render thread] Synchronously consumes one owned renderer-neutral frame packet. Only an
-    // all-zero default handle selects clear-only rendering; every other handle must resolve as a
-    // currently resident generation in this host's pool before its backend slot is accessed.
+    // [main/render thread] Synchronously consumes one owned renderer-neutral frame packet. Every
+    // draw-list handle must resolve as a currently resident generation before any GPU work begins;
+    // an empty list preserves clear-only rendering.
     [[nodiscard]] std::expected<void, std::string> RenderFrame(
         const runtime::RenderFramePacket& packet);
 

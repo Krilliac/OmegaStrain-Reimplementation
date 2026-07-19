@@ -1,6 +1,6 @@
 #pragma once
 
-#include "omega/runtime/render_texture.h"
+#include "omega/runtime/render_draw_list.h"
 
 #include <chrono>
 #include <cstdint>
@@ -18,9 +18,9 @@ struct RenderFramePacket
     std::uint64_t completed_simulation_steps = 0;
     std::chrono::nanoseconds simulated_time{0};
     std::uint32_t alive_entities = 0;
-    // Optional non-owning renderer identity. The default-invalid handle preserves the current
-    // content-free frame behavior until a renderer explicitly publishes a project-owned image.
-    RenderTextureHandle diagnostic_texture;
+    // Owned fixed command value. Commands do not pin texture generations; the current synchronous
+    // caller keeps every referenced texture resident through consumption.
+    RenderDrawList draw_list;
 };
 
 static_assert(std::is_trivially_copyable_v<RenderFramePacket>);

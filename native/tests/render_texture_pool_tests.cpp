@@ -111,8 +111,8 @@ void CheckContractAndConfiguration()
 
     const RenderTextureHandle empty;
     const RenderFramePacket packet;
-    Check(!empty.valid() && !packet.diagnostic_texture.valid(),
-        "default handle and frame-packet texture are invalid");
+    Check(!empty.valid() && packet.draw_list.empty(),
+        "default handle is invalid and frame-packet draw list is empty");
     Check(omega::runtime::kMaximumRenderTextureSlotCapacity == 8192U,
         "the render texture pool hard maximum is fixed at 8192 slots");
     const RenderTexturePoolConfig defaults;
