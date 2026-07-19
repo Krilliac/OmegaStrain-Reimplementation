@@ -671,6 +671,20 @@ retail instruction blocks, or PS2 execution layer.
   `0xcfa7cc57696aae0a`. Dimensions, topology pixels, action rows, reducer rules, modal timing, draw
   lists, three-texture 86,016-byte residency, failure ordering, and reverse teardown remain
   unchanged. These aliases establish no retail menu, key-repeat, wrapping, or controller behavior.
+- E-0071 makes the existing content-startup ownership boundary explicit before the native host
+  allocates or touches platform state. A nonallocating `noexcept` classifier accepts only an empty
+  state (`NoContent`), `GameDataService` alone (`DataMounted`), or the complete five-owner level
+  state (`LevelContent`); every partial or mixed shape is rejected. `OmegaApp::Create` performs this
+  check before owning config/content, creating logs/jobs/scheduler/input/simulation/topology, or
+  touching SDL, audio, or GPU state, and reports the fixed
+  `content startup state: inconsistent-ownership` error on rejection.
+  The generated main card now labels the copied startup stage as `CONTENT NONE`, `CONTENT DATA`, or
+  `CONTENT LEVEL`. The three opaque images have exact background/cyan/slate/amber populations
+  3,593/1,627/3,516/480, 3,600/1,620/3,516/480, and 3,594/1,626/3,516/480, with FNV-1a-64 values
+  `0x8e8e3f7fff4f971a`, `0x517ad52bbf1fbe61`, and `0x08405186aa105db1`. Invalid stage enum values
+  render the `NoContent` card. Controls remains `0xcfa7cc57696aae0a`, topology remains
+  `0xb56c8db088c5a9fe`, and no action, reducer, capture/replay, file, schema, asset decoding, retail
+  presentation, or platform lifecycle contract changes.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

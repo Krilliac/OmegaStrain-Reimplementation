@@ -20,6 +20,14 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     const runtime::RuntimeSettings& settings, runtime::ContentStartupState content,
     const bool debug_device)
 {
+    const auto classified_content = runtime::ClassifyContentStartupState(content);
+    if (!classified_content)
+    {
+        return std::unexpected(
+            std::string("content startup state: inconsistent-ownership"));
+    }
+    const runtime::ContentStartupStage content_stage = *classified_content;
+
     auto config_owner = std::make_unique<runtime::ConfigStore>(std::move(config));
     auto content_owner = std::make_unique<runtime::ContentStartupState>(std::move(content));
     auto stderr_sink = std::make_unique<runtime::StderrLogSink>();
@@ -338,7 +346,7 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     auto diagnostic_hidden_draw_list = std::move(*created_hidden_draw_list);
     const std::size_t diagnostic_base_command_count = diagnostic_command_count;
 
-    const runtime::DebugImage menu_image = BuildProjectDiagnosticMenuImage();
+    const runtime::DebugImage menu_image = BuildProjectDiagnosticMenuImage(content_stage);
     auto uploaded_menu = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
         .width = menu_image.width,
         .height = menu_image.height,

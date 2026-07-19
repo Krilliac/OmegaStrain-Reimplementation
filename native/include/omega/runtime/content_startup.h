@@ -7,6 +7,7 @@
 #include "omega/runtime/debug_image.h"
 #include "omega/runtime/launch_options.h"
 
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <string>
@@ -14,6 +15,18 @@
 
 namespace omega::runtime
 {
+enum class ContentStartupStage : std::uint8_t
+{
+    NoContent = 0U,
+    DataMounted = 1U,
+    LevelContent = 2U,
+};
+
+enum class ContentStartupStateErrorCode : std::uint8_t
+{
+    InconsistentOwnership = 0U,
+};
+
 enum class ContentStartupErrorCode
 {
     InvalidOptions,
@@ -43,6 +56,11 @@ struct ContentStartupState
     std::optional<asset::LevelContentIR> level_content;
     std::optional<DebugImage> debug_image;
 };
+
+// [any thread; reentrant] Classifies only the three complete ownership shapes published by
+// StartContent. The check performs no allocation and rejects every partial or mixed state.
+[[nodiscard]] std::expected<ContentStartupStage, ContentStartupStateErrorCode>
+ClassifyContentStartupState(const ContentStartupState& state) noexcept;
 
 // [game thread, startup] Owns the validated data service, canonical level state, and optional
 // texture-locator inventory. SDL and GPU initialization deliberately occur after this succeeds.

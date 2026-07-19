@@ -421,6 +421,22 @@ int main()
         omega::runtime::kMinimumSimulationStep * 8;
     settings.max_input_events_per_frame =
         omega::runtime::InputTracker::kMaxEventsPerFrameLimit;
+
+    auto invalid_config = omega::runtime::ParseConfigText("");
+    Check(invalid_config.has_value(), "the invalid-content startup fixture parses config");
+    if (!invalid_config)
+        return EXIT_FAILURE;
+    omega::runtime::ContentStartupState invalid_content;
+    invalid_content.level_manifest.emplace();
+    const SDL_InitFlags sdl_before_invalid_create = SDL_WasInit(0);
+    auto invalid_app = omega::app::OmegaApp::Create(std::move(*invalid_config), settings,
+        std::move(invalid_content), false);
+    Check(!invalid_app &&
+              invalid_app.error() ==
+                  "content startup state: inconsistent-ownership" &&
+              SDL_WasInit(0) == sdl_before_invalid_create,
+        "inconsistent content ownership fails with the exact error before touching SDL");
+
     auto app = omega::app::OmegaApp::Create(std::move(*config), settings,
         omega::runtime::ContentStartupState{}, false);
     Check(app.has_value(), "the zero-file OmegaApp fixture starts");
@@ -691,13 +707,14 @@ int main()
                   kDiagnosticPresentationLogicalBytes,
         "the two 128x72 cards and one 96x32 topology card own exactly 86,016 resident logical bytes");
 
+    // The last two probes are stable pixels in the zero-file CONTENT and NONE labels.
     constexpr std::array menu_probe_coordinates{
         std::array{4U, 4U}, std::array{0U, 0U}, std::array{8U, 8U},
         std::array{9U, 8U}, std::array{40U, 12U}, std::array{8U, 23U},
         std::array{24U, 22U}, std::array{62U, 22U}, std::array{9U, 30U},
         std::array{16U, 30U}, std::array{17U, 30U}, std::array{77U, 30U},
-        std::array{44U, 45U}, std::array{45U, 45U}, std::array{68U, 60U},
-        std::array{69U, 62U},
+        std::array{44U, 45U}, std::array{45U, 45U}, std::array{93U, 54U},
+        std::array{96U, 61U},
     };
     constexpr omega::runtime::RenderClearColorRgba8 probe_background{
         .red = 8U, .green = 12U, .blue = 24U, .alpha = 255U};
@@ -770,7 +787,7 @@ int main()
                 OmegaAppTestAccess::Host(*app), menu_probe_packet);
         Check(menu_probe_readback &&
                   *menu_probe_readback == expected_menu_probe_readback,
-            "the resident menu texture preserves the exact sixteen-probe RGBA8 grid on GPU");
+            "the resident zero-file menu texture preserves CONTENT/NONE and the exact sixteen-probe RGBA8 grid on GPU");
         Check(OmegaAppTestAccess::GpuSnapshot(*app) == initial_gpu,
             "the private menu readback seam leaves every production GPU counter unchanged");
     }

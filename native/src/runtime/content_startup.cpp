@@ -6,6 +6,36 @@
 
 namespace omega::runtime
 {
+std::expected<ContentStartupStage, ContentStartupStateErrorCode>
+ClassifyContentStartupState(const ContentStartupState& state) noexcept
+{
+    const bool has_game_data = state.game_data.has_value();
+    const bool has_level_texture_store = state.level_texture_store.has_value();
+    const bool has_level_manifest = state.level_manifest.has_value();
+    const bool has_level_content = state.level_content.has_value();
+    const bool has_debug_image = state.debug_image.has_value();
+
+    if (!has_game_data && !has_level_texture_store && !has_level_manifest &&
+        !has_level_content && !has_debug_image)
+    {
+        return ContentStartupStage::NoContent;
+    }
+
+    if (has_game_data && !has_level_texture_store && !has_level_manifest &&
+        !has_level_content && !has_debug_image)
+    {
+        return ContentStartupStage::DataMounted;
+    }
+
+    if (has_game_data && has_level_texture_store && has_level_manifest &&
+        has_level_content && has_debug_image)
+    {
+        return ContentStartupStage::LevelContent;
+    }
+
+    return std::unexpected(ContentStartupStateErrorCode::InconsistentOwnership);
+}
+
 std::string_view ContentStartupErrorCodeName(const ContentStartupErrorCode code) noexcept
 {
     switch (code)

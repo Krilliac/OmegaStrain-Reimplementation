@@ -1,5 +1,6 @@
 #pragma once
 
+#include "omega/runtime/content_startup.h"
 #include "omega/runtime/texture_storage_topology_debug_image.h"
 
 #include <cstdint>
@@ -154,7 +155,8 @@ struct DiagnosticMenuInputEdges
 
 // [any thread; reentrant] Returns a fully owned, project-generated opaque RGBA8 diagnostic card.
 // It performs no file I/O and consumes no platform object, decoded asset, or retail input.
-[[nodiscard]] runtime::DebugImage BuildProjectDiagnosticMenuImage();
+[[nodiscard]] runtime::DebugImage BuildProjectDiagnosticMenuImage(
+    runtime::ContentStartupStage content_stage);
 
 // [any thread; reentrant] Returns a fully owned, project-generated opaque RGBA8 controls card.
 // It performs no file I/O and consumes no platform object, decoded asset, or retail input.

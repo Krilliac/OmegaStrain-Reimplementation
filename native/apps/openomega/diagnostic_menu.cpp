@@ -260,7 +260,8 @@ TopologyAllocationError() noexcept
 }
 } // namespace
 
-runtime::DebugImage BuildProjectDiagnosticMenuImage()
+runtime::DebugImage BuildProjectDiagnosticMenuImage(
+    const runtime::ContentStartupStage content_stage)
 {
     runtime::DebugImage image = BuildDiagnosticCardBase();
 
@@ -280,6 +281,22 @@ runtime::DebugImage BuildProjectDiagnosticMenuImage()
     FillRectangle(image, 8U, 58U, 88U, 68U, kSlateColor);
     FillRectangle(image, 8U, 58U, 12U, 68U, kCyanColor);
     DrawLabel(image, "ASSET TOPOLOGY", 16U, 60U);
+
+    // Project startup ownership classification. Invalid enum values fail closed to NoContent.
+    DrawLabel(image, "CONTENT", 92U, 54U);
+    switch (content_stage)
+    {
+    case runtime::ContentStartupStage::DataMounted:
+        DrawLabel(image, "DATA", 96U, 61U);
+        break;
+    case runtime::ContentStartupStage::LevelContent:
+        DrawLabel(image, "LEVEL", 96U, 61U);
+        break;
+    case runtime::ContentStartupStage::NoContent:
+    default:
+        DrawLabel(image, "NONE", 96U, 61U);
+        break;
+    }
 
     return image;
 }
