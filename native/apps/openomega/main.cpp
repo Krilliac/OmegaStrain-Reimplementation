@@ -2,6 +2,7 @@
 #include "run_replay_session.h"
 
 #include "omega/runtime/content_startup.h"
+#include "omega/runtime/content_startup_diagnostic.h"
 #include "omega/runtime/launch_options.h"
 #include "omega/runtime/runtime_settings.h"
 
@@ -21,15 +22,16 @@ namespace
 {
 void PrintContentError(const omega::runtime::ContentStartupError& error)
 {
-    std::cerr << "content startup [";
-    if (error.game_data_error)
-        std::cerr << omega::content::GameDataErrorCodeName(error.game_data_error->code);
-    else if (error.level_texture_error)
-        std::cerr << omega::content::LevelTextureStoreErrorCodeName(
-            error.level_texture_error->code);
-    else
-        std::cerr << omega::runtime::ContentStartupErrorCodeName(error.code);
-    std::cerr << "]: " << error.message << '\n';
+    const auto diagnostic = omega::runtime::DescribeContentStartupError(error);
+    if (!diagnostic)
+    {
+        std::cerr << "content startup [inconsistent-error]: "
+                     "content startup error representation is inconsistent\n";
+        return;
+    }
+
+    std::cerr << "content startup [" << diagnostic->category << "]: "
+              << diagnostic->message << '\n';
 }
 
 void PrintRunCaptureDiagnostics(const omega::app::RunCaptureOutcome& outcome)

@@ -55,8 +55,15 @@ string(CONCAT openomega_usage
     "[--data-root=PATH [--level=CODE] [--probe-only]]\n"
 )
 set(zero_frame_stdout "OpenOmega native shell: rendered_frames=0\n")
+set(empty_data_root "${CMAKE_CURRENT_BINARY_DIR}/openomega-process-contract-empty-data-root")
+file(REMOVE_RECURSE "${empty_data_root}")
+file(MAKE_DIRECTORY "${empty_data_root}")
 
 run_openomega_case(zero_frames TRUE "${zero_frame_stdout}" "" --frames=0)
+run_openomega_case(missing_system_config FALSE ""
+    "content startup [missing-required-file]: game-data root is missing SYSTEM.CNF\n"
+    "--data-root=${empty_data_root}"
+)
 run_openomega_case(capture_without_frames FALSE ""
     "--capture-run requires --frames\n${openomega_usage}"
     --capture-run

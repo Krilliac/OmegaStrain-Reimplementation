@@ -843,6 +843,23 @@ shipping dependencies or execution mechanisms.
     `0x08405186aa105db1`. Controls and topology remain `0xcfa7cc57696aae0a` and
     `0xb56c8db088c5a9fe`. This synthetic owner-health label uses no private input and establishes no
     retail startup stage, UI, content availability meaning, or emulator-equivalence behavior.
+57. E-0072 adds a pure borrowed adapter between `ContentStartupError` and process diagnostics.
+    `DescribeContentStartupError` is nonallocating, reentrant, and `noexcept`. It accepts exactly
+    `InvalidOptions`/`DebugImage` with neither nested error, `GameData` with only
+    `game_data_error`, and `LevelTextures` with only `level_texture_error`; a nonempty outer message
+    is mandatory. Unknown outer or nested codes and every missing, unexpected, or both-nested
+    representation return typed `InconsistentRepresentation`. Valid diagnostics retain the existing
+    category and message bytes and borrow the outer message storage. The nested code-name functions
+    retain their stable `unknown` fallback independently. Invalid representations emit only the
+    fixed sanitized line
+    `content startup [inconsistent-error]: content startup error representation is inconsistent`.
+    An integration case uses a CMake-created empty root to freeze the existing pre-SDL, nonzero,
+    empty-stdout missing-`SYSTEM.CNF` diagnostic. `StartContent` ownership/order and all menu,
+    DiagnosticPlay, resource, retry, picker, fallback, persistence, schema, capture/replay, and
+    retail-data behavior remain unchanged. The slice is synthetic-only. Focused/full MSVC,
+    `omega_core_tests`, process-contract, 30/34/30 CTest, runtime-off with 27 registrations,
+    157-file dependency, 209-tooling-test, and Python compile-all validation passed. Publication is
+    not yet claimed.
 
 ## Disc observations
 

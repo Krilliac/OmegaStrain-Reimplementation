@@ -83,6 +83,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/asset_service.cpp
     native/src/runtime/config_service.cpp
     native/src/runtime/content_startup.cpp
+    native/src/runtime/content_startup_diagnostic.cpp
     native/src/runtime/frame_scheduler.cpp
     native/src/runtime/input_trace.cpp
     native/src/runtime/input_tracker.cpp

@@ -781,6 +781,20 @@ render `NONE`. The exact hashes are `0x8e8e3f7fff4f971a`, `0x517ad52bbf1fbe61`, 
 capture/replay, teardown, and all retail-data boundaries are unchanged. This is synthetic developer
 owner-health presentation, not a retail startup or UI claim.
 
+E-0072 adds a fail-closed presentation adapter for the existing all-or-error startup boundary.
+`DescribeContentStartupError` borrows the nonempty outer message, allocates nothing, is `noexcept`,
+and accepts only the four nested-error shapes produced by `StartContent`. Unknown outer or nested
+codes and missing, unexpected, or both nested errors return typed `InconsistentRepresentation`.
+The underlying code-name functions retain their stable `unknown` fallback. Valid process output is
+unchanged,
+while an inconsistent representation has one fixed sanitized error. A CMake-created empty-root
+process case freezes nonzero exit, empty stdout, and the existing exact missing-`SYSTEM.CNF` stderr
+before SDL/GPU or owner input. Startup ownership, DiagnosticPlay/menu behavior, assets, resources,
+retry/fallback policy, persistence, schemas, capture, and replay remain unchanged. The slice is
+synthetic-only. Focused/full MSVC, direct core/process, 30/34/30 CTest, runtime-off with 27
+registrations, 157-file dependency, 209-tooling-test, and compile-all validation passed.
+Publication remains unclaimed.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.
