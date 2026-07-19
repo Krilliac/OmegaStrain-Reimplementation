@@ -375,6 +375,27 @@ dimensions, full opacity, upload/list geometry, topology pixels, three-texture 8
 residency, and reverse teardown remain unchanged. Gamepad South is intentionally not rendered as
 `A` or `Cross`; that naming is host-dependent and no retail controller mapping is claimed.
 
+E-0070 keeps conventional vertical navigation in the same physical-to-logical leaf. Keyboard Up is
+an additional binding for action 2 beside W and gamepad D-pad Up; keyboard Down similarly joins S
+and D-pad Down on action 3. `InputBindingTable` now owns exactly 17 physical rows while retaining the
+same six sorted actions. Per-control levels and per-action down counts still yield only one first-down
+press and one last-up release, so a same-action alias cannot repeat navigation or release early.
+
+The reducer, live host, capture, and opt-in replay continue to consume only action 2/3 rows. Captures
+retain no physical provenance. MainMenu navigation remains edge-only, clamped, and simultaneous-
+opposite neutral; terminal input and primary retain their existing priorities, and the modal elapsed
+gate still prevents catch-up. In DiagnosticPlay, Up/Down also reach the intentionally shared
+synthetic forward/reverse actions; this is project diagnostic policy rather than a retail mapping.
+Binding validation remains before tracker, simulation, and SDL construction, with no new failure or
+rollback stage.
+
+The card legends become `W/S/UP/DOWN`, `W/UP FORWARD`, and `S/DOWN REVERSE`. Their new FNV-1a-64
+values are `0x9a4662f8f943521d` and `0xcfa7cc57696aae0a`, with respective
+background/cyan/slate/amber populations 3,702/1,518/3,516/480 and 2,104/1,452/5,247/413. Dimensions,
+full opacity, topology pixels, draw-list geometry, three-texture 86,016-byte residency, and reverse
+teardown remain unchanged. This establishes no retail key map, held-key repeat, navigation wrapping,
+mouse selection, or controller-label semantics.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

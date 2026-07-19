@@ -439,7 +439,13 @@ int main()
               static_cast<std::uint16_t>(SDL_SCANCODE_W),
               omega::app::kDebugMoveForwardAction) &&
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_UP),
+                  omega::app::kDebugMoveForwardAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
                   static_cast<std::uint16_t>(SDL_SCANCODE_S),
+                  omega::app::kDebugMoveBackwardAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_DOWN),
                   omega::app::kDebugMoveBackwardAction) &&
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
                   static_cast<std::uint16_t>(SDL_SCANCODE_A),
@@ -459,7 +465,7 @@ int main()
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
                   static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_RIGHT),
                   omega::app::kDebugMoveRightAction),
-        "the synthetic W/S/A/D and gamepad dpad bindings expose action IDs 2 through 5");
+        "the synthetic W/S, Up/Down, A/D, and gamepad dpad bindings expose action IDs 2 through 5");
     Check(OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
               static_cast<std::uint16_t>(SDL_SCANCODE_F1),
               omega::app::kDiagnosticMenuToggleAction) &&
@@ -475,9 +481,10 @@ int main()
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
                   static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_SOUTH),
                   omega::app::kDiagnosticMenuToggleAction) &&
-              OmegaAppTestAccess::InputBindingCount(*app) == 15U &&
+              OmegaAppTestAccess::InputBindingCount(*app) == 17U &&
               OmegaAppTestAccess::InputActionCount(*app) == 6U,
-        "F1, both Enter keys, gamepad Start, and gamepad South share action 6 without changing the exact six-action schema");
+        "seventeen physical bindings preserve the six-action schema while "
+        "five confirmation controls share action 6");
 
     const omega::runtime::RenderTextureHandle diagnostic_texture =
         OmegaAppTestAccess::DiagnosticTexture(*app);
@@ -687,7 +694,7 @@ int main()
     constexpr std::array menu_probe_coordinates{
         std::array{4U, 4U}, std::array{0U, 0U}, std::array{8U, 8U},
         std::array{9U, 8U}, std::array{40U, 12U}, std::array{8U, 23U},
-        std::array{9U, 22U}, std::array{62U, 22U}, std::array{9U, 30U},
+        std::array{24U, 22U}, std::array{62U, 22U}, std::array{9U, 30U},
         std::array{16U, 30U}, std::array{17U, 30U}, std::array{77U, 30U},
         std::array{44U, 45U}, std::array{45U, 45U}, std::array{68U, 60U},
         std::array{69U, 62U},
@@ -702,7 +709,7 @@ int main()
         .red = 255U, .green = 196U, .blue = 64U, .alpha = 255U};
     constexpr std::array expected_menu_probe_readback{
         probe_background, probe_cyan, probe_slate, probe_cyan,
-        probe_amber, probe_cyan, probe_background, probe_cyan,
+        probe_amber, probe_cyan, probe_cyan, probe_cyan,
         probe_cyan, probe_slate, probe_cyan, probe_cyan,
         probe_slate, probe_cyan, probe_cyan, probe_cyan,
     };
@@ -771,8 +778,8 @@ int main()
     constexpr std::array controls_probe_coordinates{
         std::array{4U, 4U}, std::array{0U, 0U}, std::array{8U, 8U},
         std::array{9U, 8U}, std::array{40U, 12U}, std::array{42U, 11U},
-        std::array{43U, 11U}, std::array{8U, 23U}, std::array{12U, 25U},
-        std::array{13U, 25U}, std::array{13U, 32U}, std::array{13U, 39U},
+        std::array{43U, 11U}, std::array{8U, 23U}, std::array{20U, 25U},
+        std::array{13U, 25U}, std::array{20U, 32U}, std::array{13U, 39U},
         std::array{12U, 46U}, std::array{33U, 48U}, std::array{22U, 55U},
         std::array{12U, 62U},
     };
@@ -1342,11 +1349,11 @@ int main()
         OmegaAppTestAccess::DebugLocomotionPosition(*app);
     const omega::app::GpuHostSnapshot modal_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    bool modal_events_queued = PushKey(SDL_SCANCODE_S, true);
+    bool modal_events_queued = PushKey(SDL_SCANCODE_DOWN, true);
     for (std::size_t index = 0U; modal_events_queued && index < 4'095U; ++index)
-        modal_events_queued = PushKey(SDL_SCANCODE_S, true);
+        modal_events_queued = PushKey(SDL_SCANCODE_DOWN, true);
     Check(modal_events_queued,
-        "the next-row edge and timing workload enter the SDL queue");
+        "the Down-arrow next-row edge and timing workload enter the SDL queue");
     auto next_edge = app->RunWithCapture(1);
     Check(next_edge.has_value(), "next-row edge captures");
     if (!next_edge)
@@ -1387,11 +1394,76 @@ int main()
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
                   initial_visible_draw_lists[1]) &&
               IsOneVisibleMenuSubmission(modal_gpu_before, modal_gpu_after),
-        "a real elapsed sample above one fixed step navigates and renders while the modal menu freezes scheduler, world, and locomotion");
-    Check(PushKey(SDL_SCANCODE_S, true), "held next level enters the SDL queue");
-    Check(RunPlainFrame() &&
-              OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne,
-        "held action 3 does not repeat navigation");
+        "a real Down-arrow sample above one fixed step navigates and renders "
+        "while the modal menu freezes scheduler, world, and locomotion");
+
+    const std::uint64_t held_next_alias_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
+    Check(PushKey(SDL_SCANCODE_S, true),
+        "the S alias enters while Down keeps action 3 held");
+    auto held_next_alias = app->RunWithCapture(1);
+    Check(held_next_alias.has_value(), "the held next-action alias captures");
+    if (!held_next_alias)
+        return EXIT_FAILURE;
+    const auto* held_next_alias_pair = held_next_alias->trace_pair();
+    const auto held_next_alias_action = held_next_alias_pair != nullptr
+                                            ? held_next_alias_pair->input_trace().ActionAt(
+                                                  0U, omega::app::kDiagnosticMenuNextAction)
+                                            : std::nullopt;
+    const omega::app::GpuHostSnapshot held_next_alias_gpu =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    Check(held_next_alias_pair != nullptr &&
+              held_next_alias_pair->input_trace().first_frame_index() ==
+                  held_next_alias_index &&
+              held_next_alias_action && held_next_alias_action->held &&
+              !held_next_alias_action->pressed &&
+              !held_next_alias_action->released &&
+              held_next_alias->result().planned_simulation_steps == 0U &&
+              held_next_alias->result().executed_simulation_steps == 0U &&
+              held_next_alias->scheduler_state_before() == modal_scheduler_before &&
+              held_next_alias->scheduler_state_after() == modal_scheduler_before &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne &&
+              OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
+                  modal_position_before &&
+              IsOneVisibleMenuSubmission(modal_gpu_after, held_next_alias_gpu),
+        "a second physical action-3 alias cannot repeat navigation or advance modal owners");
+
+    const std::uint64_t nonfinal_next_release_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
+    Check(PushKey(SDL_SCANCODE_DOWN, false),
+        "Down releases while the S alias keeps action 3 held");
+    auto nonfinal_next_release = app->RunWithCapture(1);
+    Check(nonfinal_next_release.has_value(),
+        "the non-final next-action release captures");
+    if (!nonfinal_next_release)
+        return EXIT_FAILURE;
+    const auto* nonfinal_next_release_pair = nonfinal_next_release->trace_pair();
+    const auto nonfinal_next_release_action =
+        nonfinal_next_release_pair != nullptr
+            ? nonfinal_next_release_pair->input_trace().ActionAt(
+                  0U, omega::app::kDiagnosticMenuNextAction)
+            : std::nullopt;
+    const omega::app::GpuHostSnapshot nonfinal_next_release_gpu =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    Check(nonfinal_next_release_pair != nullptr &&
+              nonfinal_next_release_pair->input_trace().first_frame_index() ==
+                  nonfinal_next_release_index &&
+              nonfinal_next_release_action &&
+              nonfinal_next_release_action->held &&
+              !nonfinal_next_release_action->pressed &&
+              !nonfinal_next_release_action->released &&
+              nonfinal_next_release->result().planned_simulation_steps == 0U &&
+              nonfinal_next_release->result().executed_simulation_steps == 0U &&
+              nonfinal_next_release->scheduler_state_before() ==
+                  modal_scheduler_before &&
+              nonfinal_next_release->scheduler_state_after() ==
+                  modal_scheduler_before &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne &&
+              OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
+                  modal_position_before &&
+              IsOneVisibleMenuSubmission(
+                  held_next_alias_gpu, nonfinal_next_release_gpu),
+        "releasing Down cannot release action 3 or mutate the menu while S remains held");
 
     const omega::app::GpuHostSnapshot controls_entry_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
@@ -1414,6 +1486,10 @@ int main()
                                             ? controls_entry_pair->input_trace().ActionAt(
                                                   0U, omega::app::kDiagnosticMenuPrimaryAction)
                                             : std::nullopt;
+    const auto controls_entry_next = controls_entry_pair != nullptr
+                                         ? controls_entry_pair->input_trace().ActionAt(
+                                               0U, omega::app::kDiagnosticMenuNextAction)
+                                         : std::nullopt;
     const RunResult controls_entry_result = controls_entry->result();
     const omega::app::GpuHostSnapshot controls_entry_gpu_after =
         OmegaAppTestAccess::GpuSnapshot(*app);
@@ -1421,6 +1497,8 @@ int main()
               controls_entry_elapsed->elapsed > settings.frame.simulation_step &&
               controls_entry_primary && controls_entry_primary->held &&
               controls_entry_primary->pressed &&
+              controls_entry_next && !controls_entry_next->held &&
+              !controls_entry_next->pressed && controls_entry_next->released &&
               controls_entry_result.input_frames == 1U &&
               controls_entry_result.rendered_frames == 1 &&
               controls_entry_result.planned_simulation_steps == 0U &&
@@ -1436,7 +1514,8 @@ int main()
                   initial_controls_draw_list) &&
               IsOneModalCardSubmission(
                   controls_entry_gpu_before, controls_entry_gpu_after),
-        "primary priority enters Controls on the same frame while raw elapsed remains captured and every simulation owner stays frozen");
+        "the last action-3 alias release emits once while primary priority enters "
+        "Controls and every simulation owner stays frozen");
 
     Check(PushKey(SDL_SCANCODE_F1, true), "held Controls primary enters the queue");
     auto controls_held = app->RunWithCapture(1);
@@ -1761,23 +1840,26 @@ int main()
 
     for (int row = 0; row < 2; ++row)
     {
-        Check(PushKey(SDL_SCANCODE_W, true), "previous-row edge enters the SDL queue");
-        Check(RunPlainFrame(), "previous-row frame completes");
-        Check(PushKey(SDL_SCANCODE_W, false), "previous-row edge releases");
-        Check(RunPlainFrame(), "previous-row release completes");
+        Check(PushKey(SDL_SCANCODE_UP, true),
+            "Up-arrow previous-row edge enters the SDL queue");
+        Check(RunPlainFrame(), "Up-arrow previous-row frame completes");
+        Check(PushKey(SDL_SCANCODE_UP, false),
+            "Up-arrow previous-row edge releases");
+        Check(RunPlainFrame(), "Up-arrow previous-row release completes");
     }
     Check(OmegaAppTestAccess::DiagnosticMenu(*app) ==
               omega::app::InitialDiagnosticMenuState(),
         "two previous edges return row two to row zero");
-    Check(PushKey(SDL_SCANCODE_W, true), "upper-bound edge enters the SDL queue");
+    Check(PushKey(SDL_SCANCODE_UP, true),
+        "Up-arrow upper-bound edge enters the SDL queue");
     Check(RunPlainFrame() &&
               OmegaAppTestAccess::DiagnosticMenu(*app) ==
                   omega::app::InitialDiagnosticMenuState(),
-        "previous clamps at row zero instead of wrapping");
+        "Up-arrow previous clamps at row zero instead of wrapping");
     const omega::runtime::FrameSchedulerState play_resume_scheduler_before =
         OmegaAppTestAccess::SchedulerSnapshot(*app);
-    Check(PushKey(SDL_SCANCODE_W, false) && PushKey(SDL_SCANCODE_F1, true),
-        "row-zero primary edge enters the SDL queue");
+    Check(PushKey(SDL_SCANCODE_UP, false) && PushKey(SDL_SCANCODE_F1, true),
+        "the Up-arrow alias releases as the row-zero primary edge enters");
     auto play_resume = app->RunWithCapture(1);
     Check(play_resume.has_value(), "row-zero primary activation captures");
     if (!play_resume)

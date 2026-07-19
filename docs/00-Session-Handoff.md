@@ -813,6 +813,20 @@ shipping dependencies or execution mechanisms.
     `0xd57a5b0500696505`. Topology pixels, texture/draw ownership, three-upload and 86,016-byte
     residency, failure order, and reverse teardown are unchanged. This is project frontend
     usability only and establishes no retail confirmation mapping or controller-label semantics.
+55. E-0070 adds keyboard Up and Down as physical aliases for the existing project actions 2 and 3.
+    W and D-pad Up remain on action 2; S and D-pad Down remain on action 3. The host therefore owns
+    exactly 17 physical bindings over the unchanged six sorted actions. A real SDL sequence freezes
+    the modal owners while Down navigates, S cannot repeat that held action, releasing Down cannot
+    release it while S remains held, and releasing S last emits the single logical release. Up then
+    navigates toward row zero and retains the existing upper clamp.
+    The cards advertise `W/S/UP/DOWN`, `W/UP FORWARD`, and `S/DOWN REVERSE`. The 128x72 main image
+    has exact background/cyan/slate/amber populations 3,702/1,518/3,516/480 and FNV-1a-64
+    `0x9a4662f8f943521d`; the Controls image has 2,104/1,452/5,247/413 and FNV-1a-64
+    `0xcfa7cc57696aae0a`. Input and trace schemas, physical-provenance omission, reducer priority,
+    terminal precedence, modal gating, topology pixels, three-texture 86,016-byte residency,
+    failure order, and reverse teardown remain unchanged. Up/Down also alias the intentionally
+    shared synthetic forward/reverse diagnostic actions; no retail input or movement meaning is
+    claimed.
 
 ## Disc observations
 
