@@ -121,6 +121,11 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
             .action = kDebugMoveForwardAction,
         },
         runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_UP),
+            .action = kDebugMoveForwardAction,
+        },
+        runtime::InputBinding{
             .device = runtime::InputDevice::GamepadButton,
             .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_UP),
             .action = kDebugMoveForwardAction,
@@ -128,6 +133,11 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
         runtime::InputBinding{
             .device = runtime::InputDevice::Keyboard,
             .code = static_cast<std::uint16_t>(SDL_SCANCODE_S),
+            .action = kDebugMoveBackwardAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_DOWN),
             .action = kDebugMoveBackwardAction,
         },
         runtime::InputBinding{

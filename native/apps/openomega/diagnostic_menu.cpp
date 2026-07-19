@@ -266,7 +266,7 @@ runtime::DebugImage BuildProjectDiagnosticMenuImage()
 
     // Synthetic title region and fixed control legend.
     DrawOpenOmegaHeader(image);
-    DrawLabel(image, "W/S SELECT", 8U, 22U);
+    DrawLabel(image, "W/S/UP/DOWN", 8U, 22U);
     DrawLabel(image, "F1/ENTER", 52U, 22U);
     DrawLabel(image, "ESC QUIT", 88U, 22U);
 
@@ -292,8 +292,8 @@ runtime::DebugImage BuildProjectDiagnosticControlsImage()
     DrawLabel(image, "CONTROLS", 42U, 11U);
 
     FillRectangle(image, 8U, 24U, 120U, 52U, kSlateColor);
-    DrawLabel(image, "W FORWARD", 12U, 25U);
-    DrawLabel(image, "S REVERSE", 12U, 32U);
+    DrawLabel(image, "W/UP FORWARD", 12U, 25U);
+    DrawLabel(image, "S/DOWN REVERSE", 12U, 32U);
     DrawLabel(image, "A LEFT", 12U, 39U);
     DrawLabel(image, "D RIGHT", 12U, 46U);
 

@@ -759,6 +759,16 @@ teardown remain unchanged. Project-generated legends become `F1/ENTER` and `F1/E
 main and Controls hashes become `0x0a1373c69c8bcce2` and `0xd57a5b0500696505`. This improves native
 main-menu usability without asserting a retail input map or platform-specific gamepad label.
 
+E-0070 makes vertical navigation conventional without expanding the six-action schema. Keyboard Up
+joins W and gamepad D-pad Up on action 2; keyboard Down joins S and gamepad D-pad Down on action 3,
+for exactly 17 physical bindings. First-down/last-up aggregation prevents alias repeat and premature
+release. Real SDL coverage drives Down, overlapping S, non-final/final release, Up navigation, and
+upper clamping while preserving modal owner state. The project legends become `W/S/UP/DOWN`,
+`W/UP FORWARD`, and `S/DOWN REVERSE`; the main and Controls hashes become
+`0x9a4662f8f943521d` and `0xcfa7cc57696aae0a`. Capture/replay rows, reducer and terminal priority,
+modal timing, topology, resources, and teardown remain unchanged. Up/Down also alias the shared
+synthetic diagnostic locomotion actions and establish no retail input or movement semantics.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

@@ -658,6 +658,19 @@ retail instruction blocks, or PS2 execution layer.
   logical bytes, draw lists, topology raster, failure ordering, and teardown remain unchanged.
   These project-owned aliases and labels establish no retail input map or platform-specific
   button-name claim.
+- E-0070 adds conventional vertical-navigation aliases without expanding the logical input
+  contract. Keyboard Up joins W and gamepad D-pad Up on existing action 2; keyboard Down joins S
+  and gamepad D-pad Down on action 3. The complete host table is now 17 physical bindings over the
+  unchanged six sorted actions. First-down/last-up aggregation prevents a second same-action alias
+  from repeating navigation and prevents a non-final release from ending the action. Because the
+  menu intentionally reuses the synthetic forward/reverse actions, Up/Down also drive that
+  project-owned diagnostic locomotion while in DiagnosticPlay; this is not a retail control claim.
+  The legends become `W/S/UP/DOWN`, `W/UP FORWARD`, and `S/DOWN REVERSE`. The fully opaque main
+  card's background/cyan/slate/amber populations are 3,702/1,518/3,516/480 with FNV-1a-64
+  `0x9a4662f8f943521d`; the Controls card's are 2,104/1,452/5,247/413 with FNV-1a-64
+  `0xcfa7cc57696aae0a`. Dimensions, topology pixels, action rows, reducer rules, modal timing, draw
+  lists, three-texture 86,016-byte residency, failure ordering, and reverse teardown remain
+  unchanged. These aliases establish no retail menu, key-repeat, wrapping, or controller behavior.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
