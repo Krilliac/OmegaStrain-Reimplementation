@@ -1,13 +1,19 @@
 #include "omega_app.h"
+#include "run_replay_session.h"
 
 #include "omega/runtime/config_service.h"
 #include "omega/runtime/content_startup.h"
 #include "omega/runtime/frame_scheduler.h"
+#include "omega/runtime/input_trace.h"
+#include "omega/runtime/input_tracker.h"
 #include "omega/runtime/runtime_settings.h"
+#include "omega/runtime/scheduler_elapsed_trace.h"
 
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -217,27 +223,143 @@ int main()
         normal->scheduler_state_before();
     const omega::runtime::FrameSchedulerState normal_after =
         normal->scheduler_state_after();
+    std::optional<omega::runtime::InputTraceFrameState> captured_input;
+    std::optional<omega::runtime::SchedulerElapsedFrameState> captured_elapsed;
+    std::optional<omega::runtime::FramePlan> captured_plan;
+    std::array<std::uint32_t, omega::runtime::InputBindingTable::kMaxActions>
+        captured_actions{};
+    std::array<omega::runtime::InputTraceActionState,
+        omega::runtime::InputBindingTable::kMaxActions>
+        captured_action_states{};
+    std::size_t captured_action_count = 0U;
+    bool captured_action_states_valid = true;
     if (normal_pair != nullptr)
     {
-        const auto elapsed = normal_pair->scheduler_elapsed_trace().FrameAt(0U);
+        captured_input = normal_pair->input_trace().FrameAt(0U);
+        captured_elapsed = normal_pair->scheduler_elapsed_trace().FrameAt(0U);
+        const auto action_schema = normal_pair->input_trace().actions();
+        captured_action_count = action_schema.size();
+        for (std::size_t index = 0U; index < captured_action_count; ++index)
+        {
+            captured_actions[index] = action_schema[index];
+            const auto action_state =
+                normal_pair->input_trace().ActionAt(0U, action_schema[index]);
+            if (!action_state)
+            {
+                captured_action_states_valid = false;
+                break;
+            }
+            captured_action_states[index] = *action_state;
+        }
         Check(normal_pair->input_trace().first_frame_index() == 2U &&
                   normal_pair->input_trace().frame_count() == 1U &&
-                  normal_pair->scheduler_elapsed_trace().frame_count() == 1U && elapsed,
+                  normal_pair->scheduler_elapsed_trace().frame_count() == 1U &&
+                  captured_input && captured_elapsed && captured_action_count > 0U &&
+                  captured_action_states_valid,
             "normal capture aligns the continued input index with one elapsed sample");
-        if (elapsed)
+        if (captured_elapsed)
         {
             auto replay = omega::runtime::FrameScheduler::Create(normal_before.config);
             Check(replay.has_value(), "the captured scheduler configuration revalidates");
             if (replay)
             {
-                const omega::runtime::FramePlan plan =
-                    replay->BeginFrame(elapsed->elapsed);
+                captured_plan = replay->BeginFrame(captured_elapsed->elapsed);
                 Check(replay->Snapshot() == normal_after &&
-                          plan.simulation_steps == normal_result.planned_simulation_steps,
+                          captured_plan->simulation_steps ==
+                              normal_result.planned_simulation_steps,
                     "the exact captured elapsed value reproduces scheduler state");
             }
         }
     }
+
+    auto replay_traces = std::move(*normal).TakeTracePair();
+    Check(replay_traces && captured_input && captured_elapsed && captured_plan &&
+              captured_action_states_valid,
+        "the real capture publishes complete owned replay inputs");
+    if (!replay_traces || !captured_input || !captured_elapsed || !captured_plan ||
+        !captured_action_states_valid)
+    {
+        return EXIT_FAILURE;
+    }
+
+    auto replay_created = omega::app::RunReplaySession::Create(
+        std::move(*replay_traces),
+        omega::app::RunReplaySessionConfig{.scheduler = normal_before.config});
+    Check(replay_created.has_value(),
+        "the actual real-host capture creates a fresh app replay session");
+    if (!replay_created)
+        return EXIT_FAILURE;
+    omega::app::RunReplaySession replay_session = std::move(*replay_created);
+
+    const auto replay_scheduler_before = replay_session.scheduler_state();
+    const auto replay_simulation_before = replay_session.simulation_state();
+    Check(replay_session.state() == omega::app::RunReplaySessionState::Ready &&
+              replay_session.remaining_frames() == 1U && replay_scheduler_before &&
+              *replay_scheduler_before == normal_before && replay_simulation_before &&
+              replay_simulation_before->completed_steps == 0U &&
+              replay_simulation_before->simulated_time ==
+                  std::chrono::nanoseconds::zero() &&
+              replay_simulation_before->alive_entities == 0U,
+        "real-host replay begins with the captured scheduler boundary and a fresh world");
+
+    auto replay_frame = replay_session.Next();
+    Check(replay_frame.has_value(), "the actual captured frame advances through app replay");
+    if (!replay_frame)
+        return EXIT_FAILURE;
+
+    bool replay_actions_match =
+        replay_frame->input().actions().size() == captured_action_count;
+    for (std::size_t index = 0U;
+         replay_actions_match && index < captured_action_count; ++index)
+    {
+        const std::uint32_t action = captured_actions[index];
+        const auto& expected = captured_action_states[index];
+        replay_actions_match = replay_frame->input().actions()[index] == action &&
+                               replay_frame->input().IsHeld(action) == expected.held &&
+                               replay_frame->input().WasPressed(action) == expected.pressed &&
+                               replay_frame->input().WasReleased(action) == expected.released;
+    }
+    const auto replay_plan = replay_frame->frame_plan();
+    Check(replay_frame->input().frame_index() == captured_input->frame_index &&
+              replay_frame->input().accepted_event_count() ==
+                  captured_input->accepted_event_count &&
+              replay_frame->input().rejected_event_count() ==
+                  captured_input->rejected_event_count &&
+              replay_actions_match &&
+              replay_frame->elapsed() == captured_elapsed->elapsed &&
+              !replay_frame->terminal_input() && replay_plan &&
+              replay_plan->simulation_steps == captured_plan->simulation_steps &&
+              replay_plan->interpolation_alpha == captured_plan->interpolation_alpha &&
+              replay_plan->clamped_delta == captured_plan->clamped_delta &&
+              replay_plan->dropped_time == captured_plan->dropped_time,
+        "app replay preserves the actual input, elapsed value, and exact scheduler plan");
+
+    const auto replay_scheduler_after = replay_session.scheduler_state();
+    const auto replay_simulation_after = replay_session.simulation_state();
+    const auto expected_fresh_time = normal_before.config.simulation_step *
+                                     captured_plan->simulation_steps;
+    Check(replay_scheduler_after && *replay_scheduler_after == normal_after &&
+              replay_simulation_after &&
+              replay_simulation_after->completed_steps ==
+                  captured_plan->simulation_steps &&
+              replay_simulation_after->simulated_time == expected_fresh_time &&
+              replay_simulation_after->alive_entities == 0U &&
+              normal_result.planned_simulation_steps ==
+                  captured_plan->simulation_steps &&
+              normal_result.executed_simulation_steps ==
+                  captured_plan->simulation_steps &&
+              replay_session.state() ==
+                  omega::app::RunReplaySessionState::Complete &&
+              replay_session.remaining_frames() == 0U,
+        "real-host replay reaches the captured scheduler state in a fresh completed world");
+
+    const auto replay_complete = replay_session.Next();
+    Check(!replay_complete &&
+              replay_complete.error().operation == omega::app::RunReplayOperation::Next &&
+              replay_complete.error().code ==
+                  omega::app::RunReplayErrorCode::ReplayComplete &&
+              !replay_complete.error().replay_error,
+        "the consumed real-host capture reports stable app replay completion");
 
     Check(PushEscape(true) && PushQuit(),
         "simultaneous logical and host quit events enter the SDL queue");

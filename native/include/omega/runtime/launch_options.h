@@ -26,6 +26,7 @@ struct LaunchOptions
     std::optional<std::filesystem::path> config_path;
     std::vector<LaunchConfigOverride> config_overrides;
     bool capture_run = false;
+    bool replay_capture = false;
     bool probe_only = false;
     bool show_help = false;
 };

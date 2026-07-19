@@ -562,6 +562,24 @@ entity or RNG checkpoint, gameplay reconstruction, host-event synthesis, pacing 
 CLI route, render, audio, jobs, persistence, file/wire/stable ABI, cross-process compatibility,
 seek, rewind, looping, rollback, or retail timing or determinism claim.
 
+E-0059 adds one-process finite capture followed by immediate fresh replay through the exact
+`--frames=N --capture-run --replay-capture` command surface. Replay requires the existing explicit
+capture range of 1 through 65,536. Ordinary and capture-only paths remain unchanged. Before moving
+the trace pair, `main` requires a complete, consistent, nonterminal capture and a capture scheduler
+that began with zero remainder and counters. Replay then runs synchronously on the main thread with
+a fresh scheduler and empty world, failing immediately on any replay or comparison error.
+
+Success requires replay aggregates to match captured frame, step, clamp, and drop totals; the final
+scheduler snapshot to match the captured final snapshot; and the fresh world's final step count,
+simulated time, and zero-entity state to agree. Only success prints the fixed
+`OpenOmega fresh replay:` aggregate line. This is not replay into the existing `OmegaApp`; the
+main-thread replay orchestration makes no calls into or reads from it. The host remains alive, so
+its audio callback may continue independently. `RunReplaySession` itself performs no pacing, clock
+sampling, rendering, audio, or job work. The command adds no terminal or incomplete CLI replay,
+input injection or world input use, gameplay reconstruction, captured scheduler/world, entity or
+RNG restoration, persistence, file/wire/stable ABI, cross-process format, seek, rewind, loop,
+rollback, or retail timing or determinism claim.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

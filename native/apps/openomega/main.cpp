@@ -1,12 +1,16 @@
 #include "omega_app.h"
+#include "run_replay_session.h"
 
 #include "omega/runtime/content_startup.h"
 #include "omega/runtime/launch_options.h"
 #include "omega/runtime/runtime_settings.h"
 
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -64,6 +68,135 @@ void PrintRunCaptureDiagnostics(const omega::app::RunCaptureOutcome& outcome)
               << " before_dropped_time_ns=" << before.total_dropped_time.count()
               << " after_dropped_time_ns=" << after.total_dropped_time.count()
               << '\n';
+}
+
+void PrintRunReplayError(const omega::app::RunReplayError& error)
+{
+    std::cerr << "runtime capture replay ["
+              << omega::app::RunReplayOperationName(error.operation) << '/'
+              << omega::app::RunReplayErrorCodeName(error.code);
+    if (error.replay_error)
+    {
+        std::cerr << '/'
+                  << omega::runtime::RunCaptureReplayErrorCodeName(
+                         error.replay_error->code);
+    }
+    std::cerr << "]: " << error.message << '\n';
+}
+
+[[nodiscard]] bool IsZeroOriginScheduler(
+    const omega::runtime::FrameSchedulerState& state) noexcept
+{
+    return state == omega::runtime::FrameSchedulerState{.config = state.config};
+}
+
+[[nodiscard]] bool ReplayFreshCapture(
+    omega::app::RunCaptureOutcome&& outcome,
+    const omega::app::RunResult capture_result,
+    const omega::runtime::FrameSchedulerState capture_before,
+    const omega::runtime::FrameSchedulerState capture_after)
+{
+    auto traces = std::move(outcome).TakeTracePair();
+    if (!traces)
+    {
+        std::cerr << "runtime capture replay: complete capture trace pair is absent\n";
+        return false;
+    }
+
+    omega::app::RunReplaySessionConfig config{};
+    config.scheduler = capture_before.config;
+    auto created = omega::app::RunReplaySession::Create(std::move(*traces), config);
+    if (!created)
+    {
+        PrintRunReplayError(created.error());
+        return false;
+    }
+    omega::app::RunReplaySession replay = std::move(*created);
+
+    std::uint64_t replayed_frames = 0U;
+    std::uint64_t planned_steps = 0U;
+    std::uint64_t clamped_frames = 0U;
+    std::uint64_t dropped_frames = 0U;
+    while (replay.state() == omega::app::RunReplaySessionState::Ready)
+    {
+        auto frame = replay.Next();
+        if (!frame)
+        {
+            PrintRunReplayError(frame.error());
+            return false;
+        }
+        const auto plan = frame->frame_plan();
+        if (!frame->elapsed() || frame->terminal_input() || !plan)
+        {
+            std::cerr << "runtime capture replay: normal frame shape is invalid\n";
+            return false;
+        }
+        if (planned_steps > std::numeric_limits<std::uint64_t>::max() -
+                                plan->simulation_steps)
+        {
+            std::cerr << "runtime capture replay: aggregate step count exhausted\n";
+            return false;
+        }
+        ++replayed_frames;
+        planned_steps += plan->simulation_steps;
+        clamped_frames += plan->clamped_delta ? 1U : 0U;
+        dropped_frames += plan->dropped_time ? 1U : 0U;
+    }
+
+    if (replay.state() != omega::app::RunReplaySessionState::Complete ||
+        replay.remaining_frames() != 0U)
+    {
+        std::cerr << "runtime capture replay: replay session did not complete\n";
+        return false;
+    }
+    const auto scheduler = replay.scheduler_state();
+    const auto simulation = replay.simulation_state();
+    if (!scheduler || !simulation)
+    {
+        std::cerr << "runtime capture replay: final owner snapshots are unavailable\n";
+        return false;
+    }
+    if (replayed_frames != capture_result.input_frames ||
+        planned_steps != capture_result.planned_simulation_steps ||
+        planned_steps != capture_result.executed_simulation_steps ||
+        clamped_frames != capture_result.clamped_frame_count ||
+        dropped_frames != capture_result.dropped_time_frame_count)
+    {
+        std::cerr << "runtime capture replay: capture and replay aggregates differ\n";
+        return false;
+    }
+    if (*scheduler != capture_after)
+    {
+        std::cerr << "runtime capture replay: final scheduler states differ\n";
+        return false;
+    }
+
+    const std::int64_t step_count = capture_before.config.simulation_step.count();
+    if (step_count <= 0 ||
+        capture_result.executed_simulation_steps >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<std::int64_t>::max() / step_count))
+    {
+        std::cerr << "runtime capture replay: simulated time is not representable\n";
+        return false;
+    }
+    const std::chrono::nanoseconds expected_time{
+        static_cast<std::int64_t>(capture_result.executed_simulation_steps) * step_count};
+    if (simulation->completed_steps != capture_result.executed_simulation_steps ||
+        simulation->completed_steps != capture_result.planned_simulation_steps ||
+        simulation->simulated_time != expected_time || simulation->alive_entities != 0U)
+    {
+        std::cerr << "runtime capture replay: fresh simulation state differs\n";
+        return false;
+    }
+
+    std::cout << "OpenOmega fresh replay: replayed_frames=" << replayed_frames
+              << " planned_simulation_steps=" << planned_steps
+              << " completed_simulation_steps=" << simulation->completed_steps
+              << " clamped_frames=" << clamped_frames
+              << " dropped_frames=" << dropped_frames
+              << " completion=complete\n";
+    return true;
 }
 
 } // namespace
@@ -176,6 +309,23 @@ int main(const int argc, char** argv)
             if (const auto failure = outcome.failure())
                 std::cerr << " failure=" << *failure;
             std::cerr << '\n';
+            return EXIT_FAILURE;
+        }
+        if (!options->replay_capture)
+            return EXIT_SUCCESS;
+
+        const omega::runtime::FrameSchedulerState capture_before =
+            outcome.scheduler_state_before();
+        const omega::runtime::FrameSchedulerState capture_after =
+            outcome.scheduler_state_after();
+        if (!IsZeroOriginScheduler(capture_before))
+        {
+            std::cerr << "runtime capture replay: capture scheduler did not start at zero\n";
+            return EXIT_FAILURE;
+        }
+        if (!ReplayFreshCapture(std::move(*capture), capture_result,
+                capture_before, capture_after))
+        {
             return EXIT_FAILURE;
         }
         return EXIT_SUCCESS;

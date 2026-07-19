@@ -546,6 +546,31 @@ shipping dependencies or execution mechanisms.
     gameplay, synthesize host events, restore entities or RNG, pace from a host clock, integrate an
     existing `OmegaApp` or CLI path, render, mix audio, dispatch jobs, persist data, define a stable
     ABI, seek, rewind, loop, roll back, or claim retail timing or determinism.
+44. E-0059 adds the exact once-only `--replay-capture` flag. It composes only with
+    `--capture-run` and an explicit `--frames=N` from 1 through 65,536. The canonical one-process
+    command is `openomega --frames=N --capture-run --replay-capture`; the two boolean flags are
+    accepted in either token order. Ordinary runs and capture-only commands remain on their prior
+    paths with unchanged output and behavior.
+    `main` completes the existing finite capture first and fails closed unless
+    `IsCompleteRunCaptureOutcome` accepts it. That gate excludes failures, quit, terminal input,
+    partial counts, capacity or origin disagreement, and planned/executed-step disagreement. The
+    captured scheduler must also have started with zero remainder, planned steps, and dropped time.
+    Only after those preconditions pass does rvalue extraction transfer the pair and normalize the
+    outcome. The fresh replay session uses the captured starting scheduler configuration and a new
+    empty world. Main-thread replay makes no calls into or reads from the captured `OmegaApp`; the
+    host remains alive, so its audio callback may continue independently.
+    Replay runs synchronously on the main thread and fails immediately on creation, frame-shape,
+    counter-overflow, replay, completion, aggregate, or final-state disagreement. It compares
+    replayed-frame, planned-step, clamped-frame, and dropped-frame aggregates with the capture,
+    requires the final scheduler state to equal the captured final scheduler state, and requires a
+    zero-entity fresh world whose completed steps and simulated time match the capture. Success
+    alone prints one fixed `OpenOmega fresh replay:` aggregate line with replayed frames, planned
+    and completed steps, clamped and dropped frames, and `completion=complete`.
+    This adds no terminal or incomplete CLI replay, input injection, world input consumption,
+    gameplay reconstruction, captured scheduler/world checkpoint, entity or RNG restoration,
+    persistence, file/wire/stable ABI, or cross-process format. `RunReplaySession` owns no pacing or
+    host clock and performs no rendering, audio, or job work. The command adds no seek, rewind,
+    loop, rollback, or retail timing or determinism claim.
 
 ## Disc observations
 
