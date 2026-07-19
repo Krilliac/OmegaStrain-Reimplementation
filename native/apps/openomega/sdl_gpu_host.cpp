@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -66,6 +67,21 @@ static_assert(kClearColorConversionProbe.r == 0.0F &&
               kClearColorConversionProbe.g == 1.0F &&
               kClearColorConversionProbe.b == RenderColorChannelToFloat(64U) &&
               kClearColorConversionProbe.a == RenderColorChannelToFloat(128U));
+
+[[nodiscard]] bool RecordClearPass(SDL_GPUCommandBuffer* commands,
+    SDL_GPUTexture* texture, const SDL_FColor clear_color) noexcept
+{
+    SDL_GPUColorTargetInfo target{};
+    target.texture = texture;
+    target.clear_color = clear_color;
+    target.load_op = SDL_GPU_LOADOP_CLEAR;
+    target.store_op = SDL_GPU_STOREOP_STORE;
+    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1U, nullptr);
+    if (pass == nullptr)
+        return false;
+    SDL_EndGPURenderPass(pass);
+    return true;
+}
 
 void AppendBounded(std::string& destination, const std::string_view text) noexcept
 {
@@ -172,6 +188,52 @@ private:
     SDL_GPUTransferBuffer* transfer_ = nullptr;
 };
 
+class FenceGuard final
+{
+public:
+    FenceGuard(SDL_GPUDevice* device, SDL_GPUFence* fence) noexcept
+        : device_(device), fence_(fence)
+    {
+    }
+
+    ~FenceGuard()
+    {
+        if (fence_ != nullptr)
+            SDL_ReleaseGPUFence(device_, fence_);
+    }
+
+    FenceGuard(const FenceGuard&) = delete;
+    FenceGuard& operator=(const FenceGuard&) = delete;
+
+private:
+    SDL_GPUDevice* device_ = nullptr;
+    SDL_GPUFence* fence_ = nullptr;
+};
+
+class TransferBufferMapGuard final
+{
+public:
+    TransferBufferMapGuard(SDL_GPUDevice* device,
+        SDL_GPUTransferBuffer* transfer, void* mapped) noexcept
+        : device_(device), transfer_(transfer), mapped_(mapped)
+    {
+    }
+
+    ~TransferBufferMapGuard()
+    {
+        if (mapped_ != nullptr)
+            SDL_UnmapGPUTransferBuffer(device_, transfer_);
+    }
+
+    TransferBufferMapGuard(const TransferBufferMapGuard&) = delete;
+    TransferBufferMapGuard& operator=(const TransferBufferMapGuard&) = delete;
+
+private:
+    SDL_GPUDevice* device_ = nullptr;
+    SDL_GPUTransferBuffer* transfer_ = nullptr;
+    void* mapped_ = nullptr;
+};
+
 enum class CommandBufferUnwindAction
 {
     Cancel,
@@ -214,6 +276,13 @@ public:
     {
         SDL_GPUCommandBuffer* commands = std::exchange(commands_, nullptr);
         return commands != nullptr && SDL_SubmitGPUCommandBuffer(commands);
+    }
+
+    // SDL consumes the command buffer even when fence acquisition fails. Taking it first prevents
+    // the guard from attempting either cancellation or a second submission during unwinding.
+    [[nodiscard]] SDL_GPUCommandBuffer* Take() noexcept
+    {
+        return std::exchange(commands_, nullptr);
     }
 
 private:
@@ -513,6 +582,174 @@ std::expected<void, std::string> SdlGpuHost::WaitForIdle()
     return {};
 }
 
+std::expected<std::array<runtime::RenderClearColorRgba8, 4U>, std::string>
+SdlGpuHost::ReadbackClearForTesting(const runtime::RenderFramePacket& packet)
+{
+    try
+    {
+        if (!packet.draw_list.empty())
+        {
+            return std::unexpected(
+                "clear readback requires an empty draw list");
+        }
+
+        constexpr SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        constexpr std::uint32_t width = 2U;
+        constexpr std::uint32_t height = 2U;
+        constexpr std::size_t pixel_count =
+            static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+        constexpr std::size_t byte_count =
+            pixel_count * sizeof(runtime::RenderClearColorRgba8);
+        static_assert(byte_count == 16U);
+        if (!SDL_GPUTextureSupportsFormat(impl_->device, format,
+                SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET))
+        {
+            return std::unexpected(
+                "offscreen clear readback RGBA8 color target is unsupported");
+        }
+        if (SDL_GPUTextureFormatTexelBlockSize(format) != 4U)
+        {
+            return std::unexpected(
+                "offscreen clear readback RGBA8 texel size is not four bytes");
+        }
+
+        const SDL_FColor clear_color = ToSdlClearColor(packet.clear_color);
+
+        const SDL_GPUTextureCreateInfo texture_info{
+            .type = SDL_GPU_TEXTURETYPE_2D,
+            .format = format,
+            .usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+            .width = width,
+            .height = height,
+            .layer_count_or_depth = 1U,
+            .num_levels = 1U,
+            .sample_count = SDL_GPU_SAMPLECOUNT_1,
+            .props = 0,
+        };
+        SDL_GPUTexture* texture = SDL_CreateGPUTexture(impl_->device, &texture_info);
+        if (texture == nullptr)
+            return std::unexpected(SdlError("offscreen clear target create"));
+        TextureGuard texture_guard(impl_->device, texture);
+
+        const SDL_GPUTransferBufferCreateInfo transfer_info{
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
+            .size = static_cast<std::uint32_t>(byte_count),
+            .props = 0,
+        };
+        SDL_GPUTransferBuffer* transfer =
+            SDL_CreateGPUTransferBuffer(impl_->device, &transfer_info);
+        if (transfer == nullptr)
+        {
+            return std::unexpected(
+                SdlError("offscreen clear download transfer-buffer create"));
+        }
+        TransferBufferGuard transfer_guard(impl_->device, transfer);
+
+        std::string post_acquire_error;
+        post_acquire_error.reserve(kPostAcquireErrorCapacity);
+
+        SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
+        if (commands == nullptr)
+        {
+            SetSdlErrorBounded(
+                post_acquire_error, "offscreen clear command-buffer acquire");
+            return std::unexpected(std::move(post_acquire_error));
+        }
+        CommandBufferGuard command_guard(commands);
+
+        if (!RecordClearPass(commands, texture, clear_color))
+        {
+            SetSdlErrorBounded(post_acquire_error, "offscreen clear render-pass begin");
+            if (!command_guard.Cancel())
+            {
+                AppendSdlErrorBounded(post_acquire_error,
+                    "SDL_CancelGPUCommandBuffer after offscreen render-pass failure");
+            }
+            return std::unexpected(std::move(post_acquire_error));
+        }
+
+        SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+        if (copy == nullptr)
+        {
+            SetSdlErrorBounded(post_acquire_error, "offscreen clear copy-pass begin");
+            if (!command_guard.Cancel())
+            {
+                AppendSdlErrorBounded(post_acquire_error,
+                    "SDL_CancelGPUCommandBuffer after offscreen copy-pass failure");
+            }
+            return std::unexpected(std::move(post_acquire_error));
+        }
+
+        const SDL_GPUTextureRegion source{
+            .texture = texture,
+            .mip_level = 0U,
+            .layer = 0U,
+            .x = 0U,
+            .y = 0U,
+            .z = 0U,
+            .w = width,
+            .h = height,
+            .d = 1U,
+        };
+        const SDL_GPUTextureTransferInfo destination{
+            .transfer_buffer = transfer,
+            .offset = 0U,
+            .pixels_per_row = 0U,
+            .rows_per_layer = 0U,
+        };
+        SDL_DownloadFromGPUTexture(copy, &source, &destination);
+        SDL_EndGPUCopyPass(copy);
+
+        SDL_GPUFence* fence =
+            SDL_SubmitGPUCommandBufferAndAcquireFence(command_guard.Take());
+        if (fence == nullptr)
+        {
+            SetSdlErrorBounded(post_acquire_error,
+                "offscreen clear command-buffer submit and fence acquire");
+            return std::unexpected(std::move(post_acquire_error));
+        }
+        FenceGuard fence_guard(impl_->device, fence);
+
+        SDL_GPUFence* fence_to_wait = fence;
+        if (!SDL_WaitForGPUFences(impl_->device, true, &fence_to_wait, 1U))
+        {
+            SetSdlErrorBounded(post_acquire_error, "offscreen clear fence wait");
+            return std::unexpected(std::move(post_acquire_error));
+        }
+
+        void* mapped = SDL_MapGPUTransferBuffer(impl_->device, transfer, false);
+        if (mapped == nullptr)
+        {
+            SetSdlErrorBounded(
+                post_acquire_error, "offscreen clear download transfer-buffer map");
+            return std::unexpected(std::move(post_acquire_error));
+        }
+        TransferBufferMapGuard map_guard(impl_->device, transfer, mapped);
+
+        const auto* bytes = static_cast<const std::byte*>(mapped);
+        std::array<runtime::RenderClearColorRgba8, pixel_count> pixels{};
+        for (std::size_t index = 0U; index < pixels.size(); ++index)
+        {
+            const std::size_t offset = index * 4U;
+            pixels[index] = runtime::RenderClearColorRgba8{
+                .red = std::to_integer<std::uint8_t>(bytes[offset + 0U]),
+                .green = std::to_integer<std::uint8_t>(bytes[offset + 1U]),
+                .blue = std::to_integer<std::uint8_t>(bytes[offset + 2U]),
+                .alpha = std::to_integer<std::uint8_t>(bytes[offset + 3U]),
+            };
+        }
+        return pixels;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected("offscreen clear readback error allocation failed");
+    }
+    catch (...)
+    {
+        return std::unexpected("offscreen clear readback failed unexpectedly");
+    }
+}
+
 std::expected<void, std::string> SdlGpuHost::RenderFrame(
     const runtime::RenderFramePacket& packet)
 {
@@ -656,14 +893,7 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
                 submission_kind = FrameSubmissionKind::Blit;
             }
 
-            SDL_GPUColorTargetInfo target{};
-            target.texture = swapchain;
-            target.clear_color = clear_color;
-            target.load_op = SDL_GPU_LOADOP_CLEAR;
-            target.store_op = SDL_GPU_STOREOP_STORE;
-            SDL_GPURenderPass* pass =
-                SDL_BeginGPURenderPass(gpu_commands, &target, 1, nullptr);
-            if (pass == nullptr)
+            if (!RecordClearPass(gpu_commands, swapchain, clear_color))
             {
                 SetSdlErrorBounded(post_acquire_error, "SDL_BeginGPURenderPass");
                 if (!command_guard.Submit())
@@ -673,7 +903,6 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
                 }
                 return std::unexpected(std::move(post_acquire_error));
             }
-            SDL_EndGPURenderPass(pass);
 
             for (std::size_t index = 0U; index < draw_commands.size(); ++index)
             {

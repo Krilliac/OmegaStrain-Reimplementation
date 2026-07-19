@@ -208,6 +208,32 @@ retail instruction blocks, or PS2 execution layer.
   ABI, serialized or persistent value, or retail semantic. It establishes no framebuffer pixel
   identity, readback, color-space, alpha, blending, display-expansion, or asset-service/storage
   bridge claim.
+- E-0049 adds a private friend-only `SdlGpuHostTestAccess` seam for a synchronous synthetic clear
+  readback. An empty packet clears a temporary 2x2 `R8G8B8A8_UNORM` color target through the same
+  `RecordClearPass` used by production rendering, downloads its tightly packed 16 bytes, submits
+  with a fence, waits, maps, explicitly decodes four owned RGBA8 values, and unmaps/releases every
+  SDL resource through guards. The probe changes no production counter or texture residency.
+  The public zero-file smoke reads back endpoint colors `{0, 255, 0, 255}` and
+  `{255, 0, 255, 0}` exactly from all four pixels. A nonempty draw list is rejected before SDL/GPU
+  work with exact error `clear readback requires an empty draw list`; accepted and rejected probes
+  both preserve the complete host snapshot.
+  A clean incremental MSVC build issued four compile requests with zero warnings or errors. One
+  initial plus 20 repeated public zero-file `direct3d12` GPU smokes passed; every run preserved the
+  established production totals of three uploads/640 cumulative logical bytes, three releases,
+  two blit frames/four draws, one clear-only submission, one stale rejection, zero unavailable
+  submissions, and zero residual residency. Default CTest passed 20/20. The opt-in configuration
+  passed 21/21, was restored to OFF, and listed 20 default tests. A public two-frame D3D12
+  `openomega` smoke passed with dummy audio. Publication CI is tracked separately from these local
+  validation claims.
+  E-0049 confirms only the two synthetic endpoint values in a temporary offscreen target on the
+  observed D3D12 path. It establishes no stable public readback API or exposed SDL handle; no
+  swapchain, on-screen, presentation, sRGB/HDR, color-space, or intermediate-value rounding
+  guarantee and no guarantee for untested values; no alpha interpretation, blending, or composition
+  semantics beyond the exact tested 0/255 alpha bytes; no blit/filter or other backend pixel
+  guarantee; no arbitrary backend-
+  failure atomicity or production asynchronous queue/pin/fence contract; and no stable ABI,
+  serialization, persistence, wire/plugin, measured GPU-memory, streaming/eviction,
+  display-expansion, asset-binding, retail-rendering, or gameplay semantic.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

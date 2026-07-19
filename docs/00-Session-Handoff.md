@@ -301,6 +301,34 @@ shipping dependencies or execution mechanisms.
     value establishes no ABI, persistence, serialization, wire, plugin, or retail contract; no
     framebuffer identity, pixel correctness, readback, color-space, alpha, or blending semantics;
     and no `TextureStorageIR`/`AssetService`, material, cell, mesh, or retail asset-to-draw bridge.
+34. E-0049 adds a private friend-only `SdlGpuHostTestAccess` seam for a synchronous synthetic
+    clear readback. For an empty packet, the host validates 2D color-target support and four-byte
+    texels for `R8G8B8A8_UNORM`, maps the packet clear before command acquisition, creates a
+    temporary 2x2 target plus 16-byte download buffer, and records the clear through the same
+    `RecordClearPass` used by production rendering. It then downloads, disarms the command guard
+    into submit-and-fence acquisition, waits, maps, explicitly decodes four RGBA8 values, and uses
+    guards for unmap, fence, transfer-buffer, and texture cleanup. No production counter or
+    portable texture residency changes.
+    The public zero-file smoke reads back `{0, 255, 0, 255}` and `{255, 0, 255, 0}` exactly from all
+    four pixels and proves snapshot invariance after each probe. A nonempty synthetic draw list is
+    rejected before any SDL/GPU work with exact error
+    `clear readback requires an empty draw list`, again without snapshot mutation.
+    A clean incremental MSVC build issued four compile requests with zero warnings or errors. One
+    initial plus 20 repeated public zero-file `direct3d12` GPU smokes passed; every run preserved
+    the established three uploads/640 cumulative logical bytes, three releases, two blit frames/
+    four draws, one clear-only submission, one stale rejection, zero unavailable submissions, and
+    zero residual residency. Default CTest passed 20/20. The opt-in configuration passed 21/21,
+    was restored to OFF, and listed 20 default tests. A public two-frame D3D12 `openomega` smoke
+    passed with dummy audio. Publication CI is tracked separately from these local claims.
+    This confirms only those synthetic endpoint values in a temporary offscreen target on the
+    observed D3D12 path. The friend seam is not a stable public readback API and exposes no SDL
+    handle. E-0049 establishes no swapchain/on-screen/presentation, sRGB/HDR, color-space, or
+    intermediate-value rounding guarantee and no guarantee for untested values; no alpha
+    interpretation, blending, or composition semantics beyond the exact tested 0/255 alpha bytes;
+    no blit/filter or cross-backend pixel guarantee; arbitrary backend-failure atomicity; production
+    asynchronous queue, residency-pin,
+    or fence contract; stable ABI, serialization, persistence, wire/plugin, measured GPU-memory,
+    streaming/eviction, display-expansion, asset-binding, retail-rendering, or gameplay semantic.
 
 ## Disc observations
 
