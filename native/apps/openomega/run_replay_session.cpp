@@ -116,18 +116,20 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
 
     RunReplaySession session(
         std::move(*scheduler), std::move(*world), std::move(*replay),
-        debug_locomotion_entity);
+        debug_locomotion_entity, config.initial_diagnostic_menu_state);
     return std::expected<RunReplaySession, RunReplayError>{std::move(session)};
 }
 
 RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
     simulation::SimulationWorld&& simulation,
     runtime::RunCaptureReplaySession&& replay,
-    const std::optional<simulation::EntityId> debug_locomotion_entity) noexcept
+    const std::optional<simulation::EntityId> debug_locomotion_entity,
+    const std::optional<DiagnosticMenuState> diagnostic_menu_state) noexcept
     : scheduler_(std::in_place, std::move(scheduler)),
       simulation_(std::in_place, std::move(simulation)),
       replay_(std::in_place, std::move(replay)),
       debug_locomotion_entity_(debug_locomotion_entity),
+      diagnostic_menu_state_(diagnostic_menu_state),
       state_(replay_->complete()
                  ? RunReplaySessionState::Complete
                  : RunReplaySessionState::Ready)
@@ -140,6 +142,8 @@ RunReplaySession::RunReplaySession(RunReplaySession&& other) noexcept
       replay_(std::move(other.replay_)),
       debug_locomotion_entity_(std::exchange(
           other.debug_locomotion_entity_, std::nullopt)),
+      diagnostic_menu_state_(std::exchange(
+          other.diagnostic_menu_state_, std::nullopt)),
       state_(std::exchange(other.state_, RunReplaySessionState::Inert))
 {
     other.NormalizeInert();
@@ -149,6 +153,7 @@ void RunReplaySession::NormalizeInert() noexcept
 {
     replay_.reset();
     debug_locomotion_entity_.reset();
+    diagnostic_menu_state_.reset();
     simulation_.reset();
     scheduler_.reset();
     state_ = RunReplaySessionState::Inert;
@@ -182,11 +187,29 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             RunReplayFrame(std::move(*replay_frame))};
     }
 
+    if (diagnostic_menu_state_)
+    {
+        *diagnostic_menu_state_ = UpdateDiagnosticMenu(*diagnostic_menu_state_,
+            DiagnosticMenuInputEdges{
+                .primary_pressed =
+                    replay_frame->input().WasPressed(kDiagnosticMenuPrimaryAction),
+                .previous_pressed =
+                    replay_frame->input().WasPressed(kDiagnosticMenuPreviousAction),
+                .next_pressed =
+                    replay_frame->input().WasPressed(kDiagnosticMenuNextAction),
+            });
+    }
+    const bool simulation_allowed = !diagnostic_menu_state_ ||
+                                    DiagnosticMenuAllowsSimulation(
+                                        *diagnostic_menu_state_);
     const std::optional<std::chrono::nanoseconds> elapsed = replay_frame->elapsed();
-    const runtime::FramePlan plan = scheduler_->BeginFrame(*elapsed);
+    const std::chrono::nanoseconds effective_elapsed = simulation_allowed
+        ? *elapsed
+        : std::chrono::nanoseconds::zero();
+    const runtime::FramePlan plan = scheduler_->BeginFrame(effective_elapsed);
 
     simulation::SimulationStepInput simulation_input{};
-    if (debug_locomotion_entity_)
+    if (simulation_allowed && debug_locomotion_entity_)
     {
         const auto translation = gameplay::PlanDebugLocomotionStep(
             gameplay::DigitalMoveCommand{
@@ -264,5 +287,11 @@ RunReplaySession::debug_locomotion_position() const noexcept
     if (!simulation_ || !debug_locomotion_entity_)
         return std::nullopt;
     return simulation_->PositionOf(*debug_locomotion_entity_);
+}
+
+std::optional<DiagnosticMenuState>
+RunReplaySession::diagnostic_menu_state() const noexcept
+{
+    return diagnostic_menu_state_;
 }
 } // namespace omega::app

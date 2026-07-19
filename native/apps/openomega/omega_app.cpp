@@ -600,33 +600,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                     input_snapshot.WasPressed(kDiagnosticMenuPreviousAction),
                 .next_pressed = input_snapshot.WasPressed(kDiagnosticMenuNextAction),
             });
-
-        const auto planned_translation = gameplay::PlanDebugLocomotionStep(
-            gameplay::DigitalMoveCommand{
-                .lateral = static_cast<std::int8_t>(
-                    (input_snapshot.IsHeld(kDebugMoveRightAction) ? 1 : 0) -
-                    (input_snapshot.IsHeld(kDebugMoveLeftAction) ? 1 : 0)),
-                .longitudinal = static_cast<std::int8_t>(
-                    (input_snapshot.IsHeld(kDebugMoveForwardAction) ? 1 : 0) -
-                    (input_snapshot.IsHeld(kDebugMoveBackwardAction) ? 1 : 0)),
-            });
-        if (!planned_translation)
-        {
-            jobs_->WaitForIdle();
-            constexpr std::string_view error = "debug locomotion planning failed";
-            log_->Error("simulation", error);
-            return RunLoopResult{
-                .result = result,
-                .operational_error = std::string(error),
-                .capture_error = std::nullopt,
-            };
-        }
-        const simulation::SimulationStepInput simulation_input{
-            .translation = simulation::EntityTranslation{
-                .entity = debug_locomotion_entity_,
-                .delta = *planned_translation,
-            },
-        };
+        const bool simulation_allowed =
+            DiagnosticMenuAllowsSimulation(diagnostic_menu_state_);
 
         const auto current_frame = Clock::now();
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -644,7 +619,10 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 };
             }
         }
-        const runtime::FramePlan plan = frame_scheduler_->BeginFrame(elapsed);
+        const std::chrono::nanoseconds effective_elapsed = simulation_allowed
+            ? elapsed
+            : std::chrono::nanoseconds::zero();
+        const runtime::FramePlan plan = frame_scheduler_->BeginFrame(effective_elapsed);
         previous_frame = current_frame;
         if (plan.simulation_steps >
             std::numeric_limits<std::uint64_t>::max() - result.planned_simulation_steps)
@@ -671,6 +649,35 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             if (result.dropped_time_frame_count == 1U)
                 log_->Warning(
                     "frame", "fixed-step backlog exceeded the configured frame budget");
+        }
+
+        simulation::SimulationStepInput simulation_input{};
+        if (simulation_allowed)
+        {
+            const auto planned_translation = gameplay::PlanDebugLocomotionStep(
+                gameplay::DigitalMoveCommand{
+                    .lateral = static_cast<std::int8_t>(
+                        (input_snapshot.IsHeld(kDebugMoveRightAction) ? 1 : 0) -
+                        (input_snapshot.IsHeld(kDebugMoveLeftAction) ? 1 : 0)),
+                    .longitudinal = static_cast<std::int8_t>(
+                        (input_snapshot.IsHeld(kDebugMoveForwardAction) ? 1 : 0) -
+                        (input_snapshot.IsHeld(kDebugMoveBackwardAction) ? 1 : 0)),
+                });
+            if (!planned_translation)
+            {
+                jobs_->WaitForIdle();
+                constexpr std::string_view error = "debug locomotion planning failed";
+                log_->Error("simulation", error);
+                return RunLoopResult{
+                    .result = result,
+                    .operational_error = std::string(error),
+                    .capture_error = std::nullopt,
+                };
+            }
+            simulation_input.translation = simulation::EntityTranslation{
+                .entity = debug_locomotion_entity_,
+                .delta = *planned_translation,
+            };
         }
 
         for (std::uint32_t step = 0; step < plan.simulation_steps; ++step)

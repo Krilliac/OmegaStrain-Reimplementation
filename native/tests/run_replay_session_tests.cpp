@@ -68,6 +68,9 @@ namespace
 {
 using std::chrono::milliseconds;
 using std::chrono::nanoseconds;
+using omega::app::DiagnosticMenuMode;
+using omega::app::DiagnosticMenuRow;
+using omega::app::DiagnosticMenuState;
 using omega::app::RunReplayError;
 using omega::app::RunReplayErrorCode;
 using omega::app::RunReplayFrame;
@@ -184,6 +187,18 @@ struct TerminalReasons
     bool logical_quit_pressed = false;
 };
 
+struct InputTransition
+{
+    std::uint16_t code = 0U;
+    bool pressed = false;
+};
+
+struct ScriptedElapsedFrame
+{
+    nanoseconds elapsed{};
+    std::span<const InputTransition> transitions;
+};
+
 [[nodiscard]] RunCaptureTracePair BuildPair(
     const std::span<const std::uint32_t> actions,
     const std::size_t maximum_frames,
@@ -234,6 +249,55 @@ struct TerminalReasons
     auto finished = std::move(capture).Finish();
     if (!finished)
         FailFixture("capture session finish");
+    return std::move(*finished);
+}
+
+[[nodiscard]] RunCaptureTracePair BuildScriptedPair(
+    const std::span<const std::uint32_t> actions,
+    const std::span<const ScriptedElapsedFrame> elapsed_frames,
+    const std::optional<TerminalReasons> terminal = std::nullopt,
+    const std::span<const InputTransition> terminal_transitions = {})
+{
+    const std::size_t maximum_frames = elapsed_frames.size() + (terminal ? 1U : 0U);
+    auto created = RunCaptureSession::Create(
+        RunCaptureSessionConfig{.maximum_frames = maximum_frames}, actions);
+    if (!created)
+        FailFixture("scripted capture session creation");
+    RunCaptureSession capture = std::move(*created);
+    InputTracker tracker = MakeTracker(actions);
+
+    for (const ScriptedElapsedFrame& frame : elapsed_frames)
+    {
+        for (const InputTransition transition : frame.transitions)
+        {
+            if (!Push(tracker, transition.code, transition.pressed))
+                FailFixture("scripted elapsed input transition");
+        }
+        if (!capture.AppendInput(tracker.EndFrame()) ||
+            !capture.AppendElapsed(frame.elapsed))
+        {
+            FailFixture("scripted elapsed frame append");
+        }
+    }
+
+    if (terminal)
+    {
+        for (const InputTransition transition : terminal_transitions)
+        {
+            if (!Push(tracker, transition.code, transition.pressed))
+                FailFixture("scripted terminal input transition");
+        }
+        if (!capture.AppendInput(tracker.EndFrame()) ||
+            !capture.MarkTerminal(
+                terminal->host_quit_requested, terminal->logical_quit_pressed))
+        {
+            FailFixture("scripted terminal frame append");
+        }
+    }
+
+    auto finished = std::move(capture).Finish();
+    if (!finished)
+        FailFixture("scripted capture session finish");
     return std::move(*finished);
 }
 
@@ -330,6 +394,8 @@ void CheckContractAndTaxonomy()
         std::declval<const RunReplaySession&>().simulation_state()));
     static_assert(noexcept(
         std::declval<const RunReplaySession&>().debug_locomotion_position()));
+    static_assert(noexcept(
+        std::declval<const RunReplaySession&>().diagnostic_menu_state()));
 
     static_assert(!std::is_aggregate_v<RunReplayFrame>);
     static_assert(!std::is_default_constructible_v<RunReplayFrame>);
@@ -359,6 +425,9 @@ void CheckContractAndTaxonomy()
     static_assert(std::is_same_v<
         decltype(std::declval<const RunReplaySession&>().debug_locomotion_position()),
         std::optional<Position3>>);
+    static_assert(std::is_same_v<
+        decltype(std::declval<const RunReplaySession&>().diagnostic_menu_state()),
+        std::optional<DiagnosticMenuState>>);
     static_assert(std::is_nothrow_move_constructible_v<CreateResult>);
     static_assert(std::is_nothrow_move_constructible_v<NextResult>);
 
@@ -366,6 +435,7 @@ void CheckContractAndTaxonomy()
     static_assert(default_config.scheduler == omega::runtime::FrameSchedulerConfig{});
     static_assert(default_config.maximum_entities == 65'536U);
     static_assert(!default_config.enable_debug_locomotion);
+    static_assert(!default_config.initial_diagnostic_menu_state);
     static_assert(static_cast<int>(
                       RunReplayErrorCode::SimulationRepresentationExhausted) == 7);
     static_assert(static_cast<int>(
@@ -873,13 +943,280 @@ void CheckDebugLocomotionOptIn()
         "the default-disabled replay preserves clock-only E0059 behavior for the same schema");
 }
 
+void CheckDiagnosticMenuModalGate()
+{
+    constexpr std::array<std::uint32_t, 3U> menu_actions{
+        omega::app::kDiagnosticMenuPreviousAction,
+        omega::app::kDiagnosticMenuNextAction,
+        omega::app::kDiagnosticMenuPrimaryAction,
+    };
+    constexpr std::array<InputTransition, 0U> no_transitions{};
+
+    constexpr std::array legacy_transitions{
+        InputTransition{.code = 0U, .pressed = true},
+        InputTransition{.code = 2U, .pressed = true},
+    };
+    const std::array legacy_frames{
+        ScriptedElapsedFrame{
+            .elapsed = milliseconds{25},
+            .transitions = legacy_transitions,
+        },
+    };
+    RunCaptureTracePair legacy_pair = BuildScriptedPair(menu_actions, legacy_frames);
+    RunReplaySessionConfig legacy_config = ValidConfig();
+    legacy_config.enable_debug_locomotion = true;
+    auto legacy_created =
+        RunReplaySession::Create(std::move(legacy_pair), legacy_config);
+    RunReplaySession legacy =
+        TakeSession(legacy_created, "the default-disabled menu replay is created");
+    auto legacy_frame = legacy.Next();
+    const auto legacy_plan = legacy_frame ? legacy_frame->frame_plan() : std::nullopt;
+    const auto legacy_simulation = legacy.simulation_state();
+    Check(legacy_frame && legacy_plan && legacy_frame->elapsed() == milliseconds{25} &&
+              legacy_frame->input().actions().size() == menu_actions.size() &&
+              legacy_frame->input().actions()[0] ==
+                  omega::app::kDiagnosticMenuPreviousAction &&
+              legacy_frame->input().actions()[1] ==
+                  omega::app::kDiagnosticMenuNextAction &&
+              legacy_frame->input().actions()[2] ==
+                  omega::app::kDiagnosticMenuPrimaryAction &&
+              legacy_frame->input().WasPressed(
+                  omega::app::kDiagnosticMenuPreviousAction) &&
+              legacy_frame->input().WasPressed(
+                  omega::app::kDiagnosticMenuPrimaryAction) &&
+              legacy_plan->simulation_steps == 2U &&
+              !legacy.diagnostic_menu_state() &&
+              legacy.debug_locomotion_position() == Position3{.z = 2} &&
+              legacy_simulation && SameSimulation(*legacy_simulation,
+                  SimulationState{
+                      .completed_steps = 2U,
+                      .simulated_time = milliseconds{20},
+                      .alive_entities = 1U,
+                  }),
+        "default-null menu ownership leaves actions 2, 3, and 6 on legacy nonmodal replay");
+
+    constexpr std::array next_down{
+        InputTransition{.code = 1U, .pressed = true}};
+    constexpr std::array next_up{
+        InputTransition{.code = 1U, .pressed = false}};
+    constexpr std::array primary_down{
+        InputTransition{.code = 2U, .pressed = true}};
+    constexpr std::array primary_up_next_down{
+        InputTransition{.code = 2U, .pressed = false},
+        InputTransition{.code = 1U, .pressed = true},
+    };
+    constexpr std::array next_up_primary_down{
+        InputTransition{.code = 1U, .pressed = false},
+        InputTransition{.code = 2U, .pressed = true},
+    };
+    constexpr std::array primary_up_previous_down{
+        InputTransition{.code = 2U, .pressed = false},
+        InputTransition{.code = 0U, .pressed = true},
+    };
+    constexpr std::array previous_up{
+        InputTransition{.code = 0U, .pressed = false}};
+    constexpr std::array previous_down{
+        InputTransition{.code = 0U, .pressed = true}};
+    const std::array modal_frames{
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = no_transitions},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = next_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = next_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up_next_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = next_up_primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up_previous_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = previous_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = previous_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = previous_up},
+        ScriptedElapsedFrame{.elapsed = milliseconds{15},
+            .transitions = primary_down},
+    };
+    constexpr std::array expected_modal_states{
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = DiagnosticMenuRow::StartDiagnosticPlay},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = DiagnosticMenuRow::ReservedProjectOne},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = DiagnosticMenuRow::ReservedProjectOne},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = DiagnosticMenuRow::ReservedProjectOne},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = DiagnosticMenuRow::ReservedProjectTwo},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = DiagnosticMenuRow::ReservedProjectTwo},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = DiagnosticMenuRow::ReservedProjectOne},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = DiagnosticMenuRow::ReservedProjectOne},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = DiagnosticMenuRow::StartDiagnosticPlay},
+        DiagnosticMenuState{.mode = DiagnosticMenuMode::MainMenu,
+            .selected_row = DiagnosticMenuRow::StartDiagnosticPlay},
+    };
+    RunCaptureTracePair modal_pair = BuildScriptedPair(menu_actions, modal_frames);
+    RunReplaySessionConfig modal_config = ValidConfig();
+    modal_config.enable_debug_locomotion = true;
+    modal_config.initial_diagnostic_menu_state =
+        omega::app::InitialDiagnosticMenuState();
+    auto modal_created = RunReplaySession::Create(std::move(modal_pair), modal_config);
+    RunReplaySession modal =
+        TakeSession(modal_created, "the main-menu modal replay is created");
+    const auto modal_scheduler_origin = modal.scheduler_state();
+    const auto modal_world_origin = modal.simulation_state();
+    const auto modal_position_origin = modal.debug_locomotion_position();
+    for (std::size_t index = 0U; index < expected_modal_states.size(); ++index)
+    {
+        auto frame = modal.Next();
+        const auto plan = frame ? frame->frame_plan() : std::nullopt;
+        Check(frame && frame->elapsed() == std::chrono::seconds{4} && plan &&
+                  plan->simulation_steps == 0U &&
+                  plan->interpolation_alpha == 0.0 && !plan->clamped_delta &&
+                  !plan->dropped_time &&
+                  modal.diagnostic_menu_state() == expected_modal_states[index] &&
+                  modal.scheduler_state() == modal_scheduler_origin &&
+                  SameSimulation(modal.simulation_state(), modal_world_origin) &&
+                  modal.debug_locomotion_position() == modal_position_origin,
+            "idle, navigation, and reserved-primary modal samples preserve actual elapsed and freeze all simulation owners");
+    }
+    auto activated = modal.Next();
+    const auto activated_plan = activated ? activated->frame_plan() : std::nullopt;
+    const auto activated_scheduler = modal.scheduler_state();
+    const auto activated_world = modal.simulation_state();
+    Check(activated && activated->elapsed() == milliseconds{15} && activated_plan &&
+              activated_plan->simulation_steps == 1U &&
+              activated_plan->interpolation_alpha == 0.5 &&
+              !activated_plan->clamped_delta && !activated_plan->dropped_time &&
+              modal.diagnostic_menu_state() == DiagnosticMenuState{} &&
+              activated_scheduler &&
+              *activated_scheduler == FrameSchedulerState{
+                  .config = modal_config.scheduler,
+                  .accumulated_remainder = milliseconds{5},
+                  .total_planned_steps = 1U,
+              } &&
+              activated_world && SameSimulation(*activated_world,
+                  SimulationState{
+                      .completed_steps = 1U,
+                      .simulated_time = milliseconds{10},
+                      .alive_entities = 1U,
+                  }) &&
+              modal.debug_locomotion_position() == Position3{},
+        "activation schedules only its own elapsed sample after large modal time is discarded");
+
+    constexpr std::array open_with_forward{
+        InputTransition{.code = 0U, .pressed = true},
+        InputTransition{.code = 2U, .pressed = true},
+    };
+    constexpr std::array release_primary{
+        InputTransition{.code = 2U, .pressed = false}};
+    const std::array reopen_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{5},
+            .transitions = no_transitions},
+        ScriptedElapsedFrame{.elapsed = milliseconds{25},
+            .transitions = open_with_forward},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = release_primary},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = no_transitions},
+        ScriptedElapsedFrame{.elapsed = milliseconds{5},
+            .transitions = primary_down},
+    };
+    RunCaptureTracePair reopen_pair = BuildScriptedPair(menu_actions, reopen_frames);
+    RunReplaySessionConfig reopen_config = ValidConfig();
+    reopen_config.enable_debug_locomotion = true;
+    reopen_config.initial_diagnostic_menu_state = DiagnosticMenuState{};
+    auto reopen_created =
+        RunReplaySession::Create(std::move(reopen_pair), reopen_config);
+    RunReplaySession reopen =
+        TakeSession(reopen_created, "the diagnostic-play modal transition replay is created");
+    auto remainder_frame = reopen.Next();
+    Check(remainder_frame && remainder_frame->frame_plan() &&
+              remainder_frame->frame_plan()->simulation_steps == 0U &&
+              reopen.scheduler_state() == FrameSchedulerState{
+                  .config = reopen_config.scheduler,
+                  .accumulated_remainder = milliseconds{5},
+              },
+        "diagnostic play can retain a nonzero scheduler remainder before opening the menu");
+    const auto scheduler_before_open = reopen.scheduler_state();
+    const auto world_before_open = reopen.simulation_state();
+    const auto position_before_open = reopen.debug_locomotion_position();
+    for (std::size_t index = 1U; index < 4U; ++index)
+    {
+        auto frame = reopen.Next();
+        const auto plan = frame ? frame->frame_plan() : std::nullopt;
+        Check(frame && frame->elapsed() == reopen_frames[index].elapsed && plan &&
+                  plan->simulation_steps == 0U && !plan->clamped_delta &&
+                  !plan->dropped_time &&
+                  reopen.diagnostic_menu_state() ==
+                      omega::app::InitialDiagnosticMenuState() &&
+                  reopen.scheduler_state() == scheduler_before_open &&
+                  SameSimulation(reopen.simulation_state(), world_before_open) &&
+                  reopen.debug_locomotion_position() == position_before_open,
+            "opening with held movement and subsequent large modal frames call no locomotion or simulation work");
+    }
+    auto resumed = reopen.Next();
+    const auto resumed_plan = resumed ? resumed->frame_plan() : std::nullopt;
+    Check(resumed && resumed->elapsed() == milliseconds{5} && resumed_plan &&
+              resumed_plan->simulation_steps == 1U &&
+              resumed_plan->interpolation_alpha == 0.0 &&
+              reopen.diagnostic_menu_state() == DiagnosticMenuState{} &&
+              reopen.scheduler_state() == FrameSchedulerState{
+                  .config = reopen_config.scheduler,
+                  .total_planned_steps = 1U,
+              } &&
+              reopen.debug_locomotion_position() == Position3{.z = 1},
+        "reactivation combines the preserved remainder with only its own elapsed and then resumes held movement");
+
+    constexpr std::array terminal_transition{
+        InputTransition{.code = 0U, .pressed = true}};
+    const std::span<const ScriptedElapsedFrame> no_elapsed_frames;
+    RunCaptureTracePair terminal_pair = BuildScriptedPair(
+        std::span<const std::uint32_t>{menu_actions}.subspan(2U), no_elapsed_frames,
+        TerminalReasons{.host_quit_requested = true}, terminal_transition);
+    RunReplaySessionConfig terminal_config = ValidConfig();
+    terminal_config.enable_debug_locomotion = true;
+    terminal_config.initial_diagnostic_menu_state = DiagnosticMenuState{};
+    auto terminal_created =
+        RunReplaySession::Create(std::move(terminal_pair), terminal_config);
+    RunReplaySession terminal =
+        TakeSession(terminal_created, "the terminal menu-edge replay is created");
+    const auto terminal_menu_before = terminal.diagnostic_menu_state();
+    const auto terminal_scheduler_before = terminal.scheduler_state();
+    const auto terminal_world_before = terminal.simulation_state();
+    const auto terminal_position_before = terminal.debug_locomotion_position();
+    auto terminal_frame = terminal.Next();
+    Check(terminal_frame && terminal_frame->terminal_input() &&
+              terminal_frame->input().WasPressed(
+                  omega::app::kDiagnosticMenuPrimaryAction) &&
+              !terminal_frame->elapsed() && !terminal_frame->frame_plan() &&
+              terminal.diagnostic_menu_state() == terminal_menu_before &&
+              terminal.scheduler_state() == terminal_scheduler_before &&
+              SameSimulation(terminal.simulation_state(), terminal_world_before) &&
+              terminal.debug_locomotion_position() == terminal_position_before &&
+              terminal.state() == RunReplaySessionState::Complete &&
+              terminal.remaining_frames() == 0U,
+        "terminal resolution consumes a menu edge without mutating menu, scheduler, world, or position");
+}
+
 void CheckMoveLifecycle()
 {
     constexpr std::array<std::uint32_t, 1U> actions{17U};
     constexpr std::array<nanoseconds, 2U> elapsed_values{
         milliseconds{5}, milliseconds{25}};
     RunCaptureTracePair pair = BuildPair(actions, 4U, elapsed_values);
-    auto created = RunReplaySession::Create(std::move(pair), ValidConfig());
+    RunReplaySessionConfig config = ValidConfig();
+    config.initial_diagnostic_menu_state =
+        omega::app::InitialDiagnosticMenuState();
+    auto created = RunReplaySession::Create(std::move(pair), config);
     RunReplaySession source = TakeSession(created, "the move fixture is created");
 
     auto first_result = source.Next();
@@ -895,10 +1232,11 @@ void CheckMoveLifecycle()
 
     const auto scheduler_before_move = source.scheduler_state();
     const auto simulation_before_move = source.simulation_state();
+    const auto menu_before_move = source.diagnostic_menu_state();
     RunReplaySession destination = std::move(source);
     Check(source.state() == RunReplaySessionState::Inert &&
               source.remaining_frames() == 0U && !source.scheduler_state() &&
-              !source.simulation_state(),
+              !source.simulation_state() && !source.diagnostic_menu_state(),
         "a moved-from replay session is observably inert without owners");
     const auto inert_next = source.Next();
     CheckError(inert_next, RunReplayOperation::Next,
@@ -908,11 +1246,13 @@ void CheckMoveLifecycle()
     Check(destination.state() == RunReplaySessionState::Ready &&
               destination.remaining_frames() == 1U &&
               destination.scheduler_state() == scheduler_before_move &&
-              SameSimulation(destination.simulation_state(), simulation_before_move),
-        "session move construction transfers cursor and both fresh owners exactly");
+              SameSimulation(destination.simulation_state(), simulation_before_move) &&
+              destination.diagnostic_menu_state() == menu_before_move,
+        "session move construction transfers cursor, menu, and both fresh owners exactly");
     auto final = destination.Next();
     Check(final && final->input().frame_index() == 1U &&
               final->elapsed() == elapsed_values[1] && final->frame_plan() &&
+              destination.diagnostic_menu_state() == menu_before_move &&
               destination.state() == RunReplaySessionState::Complete &&
               destination.remaining_frames() == 0U,
         "the moved-to session resumes the exact remaining frame and completes");
@@ -923,11 +1263,14 @@ void CheckReplayAllocationRetry()
     constexpr std::array<std::uint32_t, 1U> actions{19U};
     constexpr std::array<nanoseconds, 1U> elapsed_values{milliseconds{31}};
     RunCaptureTracePair pair = BuildPair(actions, 1U, elapsed_values);
-    auto created = RunReplaySession::Create(std::move(pair), ValidConfig());
+    RunReplaySessionConfig config = ValidConfig();
+    config.initial_diagnostic_menu_state = DiagnosticMenuState{};
+    auto created = RunReplaySession::Create(std::move(pair), config);
     RunReplaySession session =
         TakeSession(created, "the allocation-retry fixture is created");
     const auto scheduler_before = session.scheduler_state();
     const auto simulation_before = session.simulation_state();
+    const auto menu_before = session.diagnostic_menu_state();
 
     replay_session_test_allocation::Arm(0U);
     const auto object_failure = session.Next();
@@ -939,8 +1282,9 @@ void CheckReplayAllocationRetry()
     Check(session.state() == RunReplaySessionState::Ready &&
               session.remaining_frames() == 1U &&
               session.scheduler_state() == scheduler_before &&
-              SameSimulation(session.simulation_state(), simulation_before),
-        "snapshot object allocation failure changes no app replay state");
+              SameSimulation(session.simulation_state(), simulation_before) &&
+              session.diagnostic_menu_state() == menu_before,
+        "snapshot object allocation failure changes no app replay or menu state");
 
     replay_session_test_allocation::Arm(1U);
     const auto backing_failure = session.Next();
@@ -952,8 +1296,9 @@ void CheckReplayAllocationRetry()
     Check(session.state() == RunReplaySessionState::Ready &&
               session.remaining_frames() == 1U &&
               session.scheduler_state() == scheduler_before &&
-              SameSimulation(session.simulation_state(), simulation_before),
-        "snapshot backing allocation failure changes no app replay state");
+              SameSimulation(session.simulation_state(), simulation_before) &&
+              session.diagnostic_menu_state() == menu_before,
+        "snapshot backing allocation failure changes no app replay or menu state");
 
     auto retried = session.Next();
     const auto plan = retried ? retried->frame_plan() : std::nullopt;
@@ -975,6 +1320,7 @@ void CheckReplayAllocationRetry()
                       .completed_steps = 2U,
                       .simulated_time = milliseconds{20},
                   }) &&
+              session.diagnostic_menu_state() == menu_before &&
               session.state() == RunReplaySessionState::Complete,
         "the exact failed frame retries once and advances fresh owners exactly");
 }
@@ -988,6 +1334,7 @@ int main()
     CheckElapsedOracleAndPartialPrefix();
     CheckTerminalBehavior();
     CheckDebugLocomotionOptIn();
+    CheckDiagnosticMenuModalGate();
     CheckMoveLifecycle();
     CheckReplayAllocationRetry();
 

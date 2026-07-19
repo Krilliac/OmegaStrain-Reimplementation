@@ -13,10 +13,18 @@ using Color = std::array<std::byte, 4U>;
 
 constexpr std::uint32_t kChannelsPerPixel = 4U;
 constexpr std::uint32_t kBorderPixels = 2U;
-constexpr std::uint32_t kGlyphScale = 2U;
+constexpr std::uint32_t kGlyphScale = 1U;
 constexpr std::uint32_t kGlyphWidth = 3U;
 constexpr std::uint32_t kGlyphHeight = 5U;
-constexpr std::uint32_t kGlyphAdvance = 8U;
+constexpr std::uint32_t kGlyphAdvance = 4U;
+
+using GlyphRows = std::array<std::uint8_t, kGlyphHeight>;
+
+struct Glyph
+{
+    char symbol;
+    GlyphRows rows;
+};
 
 constexpr Color kBackgroundColor{
     std::byte{8U}, std::byte{12U}, std::byte{24U}, std::byte{255U}};
@@ -27,12 +35,32 @@ constexpr Color kSlateColor{
 constexpr Color kAmberColor{
     std::byte{255U}, std::byte{196U}, std::byte{64U}, std::byte{255U}};
 
-// Project-authored 3x5 block masks for the literal diagnostic marker "DEV". Each row's three mask
-// bits are read left-to-right after integer promotion; no font or external glyph data is involved.
-constexpr std::array<std::array<std::uint8_t, kGlyphHeight>, 3U> kDevGlyphs{{
-    {{0b110U, 0b101U, 0b101U, 0b101U, 0b110U}},
-    {{0b111U, 0b100U, 0b110U, 0b100U, 0b111U}},
-    {{0b101U, 0b101U, 0b101U, 0b101U, 0b010U}},
+// Project-authored 3x5 block masks for the diagnostic labels below. Each row's three mask bits are
+// read left-to-right after integer promotion; no font or external glyph data is involved.
+constexpr std::array<Glyph, 23U> kDiagnosticGlyphs{{
+    {'A', {{0b010U, 0b101U, 0b111U, 0b101U, 0b101U}}},
+    {'C', {{0b011U, 0b100U, 0b100U, 0b100U, 0b011U}}},
+    {'D', {{0b110U, 0b101U, 0b101U, 0b101U, 0b110U}}},
+    {'E', {{0b111U, 0b100U, 0b110U, 0b100U, 0b111U}}},
+    {'F', {{0b111U, 0b100U, 0b110U, 0b100U, 0b100U}}},
+    {'G', {{0b011U, 0b100U, 0b101U, 0b101U, 0b011U}}},
+    {'I', {{0b111U, 0b010U, 0b010U, 0b010U, 0b111U}}},
+    {'L', {{0b100U, 0b100U, 0b100U, 0b100U, 0b111U}}},
+    {'M', {{0b101U, 0b111U, 0b111U, 0b101U, 0b101U}}},
+    {'N', {{0b101U, 0b111U, 0b111U, 0b111U, 0b101U}}},
+    {'O', {{0b010U, 0b101U, 0b101U, 0b101U, 0b010U}}},
+    {'P', {{0b110U, 0b101U, 0b110U, 0b100U, 0b100U}}},
+    {'Q', {{0b010U, 0b101U, 0b101U, 0b111U, 0b011U}}},
+    {'R', {{0b110U, 0b101U, 0b110U, 0b101U, 0b101U}}},
+    {'S', {{0b011U, 0b100U, 0b010U, 0b001U, 0b110U}}},
+    {'T', {{0b111U, 0b010U, 0b010U, 0b010U, 0b010U}}},
+    {'U', {{0b101U, 0b101U, 0b101U, 0b101U, 0b111U}}},
+    {'V', {{0b101U, 0b101U, 0b101U, 0b101U, 0b010U}}},
+    {'W', {{0b101U, 0b101U, 0b101U, 0b111U, 0b101U}}},
+    {'1', {{0b010U, 0b110U, 0b010U, 0b010U, 0b111U}}},
+    {'2', {{0b110U, 0b001U, 0b010U, 0b100U, 0b111U}}},
+    {'/', {{0b001U, 0b001U, 0b010U, 0b100U, 0b100U}}},
+    {' ', {{0b000U, 0b000U, 0b000U, 0b000U, 0b000U}}},
 }};
 
 static_assert(kBorderPixels * 2U < kDiagnosticMenuImageWidth);
@@ -60,7 +88,7 @@ void FillRectangle(runtime::DebugImage& image, const std::uint32_t left,
 }
 
 void DrawGlyph(runtime::DebugImage& image,
-    const std::array<std::uint8_t, kGlyphHeight>& rows,
+    const GlyphRows& rows,
     const std::uint32_t origin_x, const std::uint32_t origin_y) noexcept
 {
     for (std::uint32_t row = 0U; row < kGlyphHeight; ++row)
@@ -76,6 +104,29 @@ void DrawGlyph(runtime::DebugImage& image,
             FillRectangle(image, left, top, left + kGlyphScale,
                 top + kGlyphScale, kCyanColor);
         }
+    }
+}
+
+const GlyphRows& FindGlyph(const char symbol) noexcept
+{
+    for (const auto& glyph : kDiagnosticGlyphs)
+    {
+        if (glyph.symbol == symbol)
+            return glyph.rows;
+    }
+    return kDiagnosticGlyphs.back().rows;
+}
+
+template <std::size_t Size>
+void DrawLabel(runtime::DebugImage& image, const char (&label)[Size],
+    const std::uint32_t origin_x, const std::uint32_t origin_y) noexcept
+{
+    static_assert(Size > 0U);
+    for (std::size_t index = 0U; index + 1U < Size; ++index)
+    {
+        DrawGlyph(image, FindGlyph(label[index]),
+            origin_x + static_cast<std::uint32_t>(index) * kGlyphAdvance,
+            origin_y);
     }
 }
 } // namespace
@@ -103,24 +154,25 @@ runtime::DebugImage BuildProjectDiagnosticMenuImage()
     FillRectangle(image, image.width - kBorderPixels, kBorderPixels,
         image.width, image.height - kBorderPixels, kCyanColor);
 
-    // Synthetic title region: a literal DEV marker and an inert amber status bar.
+    // Synthetic title region and fixed control legend.
     FillRectangle(image, 6U, 6U, 122U, 20U, kSlateColor);
-    std::uint32_t glyph_x = 8U;
-    for (const auto& glyph : kDevGlyphs)
-    {
-        DrawGlyph(image, glyph, glyph_x, 8U);
-        glyph_x += kGlyphAdvance;
-    }
+    DrawLabel(image, "OPEN", 8U, 8U);
+    DrawLabel(image, "OMEGA", 8U, 14U);
     FillRectangle(image, 36U, 10U, 116U, 16U, kAmberColor);
+    DrawLabel(image, "W/S SELECT", 8U, 22U);
+    DrawLabel(image, "F1 START", 52U, 22U);
+    DrawLabel(image, "ESC QUIT", 88U, 22U);
 
-    // Three project-owned geometric rows. They deliberately carry no item labels, selection,
-    // activation, navigation, or retail-menu meaning.
+    // Three project-owned diagnostic rows. Selection remains a host-side geometric overlay.
     FillRectangle(image, 8U, 28U, 120U, 38U, kSlateColor);
     FillRectangle(image, 8U, 28U, 12U, 38U, kCyanColor);
+    DrawLabel(image, "START DIAGNOSTIC", 16U, 30U);
     FillRectangle(image, 8U, 43U, 104U, 53U, kSlateColor);
     FillRectangle(image, 8U, 43U, 12U, 53U, kCyanColor);
+    DrawLabel(image, "RESERVED SLOT 1", 16U, 45U);
     FillRectangle(image, 8U, 58U, 88U, 68U, kSlateColor);
     FillRectangle(image, 8U, 58U, 12U, 68U, kCyanColor);
+    DrawLabel(image, "RESERVED SLOT 2", 16U, 60U);
 
     return image;
 }

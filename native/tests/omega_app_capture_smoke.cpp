@@ -17,14 +17,27 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <expected>
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
 namespace omega::app::detail
 {
+struct SdlGpuHostTestAccess final
+{
+    [[nodiscard]] static std::expected<
+        std::array<runtime::RenderClearColorRgba8, 16U>, std::string>
+        ReadbackBlitsForTesting(
+            SdlGpuHost& host, const runtime::RenderFramePacket& packet)
+    {
+        return host.ReadbackBlitsForTesting(packet);
+    }
+};
+
 struct OmegaAppTestAccess final
 {
     [[nodiscard]] static bool InstallUnownedDiagnosticDraw(OmegaApp& app)
@@ -125,6 +138,23 @@ struct OmegaAppTestAccess final
         if (!app.simulation_)
             return std::nullopt;
         return app.simulation_->PositionOf(app.debug_locomotion_entity_);
+    }
+
+    [[nodiscard]] static runtime::FrameSchedulerState SchedulerSnapshot(
+        const OmegaApp& app) noexcept
+    {
+        return app.frame_scheduler_->Snapshot();
+    }
+
+    [[nodiscard]] static simulation::SimulationState SimulationSnapshot(
+        const OmegaApp& app) noexcept
+    {
+        return app.simulation_->Snapshot();
+    }
+
+    [[nodiscard]] static SdlGpuHost& Host(OmegaApp& app) noexcept
+    {
+        return *app.host_;
     }
 
     [[nodiscard]] static bool HasInputBinding(const OmegaApp& app,
@@ -443,6 +473,90 @@ int main()
                   kDiagnosticMenuLogicalBytes,
         "the project menu is uploaded exactly once and remains host-resident");
 
+    constexpr std::array menu_probe_coordinates{
+        std::array{4U, 4U}, std::array{0U, 0U}, std::array{8U, 8U},
+        std::array{9U, 8U}, std::array{40U, 12U}, std::array{8U, 23U},
+        std::array{9U, 22U}, std::array{52U, 22U}, std::array{9U, 30U},
+        std::array{16U, 30U}, std::array{17U, 30U}, std::array{77U, 30U},
+        std::array{72U, 45U}, std::array{73U, 45U}, std::array{72U, 60U},
+        std::array{72U, 61U},
+    };
+    constexpr omega::runtime::RenderClearColorRgba8 probe_background{
+        .red = 8U, .green = 12U, .blue = 24U, .alpha = 255U};
+    constexpr omega::runtime::RenderClearColorRgba8 probe_cyan{
+        .red = 112U, .green = 220U, .blue = 255U, .alpha = 255U};
+    constexpr omega::runtime::RenderClearColorRgba8 probe_slate{
+        .red = 28U, .green = 38U, .blue = 58U, .alpha = 255U};
+    constexpr omega::runtime::RenderClearColorRgba8 probe_amber{
+        .red = 255U, .green = 196U, .blue = 64U, .alpha = 255U};
+    constexpr std::array expected_menu_probe_readback{
+        probe_background, probe_cyan, probe_slate, probe_cyan,
+        probe_amber, probe_cyan, probe_background, probe_cyan,
+        probe_cyan, probe_slate, probe_cyan, probe_cyan,
+        probe_slate, probe_cyan, probe_cyan, probe_slate,
+    };
+    constexpr auto source_begin = [](const std::uint32_t coordinate,
+                                      const std::uint32_t dimension) noexcept {
+        return static_cast<std::uint32_t>(
+            (static_cast<std::uint64_t>(coordinate) *
+                 omega::runtime::kNormalizedRenderExtent +
+                dimension - 1U) /
+            dimension);
+    };
+    constexpr auto source_end = [](const std::uint32_t coordinate,
+                                    const std::uint32_t dimension) noexcept {
+        return static_cast<std::uint32_t>(
+            static_cast<std::uint64_t>(coordinate + 1U) *
+            omega::runtime::kNormalizedRenderExtent / dimension);
+    };
+    constexpr auto destination_edge = [](const std::uint32_t coordinate) noexcept {
+        return coordinate * (omega::runtime::kNormalizedRenderExtent / 4U);
+    };
+    std::array<omega::runtime::RenderTextureBlitCommand, 16U> menu_probe_commands{};
+    for (std::size_t index = 0U; index < menu_probe_commands.size(); ++index)
+    {
+        const std::uint32_t x = menu_probe_coordinates[index][0];
+        const std::uint32_t y = menu_probe_coordinates[index][1];
+        const std::uint32_t column = static_cast<std::uint32_t>(index % 4U);
+        const std::uint32_t row = static_cast<std::uint32_t>(index / 4U);
+        menu_probe_commands[index] = omega::runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_menu_texture,
+            .source = omega::runtime::RenderSourceRectQ16{
+                .left = source_begin(x, omega::app::kDiagnosticMenuImageWidth),
+                .top = source_begin(y, omega::app::kDiagnosticMenuImageHeight),
+                .right = source_end(x, omega::app::kDiagnosticMenuImageWidth),
+                .bottom = source_end(y, omega::app::kDiagnosticMenuImageHeight),
+            },
+            .destination = omega::runtime::RenderTargetRectQ16{
+                .left = destination_edge(column),
+                .top = destination_edge(row),
+                .right = destination_edge(column + 1U),
+                .bottom = destination_edge(row + 1U),
+            },
+            .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+        };
+    }
+    auto menu_probe_draw_list =
+        omega::runtime::RenderDrawList::Create(menu_probe_commands);
+    Check(menu_probe_draw_list.has_value(),
+        "the sixteen one-texel menu readback commands form a valid draw list");
+    if (menu_probe_draw_list)
+    {
+        omega::runtime::RenderFramePacket menu_probe_packet{
+            .clear_color = omega::runtime::kDefaultRenderClearColor,
+            .draw_list = *menu_probe_draw_list,
+        };
+        auto menu_probe_readback =
+            omega::app::detail::SdlGpuHostTestAccess::ReadbackBlitsForTesting(
+                OmegaAppTestAccess::Host(*app), menu_probe_packet);
+        Check(menu_probe_readback &&
+                  *menu_probe_readback == expected_menu_probe_readback,
+            "the resident menu texture preserves the exact sixteen-probe RGBA8 grid on GPU");
+        Check(OmegaAppTestAccess::GpuSnapshot(*app) == initial_gpu,
+            "the private menu readback seam leaves every production GPU counter unchanged");
+    }
+
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     Check(PushQuit(), "a host-quit event enters the SDL queue");
 
@@ -672,6 +786,8 @@ int main()
         omega::app::RunReplaySessionConfig{
             .scheduler = normal_before.config,
             .enable_debug_locomotion = true,
+            .initial_diagnostic_menu_state =
+                omega::app::InitialDiagnosticMenuState(),
         });
     Check(replay_created.has_value(),
         "the actual real-host capture creates a fresh app replay session");
@@ -689,7 +805,9 @@ int main()
                   std::chrono::nanoseconds::zero() &&
               replay_simulation_before->alive_entities == 1U &&
               replay_session.debug_locomotion_position() ==
-                  omega::simulation::Position3{},
+                  omega::simulation::Position3{} &&
+              replay_session.diagnostic_menu_state() ==
+                  omega::app::InitialDiagnosticMenuState(),
         "real-host replay begins with a fresh positioned synthetic diagnostic entity");
 
     auto replay_frame = replay_session.Next();
@@ -741,6 +859,8 @@ int main()
               replay_simulation_after->simulated_time == expected_fresh_time &&
               replay_simulation_after->alive_entities == 1U &&
               replay_session.debug_locomotion_position() == normal_debug_position &&
+              replay_session.diagnostic_menu_state() ==
+                  omega::app::DiagnosticMenuState{} &&
               normal_result.planned_simulation_steps ==
                   captured_plan->simulation_steps &&
               normal_result.executed_simulation_steps ==
@@ -748,7 +868,7 @@ int main()
               replay_session.state() ==
                   omega::app::RunReplaySessionState::Complete &&
               replay_session.remaining_frames() == 0U,
-        "replay ignores action 6 for locomotion and reaches the captured fresh-world position");
+        "replay applies action 6 as menu activation and reaches the captured fresh-world position");
 
     const auto replay_complete = replay_session.Next();
     Check(!replay_complete &&
@@ -824,7 +944,19 @@ int main()
 
     const std::uint64_t next_edge_index =
         OmegaAppTestAccess::NextInputFrameIndex(*app);
-    Check(PushKey(SDL_SCANCODE_S, true), "next-row edge enters the SDL queue");
+    const omega::runtime::FrameSchedulerState modal_scheduler_before =
+        OmegaAppTestAccess::SchedulerSnapshot(*app);
+    const omega::simulation::SimulationState modal_simulation_before =
+        OmegaAppTestAccess::SimulationSnapshot(*app);
+    const auto modal_position_before =
+        OmegaAppTestAccess::DebugLocomotionPosition(*app);
+    const omega::app::GpuHostSnapshot modal_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    bool modal_events_queued = PushKey(SDL_SCANCODE_S, true);
+    for (std::size_t index = 0U; modal_events_queued && index < 4'095U; ++index)
+        modal_events_queued = PushKey(SDL_SCANCODE_S, true);
+    Check(modal_events_queued,
+        "the next-row edge and timing workload enter the SDL queue");
     auto next_edge = app->RunWithCapture(1);
     Check(next_edge.has_value(), "next-row edge captures");
     if (!next_edge)
@@ -834,13 +966,38 @@ int main()
                                  ? next_pair->input_trace().ActionAt(
                                        0U, omega::app::kDiagnosticMenuNextAction)
                                  : std::nullopt;
+    const auto next_elapsed = next_pair != nullptr
+                                  ? next_pair->scheduler_elapsed_trace().FrameAt(0U)
+                                  : std::nullopt;
+    const RunResult next_result = next_edge->result();
+    const omega::app::GpuHostSnapshot modal_gpu_after =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    const omega::simulation::SimulationState modal_simulation_after =
+        OmegaAppTestAccess::SimulationSnapshot(*app);
     Check(next_pair != nullptr &&
               next_pair->input_trace().first_frame_index() == next_edge_index &&
               next_action && next_action->held && next_action->pressed &&
+              next_elapsed &&
+              next_elapsed->elapsed > settings.frame.simulation_step &&
+              next_result.input_frames == 1U && next_result.rendered_frames == 1 &&
+              next_result.planned_simulation_steps == 0U &&
+              next_result.executed_simulation_steps == 0U &&
+              next_edge->scheduler_state_before() == modal_scheduler_before &&
+              next_edge->scheduler_state_after() == modal_scheduler_before &&
+              OmegaAppTestAccess::SchedulerSnapshot(*app) == modal_scheduler_before &&
+              modal_simulation_after.completed_steps ==
+                  modal_simulation_before.completed_steps &&
+              modal_simulation_after.simulated_time ==
+                  modal_simulation_before.simulated_time &&
+              modal_simulation_after.alive_entities ==
+                  modal_simulation_before.alive_entities &&
+              OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
+                  modal_position_before &&
               OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne &&
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
-                  initial_visible_draw_lists[1]),
-        "S/action 3 moves row zero to row one on its press edge");
+                  initial_visible_draw_lists[1]) &&
+              IsOneVisibleMenuSubmission(modal_gpu_before, modal_gpu_after),
+        "a real elapsed sample above one fixed step navigates and renders while the modal menu freezes scheduler, world, and locomotion");
     Check(PushKey(SDL_SCANCODE_S, true), "held next level enters the SDL queue");
     Check(RunPlainFrame() &&
               OmegaAppTestAccess::DiagnosticMenu(*app) == kMainMenuRowOne,

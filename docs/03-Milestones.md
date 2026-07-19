@@ -654,6 +654,29 @@ which passed directly and through CTest, with 26 tests registered. The native de
 checked 152 files, all 209 tooling tests passed, Python compile-all passed, and the public-tree gate
 checked 239 indexed text blobs. Publication CI remains separate and unclaimed.
 
+E-0064 renders readable project-authored 3x5 labels into the same generated 128x72 diagnostic card:
+`OPEN OMEGA`, the fixed control legend, `START DIAGNOSTIC`, and both `RESERVED SLOT` rows. It adds
+no font or asset input and preserves the single startup texture upload, one hidden list, three
+prebuilt visible lists, existing card/marker geometry, and allocation-free per-frame list selection.
+
+The post-reducer menu state becomes an app-layer simulation gate in both live and opt-in replay.
+`DiagnosticPlay` passes measured/captured elapsed to the scheduler; `MainMenu` or invalid state
+passes zero and skips locomotion/world work. Reduction occurs first, so freeze and resume take
+effect on the transition frame, while advancing the live clock baseline prevents modal catch-up.
+Capture still records actual elapsed, and modal frames continue input/capture, rendering, audio,
+and job-service operation. Replay's optional caller-supplied initial menu state defaults absent for
+legacy nonmodal compatibility; the finite fresh-replay route supplies the native startup state
+internally. No action/binding, input or trace schema, captured checkpoint, serialization, CLI
+syntax, or CLI output changes. These labels and modal rules remain synthetic and establish no
+retail menu, pause, timing, persistence, or PCSX2-equivalence semantics. The final incremental MSVC
+build was warning-free. Portable diagnostic and replay tests each passed directly plus 20/20
+repetitions; the Direct3D12 host smoke passed directly plus 20/20 repetitions; default CTest passed
+29/29 before and after the opt-in 33/33 GPU matrix; and capture/replay CLI passed 20/20 repetitions
+plus one 20-frame run. Runtime-off built and ran the exact portable target, its focused CTest passed,
+and 26 tests were registered. The dependency gate checked 152 native files, all 209 tooling tests
+passed, Python compile-all passed, and the public-tree gate checked 239 indexed text blobs.
+Publication CI remains separate and unclaimed.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.
