@@ -251,6 +251,49 @@ coordinates, filtering, clearing, composition, placement, camera, material, mesh
 meaning is assigned. No asset-service/storage bridge, display expansion, measured GPU allocation,
 streaming/eviction, asynchronous upload/rendering, pin contract, or fence design is established.
 
+E-0047 supersedes E-0046's fixed full-source, contained, nearest-filter blit policy. Every bounded
+command now owns a half-open normalized Q16 source crop and explicit project-owned
+`Contain`/`Stretch` fit and `Nearest`/`Linear` filter choices in addition to its generation handle
+and normalized target rectangle. Allocation-free draw-list creation rejects capacity overflow
+first and then validates complete commands in source order with stable handle, source, target, fit,
+and filter priority. The maximum remains 16; source order and duplicates are retained; the inactive
+tail remains zeroed; only the active const prefix is exposed; and all public command/list/plan/frame
+packet values remain trivially copyable and standard layout.
+
+The pure `MapTextureSourceRect` phase maps normalized crops to half-open mip-zero texel rectangles,
+flooring start edges and ceiling end edges with 64-bit overflow-safe arithmetic. The pure
+`PlanTextureBlit` phase retains that mapped crop exactly, maps the target with the same edge rule,
+and either stretches to the mapped target or aspect-contains from the cropped dimensions using
+deterministic round-half-up sizing and centering. Its error ordering checks the mapped source,
+target extent, normalized target rectangle, and fit mode deterministically.
+
+The host then runs three complete-list fail-closed passes. Before GPU acquisition it resolves every
+handle and backend slot into fixed storage. It then maps every source crop and filter. After command
+buffer and swapchain acquisition, it plans every destination against the nonzero swapchain extent
+before recording the clear or any blit. Only then does it clear the full target once and issue
+source-order `LOAD` blits with the per-command crop and filter. Thus a stale later generation cannot
+reach GPU work, and a later planning rejection cannot record a visible accepted prefix. The
+post-acquisition path uses fixed arrays and pre-reserved error storage, empty lists remain
+clear-only, and command-buffer submit-on-unwind remains intact.
+
+A clean MSVC build compiled seven translation units with zero warnings and errors. The focused
+portable executable passed once plus 100 repeats, and default CTest passed 20/20. One initial plus
+20 repeated public zero-file GPU smokes all passed on `direct3d12`; each run ended with exactly
+three uploads/640 cumulative logical bytes, three releases, two submitted blit frames/four
+successful draws, one clear-only submission, one stale-list rejection, zero unavailable
+submissions, all slots free, and zero reserved, resident, retired, or charged state. The opt-in GPU
+configuration passed 21/21 CTests; registration was then restored to OFF and the default listing to
+20 tests. A public two-frame D3D12 `openomega` smoke with dummy audio also passed. Publication CI is
+tracked separately from these local validation claims.
+
+This proves bounded project-owned crop/fit/filter validation, planning, SDL submission, and cleanup,
+not framebuffer pixel identity or readback, filter-pixel correctness, or arbitrary backend-failure
+atomicity. Crop, fit, filter, ordering, clear/composition, and placement remain project-owned
+policy, not retail semantics. No asynchronous pin/fence design, measured GPU allocation, streaming
+or eviction, `TextureStorageIR`/`AssetService` bridge, TDX plane/palette/channel/alpha/nibble/
+swizzle/mip or display expansion, or VUM/material/alias/cell/mesh/placement/visibility/camera/
+retail-rendering/gameplay meaning is established.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

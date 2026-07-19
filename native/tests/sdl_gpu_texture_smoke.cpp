@@ -173,14 +173,38 @@ int main()
             .right = omega::runtime::kNormalizedRenderExtent,
             .bottom = omega::runtime::kNormalizedRenderExtent,
         };
+        constexpr omega::runtime::RenderSourceRectQ16 full_source{
+            .left = 0U,
+            .top = 0U,
+            .right = omega::runtime::kNormalizedRenderExtent,
+            .bottom = omega::runtime::kNormalizedRenderExtent,
+        };
+        constexpr omega::runtime::RenderSourceRectQ16 first_b_source{
+            .left = 0U,
+            .top = 0U,
+            .right = 32'768U,
+            .bottom = omega::runtime::kNormalizedRenderExtent,
+        };
+        constexpr omega::runtime::RenderSourceRectQ16 first_a_source{
+            .left = 16'384U,
+            .top = 0U,
+            .right = 49'152U,
+            .bottom = omega::runtime::kNormalizedRenderExtent,
+        };
         const std::array first_commands{
             omega::runtime::RenderTextureBlitCommand{
                 .texture = *uploaded_b,
+                .source = first_b_source,
                 .destination = left_half,
+                .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+                .filter_mode = omega::runtime::RenderTextureFilterMode::Linear,
             },
             omega::runtime::RenderTextureBlitCommand{
                 .texture = *uploaded_a,
+                .source = first_a_source,
                 .destination = right_half,
+                .fit_mode = omega::runtime::RenderTextureFitMode::Contain,
+                .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
             },
         };
         auto first_draw_list = omega::runtime::RenderDrawList::Create(first_commands);
@@ -243,11 +267,22 @@ int main()
         const std::array second_commands{
             omega::runtime::RenderTextureBlitCommand{
                 .texture = *uploaded_b,
+                .source = full_source,
                 .destination = left_half,
+                .fit_mode = omega::runtime::RenderTextureFitMode::Contain,
+                .filter_mode = omega::runtime::RenderTextureFilterMode::Linear,
             },
             omega::runtime::RenderTextureBlitCommand{
                 .texture = *uploaded_c,
+                .source = omega::runtime::RenderSourceRectQ16{
+                    .left = 32'768U,
+                    .top = 0U,
+                    .right = omega::runtime::kNormalizedRenderExtent,
+                    .bottom = 32'768U,
+                },
                 .destination = right_half,
+                .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+                .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
             },
         };
         auto second_draw_list = omega::runtime::RenderDrawList::Create(second_commands);

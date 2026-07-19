@@ -244,6 +244,44 @@ shipping dependencies or execution mechanisms.
     material, texture, mesh, or gameplay semantics; no `TextureStorageIR`/`AssetService` bridge
     or display expansion; and no measured GPU-byte accounting, streaming, eviction, asynchronous
     upload, or fence design.
+32. E-0047 supersedes item 31's historical full-source, contained, nearest-filter policy. Each
+    `RenderTextureBlitCommand` now owns a half-open normalized Q16 source crop, a normalized target
+    rectangle, and explicit project-owned `Contain`/`Stretch` fit and `Nearest`/`Linear` filter
+    values. Allocation-free creation rejects capacity overflow first, then validates each command
+    in source order with fixed handle, source, target, fit, and filter priority. The maximum remains
+    16 commands; order and duplicates are preserved; the inactive tail is zeroed; only a const
+    prefix is exposed; and the command, list, plan, and frame-packet values remain trivially
+    copyable and standard layout.
+    The pure source phase maps normalized crops into mip-zero texel rectangles by flooring
+    left/top and ceiling right/bottom with overflow-safe 64-bit arithmetic. The pure planning phase
+    retains that mapped crop exactly, maps the target by the same half-open rule, and either fills
+    it for `Stretch` or uses the cropped aspect ratio with deterministic round-half-up sizing and
+    centering for `Contain`. Invalid source extents, mapped crops, target extents, target
+    rectangles, and fit values fail with deterministic priority.
+    `SdlGpuHost` runs three complete-list fail-closed passes: it first resolves the complete
+    handle/backend-slot set into fixed arrays. It then maps every source crop and filter before
+    acquiring GPU work. After acquiring the command buffer and swapchain, the third pass uses the
+    nonzero swapchain extent to plan the complete target set before recording one full-target clear
+    and the source-order
+    `LOAD` blits. A later stale handle therefore cannot
+    validate or render a prefix, and a later planning failure cannot record a visible prefix. The
+    post-acquisition path uses only fixed arrays and pre-reserved error storage. Empty lists remain
+    clear-only, and the existing submit-on-unwind behavior is retained.
+    A clean MSVC build compiled seven translation units with zero warnings and errors. The focused
+    portable executable passed once plus 100 repeated runs, and the default suite passed 20/20.
+    One initial plus 20 repeated public zero-file GPU smokes all passed on `direct3d12`; each ended
+    at exactly three uploads, 640 cumulative logical bytes, three releases, two submitted blit
+    frames, four successful draws, one clear-only submission, one stale-list rejection, zero
+    unavailable submissions, all slots free, and zero reserved, resident, retired, or charged state.
+    The opt-in GPU configuration passed 21/21 CTests. Registration was then restored to OFF, and the
+    default listing returned to 20 tests. A public two-frame D3D12 `openomega` smoke passed with
+    dummy audio. Publication CI is tracked separately from these local validation claims.
+    This proves bounded project-owned crop/fit/filter validation, deterministic planning, checked
+    SDL submission, and cleanup, not framebuffer identity, readback, or filter-pixel correctness;
+    arbitrary backend-failure atomicity; asynchronous lifetime pins or fences; measured GPU memory,
+    streaming, or eviction; `TextureStorageIR`/`AssetService` consumption or binding; TDX plane,
+    palette, channel, alpha, nibble, swizzle, mip, or display expansion; or VUM, material, alias,
+    cell, mesh, placement, visibility, camera, retail rendering, or gameplay semantics.
 
 ## Disc observations
 
@@ -283,9 +321,10 @@ shipping dependencies or execution mechanisms.
    stem, substring, repeated-extension, suffix-family, and other alias hypotheses separate.
    E-0043's `AssetService` accepts only an already-issued `LevelTextureHandle`; it does not change
    this research boundary or consume either lexical experiment.
-   E-0046 now consumes a frame-packet draw list that references only the existing project-generated
-   diagnostic texture. It still does not connect an asset, decoded texture storage, catalog name,
-   material record, or locator to a draw command.
+   E-0047 now applies explicit source-crop, fit, and filter policy to a frame-packet draw list that
+   still references only the existing project-generated diagnostic texture. It does not connect an
+   asset, decoded texture storage, catalog name, material record, locator, cell, or mesh to a draw
+   command.
 3. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
    independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.
