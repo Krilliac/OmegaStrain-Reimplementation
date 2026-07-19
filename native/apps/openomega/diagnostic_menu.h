@@ -1,8 +1,9 @@
 #pragma once
 
-#include "omega/runtime/debug_image.h"
+#include "omega/runtime/texture_storage_topology_debug_image.h"
 
 #include <cstdint>
+#include <expected>
 #include <type_traits>
 
 namespace omega::app
@@ -26,13 +27,14 @@ enum class DiagnosticMenuMode : std::uint8_t
     MainMenu = 0U,
     DiagnosticPlay = 1U,
     Controls = 2U,
+    AssetTopology = 3U,
 };
 
 enum class DiagnosticMenuRow : std::uint8_t
 {
     StartDiagnosticPlay = 0U,
     ShowControls = 1U,
-    ReservedProjectTwo = 2U,
+    ShowAssetTopology = 2U,
 };
 
 // Small owned app-layer value. It has no service, platform, renderer, or retail-data lifetime.
@@ -77,7 +79,7 @@ struct DiagnosticMenuInputEdges
     {
     case DiagnosticMenuRow::StartDiagnosticPlay:
     case DiagnosticMenuRow::ShowControls:
-    case DiagnosticMenuRow::ReservedProjectTwo:
+    case DiagnosticMenuRow::ShowAssetTopology:
         return true;
     }
     return false;
@@ -85,17 +87,18 @@ struct DiagnosticMenuInputEdges
 
 // [any thread; reentrant] Consumes already-routed logical press edges. Invalid input state fails
 // closed to the initial main menu before considering any edge. Primary has priority over
-// navigation; the controls screen returns to its main-menu row on primary; simultaneous
-// previous/next edges are neutral; main-menu navigation clamps at both bounds.
+// navigation; each modal project screen returns to its own main-menu row on primary;
+// simultaneous previous/next edges are neutral; main-menu navigation clamps at both bounds.
 [[nodiscard]] constexpr DiagnosticMenuState UpdateDiagnosticMenu(
     DiagnosticMenuState state, const DiagnosticMenuInputEdges input) noexcept
 {
     const bool valid_mode = state.mode == DiagnosticMenuMode::MainMenu ||
                             state.mode == DiagnosticMenuMode::DiagnosticPlay ||
-                            state.mode == DiagnosticMenuMode::Controls;
+                            state.mode == DiagnosticMenuMode::Controls ||
+                            state.mode == DiagnosticMenuMode::AssetTopology;
     const bool valid_row = state.selected_row == DiagnosticMenuRow::StartDiagnosticPlay ||
                            state.selected_row == DiagnosticMenuRow::ShowControls ||
-                           state.selected_row == DiagnosticMenuRow::ReservedProjectTwo;
+                           state.selected_row == DiagnosticMenuRow::ShowAssetTopology;
     if (!valid_mode || !valid_row)
         return InitialDiagnosticMenuState();
 
@@ -110,10 +113,19 @@ struct DiagnosticMenuInputEdges
                 .selected_row = DiagnosticMenuRow::ShowControls,
             };
         }
+        if (state.mode == DiagnosticMenuMode::AssetTopology)
+        {
+            return DiagnosticMenuState{
+                .mode = DiagnosticMenuMode::MainMenu,
+                .selected_row = DiagnosticMenuRow::ShowAssetTopology,
+            };
+        }
         if (state.selected_row == DiagnosticMenuRow::StartDiagnosticPlay)
             state.mode = DiagnosticMenuMode::DiagnosticPlay;
         else if (state.selected_row == DiagnosticMenuRow::ShowControls)
             state.mode = DiagnosticMenuMode::Controls;
+        else if (state.selected_row == DiagnosticMenuRow::ShowAssetTopology)
+            state.mode = DiagnosticMenuMode::AssetTopology;
         return state;
     }
 
@@ -125,7 +137,7 @@ struct DiagnosticMenuInputEdges
 
     if (input.previous_pressed)
     {
-        if (state.selected_row == DiagnosticMenuRow::ReservedProjectTwo)
+        if (state.selected_row == DiagnosticMenuRow::ShowAssetTopology)
             state.selected_row = DiagnosticMenuRow::ShowControls;
         else if (state.selected_row == DiagnosticMenuRow::ShowControls)
             state.selected_row = DiagnosticMenuRow::StartDiagnosticPlay;
@@ -135,7 +147,7 @@ struct DiagnosticMenuInputEdges
         if (state.selected_row == DiagnosticMenuRow::StartDiagnosticPlay)
             state.selected_row = DiagnosticMenuRow::ShowControls;
         else if (state.selected_row == DiagnosticMenuRow::ShowControls)
-            state.selected_row = DiagnosticMenuRow::ReservedProjectTwo;
+            state.selected_row = DiagnosticMenuRow::ShowAssetTopology;
     }
     return state;
 }
@@ -147,6 +159,14 @@ struct DiagnosticMenuInputEdges
 // [any thread; reentrant] Returns a fully owned, project-generated opaque RGBA8 controls card.
 // It performs no file I/O and consumes no platform object, decoded asset, or retail input.
 [[nodiscard]] runtime::DebugImage BuildProjectDiagnosticControlsImage();
+
+// [any thread; reentrant] Builds the exact project-owned E-0066 three-block topology fixture and
+// returns its fully owned metadata-only diagnostic image. It performs no file I/O, asset-service
+// request, platform work, or retail-data access. Fixture and output allocation failures are
+// reported through the existing fixed topology-image error contract.
+[[nodiscard]] std::expected<runtime::DebugImage,
+    runtime::TextureStorageTopologyDebugImageError>
+BuildProjectDiagnosticAssetTopologyImage();
 
 static_assert(std::is_trivially_copyable_v<DiagnosticMenuState>);
 static_assert(std::is_standard_layout_v<DiagnosticMenuState>);

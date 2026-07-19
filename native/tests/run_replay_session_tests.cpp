@@ -1122,6 +1122,129 @@ void CheckDiagnosticMenuModalGate()
               modal.debug_locomotion_position() == Position3{},
         "activation schedules only its own elapsed sample after large modal time is discarded");
 
+    constexpr std::array primary_up{
+        InputTransition{.code = 2U, .pressed = false}};
+    constexpr std::array previous_down{
+        InputTransition{.code = 0U, .pressed = true}};
+    constexpr std::array previous_up_primary_down{
+        InputTransition{.code = 0U, .pressed = false},
+        InputTransition{.code = 2U, .pressed = true},
+    };
+    const std::array topology_frames{
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = no_transitions},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up_previous_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = previous_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = previous_down},
+        ScriptedElapsedFrame{.elapsed = milliseconds{15},
+            .transitions = previous_up_primary_down},
+    };
+    constexpr DiagnosticMenuState topology_row{
+        .mode = DiagnosticMenuMode::AssetTopology,
+        .selected_row = DiagnosticMenuRow::ShowAssetTopology,
+    };
+    constexpr DiagnosticMenuState main_row_two{
+        .mode = DiagnosticMenuMode::MainMenu,
+        .selected_row = DiagnosticMenuRow::ShowAssetTopology,
+    };
+    constexpr DiagnosticMenuState main_row_one{
+        .mode = DiagnosticMenuMode::MainMenu,
+        .selected_row = DiagnosticMenuRow::ShowControls,
+    };
+    constexpr std::array expected_topology_modal_states{
+        topology_row,
+        topology_row,
+        topology_row,
+        main_row_two,
+        main_row_one,
+        main_row_one,
+        omega::app::InitialDiagnosticMenuState(),
+    };
+    constexpr std::array expected_topology_primary_held{
+        true, true, false, true, false, false, false,
+    };
+    constexpr std::array expected_topology_primary_pressed{
+        true, false, false, true, false, false, false,
+    };
+    constexpr std::array expected_topology_primary_released{
+        false, false, true, false, true, false, false,
+    };
+    RunCaptureTracePair topology_pair =
+        BuildScriptedPair(menu_actions, topology_frames);
+    RunReplaySessionConfig topology_config = ValidConfig();
+    topology_config.enable_debug_locomotion = true;
+    topology_config.initial_diagnostic_menu_state = main_row_two;
+    auto topology_created =
+        RunReplaySession::Create(std::move(topology_pair), topology_config);
+    RunReplaySession topology =
+        TakeSession(topology_created, "the asset-topology modal replay is created");
+    const auto topology_scheduler_origin = topology.scheduler_state();
+    const auto topology_world_origin = topology.simulation_state();
+    const auto topology_position_origin = topology.debug_locomotion_position();
+    for (std::size_t index = 0U;
+         index < expected_topology_modal_states.size(); ++index)
+    {
+        auto frame = topology.Next();
+        const auto plan = frame ? frame->frame_plan() : std::nullopt;
+        Check(frame && frame->elapsed() == std::chrono::seconds{4} && plan &&
+                  frame->input().IsHeld(
+                      omega::app::kDiagnosticMenuPrimaryAction) ==
+                      expected_topology_primary_held[index] &&
+                  frame->input().WasPressed(
+                      omega::app::kDiagnosticMenuPrimaryAction) ==
+                      expected_topology_primary_pressed[index] &&
+                  frame->input().WasReleased(
+                      omega::app::kDiagnosticMenuPrimaryAction) ==
+                      expected_topology_primary_released[index] &&
+                  plan->simulation_steps == 0U &&
+                  plan->interpolation_alpha == 0.0 && !plan->clamped_delta &&
+                  !plan->dropped_time &&
+                  topology.diagnostic_menu_state() ==
+                      expected_topology_modal_states[index] &&
+                  topology.scheduler_state() == topology_scheduler_origin &&
+                  SameSimulation(topology.simulation_state(), topology_world_origin) &&
+                  topology.debug_locomotion_position() == topology_position_origin,
+            "asset-topology entry, held/release edges, return, and navigation discard elapsed and freeze every simulation owner");
+    }
+    auto topology_activated = topology.Next();
+    const auto topology_activated_plan =
+        topology_activated ? topology_activated->frame_plan() : std::nullopt;
+    const auto topology_activated_scheduler = topology.scheduler_state();
+    const auto topology_activated_world = topology.simulation_state();
+    Check(topology_activated &&
+              topology_activated->elapsed() == milliseconds{15} &&
+              topology_activated_plan &&
+              topology_activated_plan->simulation_steps == 1U &&
+              topology_activated_plan->interpolation_alpha == 0.5 &&
+              !topology_activated_plan->clamped_delta &&
+              !topology_activated_plan->dropped_time &&
+              topology.diagnostic_menu_state() == DiagnosticMenuState{} &&
+              topology_activated_scheduler &&
+              *topology_activated_scheduler == FrameSchedulerState{
+                  .config = topology_config.scheduler,
+                  .accumulated_remainder = milliseconds{5},
+                  .total_planned_steps = 1U,
+              } &&
+              topology_activated_world &&
+              SameSimulation(*topology_activated_world,
+                  SimulationState{
+                      .completed_steps = 1U,
+                      .simulated_time = milliseconds{10},
+                      .alive_entities = 1U,
+                  }) &&
+              topology.debug_locomotion_position() == Position3{} &&
+              topology.state() == RunReplaySessionState::Complete,
+        "diagnostic play resumes with only its own elapsed after every asset-topology sample is discarded");
+
     constexpr std::array open_with_forward{
         InputTransition{.code = 0U, .pressed = true},
         InputTransition{.code = 2U, .pressed = true},
@@ -1195,8 +1318,8 @@ void CheckDiagnosticMenuModalGate()
     RunReplaySessionConfig terminal_config = ValidConfig();
     terminal_config.enable_debug_locomotion = true;
     terminal_config.initial_diagnostic_menu_state = DiagnosticMenuState{
-        .mode = DiagnosticMenuMode::Controls,
-        .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+        .mode = DiagnosticMenuMode::AssetTopology,
+        .selected_row = DiagnosticMenuRow::ShowAssetTopology,
     };
     auto terminal_created =
         RunReplaySession::Create(std::move(terminal_pair), terminal_config);
@@ -1217,7 +1340,7 @@ void CheckDiagnosticMenuModalGate()
               terminal.debug_locomotion_position() == terminal_position_before &&
               terminal.state() == RunReplaySessionState::Complete &&
               terminal.remaining_frames() == 0U,
-        "terminal resolution precedes the reducer and cannot return a controls state or mutate any simulation owner");
+        "terminal resolution precedes the reducer and cannot return from the asset-topology state or mutate any simulation owner");
 }
 
 void CheckMoveLifecycle()

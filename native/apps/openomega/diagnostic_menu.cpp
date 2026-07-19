@@ -3,6 +3,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <new>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace omega::app
@@ -37,7 +40,7 @@ constexpr Color kAmberColor{
 
 // Project-authored 3x5 block masks for the diagnostic labels below. Each row's three mask bits are
 // read left-to-right after integer promotion; no font or external glyph data is involved.
-constexpr std::array<Glyph, 24U> kDiagnosticGlyphs{{
+constexpr std::array<Glyph, 25U> kDiagnosticGlyphs{{
     {'A', {{0b010U, 0b101U, 0b111U, 0b101U, 0b101U}}},
     {'C', {{0b011U, 0b100U, 0b100U, 0b100U, 0b011U}}},
     {'D', {{0b110U, 0b101U, 0b101U, 0b101U, 0b110U}}},
@@ -58,6 +61,7 @@ constexpr std::array<Glyph, 24U> kDiagnosticGlyphs{{
     {'U', {{0b101U, 0b101U, 0b101U, 0b101U, 0b111U}}},
     {'V', {{0b101U, 0b101U, 0b101U, 0b101U, 0b010U}}},
     {'W', {{0b101U, 0b101U, 0b101U, 0b111U, 0b101U}}},
+    {'Y', {{0b101U, 0b101U, 0b010U, 0b010U, 0b010U}}},
     {'1', {{0b010U, 0b110U, 0b010U, 0b010U, 0b111U}}},
     {'2', {{0b110U, 0b001U, 0b010U, 0b100U, 0b111U}}},
     {'/', {{0b001U, 0b001U, 0b010U, 0b100U, 0b100U}}},
@@ -163,6 +167,97 @@ void DrawOpenOmegaHeader(runtime::DebugImage& image) noexcept
     DrawLabel(image, "OMEGA", 8U, 14U);
     FillRectangle(image, 36U, 10U, 116U, 16U, kAmberColor);
 }
+
+[[nodiscard]] std::size_t TopologyPayloadSize(const std::uint32_t width,
+    const std::uint32_t height,
+    const asset::TextureTransferElementEncoding encoding) noexcept
+{
+    const std::size_t area = static_cast<std::size_t>(width) * height;
+    switch (encoding)
+    {
+    case asset::TextureTransferElementEncoding::Packed4:
+        return area / 2U + area % 2U;
+    case asset::TextureTransferElementEncoding::Packed8:
+        return area;
+    case asset::TextureTransferElementEncoding::Packed24:
+        return area * 3U;
+    case asset::TextureTransferElementEncoding::Packed32:
+        return area * 4U;
+    }
+    return 0U;
+}
+
+[[nodiscard]] asset::TextureStoragePlaneIR MakeTopologyPlane(
+    const asset::TextureTransferElementEncoding encoding,
+    const std::uint32_t width = 1U, const std::uint32_t height = 1U)
+{
+    return asset::TextureStoragePlaneIR{
+        .width = width,
+        .height = height,
+        .element_encoding = encoding,
+        .bytes = std::vector<std::byte>(
+            TopologyPayloadSize(width, height, encoding), std::byte{0x5aU}),
+    };
+}
+
+[[nodiscard]] asset::TexturePaletteStorageIR MakeTopologyPalette(
+    const std::uint32_t width, const std::uint32_t height)
+{
+    asset::TexturePaletteStorageIR palette{
+        .width = width,
+        .height = height,
+        .entries = std::vector<std::array<std::byte, 4U>>(
+            static_cast<std::size_t>(width) * height),
+    };
+    for (auto& entry : palette.entries)
+    {
+        entry = {std::byte{0x35U}, std::byte{0x71U},
+            std::byte{0xa4U}, std::byte{0xffU}};
+    }
+    return palette;
+}
+
+[[nodiscard]] asset::TextureStorageIR MakeProjectDiagnosticTopologyStorage()
+{
+    asset::TextureStorageBlockIR first{
+        .planes = {
+            MakeTopologyPlane(asset::TextureTransferElementEncoding::Packed4, 3U, 3U),
+            MakeTopologyPlane(asset::TextureTransferElementEncoding::Packed8, 2U, 3U),
+            MakeTopologyPlane(asset::TextureTransferElementEncoding::Packed24, 2U, 2U),
+            MakeTopologyPlane(asset::TextureTransferElementEncoding::Packed32, 2U, 2U),
+        },
+        .palette = MakeTopologyPalette(2U, 2U),
+    };
+    asset::TextureStorageBlockIR second{
+        .planes = {
+            MakeTopologyPlane(asset::TextureTransferElementEncoding::Packed32),
+            MakeTopologyPlane(asset::TextureTransferElementEncoding::Packed4, 3U, 1U),
+        },
+    };
+    asset::TextureStorageBlockIR third{
+        .planes = {
+            MakeTopologyPlane(asset::TextureTransferElementEncoding::Packed8, 3U, 2U),
+        },
+        .palette = MakeTopologyPalette(1U, 2U),
+    };
+    return asset::TextureStorageIR{
+        .width = 64U,
+        .height = 32U,
+        .sample_encoding = asset::TextureSampleEncoding::Indexed8,
+        .blocks = {std::move(first), std::move(second), std::move(third)},
+    };
+}
+
+[[nodiscard]] constexpr runtime::TextureStorageTopologyDebugImageError
+TopologyAllocationError() noexcept
+{
+    constexpr auto code =
+        runtime::TextureStorageTopologyDebugImageErrorCode::AllocationFailed;
+    return runtime::TextureStorageTopologyDebugImageError{
+        .code = code,
+        .message = runtime::TextureStorageTopologyDebugImageErrorMessage(code),
+    };
+}
 } // namespace
 
 runtime::DebugImage BuildProjectDiagnosticMenuImage()
@@ -184,7 +279,7 @@ runtime::DebugImage BuildProjectDiagnosticMenuImage()
     DrawLabel(image, "CONTROLS", 16U, 45U);
     FillRectangle(image, 8U, 58U, 88U, 68U, kSlateColor);
     FillRectangle(image, 8U, 58U, 12U, 68U, kCyanColor);
-    DrawLabel(image, "RESERVED SLOT 2", 16U, 60U);
+    DrawLabel(image, "ASSET TOPOLOGY", 16U, 60U);
 
     return image;
 }
@@ -206,5 +301,25 @@ runtime::DebugImage BuildProjectDiagnosticControlsImage()
     DrawLabel(image, "F1 RETURN", 12U, 55U);
     DrawLabel(image, "ESC QUIT", 12U, 62U);
     return image;
+}
+
+std::expected<runtime::DebugImage,
+    runtime::TextureStorageTopologyDebugImageError>
+BuildProjectDiagnosticAssetTopologyImage()
+{
+    try
+    {
+        const asset::TextureStorageIR storage =
+            MakeProjectDiagnosticTopologyStorage();
+        return runtime::BuildTextureStorageTopologyDebugImage(storage);
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected(TopologyAllocationError());
+    }
+    catch (const std::length_error&)
+    {
+        return std::unexpected(TopologyAllocationError());
+    }
 }
 } // namespace omega::app

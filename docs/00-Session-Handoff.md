@@ -777,6 +777,27 @@ shipping dependencies or execution mechanisms.
     or storage view. This is test-only integration. No source is selected at startup, and no image is
     connected to `OmegaApp`, a GPU upload, a draw list, a material, or geometry. It establishes no
     retail display, channel, alpha, nibble, palette, swizzle, placement, or visibility behavior.
+53. E-0068 promotes project row two to a complete zero-file `ASSET TOPOLOGY` diagnostic screen.
+    `DiagnosticMenuMode::AssetTopology` is byte 3 and `DiagnosticMenuRow::ShowAssetTopology` remains
+    byte 2. Primary enters from main row two and returns every valid topology row to main row two;
+    invalid mode/row state still fails closed, primary keeps priority, and existing clamped,
+    simultaneous-neutral navigation is unchanged. Simulation remains enabled only in a valid
+    `DiagnosticPlay` state, so live and opt-in replay discard topology elapsed without later
+    catch-up, while capture retains raw elapsed and terminal handling precedes reduction.
+    The main card now labels row two `ASSET TOPOLOGY` and has exact background/cyan/slate/amber
+    populations 3,739/1,481/3,516/480 with FNV-1a-64 `0xf37b700c33071a92`.
+    A no-input builder creates the exact E-0066 public three-block fixture and returns the same owned
+    96x32/12,288-byte topology raster, populations 2,667/372/23/10, and FNV-1a-64
+    `0xb56c8db088c5a9fe`. Fixture and adapter allocation failures use the existing typed allocation
+    category. Construction happens before SDL/platform/audio/GPU creation. The host then uploads the
+    image after menu and controls, retaining one optional-base-plus-topology `Contain`/`Nearest`
+    list. Zero-file startup owns exactly three uploads, three resident textures, and 86,016 logical
+    bytes. Lists clear before reverse-order topology/controls/menu/optional-base release.
+    The real Direct3D12 test reads sixteen exact topology texels and exercises entry, held/released
+    primary, terminal precedence, return, and no-catch-up behavior. No arbitrary retail source,
+    per-frame image work, AssetService/LevelTextureStore API, action/binding, trace/checkpoint,
+    persistence, CLI, file/wire/stable-ABI schema, material, geometry, or display interpretation is
+    added.
 
 ## Disc observations
 

@@ -327,6 +327,34 @@ list, or associate texture storage with a catalog name, material, mesh, or cell.
 channel/alpha conversion, nibble order, palette permutation, swizzle, placement, visibility, and
 retail behavior remain outside the boundary.
 
+E-0068 adds a separate zero-file app presentation over the same adapter. The app-core
+`BuildProjectDiagnosticAssetTopologyImage` function owns and builds the exact public E-0066
+three-block fixture, then returns the adapter's independently owned `DebugImage`. The call is
+reentrant, has no arguments or I/O, and translates fixture-vector `bad_alloc`/`length_error` into
+the existing typed topology `AllocationFailed` category. `OmegaApp::Create` performs this build
+after non-platform services and before `SdlPlatformService::Create`; a typed failure therefore
+causes no SDL, audio, or GPU mutation. No `AssetService`, `LevelTextureStore`, decoder, locator, or
+retail source participates.
+
+The app then creates SDL/audio/GPU owners in the existing order and uploads optional spatial, menu,
+controls, and topology textures in that order. The topology command uses full normalized source,
+the existing menu target, `Contain`, and `Nearest`. Its immutable draw list copies the optional base
+prefix and appends exactly that command. Main-menu row two enters byte-3 `AssetTopology`, every valid
+topology row returns to byte-2 `ShowAssetTopology`, and invalid rows select the hidden list. No
+per-frame image build, upload, list construction, or allocation occurs. Zero-file ownership is
+exactly three textures/uploads and 86,016 logical bytes. Destruction clears topology, controls,
+visible, and hidden lists before releasing topology, controls, menu, and optional base handles in
+reverse upload order; host-authoritative fallback cleanup remains intact.
+
+The card label `ASSET TOPOLOGY` yields exact 128x72 background/cyan/slate/amber populations
+3,739/1,481/3,516/480 and FNV-1a-64 `0xf37b700c33071a92`. The topology raster remains the E-0066
+96x32/12,288-byte value with populations 2,667/372/23/10 and FNV-1a-64
+`0xb56c8db088c5a9fe`. Live and opt-in replay reuse the existing terminal-before-reducer and
+reducer-before-elapsed-gate order, so topology frames retain captured raw elapsed but schedule zero,
+freeze world/locomotion state, and never accumulate catch-up time. This is synthetic developer
+presentation only; it establishes no texture expansion, material/geometry association, placement,
+visibility, retail UI, or PCSX2-equivalence semantics.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

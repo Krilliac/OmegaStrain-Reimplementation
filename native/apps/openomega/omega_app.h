@@ -98,10 +98,12 @@ private:
         runtime::RenderTextureHandle diagnostic_texture,
         runtime::RenderTextureHandle diagnostic_menu_texture,
         runtime::RenderTextureHandle diagnostic_controls_texture,
+        runtime::RenderTextureHandle diagnostic_asset_topology_texture,
         runtime::RenderDrawList diagnostic_hidden_draw_list,
         std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
             diagnostic_visible_draw_lists,
-        runtime::RenderDrawList diagnostic_controls_draw_list) noexcept;
+        runtime::RenderDrawList diagnostic_controls_draw_list,
+        runtime::RenderDrawList diagnostic_asset_topology_draw_list) noexcept;
 
     // Declaration order is ownership order; destruction is the required reverse order.
     std::unique_ptr<runtime::ConfigStore> config_;
@@ -125,11 +127,13 @@ private:
     runtime::RenderTextureHandle diagnostic_texture_;
     runtime::RenderTextureHandle diagnostic_menu_texture_;
     runtime::RenderTextureHandle diagnostic_controls_texture_;
+    runtime::RenderTextureHandle diagnostic_asset_topology_texture_;
     // Immutable non-owning draw data, retained independently from the explicit release handles.
     runtime::RenderDrawList diagnostic_hidden_draw_list_;
     std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
         diagnostic_visible_draw_lists_;
     runtime::RenderDrawList diagnostic_controls_draw_list_;
+    runtime::RenderDrawList diagnostic_asset_topology_draw_list_;
     // Project-owned app-layer state. It has no renderer or retail-data lifetime.
     DiagnosticMenuState diagnostic_menu_state_;
 };
