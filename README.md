@@ -644,6 +644,20 @@ retail instruction blocks, or PS2 execution layer.
   complete entry/hold/release/terminal/return modal lifecycle without adding a per-frame upload or
   allocation. No action/binding, capture/replay schema, CLI, asset-service, decoder, material,
   geometry, or retail display behavior changes.
+- E-0069 adds conventional confirmation aliases without changing the logical input contract.
+  Keyboard Return, keypad Enter, and gamepad South join F1 and gamepad Start as five physical
+  bindings for the existing action 6. The complete host table is 15 physical bindings over the
+  unchanged six sorted logical actions. Existing first-down/last-up tracking means a second alias
+  cannot repeat a press and one release cannot end action 6 while another alias remains held.
+  Capture still records one action-6 row without physical provenance, and replay consumes that row
+  through the unchanged reducer, terminal-before-reducer order, and modal elapsed gate.
+  The generated legends now read `F1/ENTER` and `F1/ENTER RETURN`. The main card's exact
+  background/cyan/slate/amber populations are 3,725/1,495/3,516/480 with FNV-1a-64
+  `0x0a1373c69c8bcce2`; the Controls card's are 2,104/1,381/5,318/413 with FNV-1a-64
+  `0xd57a5b0500696505`. Dimensions, full opacity, three uploads, three resident textures, 86,016
+  logical bytes, draw lists, topology raster, failure ordering, and teardown remain unchanged.
+  These project-owned aliases and labels establish no retail input map or platform-specific
+  button-name claim.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

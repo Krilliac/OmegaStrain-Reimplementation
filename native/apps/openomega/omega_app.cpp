@@ -96,8 +96,23 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
             .action = kDiagnosticMenuToggleAction,
         },
         runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_RETURN),
+            .action = kDiagnosticMenuToggleAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_KP_ENTER),
+            .action = kDiagnosticMenuToggleAction,
+        },
+        runtime::InputBinding{
             .device = runtime::InputDevice::GamepadButton,
             .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_START),
+            .action = kDiagnosticMenuToggleAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::GamepadButton,
+            .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_SOUTH),
             .action = kDiagnosticMenuToggleAction,
         },
         runtime::InputBinding{

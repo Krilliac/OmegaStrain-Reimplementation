@@ -751,6 +751,14 @@ topology texels and the full entry/hold/release/terminal/return lifecycle. No re
 per-frame allocation, action/binding, trace schema, asset-service API, material, geometry, or display
 semantics are added.
 
+E-0069 makes the synthetic frontend conventionally confirmable without expanding its logical
+schema. Return, keypad Enter, and gamepad South join F1 and gamepad Start on action 6, producing 15
+physical bindings and the same six unique actions. First-down/last-up aggregation prevents alias
+repeat or premature release, while capture/replay, terminal priority, modal timing, resources, and
+teardown remain unchanged. Project-generated legends become `F1/ENTER` and `F1/ENTER RETURN`; the
+main and Controls hashes become `0x0a1373c69c8bcce2` and `0xd57a5b0500696505`. This improves native
+main-menu usability without asserting a retail input map or platform-specific gamepad label.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

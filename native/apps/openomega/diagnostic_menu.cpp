@@ -267,7 +267,7 @@ runtime::DebugImage BuildProjectDiagnosticMenuImage()
     // Synthetic title region and fixed control legend.
     DrawOpenOmegaHeader(image);
     DrawLabel(image, "W/S SELECT", 8U, 22U);
-    DrawLabel(image, "F1 START", 52U, 22U);
+    DrawLabel(image, "F1/ENTER", 52U, 22U);
     DrawLabel(image, "ESC QUIT", 88U, 22U);
 
     // Three project-owned diagnostic rows. Selection remains a host-side geometric overlay.
@@ -298,7 +298,7 @@ runtime::DebugImage BuildProjectDiagnosticControlsImage()
     DrawLabel(image, "D RIGHT", 12U, 46U);
 
     FillRectangle(image, 8U, 54U, 120U, 68U, kSlateColor);
-    DrawLabel(image, "F1 RETURN", 12U, 55U);
+    DrawLabel(image, "F1/ENTER RETURN", 12U, 55U);
     DrawLabel(image, "ESC QUIT", 12U, 62U);
     return image;
 }

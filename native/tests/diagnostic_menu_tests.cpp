@@ -28,9 +28,9 @@ constexpr Color kAmberColor{
 // card contract. Both builders are hashed and reported at runtime so a future
 // intentional layout change has an actionable value.
 constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
-    UINT64_C(0xf37b700c33071a92);
+    UINT64_C(0x0a1373c69c8bcce2);
 constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
-    UINT64_C(0xa68873cc7444bdf6);
+    UINT64_C(0xd57a5b0500696505);
 constexpr std::uint64_t kExpectedDiagnosticAssetTopologyFnv1a64 =
     UINT64_C(0xb56c8db088c5a9fe);
 
@@ -513,7 +513,7 @@ int main()
             ++unknown_pixels;
     }
     Check(all_alpha_opaque, "every menu pixel has fully opaque alpha");
-    Check(background_pixels == 3'739U && cyan_pixels == 1'481U &&
+    Check(background_pixels == 3'725U && cyan_pixels == 1'495U &&
               slate_pixels == 3'516U && amber_pixels == 480U &&
               unknown_pixels == 0U,
         "the four project-authored colors have their exact independent pixel counts");
@@ -521,7 +521,7 @@ int main()
     constexpr std::array probe_coordinates{
         std::array{4U, 4U}, std::array{0U, 0U}, std::array{8U, 8U},
         std::array{9U, 8U}, std::array{40U, 12U}, std::array{8U, 23U},
-        std::array{9U, 22U}, std::array{52U, 22U}, std::array{9U, 30U},
+        std::array{9U, 22U}, std::array{62U, 22U}, std::array{9U, 30U},
         std::array{16U, 30U}, std::array{17U, 30U}, std::array{77U, 30U},
         std::array{16U, 45U}, std::array{17U, 45U}, std::array{68U, 60U},
         std::array{69U, 62U},
@@ -598,8 +598,8 @@ int main()
     Check(controls_alpha_opaque,
         "every controls-card pixel has fully opaque alpha");
     Check(controls_background_pixels == 2'104U &&
-              controls_cyan_pixels == 1'326U &&
-              controls_slate_pixels == 5'373U &&
+              controls_cyan_pixels == 1'381U &&
+              controls_slate_pixels == 5'318U &&
               controls_amber_pixels == 413U && controls_unknown_pixels == 0U,
         "the controls card has the exact independently calculated four-color histogram");
 
@@ -610,7 +610,7 @@ int main()
         std::array{9U, 8U}, std::array{40U, 12U}, std::array{43U, 11U},
         std::array{7U, 24U}, std::array{8U, 24U}, std::array{12U, 25U},
         std::array{13U, 32U}, std::array{13U, 39U}, std::array{12U, 46U},
-        std::array{8U, 52U}, std::array{8U, 54U}, std::array{12U, 55U},
+        std::array{8U, 52U}, std::array{8U, 54U}, std::array{22U, 55U},
         std::array{12U, 62U},
     };
     constexpr std::array controls_probe_colors{

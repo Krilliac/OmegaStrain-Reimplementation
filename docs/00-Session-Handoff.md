@@ -798,6 +798,21 @@ shipping dependencies or execution mechanisms.
     per-frame image work, AssetService/LevelTextureStore API, action/binding, trace/checkpoint,
     persistence, CLI, file/wire/stable-ABI schema, material, geometry, or display interpretation is
     added.
+54. E-0069 adds three conventional physical aliases to the existing project primary action without
+    changing any logical action identifier. Keyboard Return, keypad Enter, and gamepad South join
+    F1 and gamepad Start, yielding exactly 15 physical bindings over the same six sorted actions.
+    `InputTracker` retains first-down/last-up aggregation: pressing another alias while action 6 is
+    held emits no repeat edge, releasing a non-final alias emits no release, and only the last up
+    transition releases the logical action. The host consumes the same `WasPressed(6)` value, so
+    reducer priority, invalid-state handling, terminal precedence, modal gating, capture action
+    rows, and replay behavior are unchanged.
+    The zero-file cards advertise the keyboard aliases as `F1/ENTER` and `F1/ENTER RETURN` without
+    choosing a platform-specific name for gamepad South. The 128x72 main image has exact
+    background/cyan/slate/amber populations 3,725/1,495/3,516/480 and FNV-1a-64
+    `0x0a1373c69c8bcce2`; the Controls image has 2,104/1,381/5,318/413 and FNV-1a-64
+    `0xd57a5b0500696505`. Topology pixels, texture/draw ownership, three-upload and 86,016-byte
+    residency, failure order, and reverse teardown are unchanged. This is project frontend
+    usability only and establishes no retail confirmation mapping or controller-label semantics.
 
 ## Disc observations
 
