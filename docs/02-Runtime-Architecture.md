@@ -675,6 +675,39 @@ playback, scheduler timing or pacing, quit/run-control, simulation/gameplay stat
 host event/device capture, serialization, file/wire/stable ABI, concurrent recorder use, or retail
 limit, timing, or determinism semantics.
 
+E-0053 adds a bounded scheduler-elapsed capture boundary without selecting or reading a clock.
+`SchedulerElapsedTraceRecorder::Create` may run on any thread before publication. It validates
+configuration before allocation: capacity is 1 through the synthetic hard maximum of 65,536, and
+the configured contiguous `uint64_t` frame range cannot overflow. Creation pre-sizes one private
+`int64_t` elapsed-nanosecond record per slot. At maximum configuration, the 65,536 record elements
+contain exactly 524,288 bytes (512 KiB) of element payload. This excludes excess vector capacity,
+allocator/object overhead, and process RSS.
+
+After creation the recorder is an exclusive game-thread owner. Allocation-free `Append` records
+the exact caller-supplied signed nanoseconds without measuring, clamping, or interpretation;
+negative, zero, minimum, and maximum representation values remain data. Failure preserves the
+recorder and has invalid-recorder-state, capacity, then frame-discontinuity priority.
+Allocation-free expected `Finish` accepts an open zero-frame recorder, transfers the complete
+backing into a move-only immutable trace, and leaves the recorder inert. Custom nothrow moves
+normalize sources; copy and move assignment are deleted. `FrameAt` returns an owned active-frame
+value and returns `nullopt` outside the recorded range.
+
+After ownership publication, const trace reads are reentrant on any thread provided no read races
+a trace move or destruction. The recorder and trace are non-hot-reloadable. A paired
+`FrameScheduler` test feeds one scheduler the original elapsed sequence and an identically
+configured scheduler the owned values retrieved from the trace. Every tested `FramePlan`,
+accumulator state, total planned-step count, and total dropped time remains identical.
+
+The final MSVC build of the signed-nanosecond implementation completed with zero warnings or
+errors. The focused `omega_scheduler_elapsed_trace_tests` executable passed once plus 100/100
+repeated runs, and default CTest passed 22/22. The opt-in Direct3D12 configuration passed 23/23,
+after which registration was restored to `OFF` and the default list returned to 22 tests. The
+static native dependency gate passed 133 files, and all 204 tooling tests passed. Publication CI
+remains separate. This validation establishes no clock source or timestamp accuracy, `FramePlan`
+capture or checkpoint restoration, input alignment beyond caller indices, quit/run-control,
+simulation/gameplay, injection/replay/app wiring, CLI, persistence, file/wire/stable ABI, retail
+tick rate, or cross-configuration determinism.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a
