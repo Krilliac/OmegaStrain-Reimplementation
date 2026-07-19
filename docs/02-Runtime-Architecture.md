@@ -355,6 +355,26 @@ freeze world/locomotion state, and never accumulate catch-up time. This is synth
 presentation only; it establishes no texture expansion, material/geometry association, placement,
 visibility, retail UI, or PCSX2-equivalence semantics.
 
+E-0069 keeps physical confirmation aliases inside the existing SDL-to-neutral input leaf. The
+composition root adds keyboard Return, keypad Enter, and gamepad South beside F1 and gamepad Start;
+all five map to project action 6. `InputBindingTable` still exposes six unique sorted actions from
+exactly 15 physical bindings, and `InputTracker`'s per-control state plus per-action down count
+provides one first-down press and one last-up release across aliases. No platform code or reducer
+retains which physical control produced the logical row.
+
+`OmegaApp` and opt-in replay continue to query only `WasPressed(6)`. Captures therefore retain their
+six-row schema and omit physical provenance, while primary priority, terminal-before-reducer
+handling, reducer-before-modal-gate timing, and no-catch-up behavior remain unchanged. Binding-table
+validation still occurs before tracker, simulation, and SDL creation, and the added constexpr rows
+introduce no new typed failure or rollback path.
+
+The project cards replace only the keyboard legends with `F1/ENTER` and `F1/ENTER RETURN`. Their
+new exact FNV-1a-64 values are `0x0a1373c69c8bcce2` and `0xd57a5b0500696505`, with respective
+background/cyan/slate/amber populations 3,725/1,495/3,516/480 and 2,104/1,381/5,318/413. Image
+dimensions, full opacity, upload/list geometry, topology pixels, three-texture 86,016-byte zero-file
+residency, and reverse teardown remain unchanged. Gamepad South is intentionally not rendered as
+`A` or `Cross`; that naming is host-dependent and no retail controller mapping is claimed.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

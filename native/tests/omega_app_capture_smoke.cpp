@@ -202,6 +202,18 @@ struct OmegaAppTestAccess final
         return false;
     }
 
+    [[nodiscard]] static std::size_t InputBindingCount(
+        const OmegaApp& app) noexcept
+    {
+        return app.input_ ? app.input_->bindings().bindings().size() : 0U;
+    }
+
+    [[nodiscard]] static std::size_t InputActionCount(
+        const OmegaApp& app) noexcept
+    {
+        return app.input_ ? app.input_->bindings().actions().size() : 0U;
+    }
+
     [[nodiscard]] static std::uint64_t NextInputFrameIndex(
         const OmegaApp& app) noexcept
     {
@@ -451,10 +463,21 @@ int main()
     Check(OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
               static_cast<std::uint16_t>(SDL_SCANCODE_F1),
               omega::app::kDiagnosticMenuToggleAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_RETURN),
+                  omega::app::kDiagnosticMenuToggleAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_KP_ENTER),
+                  omega::app::kDiagnosticMenuToggleAction) &&
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
                   static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_START),
-                  omega::app::kDiagnosticMenuToggleAction),
-        "F1 and gamepad Start bind the project diagnostic-menu action 6");
+                  omega::app::kDiagnosticMenuToggleAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
+                  static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_SOUTH),
+                  omega::app::kDiagnosticMenuToggleAction) &&
+              OmegaAppTestAccess::InputBindingCount(*app) == 15U &&
+              OmegaAppTestAccess::InputActionCount(*app) == 6U,
+        "F1, both Enter keys, gamepad Start, and gamepad South share action 6 without changing the exact six-action schema");
 
     const omega::runtime::RenderTextureHandle diagnostic_texture =
         OmegaAppTestAccess::DiagnosticTexture(*app);
@@ -664,7 +687,7 @@ int main()
     constexpr std::array menu_probe_coordinates{
         std::array{4U, 4U}, std::array{0U, 0U}, std::array{8U, 8U},
         std::array{9U, 8U}, std::array{40U, 12U}, std::array{8U, 23U},
-        std::array{9U, 22U}, std::array{52U, 22U}, std::array{9U, 30U},
+        std::array{9U, 22U}, std::array{62U, 22U}, std::array{9U, 30U},
         std::array{16U, 30U}, std::array{17U, 30U}, std::array{77U, 30U},
         std::array{44U, 45U}, std::array{45U, 45U}, std::array{68U, 60U},
         std::array{69U, 62U},
@@ -750,7 +773,7 @@ int main()
         std::array{9U, 8U}, std::array{40U, 12U}, std::array{42U, 11U},
         std::array{43U, 11U}, std::array{8U, 23U}, std::array{12U, 25U},
         std::array{13U, 25U}, std::array{13U, 32U}, std::array{13U, 39U},
-        std::array{12U, 46U}, std::array{33U, 48U}, std::array{12U, 55U},
+        std::array{12U, 46U}, std::array{33U, 48U}, std::array{22U, 55U},
         std::array{12U, 62U},
     };
     constexpr std::array expected_controls_probe_readback{
@@ -950,14 +973,14 @@ int main()
     }
 
     bool movement_events_queued = PushEscape(false) &&
-                                  PushKey(SDL_SCANCODE_F1, true) &&
+                                  PushKey(SDL_SCANCODE_RETURN, true) &&
                                   PushKey(SDL_SCANCODE_W, true);
     // Keep the real SDL pump busy for longer than the minimum synthetic step without sleeping.
     // Duplicate level reports are explicitly accepted no-ops after the first held transition.
     for (std::size_t index = 0U; movement_events_queued && index < 2'048U; ++index)
         movement_events_queued = PushKey(SDL_SCANCODE_W, true);
     Check(movement_events_queued,
-        "the same-frame F1 and movement fixture enters the real SDL event queue");
+        "the same-frame Return and movement fixture enters the real SDL event queue");
     auto normal = app->RunWithCapture(1);
     Check(normal.has_value(), "a released quit action permits one captured render");
     if (!normal)
@@ -975,7 +998,7 @@ int main()
               normal_debug_position->x == 0 && normal_debug_position->y == 0 &&
               normal_debug_position->z == static_cast<std::int64_t>(
                   normal_result.executed_simulation_steps),
-        "one F1-plus-W frame enters diagnostic play and applies movement nonmodally");
+        "one Return-plus-W frame enters diagnostic play and applies movement nonmodally");
     const omega::app::GpuHostSnapshot normal_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(OmegaAppTestAccess::DiagnosticMenu(*app) ==
@@ -1062,7 +1085,7 @@ int main()
                   captured_forward->held && captured_forward->pressed &&
                   !captured_forward->released && captured_menu_toggle->held &&
                   captured_menu_toggle->pressed && !captured_menu_toggle->released,
-            "normal capture records the exact six-action schema and simultaneous F1/W edges");
+            "normal capture records the exact six-action schema and simultaneous Return/W edges");
         if (captured_elapsed)
         {
             auto replay = omega::runtime::FrameScheduler::Create(normal_before.config);
@@ -1213,7 +1236,7 @@ int main()
     const std::uint64_t held_primary_index =
         OmegaAppTestAccess::NextInputFrameIndex(*app);
     Check(PushKey(SDL_SCANCODE_F1, true) && PushKey(SDL_SCANCODE_W, false),
-        "held primary and forward release enter the SDL queue");
+        "the F1 alias and forward release enter while Return keeps action 6 held");
     auto held_primary = app->RunWithCapture(1);
     Check(held_primary.has_value(), "held primary renders DiagnosticPlay once");
     if (!held_primary)
@@ -1228,31 +1251,85 @@ int main()
     Check(held_pair != nullptr &&
               held_pair->input_trace().first_frame_index() == held_primary_index &&
               held_action && held_action->held && !held_action->pressed &&
+              !held_action->released &&
               OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
               OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
                   position_after_primary &&
               IsOneHiddenMenuSubmission(normal_gpu, held_gpu),
-        "held action 6 does not repeat its press edge or reopen the menu");
+        "a second physical alias does not repeat the held action-6 press edge or reopen the menu");
 
-    Check(PushKey(SDL_SCANCODE_F1, false), "primary release enters the SDL queue");
-    Check(RunPlainFrame(), "primary release frame completes");
-    const omega::app::GpuHostSnapshot released_gpu =
+    const std::uint64_t nonfinal_release_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
+    Check(PushKey(SDL_SCANCODE_RETURN, false),
+        "Return releases while the F1 alias remains held");
+    auto nonfinal_release = app->RunWithCapture(1);
+    Check(nonfinal_release.has_value(),
+        "the non-final action-6 alias release captures");
+    if (!nonfinal_release)
+        return EXIT_FAILURE;
+    const auto* nonfinal_release_pair = nonfinal_release->trace_pair();
+    const auto nonfinal_release_action = nonfinal_release_pair != nullptr
+                                             ? nonfinal_release_pair->input_trace().ActionAt(
+                                                   0U, omega::app::kDiagnosticMenuPrimaryAction)
+                                             : std::nullopt;
+    const omega::app::GpuHostSnapshot nonfinal_release_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    Check(OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
-              IsOneHiddenMenuSubmission(held_gpu, released_gpu),
-        "primary release preserves DiagnosticPlay with a clear-only frame");
+    Check(nonfinal_release_pair != nullptr &&
+              nonfinal_release_pair->input_trace().first_frame_index() ==
+                  nonfinal_release_index &&
+              nonfinal_release_action && nonfinal_release_action->held &&
+              !nonfinal_release_action->pressed &&
+              !nonfinal_release_action->released &&
+              nonfinal_release->result().input_frames == 1U &&
+              nonfinal_release->result().rendered_frames == 1 &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
+              OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
+                  position_after_primary &&
+              IsOneHiddenMenuSubmission(held_gpu, nonfinal_release_gpu),
+        "releasing Return cannot release action 6 or mutate the menu while F1 remains held");
 
-    Check(PushKey(SDL_SCANCODE_F1, true), "fresh primary edge enters the SDL queue");
-    Check(RunPlainFrame(), "fresh primary frame completes");
+    const std::uint64_t final_release_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
+    Check(PushKey(SDL_SCANCODE_F1, false),
+        "the last held action-6 alias releases");
+    auto final_release = app->RunWithCapture(1);
+    Check(final_release.has_value(), "the final action-6 alias release captures");
+    if (!final_release)
+        return EXIT_FAILURE;
+    const auto* final_release_pair = final_release->trace_pair();
+    const auto final_release_action = final_release_pair != nullptr
+                                          ? final_release_pair->input_trace().ActionAt(
+                                                0U, omega::app::kDiagnosticMenuPrimaryAction)
+                                          : std::nullopt;
+    const omega::app::GpuHostSnapshot final_release_gpu =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    Check(final_release_pair != nullptr &&
+              final_release_pair->input_trace().first_frame_index() ==
+                  final_release_index &&
+              final_release_action && !final_release_action->held &&
+              !final_release_action->pressed && final_release_action->released &&
+              final_release->result().input_frames == 1U &&
+              final_release->result().rendered_frames == 1 &&
+              OmegaAppTestAccess::DiagnosticMenu(*app) == kDiagnosticPlayRowZero &&
+              OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
+                  position_after_primary &&
+              IsOneHiddenMenuSubmission(
+                  nonfinal_release_gpu, final_release_gpu),
+        "only the last physical alias release emits the logical action-6 release edge");
+
+    Check(PushKey(SDL_SCANCODE_KP_ENTER, true),
+        "a fresh keypad Enter primary edge enters the SDL queue");
+    Check(RunPlainFrame(), "the keypad Enter primary frame completes");
     const omega::app::GpuHostSnapshot reopened_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(OmegaAppTestAccess::DiagnosticMenu(*app) ==
                   omega::app::InitialDiagnosticMenuState() &&
               DrawListsEqual(OmegaAppTestAccess::CurrentDiagnosticDrawList(*app),
                   initial_visible_draw_lists[0]) &&
-              IsOneVisibleMenuSubmission(released_gpu, reopened_gpu),
-        "F1 reopens MainMenu at row zero with exactly two resident blits");
-    Check(PushKey(SDL_SCANCODE_F1, false), "reopened primary releases");
+              IsOneVisibleMenuSubmission(final_release_gpu, reopened_gpu),
+        "keypad Enter reopens MainMenu at row zero with exactly two resident blits");
+    Check(PushKey(SDL_SCANCODE_KP_ENTER, false),
+        "the reopened keypad Enter primary releases");
     Check(RunPlainFrame(), "reopened release frame completes");
 
     const std::uint64_t next_edge_index =
