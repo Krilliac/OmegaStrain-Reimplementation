@@ -405,6 +405,25 @@ retail instruction blocks, or PS2 execution layer.
   printing, replay, injection/playback, restore or delta interpretation, checkpoint, RNG state,
   rollback, interactive or zero-frame capture command, probe composition, ordinary-above-65,536
   execution claim, or retail timing or determinism semantics.
+- E-0057 adds the SDL-free `omega_runtime` `RunCaptureReplaySession`. The concrete move-only
+  session owns one moved `RunCaptureTracePair` and advances one exclusive game-thread cursor.
+  `Create` validates both leaf traces, shared capacity and origin, normal-versus-terminal frame
+  counts, and terminal reason/index before moving; rejection leaves the caller's pair unchanged.
+  Every successful `Next` publishes a `RunCaptureReplayFrame` that reconstructs the exact recorded
+  logical state as an owned immutable `InputSnapshot`, including its frame index, schema,
+  held/pressed/released masks, and accepted/rejected event counts. A normal frame owns the exact
+  signed elapsed value; a terminal frame owns the independent host-quit and logical-quit flags
+  instead, so a frame never exposes both.
+  `InputSnapshot` reconstruction allocation or defensive trace-read failure leaves the cursor
+  unchanged. Exhausted and moved-from sessions report distinct complete and invalid-state errors.
+  `RunCaptureOutcome::TakeTracePair` is rvalue-only and transfers its optional trace pair while
+  normalizing the whole outcome to the same inert state used after move construction, including
+  when no pair exists.
+  This is bounded in-process replay data access only. It adds no SDL, `OmegaApp`, or CLI replay
+  route; input injection or `InputTracker` mutation; synthetic physical events; scheduler creation,
+  feeding, pacing, clocking, or state restoration; simulation checkpointing, RNG restoration, or
+  world mutation; render, audio, or job work; persistence, serialization, file/wire/stable ABI, or
+  cross-process contract; seek, rewind, looping, rollback, or retail timing or determinism claim.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

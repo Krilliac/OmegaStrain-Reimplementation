@@ -149,6 +149,14 @@ const runtime::RunCaptureTracePair* RunCaptureOutcome::trace_pair() const noexce
     return trace_pair_ ? &*trace_pair_ : nullptr;
 }
 
+std::optional<runtime::RunCaptureTracePair>
+RunCaptureOutcome::TakeTracePair() && noexcept
+{
+    std::optional<runtime::RunCaptureTracePair> extracted = std::move(trace_pair_);
+    NormalizeInert();
+    return extracted;
+}
+
 std::optional<runtime::RunCaptureTerminalInput>
 RunCaptureOutcome::terminal_input() const noexcept
 {

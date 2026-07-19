@@ -9,6 +9,8 @@
 
 namespace omega::runtime
 {
+class RunCaptureReplaySession;
+
 // Neutral physical-device classes. Codes are opaque host-layer scancodes/button ordinals; the
 // runtime never interprets them. SDL (or any other host) translates its events into this model
 // before they cross into runtime code.
@@ -68,15 +70,16 @@ private:
     std::vector<std::uint32_t> actions_;
 };
 
-// Owned immutable per-frame action state. The tracker hands this to the game thread by value per
-// the architecture doc's immutable-packet rule; a snapshot never observes later frames.
+// Owned immutable per-frame action state. A tracker produces this by value, and replay can
+// reconstruct the same logical state; a snapshot never observes later frames.
 class InputSnapshot
 {
 public:
     // A default snapshot represents "no frame produced yet": no actions, every query false.
     InputSnapshot() = default;
 
-    // [any thread; reentrant] Index of the frame this snapshot closed (first EndFrame is 0).
+    // [any thread; reentrant] Logical frame index. A fresh tracker's first EndFrame is zero;
+    // replay preserves the captured origin.
     [[nodiscard]] std::uint64_t frame_index() const noexcept;
 
     // [any thread; reentrant] Registered action identifiers, ascending and unique.
@@ -102,6 +105,7 @@ public:
     [[nodiscard]] std::uint32_t rejected_event_count() const noexcept;
 
 private:
+    friend class RunCaptureReplaySession;
     friend class InputTracker;
 
     struct ActionRow
@@ -111,6 +115,12 @@ private:
         bool pressed = false;
         bool released = false;
     };
+
+    InputSnapshot(std::uint64_t frame_index,
+        std::span<const std::uint32_t> actions,
+        std::span<const ActionRow> rows,
+        std::uint32_t accepted_event_count,
+        std::uint32_t rejected_event_count);
 
     std::uint64_t frame_index_ = 0;
     std::vector<std::uint32_t> actions_;
