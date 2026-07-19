@@ -84,6 +84,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/log_service.cpp
     native/src/runtime/render_draw_list.cpp
     native/src/runtime/render_texture_pool.cpp
+    native/src/runtime/run_capture_session.cpp
     native/src/runtime/scheduler_elapsed_trace.cpp
     native/src/runtime/spatial_debug_image.cpp
     native/src/runtime/runtime_settings.cpp
@@ -390,6 +391,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_scheduler_elapsed_trace_tests COMMAND omega_scheduler_elapsed_trace_tests)
     set_tests_properties(omega_scheduler_elapsed_trace_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_run_capture_session_tests
+        native/tests/run_capture_session_tests.cpp
+    )
+    target_link_libraries(omega_run_capture_session_tests PRIVATE omega_runtime)
+    if(MSVC)
+        target_compile_options(omega_run_capture_session_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_run_capture_session_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_run_capture_session_tests COMMAND omega_run_capture_session_tests)
+    set_tests_properties(omega_run_capture_session_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_render_texture_pool_tests
         native/tests/render_texture_pool_tests.cpp

@@ -708,6 +708,46 @@ capture or checkpoint restoration, input alignment beyond caller indices, quit/r
 simulation/gameplay, injection/replay/app wiring, CLI, persistence, file/wire/stable ABI, retail
 tick rate, or cross-configuration determinism.
 
+E-0054 adds `RunCaptureSession`, an SDL-free `omega_runtime` coordinator that pairs the existing
+logical input and scheduler-elapsed traces. Creation accepts 1 through 65,536 frames and a
+contiguous leaf range that may end exactly at `UINT64_MAX`. It creates input backing first, elapsed
+backing second, and publishes no session unless both succeed. At the hard maximum, input records,
+the fixed action-schema backing, and elapsed records contain exactly 2,621,696 bytes of element
+payload. This excludes excess vector capacity, allocator/object overhead, and process RSS.
+
+After creation the session is an exclusive game-thread owner. Its phase machine accepts one input
+snapshot followed by either elapsed time or terminal input. Successful input capture retains the
+pending input index internally, so the elapsed caller supplies only a duration. A terminal owns
+that same index and two independent caller-supplied flags for host quit and logical quit; at least
+one flag must be true. The coordinator does not detect either condition itself. Each error carries
+an explicit operation stage, fixed session category text, and the exact optional input or elapsed
+leaf code. Phase checks run before argument or leaf checks. Every pretransition failure preserves
+the session and caller input, including a failed elapsed append that leaves its input pending.
+
+Expected rvalue `Finish` accepts either an open empty/balanced session or a terminal session. It
+rejects a pending unpaired input without consuming the session. Once a valid finalization starts
+leaf finish, the session is consumed even if a leaf reports failure; no rollback or external
+failure recovery is promised. Session and pair are move-only, use custom nothrow moves, delete move
+assignment, and normalize their sources to inert values. The immutable pair borrows const trace
+references until pair move or destruction and returns an owned optional terminal value. After
+ownership publication, pair const reads are reentrant on any thread provided no read races pair
+move or destruction. Session and pair are non-hot-reloadable.
+
+The final MSVC build completed with zero warnings or errors. The focused
+`omega_run_capture_session_tests` executable passed once plus 100/100 repeated runs, and default
+CTest passed 23/23. The opt-in Direct3D12 configuration passed 24/24, after which registration was
+restored to `OFF` and the default list returned to 23 tests. The static native dependency gate
+passed 136 files, and all 204 tooling tests passed. Publication CI remains separate.
+
+This is capture coordination only. It establishes no `OmegaApp` wiring, clock measurement,
+scheduler/`RunResult`/checkpoint capture, host quit detection beyond caller flags, CLI,
+simulation/render/audio behavior, persistence/file/wire/stable ABI, injection/playback/replay,
+external-failure recovery/rollback, concurrent session use, tracker-wide exhaustion guarantee, or
+retail limit, timing, or determinism semantics. The separately published
+`InputTracker::next_frame_index()` accessor exists only to support future app integration; it is
+not coordinator behavior. E-0055 must preflight a planned capture length `N` with `N`, not
+`N - 1`, before tracker-index wrap.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

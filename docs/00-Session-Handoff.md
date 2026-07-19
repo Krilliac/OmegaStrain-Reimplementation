@@ -424,6 +424,34 @@ shipping dependencies or execution mechanisms.
     alignment beyond caller indices, quit/run-control, simulation/gameplay, injection, replay, app
     wiring, CLI, persistence, file/wire/stable ABI, retail tick claim, or cross-configuration
     determinism.
+39. E-0054 adds the SDL-free `omega_runtime` `RunCaptureSession` coordinator. One shared
+    configuration validates capacity from 1 through 65,536 and a contiguous leaf range that may
+    end exactly at `UINT64_MAX`. `Create` constructs input backing before elapsed backing and
+    publishes a session only after both succeed. At the hard maximum, the paired input records,
+    fixed action-schema backing, and elapsed records contain exactly 2,621,696 bytes of element
+    payload, excluding excess vector capacity, allocator/object overhead, and process RSS.
+    The exclusive game-thread phase machine accepts input followed by elapsed or terminal input.
+    Elapsed capture uses the retained pending input index. A terminal owns that index plus
+    independent host-quit and logical-quit flags and requires at least one true reason. Errors
+    preserve an explicit operation stage, fixed session category, and exact optional leaf code.
+    Phase validation has priority, and every failure before a transition preserves coordinator and
+    caller state. An open empty session may finish; a pending unpaired input rejects finish without
+    consumption. Once valid leaf finalization begins, the session is consumed even if a leaf fails.
+    Session and immutable pair are move-only, use nothrow moves, and leave sources inert. The pair
+    lends trace references and returns an owned optional terminal value. Published pair reads are
+    reentrant on any thread when no read races pair move or destruction.
+    The final MSVC build completed with zero warnings or errors. The focused
+    `omega_run_capture_session_tests` executable passed once plus 100/100 repeated runs; default
+    CTest passed 23/23. The opt-in Direct3D12 configuration passed 24/24, was restored to `OFF`, and
+    left 23 tests in the default list. The static native dependency gate passed 136 files, and all
+    204 tooling tests passed. Publication CI remains separate.
+    This adds no `OmegaApp` wiring, clock measurement, scheduler/`RunResult`/checkpoint capture,
+    host quit detection beyond caller flags, CLI, simulation/render/audio work,
+    persistence/file/wire/stable ABI, injection/playback/replay, external-failure recovery or
+    rollback, concurrent session use, tracker-wide exhaustion guarantee, or retail limit, timing,
+    or determinism claim. The separately published `InputTracker::next_frame_index()` accessor is
+    future app-integration support, not coordinator behavior. E-0055 must preflight a requested
+    capture length `N` with `N`, not `N - 1`, before tracker-index wrap.
 
 ## Disc observations
 

@@ -439,6 +439,35 @@ capture/storage/query infrastructure only, not a clock source or timestamp-accur
 quit/run-control, simulation/gameplay, injection/replay/app wiring, CLI, persistence, a
 file/wire/stable ABI, retail tick claim, or cross-configuration determinism.
 
+E-0054 adds the SDL-free `omega_runtime` capture coordinator. One shared configuration validates a
+capacity of 1 through 65,536 and a contiguous leaf range that may end exactly at `UINT64_MAX`, then
+creates input backing before elapsed backing and publishes only after both succeed. Its exclusive
+game-thread phase machine pairs every input with elapsed or terminal input. Elapsed uses the
+internally retained input index; a terminal owns that index plus independent caller-supplied host
+and logical quit flags and requires at least one true reason. Errors retain the operation stage,
+fixed session category, and exact optional leaf code. Phase checks run first, and pretransition
+failures are atomic.
+
+An open empty session may finish, while pending input rejects finish without consumption. Valid
+finalization consumes the session once leaf finish begins. Session and immutable pair are move-only
+with nothrow moves and inert sources. The pair lends trace references and returns an owned optional
+terminal value. Published pair reads are reentrant on any thread when no read races pair move or
+destruction. At the hard maximum, the paired records and fixed schema backing contain exactly
+2,621,696 bytes of element payload, excluding excess vector capacity, allocator/object overhead,
+and process RSS.
+
+The final MSVC build completed with zero warnings or errors. The focused
+`omega_run_capture_session_tests` executable passed once plus 100/100 repeated runs; default CTest
+passed 23/23. The opt-in Direct3D12 configuration passed 24/24, was restored to `OFF`, and left 23
+tests in the default list. The static native dependency gate passed 136 files, and all 204 tooling
+tests passed. Publication CI remains separate. This is capture coordination only, not `OmegaApp`
+wiring, clock measurement, scheduler/`RunResult`/checkpoint capture, host quit detection beyond
+caller flags, CLI, simulation/render/audio, persistence/file/wire/stable ABI,
+injection/playback/replay, external-failure recovery/rollback, concurrent session use,
+tracker-wide exhaustion safety, or a retail limit, timing, or determinism claim. The separately
+published `InputTracker::next_frame_index()` accessor is future app-integration support only.
+E-0055 must preflight a requested length `N` with `N`, not `N - 1`, before tracker-index wrap.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.
