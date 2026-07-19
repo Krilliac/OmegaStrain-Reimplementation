@@ -540,6 +540,49 @@ is an in-process renderer-neutral policy, not a stable ABI, persistent/serialize
 or retail semantic. It establishes no framebuffer pixel identity, readback, color-space transfer,
 alpha or blending behavior, display expansion, or `TextureStorageIR`/`AssetService` asset bridge.
 
+E-0049 adds a private friend-only diagnostic seam rather than a stable renderer API.
+`SdlGpuHostTestAccess` can invoke `ReadbackClearForTesting` with an empty frame packet; all SDL
+handles remain inside `SdlGpuHost`, and the returned value is an owned four-element array of
+`RenderClearColorRgba8`. The operation mutates neither `GpuHostSnapshot` counters nor the portable
+texture pool.
+
+The synchronous probe first validates `R8G8B8A8_UNORM` as a two-dimensional color target with a
+four-byte texel, then converts the packet clear before acquiring command work. It owns a temporary
+2x2 color target and tightly packed 16-byte download transfer buffer. Both the production
+swapchain path and this offscreen path call one `RecordClearPass` helper with `LOADOP_CLEAR` and
+`STOREOP_STORE`. The probe ends that pass, records the texture download, takes the command buffer
+out of its cancel/submit guard before `SDL_SubmitGPUCommandBufferAndAcquireFence`, waits for the
+fence, maps only after completion, explicitly decodes four RGBA byte values, unmaps the transfer
+buffer, and releases the fence, transfer buffer, and target through bounded RAII ownership.
+Render- or copy-pass failure before submission cancels legally because no swapchain was acquired;
+after submission, the consumed command buffer is never reused or canceled.
+
+The public zero-file smoke reads back endpoint colors `{0, 255, 0, 255}` and
+`{255, 0, 255, 0}` exactly from every one of the four pixels and checks the complete host snapshot
+after each readback. A nonempty synthetic draw list returns exact error
+`clear readback requires an empty draw list` before any SDL/GPU call and likewise leaves the
+snapshot unchanged.
+
+A clean incremental MSVC build issued four compile requests with zero warnings or errors. One
+initial plus 20 repeated public zero-file `direct3d12` GPU smokes passed; every run preserved the
+established production totals of three uploads/640 cumulative logical bytes, three releases, two
+blit frames/four draws, one clear-only submission, one stale rejection, zero unavailable
+submissions, and zero residual residency. Default CTest passed 20/20. The opt-in configuration
+passed 21/21, was restored to `OFF`, and listed 20 default tests. A public two-frame D3D12
+`openomega` smoke passed with dummy audio. Windows, Linux, and public-tree CI are
+tracked separately from these local validation claims.
+
+This establishes exact storage/readback only for those two synthetic endpoint colors in the
+temporary offscreen target on the observed D3D12 path. The private seam is not a stable public
+readback or capture interface and exposes no backend resource. E-0049 establishes no swapchain,
+on-screen, presentation, sRGB/HDR, color-space transfer, or intermediate-value UNORM rounding
+guarantee and no guarantee for untested values; no alpha interpretation, blending, or composition
+semantics beyond the exact tested 0/255 alpha bytes; no blit/filter/source/target pixel correctness
+or other driver, platform, or hardware guarantee; no arbitrary backend-failure atomicity or production
+asynchronous queue, lifetime-pin, or fence contract; and no stable ABI, persistence,
+serialization, wire/plugin, measured GPU memory, performance, streaming/eviction,
+display-expansion, `TextureStorageIR`/`AssetService` binding, retail-rendering, or gameplay meaning.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

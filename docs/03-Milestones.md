@@ -316,6 +316,36 @@ unchanged. This in-process project value establishes no stable ABI, persistence,
 wire/plugin, retail, pixel/readback, color-space, alpha, blending, display-expansion, or
 `TextureStorageIR`/`AssetService` asset-binding contract.
 
+E-0049 adds one private friend-only synchronous clear-readback seam without changing the public
+renderer contract. An empty packet drives a temporary 2x2 `R8G8B8A8_UNORM` color target through
+the same `RecordClearPass` used for production swapchain clears. The host downloads 16 tightly
+packed bytes, disarms the command guard into fence-producing submission, waits, maps, explicitly
+decodes four owned RGBA8 pixels, unmaps the transfer buffer, and releases the fence, transfer
+buffer, and target through guards. It changes no production counter or portable texture residency.
+
+The public zero-file smoke reads back `{0, 255, 0, 255}` and `{255, 0, 255, 0}` exactly from all
+four pixels and proves complete snapshot invariance. A nonempty synthetic draw list fails before
+SDL/GPU work with exact error `clear readback requires an empty draw list` and also leaves the
+snapshot unchanged.
+
+A clean incremental MSVC build issued four compile requests with zero warnings or errors. One
+initial plus 20 repeated public zero-file `direct3d12` GPU smokes passed; every run preserved the
+established three uploads/640 cumulative logical bytes, three releases, two blit frames/four
+draws, one clear-only submission, one stale rejection, zero unavailable submissions, and zero
+residual residency. Default CTest passed 20/20. The opt-in configuration passed 21/21, was restored
+to OFF, and listed 20 default tests. A public two-frame D3D12 `openomega` smoke passed with dummy
+audio. Publication CI is tracked separately from these local validation claims.
+
+This confirms only those two synthetic endpoint values in a temporary offscreen target on the
+observed D3D12 path. It establishes no stable public readback API or exposed SDL handle; no
+swapchain/on-screen/presentation, sRGB/HDR, color-space, or intermediate-value rounding guarantee
+and no guarantee for untested values; no alpha interpretation, blending, or composition semantics
+beyond the exact tested 0/255 alpha bytes; no blit/filter or cross-backend pixel guarantee; no
+arbitrary backend-failure
+atomicity or production asynchronous queue/pin/fence contract; and no stable ABI, serialization,
+persistence, wire/plugin, measured GPU-memory, streaming/eviction, display-expansion,
+`TextureStorageIR`/`AssetService` binding, retail-rendering, or gameplay semantic.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

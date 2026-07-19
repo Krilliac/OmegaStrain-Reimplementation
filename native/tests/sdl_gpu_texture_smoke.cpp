@@ -11,10 +11,25 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <iostream>
 #include <string>
 #include <string_view>
 #include <utility>
+
+namespace omega::app::detail
+{
+struct SdlGpuHostTestAccess final
+{
+    [[nodiscard]] static std::expected<
+        std::array<runtime::RenderClearColorRgba8, 4U>, std::string>
+        ReadbackClearForTesting(
+            SdlGpuHost& host, const runtime::RenderFramePacket& packet)
+    {
+        return host.ReadbackClearForTesting(packet);
+    }
+};
+} // namespace omega::app::detail
 
 namespace
 {
@@ -111,6 +126,77 @@ int main()
         if (driver.empty())
             return Fail("GPU driver name is empty");
 
+        const omega::app::GpuHostSnapshot before_clear_readbacks = host.Snapshot();
+        omega::runtime::RenderFramePacket packet;
+        constexpr std::array endpoint_clear_colors{
+            omega::runtime::RenderClearColorRgba8{
+                .red = 0U,
+                .green = 255U,
+                .blue = 0U,
+                .alpha = 255U,
+            },
+            omega::runtime::RenderClearColorRgba8{
+                .red = 255U,
+                .green = 0U,
+                .blue = 255U,
+                .alpha = 0U,
+            },
+        };
+        for (const omega::runtime::RenderClearColorRgba8 clear_color :
+            endpoint_clear_colors)
+        {
+            packet.clear_color = clear_color;
+            auto readback = omega::app::detail::SdlGpuHostTestAccess::
+                ReadbackClearForTesting(host, packet);
+            if (!readback)
+                return Fail("clear readback failed", readback.error());
+            for (const omega::runtime::RenderClearColorRgba8 pixel : *readback)
+            {
+                if (pixel != clear_color)
+                    return Fail("clear readback did not preserve exact RGBA8 endpoints");
+            }
+            if (host.Snapshot() != before_clear_readbacks)
+                return Fail("clear readback mutated production host state");
+        }
+
+        constexpr omega::runtime::RenderTextureBlitCommand readback_rejection_command{
+            .texture = omega::runtime::RenderTextureHandle{
+                .pool_identity = 1U,
+                .generation = 1U,
+                .slot_index = 0U,
+            },
+            .source = omega::runtime::RenderSourceRectQ16{
+                .left = 0U,
+                .top = 0U,
+                .right = omega::runtime::kNormalizedRenderExtent,
+                .bottom = omega::runtime::kNormalizedRenderExtent,
+            },
+            .destination = omega::runtime::RenderTargetRectQ16{
+                .left = 0U,
+                .top = 0U,
+                .right = omega::runtime::kNormalizedRenderExtent,
+                .bottom = omega::runtime::kNormalizedRenderExtent,
+            },
+            .fit_mode = omega::runtime::RenderTextureFitMode::Contain,
+            .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+        };
+        const std::array readback_rejection_commands{readback_rejection_command};
+        auto readback_rejection_list =
+            omega::runtime::RenderDrawList::Create(readback_rejection_commands);
+        if (!readback_rejection_list)
+            return Fail("clear readback rejection draw-list creation failed");
+        packet.draw_list = *readback_rejection_list;
+        auto rejected_readback = omega::app::detail::SdlGpuHostTestAccess::
+            ReadbackClearForTesting(host, packet);
+        if (rejected_readback ||
+            rejected_readback.error() != "clear readback requires an empty draw list")
+        {
+            return Fail("clear readback accepted a nonempty draw list or returned the wrong error");
+        }
+        if (host.Snapshot() != before_clear_readbacks)
+            return Fail("rejected clear readback mutated production host state");
+
+        packet = omega::runtime::RenderFramePacket{};
         constexpr omega::runtime::RenderClearColorRgba8 clear_only_color{
             .red = 0U,
             .green = 128U,
@@ -143,7 +229,6 @@ int main()
                       first_blit_color != stale_rejection_color &&
                       second_blit_color != stale_rejection_color);
 
-        omega::runtime::RenderFramePacket packet;
         packet.clear_color = clear_only_color;
         if (!RenderUntil(host, packet,
                 [](const omega::app::GpuHostSnapshot& snapshot)

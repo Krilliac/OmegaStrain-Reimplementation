@@ -3,6 +3,7 @@
 #include "omega/runtime/render_frame_packet.h"
 #include "omega/runtime/render_texture.h"
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -13,6 +14,10 @@
 namespace omega::app
 {
 class SdlPlatformService;
+namespace detail
+{
+struct SdlGpuHostTestAccess;
+}
 
 // Aggregate-only main/render-thread diagnostics. Counters saturate instead of wrapping and expose
 // no backend pointer, pool identity, texture identity, input identity, or source metadata.
@@ -77,6 +82,14 @@ public:
     [[nodiscard]] std::string_view driver_name() const noexcept;
 
 private:
+    friend struct detail::SdlGpuHostTestAccess;
+
+    // [main/render thread, test access only] Returns four owned pixels from a temporary synthetic
+    // 2x2 RGBA8 clear target. No backend resource, production counter, or residency escapes.
+    [[nodiscard]] std::expected<
+        std::array<runtime::RenderClearColorRgba8, 4U>, std::string>
+        ReadbackClearForTesting(const runtime::RenderFramePacket& packet);
+
     struct Impl;
     explicit SdlGpuHost(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;
