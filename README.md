@@ -627,6 +627,23 @@ retail instruction blocks, or PS2 execution layer.
   asset handles then release to an exactly empty two-slot snapshot while both independent images
   remain intact. This is a test-only ownership and composition proof: `OmegaApp`, startup selection,
   GPU upload, material/geometry association, and retail display expansion remain unwired.
+- E-0068 turns main-menu row two into a zero-file, project-owned `ASSET TOPOLOGY` screen without
+  selecting a retail asset. The additive `AssetTopology` mode is byte 3 and row-two
+  `ShowAssetTopology` remains byte 2. Primary enters the screen from row two and returns every valid
+  topology state to that row; the screen is modal under the existing live/replay reducer-before-gate
+  rule. The updated 128x72 main card has exact background/cyan/slate/amber populations
+  3,739/1,481/3,516/480 and FNV-1a-64 `0xf37b700c33071a92`.
+  `BuildProjectDiagnosticAssetTopologyImage` creates the exact public E-0066 three-block fixture
+  before SDL/platform creation and returns its owned 96x32, 12,288-byte image with populations
+  2,667/372/23/10 and FNV-1a-64 `0xb56c8db088c5a9fe`; allocation failures stay in the existing typed
+  topology-error contract. After host creation, startup uploads the topology texture after the menu
+  and controls cards and builds one immutable optional-base-plus-topology `Contain`/`Nearest` list.
+  Zero-file startup therefore owns three uploads, three resident textures, and 86,016 logical bytes.
+  Teardown clears every retained list, then releases topology, controls, menu, and optional spatial
+  textures in reverse upload order. Real Direct3D12 testing freezes sixteen topology texels and the
+  complete entry/hold/release/terminal/return modal lifecycle without adding a per-frame upload or
+  allocation. No action/binding, capture/replay schema, CLI, asset-service, decoder, material,
+  geometry, or retail display behavior changes.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

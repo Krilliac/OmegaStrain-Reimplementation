@@ -9,6 +9,7 @@
 #include <span>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace
 {
@@ -27,9 +28,11 @@ constexpr Color kAmberColor{
 // card contract. Both builders are hashed and reported at runtime so a future
 // intentional layout change has an actionable value.
 constexpr std::uint64_t kExpectedDiagnosticMenuFnv1a64 =
-    UINT64_C(0x5303b94979cd74d6);
+    UINT64_C(0xf37b700c33071a92);
 constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
     UINT64_C(0xa68873cc7444bdf6);
+constexpr std::uint64_t kExpectedDiagnosticAssetTopologyFnv1a64 =
+    UINT64_C(0xb56c8db088c5a9fe);
 
 [[nodiscard]] Color PixelAt(const omega::runtime::DebugImage& image,
     const std::uint32_t x, const std::uint32_t y)
@@ -84,6 +87,7 @@ constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
     case DiagnosticMenuMode::MainMenu:
     case DiagnosticMenuMode::DiagnosticPlay:
     case DiagnosticMenuMode::Controls:
+    case DiagnosticMenuMode::AssetTopology:
         break;
     default:
         return initial;
@@ -92,7 +96,7 @@ constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
     {
     case DiagnosticMenuRow::StartDiagnosticPlay:
     case DiagnosticMenuRow::ShowControls:
-    case DiagnosticMenuRow::ReservedProjectTwo:
+    case DiagnosticMenuRow::ShowAssetTopology:
         break;
     default:
         return initial;
@@ -109,10 +113,19 @@ constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
                 .selected_row = DiagnosticMenuRow::ShowControls,
             };
         }
+        if (state.mode == DiagnosticMenuMode::AssetTopology)
+        {
+            return DiagnosticMenuState{
+                .mode = DiagnosticMenuMode::MainMenu,
+                .selected_row = DiagnosticMenuRow::ShowAssetTopology,
+            };
+        }
         if (state.selected_row == DiagnosticMenuRow::StartDiagnosticPlay)
             state.mode = DiagnosticMenuMode::DiagnosticPlay;
         else if (state.selected_row == DiagnosticMenuRow::ShowControls)
             state.mode = DiagnosticMenuMode::Controls;
+        else if (state.selected_row == DiagnosticMenuRow::ShowAssetTopology)
+            state.mode = DiagnosticMenuMode::AssetTopology;
         return state;
     }
 
@@ -131,7 +144,7 @@ constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
         case DiagnosticMenuRow::ShowControls:
             state.selected_row = DiagnosticMenuRow::StartDiagnosticPlay;
             break;
-        case DiagnosticMenuRow::ReservedProjectTwo:
+        case DiagnosticMenuRow::ShowAssetTopology:
             state.selected_row = DiagnosticMenuRow::ShowControls;
             break;
         }
@@ -144,9 +157,9 @@ constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
             state.selected_row = DiagnosticMenuRow::ShowControls;
             break;
         case DiagnosticMenuRow::ShowControls:
-            state.selected_row = DiagnosticMenuRow::ReservedProjectTwo;
+            state.selected_row = DiagnosticMenuRow::ShowAssetTopology;
             break;
-        case DiagnosticMenuRow::ReservedProjectTwo:
+        case DiagnosticMenuRow::ShowAssetTopology:
             break;
         }
     }
@@ -157,6 +170,7 @@ constexpr std::uint64_t kExpectedDiagnosticControlsFnv1a64 =
 int main()
 {
     using omega::app::BuildProjectDiagnosticControlsImage;
+    using omega::app::BuildProjectDiagnosticAssetTopologyImage;
     using omega::app::BuildProjectDiagnosticMenuImage;
     using omega::app::DiagnosticMenuAllowsSimulation;
     using omega::app::DiagnosticMenuInputEdges;
@@ -177,7 +191,9 @@ int main()
     static_assert(sizeof(DiagnosticMenuMode) == 1U);
     static_assert(sizeof(DiagnosticMenuRow) == 1U);
     static_assert(static_cast<std::uint8_t>(DiagnosticMenuMode::Controls) == 2U);
+    static_assert(static_cast<std::uint8_t>(DiagnosticMenuMode::AssetTopology) == 3U);
     static_assert(static_cast<std::uint8_t>(DiagnosticMenuRow::ShowControls) == 1U);
+    static_assert(static_cast<std::uint8_t>(DiagnosticMenuRow::ShowAssetTopology) == 2U);
     static_assert(std::is_trivially_copyable_v<DiagnosticMenuMode>);
     static_assert(std::is_standard_layout_v<DiagnosticMenuMode>);
     static_assert(std::is_trivially_copyable_v<DiagnosticMenuRow>);
@@ -228,18 +244,42 @@ int main()
     static_assert(UpdateDiagnosticMenu(
                       DiagnosticMenuState{
                           .mode = DiagnosticMenuMode::Controls,
-                          .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+                          .selected_row = DiagnosticMenuRow::ShowAssetTopology,
                       },
                       DiagnosticMenuInputEdges{.primary_pressed = true}) ==
                   DiagnosticMenuState{
                       .mode = DiagnosticMenuMode::MainMenu,
                       .selected_row = DiagnosticMenuRow::ShowControls,
                   });
+    static_assert(UpdateDiagnosticMenu(
+                      DiagnosticMenuState{
+                          .mode = DiagnosticMenuMode::MainMenu,
+                          .selected_row = DiagnosticMenuRow::ShowAssetTopology,
+                      },
+                      DiagnosticMenuInputEdges{.primary_pressed = true}) ==
+                  DiagnosticMenuState{
+                      .mode = DiagnosticMenuMode::AssetTopology,
+                      .selected_row = DiagnosticMenuRow::ShowAssetTopology,
+                  });
+    static_assert(UpdateDiagnosticMenu(
+                      DiagnosticMenuState{
+                          .mode = DiagnosticMenuMode::AssetTopology,
+                          .selected_row = DiagnosticMenuRow::StartDiagnosticPlay,
+                      },
+                      DiagnosticMenuInputEdges{.primary_pressed = true}) ==
+                  DiagnosticMenuState{
+                      .mode = DiagnosticMenuMode::MainMenu,
+                      .selected_row = DiagnosticMenuRow::ShowAssetTopology,
+                  });
     static_assert(DiagnosticMenuAllowsSimulation(DiagnosticMenuState{}));
     static_assert(!DiagnosticMenuAllowsSimulation(InitialDiagnosticMenuState()));
     static_assert(!DiagnosticMenuAllowsSimulation(DiagnosticMenuState{
         .mode = DiagnosticMenuMode::Controls,
         .selected_row = DiagnosticMenuRow::ShowControls,
+    }));
+    static_assert(!DiagnosticMenuAllowsSimulation(DiagnosticMenuState{
+        .mode = DiagnosticMenuMode::AssetTopology,
+        .selected_row = DiagnosticMenuRow::ShowAssetTopology,
     }));
 
     int failures = 0;
@@ -269,11 +309,12 @@ int main()
         DiagnosticMenuMode::MainMenu,
         DiagnosticMenuMode::DiagnosticPlay,
         DiagnosticMenuMode::Controls,
+        DiagnosticMenuMode::AssetTopology,
     };
     constexpr std::array rows{
         DiagnosticMenuRow::StartDiagnosticPlay,
         DiagnosticMenuRow::ShowControls,
-        DiagnosticMenuRow::ReservedProjectTwo,
+        DiagnosticMenuRow::ShowAssetTopology,
     };
     std::size_t exhaustive_cases = 0U;
     std::size_t simulation_predicate_cases = 0U;
@@ -299,19 +340,19 @@ int main()
             }
         }
     }
-    Check(exhaustive_cases == 72U,
-        "the exhaustive reducer matrix covers three modes, three rows, and eight edge masks");
-    Check(simulation_predicate_cases == 9U,
+    Check(exhaustive_cases == 96U,
+        "the exhaustive reducer matrix covers four modes, three rows, and eight edge masks");
+    Check(simulation_predicate_cases == 12U,
         "the simulation predicate covers every valid mode and row combination");
 
     constexpr std::array invalid_states{
         DiagnosticMenuState{
-            .mode = static_cast<DiagnosticMenuMode>(3U),
+            .mode = static_cast<DiagnosticMenuMode>(4U),
             .selected_row = DiagnosticMenuRow::StartDiagnosticPlay,
         },
         DiagnosticMenuState{
             .mode = static_cast<DiagnosticMenuMode>(255U),
-            .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+            .selected_row = DiagnosticMenuRow::ShowAssetTopology,
         },
         DiagnosticMenuState{
             .mode = DiagnosticMenuMode::MainMenu,
@@ -326,7 +367,11 @@ int main()
             .selected_row = static_cast<DiagnosticMenuRow>(3U),
         },
         DiagnosticMenuState{
-            .mode = static_cast<DiagnosticMenuMode>(3U),
+            .mode = DiagnosticMenuMode::AssetTopology,
+            .selected_row = static_cast<DiagnosticMenuRow>(3U),
+        },
+        DiagnosticMenuState{
+            .mode = static_cast<DiagnosticMenuMode>(4U),
             .selected_row = static_cast<DiagnosticMenuRow>(3U),
         },
     };
@@ -343,13 +388,13 @@ int main()
             ++invalid_cases;
         }
     }
-    Check(invalid_cases == 48U,
+    Check(invalid_cases == 56U,
         "invalid mode, row, and combined states consume all eight edge masks");
 
     const DiagnosticMenuState first_row = InitialDiagnosticMenuState();
     const DiagnosticMenuState last_row{
         .mode = DiagnosticMenuMode::MainMenu,
-        .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+        .selected_row = DiagnosticMenuRow::ShowAssetTopology,
     };
     Check(UpdateDiagnosticMenu(first_row,
               DiagnosticMenuInputEdges{.previous_pressed = true}) == first_row &&
@@ -380,7 +425,7 @@ int main()
     Check(UpdateDiagnosticMenu(
               DiagnosticMenuState{
                   .mode = DiagnosticMenuMode::Controls,
-                  .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+                  .selected_row = DiagnosticMenuRow::ShowAssetTopology,
               },
               DiagnosticMenuInputEdges{
                   .primary_pressed = true,
@@ -395,14 +440,29 @@ int main()
     Check(UpdateDiagnosticMenu(
               DiagnosticMenuState{
                   .mode = DiagnosticMenuMode::MainMenu,
-                  .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+                  .selected_row = DiagnosticMenuRow::ShowAssetTopology,
               },
               DiagnosticMenuInputEdges{.primary_pressed = true}) ==
               DiagnosticMenuState{
-                  .mode = DiagnosticMenuMode::MainMenu,
-                  .selected_row = DiagnosticMenuRow::ReservedProjectTwo,
+                  .mode = DiagnosticMenuMode::AssetTopology,
+                  .selected_row = DiagnosticMenuRow::ShowAssetTopology,
               },
-        "the final reserved project row remains inert on primary");
+        "the final project row enters the asset-topology card on primary");
+    Check(UpdateDiagnosticMenu(
+              DiagnosticMenuState{
+                  .mode = DiagnosticMenuMode::AssetTopology,
+                  .selected_row = DiagnosticMenuRow::StartDiagnosticPlay,
+              },
+              DiagnosticMenuInputEdges{
+                  .primary_pressed = true,
+                  .previous_pressed = true,
+                  .next_pressed = true,
+              }) ==
+              DiagnosticMenuState{
+                  .mode = DiagnosticMenuMode::MainMenu,
+                  .selected_row = DiagnosticMenuRow::ShowAssetTopology,
+              },
+        "primary returns every asset-topology row to main-menu row two");
 
     Check(omega::app::kDiagnosticMenuToggleAction == 6U &&
               omega::app::kDiagnosticMenuPrimaryAction == 6U &&
@@ -453,8 +513,8 @@ int main()
             ++unknown_pixels;
     }
     Check(all_alpha_opaque, "every menu pixel has fully opaque alpha");
-    Check(background_pixels == 3'739U && cyan_pixels == 1'491U &&
-              slate_pixels == 3'506U && amber_pixels == 480U &&
+    Check(background_pixels == 3'739U && cyan_pixels == 1'481U &&
+              slate_pixels == 3'516U && amber_pixels == 480U &&
               unknown_pixels == 0U,
         "the four project-authored colors have their exact independent pixel counts");
 
@@ -463,14 +523,14 @@ int main()
         std::array{9U, 8U}, std::array{40U, 12U}, std::array{8U, 23U},
         std::array{9U, 22U}, std::array{52U, 22U}, std::array{9U, 30U},
         std::array{16U, 30U}, std::array{17U, 30U}, std::array{77U, 30U},
-        std::array{16U, 45U}, std::array{17U, 45U}, std::array{72U, 60U},
-        std::array{72U, 61U},
+        std::array{16U, 45U}, std::array{17U, 45U}, std::array{68U, 60U},
+        std::array{69U, 62U},
     };
     constexpr std::array probe_colors{
         kBackgroundColor, kCyanColor, kSlateColor, kCyanColor,
         kAmberColor, kCyanColor, kBackgroundColor, kCyanColor,
         kCyanColor, kSlateColor, kCyanColor, kCyanColor,
-        kSlateColor, kCyanColor, kCyanColor, kSlateColor,
+        kSlateColor, kCyanColor, kCyanColor, kCyanColor,
     };
     bool probes_match = true;
     for (std::size_t index = 0U; index < probe_coordinates.size(); ++index)
@@ -578,6 +638,70 @@ int main()
               << std::dec << '\n';
     Check(controls_digest == kExpectedDiagnosticControlsFnv1a64,
         "the complete controls-card RGBA8 image matches the independently frozen digest");
+
+    auto asset_topology_first = BuildProjectDiagnosticAssetTopologyImage();
+    auto asset_topology_second = BuildProjectDiagnosticAssetTopologyImage();
+    const bool asset_topology_shape_is_safe =
+        asset_topology_first && asset_topology_second &&
+        asset_topology_first->width == 96U && asset_topology_first->height == 32U &&
+        asset_topology_first->rgba8_pixels.size() == 12'288U &&
+        asset_topology_first->pixels().size() == 12'288U &&
+        asset_topology_second->width == asset_topology_first->width &&
+        asset_topology_second->height == asset_topology_first->height &&
+        asset_topology_second->rgba8_pixels == asset_topology_first->rgba8_pixels;
+    Check(asset_topology_shape_is_safe,
+        "the exact project-owned three-block fixture produces two frozen 96x32 topology images");
+    if (asset_topology_shape_is_safe)
+    {
+        Check(asset_topology_first->rgba8_pixels.data() !=
+                  asset_topology_second->rgba8_pixels.data() &&
+                  asset_topology_first->rgba8_pixels != first.rgba8_pixels &&
+                  asset_topology_first->rgba8_pixels != controls_first.rgba8_pixels,
+            "each topology build deeply owns bytes separate from every other project card");
+
+        std::size_t topology_background_pixels = 0U;
+        std::size_t topology_cyan_pixels = 0U;
+        std::size_t topology_slate_pixels = 0U;
+        std::size_t topology_amber_pixels = 0U;
+        std::size_t topology_unknown_pixels = 0U;
+        for (std::size_t offset = 0U;
+             offset + 3U < asset_topology_first->rgba8_pixels.size(); offset += 4U)
+        {
+            const Color pixel{asset_topology_first->rgba8_pixels[offset],
+                asset_topology_first->rgba8_pixels[offset + 1U],
+                asset_topology_first->rgba8_pixels[offset + 2U],
+                asset_topology_first->rgba8_pixels[offset + 3U]};
+            if (pixel == kBackgroundColor)
+                ++topology_background_pixels;
+            else if (pixel == kCyanColor)
+                ++topology_cyan_pixels;
+            else if (pixel == kSlateColor)
+                ++topology_slate_pixels;
+            else if (pixel == kAmberColor)
+                ++topology_amber_pixels;
+            else
+                ++topology_unknown_pixels;
+        }
+        Check(topology_background_pixels == 2'667U &&
+                  topology_slate_pixels == 372U &&
+                  topology_cyan_pixels == 23U && topology_amber_pixels == 10U &&
+                  topology_unknown_pixels == 0U,
+            "the project topology card preserves the exact E-0066 four-color population");
+
+        const std::uint64_t asset_topology_digest =
+            Fnv1a64(asset_topology_first->pixels());
+        std::cout << "diagnostic asset topology FNV-1a-64: 0x" << std::hex
+                  << std::setfill('0') << std::setw(16) << asset_topology_digest
+                  << std::dec << '\n';
+        Check(asset_topology_digest == kExpectedDiagnosticAssetTopologyFnv1a64,
+            "the project topology card matches the independently frozen E-0066 digest");
+
+        const std::vector<std::byte> second_pixels_before_mutation =
+            asset_topology_second->rgba8_pixels;
+        asset_topology_first->rgba8_pixels.front() = std::byte{0U};
+        Check(asset_topology_second->rgba8_pixels == second_pixels_before_mutation,
+            "mutating one returned topology image cannot alias another owned build");
+    }
 
     if (failures != 0)
     {

@@ -738,6 +738,19 @@ No production API, startup selection, app state, GPU upload, draw command, or re
 added. Texture display expansion and every material, geometry, placement, and visibility relationship
 remain unresolved.
 
+E-0068 adds a zero-file, project-owned `ASSET TOPOLOGY` screen on main-menu row two. The new byte-3
+mode uses the exact E-0066 three-block public fixture, constructed before any SDL/platform mutation,
+then uploads its owned 96x32 topology image once and retains one immutable optional-base-plus-card
+`Contain`/`Nearest` draw list. Zero-file startup now owns three uploads, three resident textures, and
+86,016 logical bytes; teardown clears all lists before reverse-order release. The updated main card
+hashes to `0xf37b700c33071a92`, and the topology raster remains `0xb56c8db088c5a9fe`.
+Live and opt-in replay treat the screen as modal through the existing reducer-before-gate policy:
+raw elapsed remains captured, simulation and locomotion freeze, terminal input precedes reduction,
+and returning cannot schedule accumulated menu time. Real Direct3D12 testing verifies sixteen exact
+topology texels and the full entry/hold/release/terminal/return lifecycle. No retail source selection,
+per-frame allocation, action/binding, trace schema, asset-service API, material, geometry, or display
+semantics are added.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.
