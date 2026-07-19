@@ -737,6 +737,26 @@ retail instruction blocks, or PS2 execution layer.
   contract, 30/34/30 default/GPU/restored CTest, runtime-off checks with 27 registrations, the
   157-file dependency gate, all 209 tooling tests, and Python compile-all passed. Publication
   remains unclaimed.
+- E-0075 adds an optional per-user default runtime profile without changing the configuration
+  grammar or content precedence. After successful argument parsing and the help fast path, main
+  captures only the host-family search roots when `--config` is absent. Absolute roots resolve
+  lexically to `%LOCALAPPDATA%/OpenOmega/openomega.cfg` on Windows,
+  `$HOME/Library/Application Support/OpenOmega/openomega.cfg` on macOS, and
+  `$XDG_CONFIG_HOME/openomega/openomega.cfg` or `$HOME/.config/openomega/openomega.cfg` on XDG
+  hosts. An explicit `--config` bypasses discovery and inspection. A missing default is silent;
+  a regular default is loaded before validated `--set` overrides; and a reported final-entry
+  symlink, dangling symlink, directory, or other non-regular type is rejected without following
+  it. Discovery performs no normalization, canonicalization, token expansion, write, directory
+  creation, migration, or success-path printing. This slice does not claim rejection of symlinked
+  parents, add a picker or startup dialog, choose a default level, or inspect private content.
+  Serialized local validation passed: focused and full MSVC builds completed cleanly; direct
+  `omega_core_tests` and the exact process contract passed; default, opt-in GPU, and restored
+  CTest passed 30/30, 34/34, and 30/30; runtime-off direct and focused checks passed with 27
+  registrations; the dependency gate checked 160 native files; all 209 tooling tests and Python
+  compile-all passed; and the staged public-tree gate checked 247 indexed text blobs. On Windows,
+  the non-missing inspection-error oracle was explicitly skipped
+  because MSVC maps the available invalid and overlong candidates to not-found. Commit, DCO,
+  publication, and exact-main validation remain unclaimed.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
@@ -875,8 +895,15 @@ built, but hardware/display-dependent CTest registration is off by default for h
 Configure with `-DOMEGA_RUN_GPU_SMOKE_TEST=ON` to register it as a serial GPU integration test.
 
 The optional project-owned configuration file uses strict `lower_snake_case` dotted keys and
-`key = value` lines. It is loaded only when selected with `--config=PATH`.
-`--set=KEY=VALUE` applies one validated command-line override per key. Current keys are
+`key = value` lines. `--config=PATH` is always authoritative. Without that option, `openomega`
+looks for one host-family default: `%LOCALAPPDATA%/OpenOmega/openomega.cfg` on Windows,
+`$HOME/Library/Application Support/OpenOmega/openomega.cfg` on macOS,
+`$XDG_CONFIG_HOME/openomega/openomega.cfg` when that root is absolute on XDG hosts, otherwise
+`$HOME/.config/openomega/openomega.cfg` when `HOME` is absolute. Missing, empty, or relative
+required roots produce no candidate. A missing default profile is equivalent to the empty store;
+the final entry must be a reported regular file and is never followed when reported as a symlink.
+No profile directory or file is created. `--set=KEY=VALUE` applies one validated command-line
+override per key. Current keys are
 `log.minimum_severity`, `log.ring_capacity`, `jobs.worker_count`, `jobs.max_pending_jobs`,
 `frame.simulation_step_ns`, `frame.max_steps_per_frame`, `frame.max_delta_ns`,
 `input.max_events_per_frame`, `content.data_root`, and `content.level_code`. The content root plus

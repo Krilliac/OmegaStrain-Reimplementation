@@ -826,6 +826,26 @@ focused/full MSVC, direct core/process, 30/34/30 default/GPU/restored CTest, run
 registrations, the 157-file dependency gate, 209 tooling tests, and Python compile-all passed.
 Publication remains unclaimed.
 
+E-0075 adds optional per-user default-profile discovery while preserving the explicit and content
+precedence contracts. A no-I/O compile-time host classifier and pure lexical resolver accept only
+nonempty absolute captured roots and append the fixed Windows, macOS, or XDG profile suffix. Main
+captures only relevant environment values after successful parsing/help and only without
+`--config`; Windows uses the wide environment representation. Explicit config bypasses default
+inspection. A missing default is the empty store, a regular default uses the bounded loader, and a
+reported final-entry symlink, dangling symlink, directory, or other non-regular type is rejected
+without following. This does not claim rejection of parent symlinks or all reparse points. Default
+values remain below `--set`, E-0074 validation, and atomic direct CLI selection. Discovery performs
+no normalization, canonicalization, expansion, write, creation, migration, path success output,
+picker, dialog, default-level choice, private-content access, retail inference, or emulator
+comparison. Serialized local validation passed: focused and full MSVC builds completed cleanly;
+direct `omega_core_tests` and the exact process contract passed; default, opt-in GPU, and restored
+CTest passed 30/30, 34/34, and 30/30; runtime-off direct and focused checks passed with 27
+registrations; the dependency gate checked 160 native files; all 209 tooling tests and Python
+compile-all passed; and the staged public-tree gate checked 247 indexed text blobs. On Windows, the
+non-missing inspection-error oracle was explicitly skipped
+because MSVC maps the available invalid and overlong candidates to not-found. Commit, DCO,
+publication, and exact-main validation remain unclaimed.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

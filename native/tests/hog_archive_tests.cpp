@@ -94,6 +94,7 @@ int JobServiceFailureCount();
 int SpatialDebugImageFailureCount();
 int FrameSchedulerFailureCount();
 int InputTrackerFailureCount();
+int RuntimeConfigDiscoveryFailureCount();
 int RuntimeSettingsFailureCount();
 int SimulationWorldFailureCount();
 int EntityRegistryFailureCount();
@@ -325,6 +326,7 @@ int main()
     failures += SpatialDebugImageFailureCount();
     failures += FrameSchedulerFailureCount();
     failures += InputTrackerFailureCount();
+    failures += RuntimeConfigDiscoveryFailureCount();
     failures += RuntimeSettingsFailureCount();
     failures += SimulationWorldFailureCount();
     failures += EntityRegistryFailureCount();

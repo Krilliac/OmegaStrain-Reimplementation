@@ -4,6 +4,7 @@
 #include "omega/runtime/content_startup.h"
 #include "omega/runtime/content_startup_diagnostic.h"
 #include "omega/runtime/launch_options.h"
+#include "omega/runtime/runtime_config_discovery.h"
 #include "omega/runtime/runtime_settings.h"
 
 #include <algorithm>
@@ -12,14 +13,70 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <expected>
+#include <filesystem>
 #include <iostream>
 #include <limits>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 namespace
 {
+#if defined(_WIN32)
+[[nodiscard]] std::optional<std::filesystem::path> ReadWideEnvironmentPath(
+    const wchar_t* const name)
+{
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const wchar_t* const value = _wgetenv(name);
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    if (value == nullptr)
+        return std::nullopt;
+    return std::filesystem::path(value);
+}
+#else
+[[nodiscard]] std::optional<std::filesystem::path> ReadEnvironmentPath(
+    const char* const name)
+{
+    const char* const value = std::getenv(name);
+    if (value == nullptr)
+        return std::nullopt;
+    return std::filesystem::path(value);
+}
+#endif
+
+[[nodiscard]] std::expected<std::optional<std::filesystem::path>, std::string>
+CaptureDefaultRuntimeConfigPath()
+{
+    try
+    {
+        omega::runtime::RuntimeConfigSearchRoots roots;
+        const omega::runtime::RuntimeConfigPlatform platform =
+            omega::runtime::HostRuntimeConfigPlatform();
+#if defined(_WIN32)
+        roots.local_app_data = ReadWideEnvironmentPath(L"LOCALAPPDATA");
+#elif defined(__APPLE__)
+        roots.home = ReadEnvironmentPath("HOME");
+#else
+        roots.xdg_config_home = ReadEnvironmentPath("XDG_CONFIG_HOME");
+        roots.home = ReadEnvironmentPath("HOME");
+#endif
+        return omega::runtime::ResolveDefaultRuntimeConfigPath(platform, roots);
+    }
+    catch (...)
+    {
+        return std::unexpected(
+            "runtime configuration default profile: unable to resolve default config path");
+    }
+}
+
 void PrintContentLaunchProfileError(
     const omega::runtime::ContentLaunchProfileError& error)
 {
@@ -246,7 +303,21 @@ int main(const int argc, char** argv)
         return EXIT_SUCCESS;
     }
 
-    auto config = omega::runtime::LoadRuntimeConfig(*options);
+    std::optional<std::filesystem::path> default_profile_path;
+    if (!options->config_path)
+    {
+        auto discovered_profile_path = CaptureDefaultRuntimeConfigPath();
+        if (!discovered_profile_path)
+        {
+            std::cerr << discovered_profile_path.error() << '\n';
+            return EXIT_FAILURE;
+        }
+        default_profile_path = std::move(*discovered_profile_path);
+    }
+
+    auto config = options->config_path
+                      ? omega::runtime::LoadRuntimeConfig(*options)
+                      : omega::runtime::LoadRuntimeConfig(*options, default_profile_path);
     if (!config)
     {
         std::cerr << config.error() << '\n';

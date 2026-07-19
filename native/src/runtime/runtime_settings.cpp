@@ -6,6 +6,7 @@
 #include <limits>
 #include <optional>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 namespace omega::runtime
@@ -35,6 +36,10 @@ constexpr std::string_view kInvalidLevelCodeMessage =
     "content.level_code must contain 1 to 32 ASCII alphanumeric characters";
 constexpr std::string_view kInvalidOptionsMessage =
     "direct content launch options are inconsistent";
+constexpr std::string_view kDefaultProfileErrorPrefix =
+    "runtime configuration default profile: ";
+constexpr std::string_view kDefaultProfileResolutionError =
+    "unable to resolve default config path";
 
 [[nodiscard]] ContentLaunchProfileError MakeContentLaunchProfileError(
     const ContentLaunchProfileErrorCode code)
@@ -170,6 +175,18 @@ ResolveConfiguredContentLaunchProfile(const ConfigStore& config)
     return std::unexpected(
         "log.minimum_severity must be one of trace, debug, info, warning, or error");
 }
+
+[[nodiscard]] std::expected<ConfigStore, std::string> ApplyRuntimeConfigOverrides(
+    ConfigStore config, const LaunchOptions& options)
+{
+    for (const LaunchConfigOverride& override : options.config_overrides)
+    {
+        auto applied = config.ApplyOverride(override.key, override.value);
+        if (!applied)
+            return std::unexpected("--set=" + override.key + ": " + applied.error());
+    }
+    return config;
+}
 } // namespace
 
 std::expected<ConfigStore, std::string> LoadRuntimeConfig(const LaunchOptions& options)
@@ -181,14 +198,52 @@ std::expected<ConfigStore, std::string> LoadRuntimeConfig(const LaunchOptions& o
         return std::unexpected("runtime configuration " + source + ": " + loaded.error());
     }
 
-    ConfigStore config = std::move(*loaded);
-    for (const LaunchConfigOverride& override : options.config_overrides)
+    return ApplyRuntimeConfigOverrides(std::move(*loaded), options);
+}
+
+std::expected<ConfigStore, std::string> LoadRuntimeConfig(
+    const LaunchOptions& options,
+    const std::optional<std::filesystem::path>& default_profile_path)
+{
+    // Explicit selection is both higher priority and a hard ambient-inspection bypass.
+    if (options.config_path || !default_profile_path)
+        return LoadRuntimeConfig(options);
+
+    try
     {
-        auto applied = config.ApplyOverride(override.key, override.value);
-        if (!applied)
-            return std::unexpected("--set=" + override.key + ": " + applied.error());
+        std::error_code inspection_error;
+        const std::filesystem::file_status profile_status =
+            std::filesystem::symlink_status(*default_profile_path, inspection_error);
+        if (inspection_error)
+        {
+            if (inspection_error == std::errc::no_such_file_or_directory)
+                return LoadRuntimeConfig(options);
+            return std::unexpected(std::string(kDefaultProfileErrorPrefix) +
+                                   "unable to inspect config file: " +
+                                   default_profile_path->string());
+        }
+        if (profile_status.type() == std::filesystem::file_type::not_found)
+            return LoadRuntimeConfig(options);
+        if (profile_status.type() != std::filesystem::file_type::regular)
+        {
+            return std::unexpected(std::string(kDefaultProfileErrorPrefix) +
+                                   "config path is not a regular file: " +
+                                   default_profile_path->string());
+        }
+
+        auto loaded = LoadConfigFile(*default_profile_path);
+        if (!loaded)
+        {
+            return std::unexpected(
+                std::string(kDefaultProfileErrorPrefix) + loaded.error());
+        }
+        return ApplyRuntimeConfigOverrides(std::move(*loaded), options);
     }
-    return config;
+    catch (...)
+    {
+        return std::unexpected(std::string(kDefaultProfileErrorPrefix) +
+                               std::string(kDefaultProfileResolutionError));
+    }
 }
 
 std::expected<RuntimeSettings, std::string> ResolveRuntimeSettings(const ConfigStore& config)
