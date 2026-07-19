@@ -162,22 +162,24 @@ step advances an owned,
 platform-neutral deterministic world clock before rendering, with fail-closed representation
 limits. The app also owns the SDL process lifetime and a resumed system-default playback stream;
 its callback supplies bounded project-owned silence and exposes lock-free health counters without
-loading files or retail data. Concrete components, gameplay systems, render scene snapshots,
-decoded voices, and mixing remain incomplete.
+loading files or retail data. A synthetic positioned diagnostic component and pure digital
+locomotion planner now exercise the world/input boundary, but retail player components and gameplay
+systems, render scene snapshots, decoded voices, and mixing remain incomplete.
 
-The simulation world now solely owns a bounded, preallocated generational entity registry. Entity
+The simulation world now solely owns a bounded, preallocated generational entity registry plus one
+direct bounded `Position3` component store. Entity
 creation/reuse is deterministic for identical call sequences, stale or nonmatching generations are
 inert, and capacity exhaustion is explicit. The world now exposes creation, destruction, liveness,
-and aggregate identity snapshots without releasing a mutable registry reference; destruction is
-the reserved in-place coordination point for future direct component cleanup. Complete world
+and aggregate identity snapshots without releasing a mutable registry reference; destruction
+cleans the exact-generation position before registry reuse. Complete world
 ownership remains move-constructible, while move assignment is deleted so replacing a live world
 cannot bypass that coordination point. A reusable header-only `ComponentStore<T>` foundation
 provides bounded startup allocation, exact-generation access, constant-time same-slot replacement
 of stale payloads, explicit exact-generation retained cleanup, inert moved-from behavior, and
-aggregate-only snapshots for future direct world-owned stores.
+aggregate-only snapshots for direct world-owned stores.
 Unrelated retained payloads are not swept during insertion and fail capacity closed until cleanup.
-No speculative gameplay component is instantiated; concrete components and systems remain future
-project-owned work. Entity and component capacities are synthetic host limits, not retail
+Only the E-0060 synthetic diagnostic position is instantiated; retail components and systems remain
+future evidence-driven work. Entity and component capacities are synthetic host limits, not retail
 population claims.
 
 At E-0044, each rendered frame crossed an explicit owned `RenderFramePacket` boundary containing the
@@ -579,6 +581,25 @@ sampling, rendering, audio, or job work. The command adds no terminal or incompl
 input injection or world input use, gameplay reconstruction, captured scheduler/world, entity or
 RNG restoration, persistence, file/wire/stable ABI, cross-process format, seek, rewind, loop,
 rollback, or retail timing or determinism claim.
+
+E-0060 adds the first synthetic input-driven world component. `SimulationWorld` now owns bounded
+preallocated signed `Position3` values behind exact generational identities. Positioned creation,
+query, cleanup-before-reuse, and optional one-translation fixed steps are allocation-free after
+startup. Each translating step validates the clock, target, component, and all three signed sums
+before committing position and clock together; the legacy no-input step stays neutral and
+backward-compatible. The separate portable `omega_gameplay` planner accepts only digital
+`-1/0/1` axes and maps them to one project unit on X/Z.
+
+The native host owns one positioned diagnostic actor and maps W/S/A/D and gamepad D-pad held state
+to synthetic actions 2 through 5. Opposites cancel, terminal input remains nonmutating, and the one
+frame command reaches every scheduled fixed step. Replay locomotion is explicit and default-off;
+the capture/replay CLI enables it only for a schema containing all four actions while preserving
+the fixed E-0059 output line and the no-read boundary with the still-live app. Portable tests cover
+the complete command domain, component lifecycle, error priority, signed overflow, release, and
+fresh replay. The real SDL host smoke uses a nonzero step count and compares host and replay final
+positions. This remains an invisible debug actor, not a retail player implementation, and establishes
+no retail controls, coordinates, rate, analog behavior, physics, camera, animation, mission, asset,
+network, or determinism semantics.
 
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.

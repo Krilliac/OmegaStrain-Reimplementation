@@ -1,4 +1,7 @@
 #include "omega_app.h"
+#include "run_replay_session.h"
+
+#include "omega/gameplay/debug_locomotion.h"
 
 #include <SDL3/SDL.h>
 
@@ -85,6 +88,46 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
             .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_BACK),
             .action = kQuitAction,
         },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_W),
+            .action = kDebugMoveForwardAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::GamepadButton,
+            .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_UP),
+            .action = kDebugMoveForwardAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_S),
+            .action = kDebugMoveBackwardAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::GamepadButton,
+            .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_DOWN),
+            .action = kDebugMoveBackwardAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_A),
+            .action = kDebugMoveLeftAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::GamepadButton,
+            .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_LEFT),
+            .action = kDebugMoveLeftAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_D),
+            .action = kDebugMoveRightAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::GamepadButton,
+            .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_RIGHT),
+            .action = kDebugMoveRightAction,
+        },
     };
     auto binding_table = runtime::InputBindingTable::FromBindings(bindings);
     if (!binding_table)
@@ -110,6 +153,17 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     }
     auto simulation =
         std::make_unique<simulation::SimulationWorld>(std::move(*created_simulation));
+    auto created_debug_locomotion_entity =
+        simulation->CreatePositionedEntity(simulation::Position3{});
+    if (!created_debug_locomotion_entity)
+    {
+        constexpr std::string_view error =
+            "debug locomotion positioned entity creation failed";
+        log->Error("startup", error);
+        return std::unexpected(std::string(error));
+    }
+    const simulation::EntityId debug_locomotion_entity =
+        *created_debug_locomotion_entity;
 
     auto created_platform = SdlPlatformService::Create();
     if (!created_platform)
@@ -202,6 +256,7 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     return OmegaApp(std::move(config_owner), std::move(content_owner), std::move(stderr_sink),
         std::move(ring_sink), std::move(log), std::move(jobs), std::move(assets),
         std::move(frame_scheduler), std::move(input), std::move(simulation),
+        debug_locomotion_entity,
         std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
         diagnostic_texture, std::move(diagnostic_draw_list));
 }
@@ -215,6 +270,7 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<runtime::FrameScheduler> frame_scheduler,
     std::unique_ptr<runtime::InputTracker> input,
     std::unique_ptr<simulation::SimulationWorld> simulation,
+    const simulation::EntityId debug_locomotion_entity,
     std::unique_ptr<SdlPlatformService> platform,
     std::unique_ptr<SdlInputService> sdl_input,
     std::unique_ptr<SdlAudioService> audio,
@@ -225,7 +281,8 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
       stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)),
       log_(std::move(log)), jobs_(std::move(jobs)), assets_(std::move(assets)),
       frame_scheduler_(std::move(frame_scheduler)), input_(std::move(input)),
-      simulation_(std::move(simulation)), platform_(std::move(platform)),
+      simulation_(std::move(simulation)),
+      debug_locomotion_entity_(debug_locomotion_entity), platform_(std::move(platform)),
       sdl_input_(std::move(sdl_input)), audio_(std::move(audio)), host_(std::move(host)),
       diagnostic_texture_(diagnostic_texture),
       diagnostic_draw_list_(std::move(diagnostic_draw_list))
@@ -419,6 +476,33 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             break;
         }
 
+        const auto planned_translation = gameplay::PlanDebugLocomotionStep(
+            gameplay::DigitalMoveCommand{
+                .lateral = static_cast<std::int8_t>(
+                    (input_snapshot.IsHeld(kDebugMoveRightAction) ? 1 : 0) -
+                    (input_snapshot.IsHeld(kDebugMoveLeftAction) ? 1 : 0)),
+                .longitudinal = static_cast<std::int8_t>(
+                    (input_snapshot.IsHeld(kDebugMoveForwardAction) ? 1 : 0) -
+                    (input_snapshot.IsHeld(kDebugMoveBackwardAction) ? 1 : 0)),
+            });
+        if (!planned_translation)
+        {
+            jobs_->WaitForIdle();
+            constexpr std::string_view error = "debug locomotion planning failed";
+            log_->Error("simulation", error);
+            return RunLoopResult{
+                .result = result,
+                .operational_error = std::string(error),
+                .capture_error = std::nullopt,
+            };
+        }
+        const simulation::SimulationStepInput simulation_input{
+            .translation = simulation::EntityTranslation{
+                .entity = debug_locomotion_entity_,
+                .delta = *planned_translation,
+            },
+        };
+
         const auto current_frame = Clock::now();
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
             current_frame - previous_frame);
@@ -466,7 +550,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
 
         for (std::uint32_t step = 0; step < plan.simulation_steps; ++step)
         {
-            if (simulation_->AdvanceOneStep() != simulation::SimulationStepResult::Advanced)
+            if (simulation_->AdvanceOneStep(simulation_input) !=
+                simulation::SimulationStepResult::Advanced)
             {
                 jobs_->WaitForIdle();
                 constexpr std::string_view error =

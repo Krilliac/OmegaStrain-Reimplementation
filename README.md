@@ -461,6 +461,27 @@ retail instruction blocks, or PS2 execution layer.
   injection or world input use, gameplay reconstruction, captured scheduler/world state, entity or
   RNG restoration, persistence, file/wire/stable ABI, cross-process contract, seek, rewind, loop,
   rollback, or retail timing or determinism claim.
+- E-0060 adds the first input-driven native simulation component without assigning retail meaning.
+  For captures with the new movement schema, it supersedes E-0059's empty-world and no-world-input
+  clauses; older replay callers remain neutral by default.
+  `SimulationWorld` now directly owns a bounded, preallocated `Position3` store and can create,
+  query, clean up, and translate one positioned entity as part of an allocation-free fixed-step
+  transaction. Clock exhaustion, stale identity, absent position, and signed coordinate overflow
+  are typed failures that leave the complete attempted step unchanged; the original no-input step
+  remains the neutral wrapper. A separate SDL-free `omega_gameplay` value maps only the synthetic
+  digital domain `-1/0/1` to one signed project unit on the X/Z axes.
+  `OmegaApp` owns one synthetic diagnostic actor and binds W/S/A/D plus the gamepad D-pad to held
+  movement actions. The same immutable command is applied to each fixed step planned for that
+  input frame. `RunReplaySession` can opt into the identical input-to-world path; its default stays
+  neutral for old callers, while the finite capture/replay CLI enables it only when all four
+  synthetic action identifiers are present. The established `OpenOmega fresh replay:` output line
+  remains unchanged. Synthetic tests verify exact movement, release, and terminal outcomes, while
+  the real-host smoke compares the captured app and fresh-replay positions; the CLI itself validates
+  only fresh replay ownership, aggregates, scheduler state, clock, actor
+  count, and position presence, and still never reads the live app after capture.
+  This diagnostic actor is not the retail player. Its identifiers, bindings, origin, axes, integer
+  unit, step rate, and diagonal policy establish no retail controls, coordinates, movement,
+  physics, collision, camera, animation, mission, network, asset, or rendering semantics.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
@@ -567,10 +588,12 @@ and prints only aggregate trace metadata plus selected absolute scheduler counte
 capture file and prints no per-frame input or elapsed records. Ordinary `--frames` behavior is
 unchanged when the flag is absent.
 Adding `--replay-capture` to that finite capture performs immediate main-thread replay into a fresh
-scheduler and empty world in the same process. It requires a complete nonterminal capture and a
-zero-origin capture scheduler, fails fast on any replay or comparison error, and prints the fixed
-fresh-replay aggregate line only after aggregate and final-state verification succeeds. Without
-`--replay-capture`, capture-only output and behavior remain unchanged.
+scheduler and world in the same process. When the captured action schema contains all four E-0060
+debug-movement actions, that fresh world owns one positioned synthetic actor and consumes the
+reconstructed held input; older schemas remain clock-only. Replay requires a complete nonterminal
+capture and a zero-origin capture scheduler, fails fast on any replay or comparison error, and
+prints the unchanged fixed fresh-replay aggregate line only after aggregate and final-state
+verification succeeds. Without `--replay-capture`, capture-only output and behavior remain unchanged.
 `--probe-only` validates the retail root and selected level, then loads the owned manifest plus one
 all-or-error `LevelContentIR` and opens an inventory-only `LevelTextureStore` without opening a
 window. The store is retained only after the existing content and debug-image gates succeed. No

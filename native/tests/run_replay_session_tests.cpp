@@ -89,6 +89,7 @@ using omega::runtime::RunCaptureSession;
 using omega::runtime::RunCaptureSessionConfig;
 using omega::runtime::RunCaptureTerminalInput;
 using omega::runtime::RunCaptureTracePair;
+using omega::simulation::Position3;
 using omega::simulation::SimulationState;
 using omega::simulation::SimulationStepResult;
 using omega::simulation::SimulationWorld;
@@ -327,6 +328,8 @@ void CheckContractAndTaxonomy()
         std::declval<const RunReplaySession&>().scheduler_state()));
     static_assert(noexcept(
         std::declval<const RunReplaySession&>().simulation_state()));
+    static_assert(noexcept(
+        std::declval<const RunReplaySession&>().debug_locomotion_position()));
 
     static_assert(!std::is_aggregate_v<RunReplayFrame>);
     static_assert(!std::is_default_constructible_v<RunReplayFrame>);
@@ -353,12 +356,22 @@ void CheckContractAndTaxonomy()
     static_assert(std::is_same_v<
         decltype(std::declval<const RunReplaySession&>().simulation_state()),
         std::optional<SimulationState>>);
+    static_assert(std::is_same_v<
+        decltype(std::declval<const RunReplaySession&>().debug_locomotion_position()),
+        std::optional<Position3>>);
     static_assert(std::is_nothrow_move_constructible_v<CreateResult>);
     static_assert(std::is_nothrow_move_constructible_v<NextResult>);
 
     constexpr RunReplaySessionConfig default_config;
     static_assert(default_config.scheduler == omega::runtime::FrameSchedulerConfig{});
     static_assert(default_config.maximum_entities == 65'536U);
+    static_assert(!default_config.enable_debug_locomotion);
+    static_assert(static_cast<int>(
+                      RunReplayErrorCode::SimulationRepresentationExhausted) == 7);
+    static_assert(static_cast<int>(
+                      RunReplayErrorCode::DebugLocomotionEntityCreateFailed) == 8);
+    static_assert(static_cast<int>(
+                      RunReplayErrorCode::DebugLocomotionPlanFailed) == 9);
 
     struct ErrorContract
     {
@@ -386,6 +399,12 @@ void CheckContractAndTaxonomy()
         ErrorContract{RunReplayErrorCode::SimulationRepresentationExhausted,
             "simulation-representation-exhausted",
             "run replay simulation representation is exhausted"},
+        ErrorContract{RunReplayErrorCode::DebugLocomotionEntityCreateFailed,
+            "debug-locomotion-entity-create-failed",
+            "run replay debug locomotion entity creation failed"},
+        ErrorContract{RunReplayErrorCode::DebugLocomotionPlanFailed,
+            "debug-locomotion-plan-failed",
+            "run replay debug locomotion planning failed"},
     };
     for (const auto& contract : contracts)
     {
@@ -748,6 +767,112 @@ void CheckTerminalBehavior()
         "a dual-reason terminal frame publishes exact owned control data");
 }
 
+void CheckDebugLocomotionOptIn()
+{
+    constexpr std::array<std::uint32_t, 4U> actions{
+        omega::app::kDebugMoveForwardAction,
+        omega::app::kDebugMoveBackwardAction,
+        omega::app::kDebugMoveLeftAction,
+        omega::app::kDebugMoveRightAction,
+    };
+    constexpr std::array<nanoseconds, 2U> elapsed_values{
+        milliseconds{25}, milliseconds{5}};
+
+    RunCaptureTracePair enabled_pair = BuildPair(actions, 3U, elapsed_values,
+        TerminalReasons{.host_quit_requested = true});
+    RunReplaySessionConfig enabled_config = ValidConfig();
+    enabled_config.enable_debug_locomotion = true;
+    auto enabled_created =
+        RunReplaySession::Create(std::move(enabled_pair), enabled_config);
+    RunReplaySession enabled =
+        TakeSession(enabled_created, "the debug-locomotion replay is created");
+
+    const auto enabled_initial_state = enabled.simulation_state();
+    Check(enabled.debug_locomotion_position() == Position3{} &&
+              enabled_initial_state &&
+              SameSimulation(*enabled_initial_state, SimulationState{
+                  .alive_entities = 1U,
+              }),
+        "opt-in replay owns one positioned synthetic diagnostic entity at the origin");
+
+    auto moved = enabled.Next();
+    const auto moved_plan = moved ? moved->frame_plan() : std::nullopt;
+    const auto moved_state = enabled.simulation_state();
+    Check(moved && moved_plan && moved_plan->simulation_steps == 2U &&
+              moved->input().IsHeld(omega::app::kDebugMoveForwardAction) &&
+              !moved->input().IsHeld(omega::app::kDebugMoveBackwardAction) &&
+              !moved->input().IsHeld(omega::app::kDebugMoveLeftAction) &&
+              !moved->input().IsHeld(omega::app::kDebugMoveRightAction) &&
+              enabled.debug_locomotion_position() == Position3{.z = 2} &&
+              moved_state && SameSimulation(*moved_state, SimulationState{
+                  .completed_steps = 2U,
+                  .simulated_time = milliseconds{20},
+                  .alive_entities = 1U,
+              }) &&
+              enabled.state() == RunReplaySessionState::Ready,
+        "one held command is planned once and its same translation reaches every fixed step");
+
+    const auto scheduler_before_move = enabled.scheduler_state();
+    const auto simulation_before_move = enabled.simulation_state();
+    const auto position_before_move = enabled.debug_locomotion_position();
+    RunReplaySession moved_enabled = std::move(enabled);
+    Check(enabled.state() == RunReplaySessionState::Inert &&
+              enabled.remaining_frames() == 0U && !enabled.scheduler_state() &&
+              !enabled.simulation_state() && !enabled.debug_locomotion_position(),
+        "moving an enabled replay leaves the source inert and positionless");
+    Check(moved_enabled.state() == RunReplaySessionState::Ready &&
+              moved_enabled.remaining_frames() == 2U &&
+              moved_enabled.scheduler_state() == scheduler_before_move &&
+              SameSimulation(moved_enabled.simulation_state(), simulation_before_move) &&
+              moved_enabled.debug_locomotion_position() == position_before_move,
+        "moving an enabled replay transfers its exact positioned world and pending frames");
+
+    auto released = moved_enabled.Next();
+    const auto released_plan = released ? released->frame_plan() : std::nullopt;
+    const auto released_state = moved_enabled.simulation_state();
+    Check(released && released_plan && released_plan->simulation_steps == 1U &&
+              released->input().WasReleased(omega::app::kDebugMoveForwardAction) &&
+              !released->input().IsHeld(omega::app::kDebugMoveForwardAction) &&
+              moved_enabled.debug_locomotion_position() == Position3{.z = 2} &&
+              released_state && SameSimulation(*released_state, SimulationState{
+                  .completed_steps = 3U,
+                  .simulated_time = milliseconds{30},
+                  .alive_entities = 1U,
+              }) &&
+              moved_enabled.state() == RunReplaySessionState::Ready,
+        "a released action advances the clock with a neutral translation and stops movement");
+
+    const auto scheduler_before_terminal = moved_enabled.scheduler_state();
+    const auto simulation_before_terminal = moved_enabled.simulation_state();
+    const auto position_before_terminal = moved_enabled.debug_locomotion_position();
+    auto terminal = moved_enabled.Next();
+    Check(terminal && terminal->terminal_input() && !terminal->elapsed() &&
+              !terminal->frame_plan() &&
+              !terminal->input().IsHeld(omega::app::kDebugMoveForwardAction) &&
+              moved_enabled.state() == RunReplaySessionState::Complete &&
+              moved_enabled.scheduler_state() == scheduler_before_terminal &&
+              SameSimulation(moved_enabled.simulation_state(), simulation_before_terminal) &&
+              moved_enabled.debug_locomotion_position() == position_before_terminal,
+        "a terminal frame cannot mutate scheduler or synthetic position");
+
+    constexpr std::array<nanoseconds, 1U> legacy_elapsed{milliseconds{25}};
+    RunCaptureTracePair disabled_pair = BuildPair(actions, 1U, legacy_elapsed);
+    auto disabled_created =
+        RunReplaySession::Create(std::move(disabled_pair), ValidConfig());
+    RunReplaySession disabled =
+        TakeSession(disabled_created, "the legacy-neutral replay is created");
+    auto neutral = disabled.Next();
+    const auto disabled_state = disabled.simulation_state();
+    Check(neutral && neutral->frame_plan() &&
+              neutral->frame_plan()->simulation_steps == 2U &&
+              !disabled.debug_locomotion_position() &&
+              disabled_state && SameSimulation(*disabled_state, SimulationState{
+                  .completed_steps = 2U,
+                  .simulated_time = milliseconds{20},
+              }),
+        "the default-disabled replay preserves clock-only E0059 behavior for the same schema");
+}
+
 void CheckMoveLifecycle()
 {
     constexpr std::array<std::uint32_t, 1U> actions{17U};
@@ -862,6 +987,7 @@ int main()
     CheckEmptyAndMaximumOrigin();
     CheckElapsedOracleAndPartialPrefix();
     CheckTerminalBehavior();
+    CheckDebugLocomotionOptIn();
     CheckMoveLifecycle();
     CheckReplayAllocationRetry();
 
