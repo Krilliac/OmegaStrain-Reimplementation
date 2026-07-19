@@ -75,7 +75,7 @@ void CheckContract()
     static_assert(std::is_nothrow_move_constructible_v<SchedulerElapsedTrace>);
     static_assert(!std::is_move_assignable_v<SchedulerElapsedTrace>);
     static_assert(noexcept(std::declval<SchedulerElapsedTraceRecorder&>().Append(
-        0U, nanoseconds{0})));
+        std::declval<std::uint64_t>(), std::declval<nanoseconds>())));
     static_assert(noexcept(std::declval<SchedulerElapsedTraceRecorder&&>().Finish()));
     static_assert(noexcept(std::declval<const SchedulerElapsedTrace&>().FrameAt(0U)));
     static_assert(sizeof(std::int64_t) == 8U);
