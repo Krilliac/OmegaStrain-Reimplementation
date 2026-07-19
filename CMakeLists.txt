@@ -300,6 +300,18 @@ if(OMEGA_RUN_GPU_SMOKE_TEST AND NOT TARGET omega_sdl_backend)
 endif()
 
 if(BUILD_TESTING)
+    if(TARGET openomega)
+        add_test(NAME openomega_process_contract
+            COMMAND "${CMAKE_COMMAND}"
+                "-DOPENOMEGA_EXECUTABLE=$<TARGET_FILE:openomega>"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/openomega_process_contract.cmake"
+        )
+        set_tests_properties(openomega_process_contract PROPERTIES
+            TIMEOUT 10
+            LABELS "integration"
+        )
+    endif()
+
     add_executable(omega_pop_post_terrain_commands_tests
         native/tests/pop_post_terrain_commands_tests.cpp
         native/apps/omega_tool/pop_post_terrain_commands.cpp
@@ -596,6 +608,18 @@ if(BUILD_TESTING)
         if(OMEGA_RUN_GPU_SMOKE_TEST)
             add_test(NAME omega_app_capture_smoke COMMAND omega_app_capture_smoke)
             set_tests_properties(omega_app_capture_smoke PROPERTIES
+                ENVIRONMENT "SDL_AUDIO_DRIVER=dummy"
+                TIMEOUT 20
+                RUN_SERIAL TRUE
+                LABELS "gpu;integration"
+            )
+
+            add_test(NAME openomega_capture_cli_smoke
+                COMMAND "${CMAKE_COMMAND}"
+                    "-DOPENOMEGA_EXECUTABLE=$<TARGET_FILE:openomega>"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/openomega_capture_cli_smoke.cmake"
+            )
+            set_tests_properties(openomega_capture_cli_smoke PROPERTIES
                 ENVIRONMENT "SDL_AUDIO_DRIVER=dummy"
                 TIMEOUT 20
                 RUN_SERIAL TRUE

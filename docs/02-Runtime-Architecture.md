@@ -797,6 +797,37 @@ serialization, file or wire format, stable ABI, simulation checkpoint, RNG state
 rollback,
 ordinary `Run` tracker-exhaustion guarantee, or retail timing or determinism semantics.
 
+E-0056 exposes finite capture only through the exact once-only `--capture-run` launch flag. The
+flag requires an explicit `--frames=N` in the synthetic range 1 through 65,536. Ordinary launch
+parsing without the flag still accepts zero and values above the capture maximum. Capture cannot
+compose with probe mode, and help remains standalone. `main` calls `RunWithCapture` only for this
+explicit route; the null-capture path continues through ordinary `Run`.
+
+The command first prints the same `RunResult` counters as an ordinary run, then prints only
+aggregate trace-pair presence/counts, optional terminal metadata, and selected absolute scheduler
+counters before and after the run. Those scheduler values are derived from owned snapshots but are
+neither complete snapshot publication nor deltas. The app-private, tested
+`IsCompleteRunCaptureOutcome` policy accepts only a positive matching request with
+`FrameLimitReached`, no owned failure, quit, or terminal, exact rendered/input/trace counts and
+capacities, matching trace first indices, and equal planned/executed simulation steps. Every other
+outcome fails closed at the process boundary.
+
+The portable process contract verifies exact exit, stdout, and stderr behavior for ordinary
+zero-frame startup plus missing, zero, and over-limit capture arguments without entering the host
+loop. The opt-in GPU capture smoke invokes the successful two-frame command through a CMake wrapper
+that checks the child exit code before matching the ordinary result, aggregate trace, and scheduler
+summaries. The clean incremental MSVC build completed with zero warnings or errors.
+`omega_core_tests` passed. `omega_run_capture_tests` passed once plus 100/100 repeated runs; default
+CTest passed 25/25. Direct3D12 plus dummy audio passed GPU CTest 28/28, including the capture CLI
+smoke. Registration was restored to `OFF` with 25 default tests. The static native dependency gate
+passed 140 files, all 204 tooling tests passed, and Python compile-all passed. Publication CI
+remains separate.
+
+This command surface adds no capture files, persistence, serialization, wire format, stable ABI,
+per-frame printing, replay, injection/playback, scheduler restore or delta interpretation,
+simulation checkpoint, RNG state, rollback, interactive or zero-frame capture command, probe
+composition, ordinary-above-65,536 execution claim, or retail timing or determinism semantics.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

@@ -381,6 +381,30 @@ retail instruction blocks, or PS2 execution layer.
   This adds no capture CLI, replay, input/playback injection, restore, persistence, serialization,
   stable ABI, simulation checkpoint, RNG state, fake services, rollback, ordinary `Run` tracker
   exhaustion guarantee, or retail timing or determinism claim.
+- E-0056 adds an explicit finite-capture command without changing ordinary finite runs.
+  The exact once-only `--capture-run` flag requires an explicit `--frames=N` in the synthetic
+  range 1 through 65,536. Without the flag, existing `--frames=0` and values above 65,536 retain
+  their ordinary parser behavior; capture cannot compose with `--probe-only`, and help remains
+  standalone. Only the explicit flag routes `main` through `RunWithCapture`; all other runs still
+  call ordinary `Run`.
+  A captured command prints the ordinary `RunResult` counters, aggregate trace-pair presence and
+  frame counts, optional terminal metadata, and selected absolute before/after scheduler counters
+  derived from snapshots. These counters are not complete snapshots or deltas. The tested
+  `IsCompleteRunCaptureOutcome` helper fails closed unless a positive request ends at the frame
+  limit with no failure, quit, or terminal; exact run/input/trace counts and capacities; matching
+  trace origins; and equal planned and executed steps. A portable process contract verifies exact
+  zero-frame and invalid-capture exit/output behavior without entering the host loop. The opt-in
+  GPU test uses an exit-code-safe CMake wrapper before checking the two-frame run, aggregate trace,
+  and scheduler summaries.
+  The clean incremental MSVC build completed with zero warnings or errors. `omega_core_tests`
+  passed. `omega_run_capture_tests` passed once plus 100/100 repeated runs; default CTest passed
+  25/25. With Direct3D12 and dummy audio, GPU CTest passed 28/28, including the capture CLI smoke.
+  Registration was restored to `OFF` with 25 default tests. The dependency gate passed 140 files,
+  all 204 tooling tests passed, and Python compile-all passed. Publication CI remains separate.
+  This adds no capture files, persistence, serialization, wire format, stable ABI, per-frame
+  printing, replay, injection/playback, restore or delta interpretation, checkpoint, RNG state,
+  rollback, interactive or zero-frame capture command, probe composition, ordinary-above-65,536
+  execution claim, or retail timing or determinism semantics.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
@@ -475,11 +499,16 @@ ctest --preset msvc-debug
 .\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
 python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\private\extracted-disc --aggregate-only
 .\build\msvc\Debug\openomega.exe --frames=120
+.\build\msvc\Debug\openomega.exe --frames=120 --capture-run
 .\build\msvc\Debug\openomega.exe --config=.\openomega.cfg --set=log.minimum_severity=debug --frames=120
 ```
 
 `openomega` is the pure-native SDL3/SDL_GPU host shell. `--frames=N` is an automated smoke mode
 that opens the modern GPU backend, renders exactly `N` frames, and exits without user input.
+Adding `--capture-run` explicitly selects bounded in-process capture for 1 through 65,536 frames
+and prints only aggregate trace metadata plus selected absolute scheduler counters; it creates no
+capture file and prints no per-frame input or elapsed records. Ordinary `--frames` behavior is
+unchanged when the flag is absent.
 `--probe-only` validates the retail root and selected level, then loads the owned manifest plus one
 all-or-error `LevelContentIR` and opens an inventory-only `LevelTextureStore` without opening a
 window. The store is retained only after the existing content and debug-image gates succeed. No

@@ -498,6 +498,32 @@ This establishes no capture CLI, replay, input/playback injection, restore, pers
 serialization, wire format, stable ABI, simulation checkpoint, RNG state, fake services,
 rollback, ordinary `Run` tracker-exhaustion guarantee, or retail timing or determinism claim.
 
+E-0056 adds the explicit finite-capture command. Exact once-only `--capture-run` requires an
+explicit `--frames=N` from 1 through the shared synthetic maximum of 65,536. Without the flag,
+ordinary zero and above-65,536 frame values retain their parser behavior. Capture cannot compose
+with probe mode, help remains standalone, and only the explicit route calls `RunWithCapture`;
+ordinary runs continue through `Run`.
+
+Captured output includes the ordinary `RunResult` counters plus aggregate trace presence/counts,
+optional terminal metadata, and selected absolute before/after scheduler counters derived from
+snapshots, not complete snapshots or deltas. The tested `IsCompleteRunCaptureOutcome` helper fails
+closed unless a positive request reaches `FrameLimitReached` without failure, quit, or terminal and
+with exact result/trace counts and capacities, matching trace origins, and planned/executed-step
+agreement. The portable process contract covers exact ordinary-zero and invalid-capture process
+behavior. The opt-in two-frame GPU smoke uses a CMake wrapper that checks the child exit code before
+matching the run, aggregate trace, and scheduler summaries.
+
+The clean incremental MSVC build completed with zero warnings or errors. `omega_core_tests` passed.
+`omega_run_capture_tests` passed once plus 100/100 repeated runs; default CTest passed 25/25.
+Direct3D12 plus dummy audio passed GPU CTest 28/28, including the capture CLI smoke. Registration
+was restored to `OFF` with 25 default tests. The dependency gate passed 140 files, all 204 tooling
+tests passed, and Python compile-all passed. Publication CI remains separate.
+
+This adds no capture files, persistence, serialization, wire format, stable ABI, per-frame
+printing, replay, injection/playback, restore, delta interpretation, checkpoint, RNG state,
+rollback, interactive or zero-frame capture command, probe composition, ordinary-above-65,536
+execution claim, or retail timing or determinism semantics.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

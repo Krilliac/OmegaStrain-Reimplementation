@@ -154,4 +154,38 @@ RunCaptureOutcome::terminal_input() const noexcept
 {
     return trace_pair_ ? trace_pair_->terminal_input() : std::nullopt;
 }
+
+namespace detail
+{
+bool IsCompleteRunCaptureOutcome(
+    const RunCaptureOutcome& outcome, const int requested_frames) noexcept
+{
+    if (requested_frames <= 0 || outcome.failure() ||
+        outcome.completion() != RunCaptureCompletion::FrameLimitReached)
+    {
+        return false;
+    }
+
+    const auto requested = static_cast<std::size_t>(requested_frames);
+    const RunResult result = outcome.result();
+    const auto* const trace_pair = outcome.trace_pair();
+    if (outcome.requested_frame_limit() != requested ||
+        result.rendered_frames != requested_frames ||
+        result.input_frames != requested || result.quit_requested ||
+        result.planned_simulation_steps != result.executed_simulation_steps ||
+        !outcome.has_traces() || trace_pair == nullptr || outcome.terminal_input())
+    {
+        return false;
+    }
+
+    const auto& input_trace = trace_pair->input_trace();
+    const auto& elapsed_trace = trace_pair->scheduler_elapsed_trace();
+    return input_trace.maximum_frames() == requested &&
+           elapsed_trace.maximum_frames() == requested &&
+           input_trace.frame_count() == requested &&
+           elapsed_trace.frame_count() == requested &&
+           input_trace.first_frame_index() == elapsed_trace.first_frame_index() &&
+           !trace_pair->terminal_input();
+}
+} // namespace detail
 } // namespace omega::app
