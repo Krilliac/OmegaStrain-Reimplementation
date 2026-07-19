@@ -28,6 +28,14 @@ struct SdlGpuHostTestAccess final
     {
         return host.ReadbackClearForTesting(packet);
     }
+
+    [[nodiscard]] static std::expected<
+        std::array<runtime::RenderClearColorRgba8, 16U>, std::string>
+        ReadbackBlitsForTesting(
+            SdlGpuHost& host, const runtime::RenderFramePacket& packet)
+    {
+        return host.ReadbackBlitsForTesting(packet);
+    }
 };
 } // namespace omega::app::detail
 
@@ -244,6 +252,135 @@ int main()
             !PoolIsEmpty(after_clear.textures))
             return Fail("clear phase counters or residency are inconsistent");
 
+        packet = omega::runtime::RenderFramePacket{};
+        const omega::app::GpuHostSnapshot before_empty_blit_readback = host.Snapshot();
+        auto empty_blit_readback = omega::app::detail::SdlGpuHostTestAccess::
+            ReadbackBlitsForTesting(host, packet);
+        if (empty_blit_readback ||
+            empty_blit_readback.error() != "blit readback requires a nonempty draw list")
+        {
+            return Fail("blit readback accepted an empty draw list or returned the wrong error");
+        }
+        if (host.Snapshot() != before_empty_blit_readback)
+            return Fail("rejected empty blit readback mutated production host state");
+
+        constexpr std::array<std::byte, 2U * 2U * 4U> probe_pixels{
+            static_cast<std::byte>(0xFFU), static_cast<std::byte>(0x00U),
+            static_cast<std::byte>(0x00U), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0x00U), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0x00U), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0x00U), static_cast<std::byte>(0x00U),
+            static_cast<std::byte>(0xFFU), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0xFFU), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0xFFU), static_cast<std::byte>(0xFFU),
+        };
+        auto uploaded_probe = host.UploadRgba8Texture(omega::runtime::Rgba8TextureUploadView{
+            .width = 2U,
+            .height = 2U,
+            .pixels = probe_pixels,
+        });
+        if (!uploaded_probe)
+            return Fail("blit readback probe upload failed", uploaded_probe.error());
+
+        const omega::app::GpuHostSnapshot before_blit_readback = host.Snapshot();
+        constexpr std::uint32_t probe_normalized_extent =
+            omega::runtime::kNormalizedRenderExtent;
+        constexpr std::uint32_t probe_half_extent = probe_normalized_extent / 2U;
+        constexpr std::uint32_t probe_quarter_extent = probe_normalized_extent / 4U;
+        constexpr std::uint32_t probe_three_quarter_extent =
+            probe_quarter_extent * 3U;
+        const std::array probe_commands{
+            omega::runtime::RenderTextureBlitCommand{
+                .texture = *uploaded_probe,
+                .source = omega::runtime::RenderSourceRectQ16{
+                    .left = 0U,
+                    .top = 0U,
+                    .right = probe_normalized_extent,
+                    .bottom = probe_half_extent,
+                },
+                .destination = omega::runtime::RenderTargetRectQ16{
+                    .left = 0U,
+                    .top = 0U,
+                    .right = probe_normalized_extent,
+                    .bottom = probe_normalized_extent,
+                },
+                .fit_mode = omega::runtime::RenderTextureFitMode::Contain,
+                .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+            },
+            omega::runtime::RenderTextureBlitCommand{
+                .texture = *uploaded_probe,
+                .source = omega::runtime::RenderSourceRectQ16{
+                    .left = 0U,
+                    .top = probe_half_extent,
+                    .right = probe_half_extent,
+                    .bottom = probe_normalized_extent,
+                },
+                .destination = omega::runtime::RenderTargetRectQ16{
+                    .left = probe_half_extent,
+                    .top = probe_quarter_extent,
+                    .right = probe_three_quarter_extent,
+                    .bottom = probe_three_quarter_extent,
+                },
+                .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+                .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+            },
+        };
+        auto probe_draw_list = omega::runtime::RenderDrawList::Create(probe_commands);
+        if (!probe_draw_list)
+            return Fail("blit readback probe draw-list creation failed");
+
+        constexpr omega::runtime::RenderClearColorRgba8 opaque_black{
+            .red = 0U,
+            .green = 0U,
+            .blue = 0U,
+            .alpha = 255U,
+        };
+        constexpr omega::runtime::RenderClearColorRgba8 opaque_red{
+            .red = 255U,
+            .green = 0U,
+            .blue = 0U,
+            .alpha = 255U,
+        };
+        constexpr omega::runtime::RenderClearColorRgba8 opaque_green{
+            .red = 0U,
+            .green = 255U,
+            .blue = 0U,
+            .alpha = 255U,
+        };
+        constexpr omega::runtime::RenderClearColorRgba8 opaque_blue{
+            .red = 0U,
+            .green = 0U,
+            .blue = 255U,
+            .alpha = 255U,
+        };
+        constexpr std::array expected_probe_readback{
+            opaque_black, opaque_black, opaque_black, opaque_black,
+            opaque_red, opaque_red, opaque_blue, opaque_green,
+            opaque_red, opaque_red, opaque_blue, opaque_green,
+            opaque_black, opaque_black, opaque_black, opaque_black,
+        };
+        packet.clear_color = opaque_black;
+        packet.draw_list = *probe_draw_list;
+        auto probe_readback = omega::app::detail::SdlGpuHostTestAccess::
+            ReadbackBlitsForTesting(host, packet);
+        if (!probe_readback)
+            return Fail("blit readback probe failed", probe_readback.error());
+        if (*probe_readback != expected_probe_readback)
+            return Fail("blit readback probe did not match the exact 4x4 RGBA8 grid");
+        if (host.Snapshot() != before_blit_readback)
+            return Fail("blit readback probe mutated production host state");
+
+        auto released_probe = host.ReleaseTexture(*uploaded_probe);
+        if (!released_probe)
+            return Fail("blit readback probe release failed", released_probe.error());
+        const omega::app::GpuHostSnapshot after_probe_release = host.Snapshot();
+        if (after_probe_release.successful_uploads != 1U ||
+            after_probe_release.successful_upload_logical_bytes != probe_pixels.size() ||
+            after_probe_release.successful_releases != 1U ||
+            !PoolIsEmpty(after_probe_release.textures))
+            return Fail("blit readback probe release did not restore empty residency");
+
+        packet = omega::runtime::RenderFramePacket{};
         std::array<std::byte, 8U * 8U * 4U> pixels_a{};
         FillOpaquePattern(pixels_a, 8U, 8U, 0U);
         auto uploaded_a = host.UploadRgba8Texture(omega::runtime::Rgba8TextureUploadView{
@@ -265,9 +402,9 @@ int main()
             return Fail("texture B upload failed", uploaded_b.error());
 
         const omega::app::GpuHostSnapshot after_upload_b = host.Snapshot();
-        if (after_upload_b.successful_uploads != 2U ||
+        if (after_upload_b.successful_uploads != 3U ||
             after_upload_b.successful_upload_logical_bytes !=
-                pixels_a.size() + pixels_b.size() ||
+                probe_pixels.size() + pixels_a.size() + pixels_b.size() ||
             after_upload_b.textures.slot_capacity != 2U ||
             after_upload_b.textures.free_slots != 0U ||
             after_upload_b.textures.resident_slots != 2U ||
@@ -343,7 +480,7 @@ int main()
         if (!released_a)
             return Fail("texture A release failed", released_a.error());
         const omega::app::GpuHostSnapshot after_release_a = host.Snapshot();
-        if (after_release_a.successful_releases != 1U ||
+        if (after_release_a.successful_releases != 2U ||
             after_release_a.textures.free_slots != 1U ||
             after_release_a.textures.resident_slots != 1U ||
             after_release_a.textures.resident_logical_bytes != pixels_b.size())
@@ -375,9 +512,9 @@ int main()
             return Fail("texture A slot did not reuse for C with a new generation");
 
         const omega::app::GpuHostSnapshot after_upload_c = host.Snapshot();
-        if (after_upload_c.successful_uploads != 3U ||
+        if (after_upload_c.successful_uploads != 4U ||
             after_upload_c.successful_upload_logical_bytes !=
-                pixels_a.size() + pixels_b.size() + pixels_c.size() ||
+                probe_pixels.size() + pixels_a.size() + pixels_b.size() + pixels_c.size() ||
             after_upload_c.textures.free_slots != 0U ||
             after_upload_c.textures.resident_slots != 2U ||
             after_upload_c.textures.resident_logical_bytes !=
@@ -430,10 +567,10 @@ int main()
             return Fail("final GPU idle wait failed", idle.error());
 
         const omega::app::GpuHostSnapshot final = host.Snapshot();
-        if (final.successful_uploads != 3U ||
+        if (final.successful_uploads != 4U ||
             final.successful_upload_logical_bytes !=
-                pixels_a.size() + pixels_b.size() + pixels_c.size() ||
-            final.successful_releases != 3U || final.blit_submissions != 2U ||
+                probe_pixels.size() + pixels_a.size() + pixels_b.size() + pixels_c.size() ||
+            final.successful_releases != 4U || final.blit_submissions != 2U ||
             final.successful_blit_draws != 4U ||
             final.clear_submissions != 1U ||
             final.rejected_nondefault_texture_handles != 1U ||
@@ -445,7 +582,7 @@ int main()
     }
 
     std::cout << "omega_sdl_gpu_texture_smoke: passed driver=" << driver
-              << " uploads=3 releases=3 blit_frames=2 blit_draws=4 unavailable="
+              << " uploads=4 releases=4 blit_frames=2 blit_draws=4 unavailable="
               << unavailable_submissions << '\n';
     return 0;
 }

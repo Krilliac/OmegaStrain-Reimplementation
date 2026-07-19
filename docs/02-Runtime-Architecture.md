@@ -583,6 +583,42 @@ asynchronous queue, lifetime-pin, or fence contract; and no stable ABI, persiste
 serialization, wire/plugin, measured GPU memory, performance, streaming/eviction,
 display-expansion, `TextureStorageIR`/`AssetService` binding, retail-rendering, or gameplay meaning.
 
+E-0050 adds a second private friend-only diagnostic seam, `ReadbackBlitsForTesting`, whose result
+is an owned row-major array of sixteen `RenderClearColorRgba8` values from a fixed synthetic 4x4
+target. It does not add a production readback interface or expose an SDL resource. An empty draw
+list fails before SDL/resource work with exact error
+`blit readback requires a nonempty draw list`. A nonempty probe completes generation/backend-slot
+resolution, source-crop mapping, filter mapping, and fixed-target planning for the entire list
+before creating the temporary `R8G8B8A8_UNORM` target, 64-byte download transfer buffer, or command
+buffer. The operation remains counter-neutral and does not change portable texture residency.
+
+`TryMapTextureFilter` and `RecordTextureBlits` are now shared by the production swapchain path and
+the offscreen probe. Each prepared entry stores only a non-owning resolved source pointer, an owned
+portable blit plan, and a mapped SDL filter. The recorder preserves source order, `LOAD`, no flip,
+no cycling, and the same source/destination/layer/mip fields in both paths. The probe clears through
+the existing shared `RecordClearPass`, records every prepared blit, downloads the target, takes the
+command buffer into fence-producing submission, waits, maps and explicitly decodes sixteen RGBA8
+pixels, unmaps the transfer buffer, then releases the fence, transfer buffer, and target through
+guards.
+
+The public zero-file fixture uploads opaque endpoint texels laid out `R G / B W`. On an opaque-black
+target, its exact top-row Contain+Nearest plan followed by a later bottom-left Stretch+Nearest
+overwrite reads back `KKKK/RRBG/RRBG/KKKK`. Rejected and accepted probes leave the complete host
+snapshot unchanged, and probe release restores empty residency before the production A/B/C flow.
+The corrected MSVC build completed with zero warnings or errors; default CTest passed 20/20; one
+initial plus 20 repeated `direct3d12` GPU smokes passed with exact final production totals of four
+uploads/656 cumulative logical bytes, four releases, two blit frames/four draws, one clear-only
+submission, one stale rejection, zero unavailable submissions, and zero residual residency. The
+opt-in configuration passed 21/21, was restored to `OFF`, and listed 20 default tests. A public
+two-frame D3D12 `openomega` smoke passed with dummy audio. Publication CI remains separate.
+
+This confirms only opaque endpoint bytes for those two exact source/destination plans, command
+order, and load preservation in the fixed 4x4 target on the observed D3D12 path. It establishes no
+general Nearest/Linear filtering, cropping, aspect, rounding, sample-center, edge/border,
+Contain/Stretch, flip/cycle/mip/layer, alpha interpretation, blending, sRGB/HDR/color-space,
+presentation/swapchain, cross-backend, asynchronous-lifetime, ABI/serialization, asset-binding,
+retail-rendering, or gameplay guarantee.
+
 `LoadLevelSpatial` composes the outer DATA.HOG, any container-only source chain, every referenced
 cell HOG, and every COL decoder under one operation budget. Input work and item counts are
 cumulative, logical output includes every owned mesh/vector payload, semantic-adapter scratch is a

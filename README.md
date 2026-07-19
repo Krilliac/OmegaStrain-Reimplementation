@@ -234,6 +234,31 @@ retail instruction blocks, or PS2 execution layer.
   failure atomicity or production asynchronous queue/pin/fence contract; and no stable ABI,
   serialization, persistence, wire/plugin, measured GPU-memory, streaming/eviction,
   display-expansion, asset-binding, retail-rendering, or gameplay semantic.
+- E-0050 adds a private friend-only synchronous blit-readback seam over a fixed synthetic 4x4
+  `R8G8B8A8_UNORM` target without widening the public renderer contract. An empty draw list fails
+  before SDL/resource work with exact error `blit readback requires a nonempty draw list`. For a
+  nonempty list, the seam resolves every generation/backend slot, maps every source crop and
+  filter, and plans every 4x4 destination before allocating the temporary target, 64-byte download
+  buffer, or command buffer. Production rendering and the probe now share filter mapping and the
+  exact source-order `LOAD` blit recorder, while both retain the shared clear-pass recorder.
+  The public zero-file smoke uploads an opaque endpoint 2x2 source laid out `R G / B W`, clears to
+  opaque black, applies one top-row Contain+Nearest blit and one later bottom-left
+  Stretch+Nearest overwrite, then reads back exactly the sixteen row-major RGBA8 pixels
+  `KKKK/RRBG/RRBG/KKKK`. Accepted and rejected probes preserve the complete host snapshot, and
+  releasing the probe restores empty portable/backend residency before the existing A/B/C flow.
+  The corrected MSVC build completed with zero warnings or errors. Default CTest passed 20/20.
+  One initial plus 20 repeated public zero-file GPU smokes passed on `direct3d12`; every run ended
+  with exactly four uploads/656 cumulative logical bytes, four releases, two production blit
+  frames/four draws, one clear-only submission, one stale rejection, zero unavailable submissions,
+  and zero residual residency. The opt-in configuration passed 21/21, was restored to OFF, and
+  listed 20 default tests. A public two-frame D3D12 `openomega` smoke passed with dummy audio.
+  Publication CI is tracked separately from these local validation claims.
+  This endpoint-only fixture confirms the two tested crops/plans, command order, load preservation,
+  and sixteen exact opaque RGBA8 pixels on the observed D3D12 path. It is not a public readback API
+  and establishes no general Nearest, Linear, crop, aspect, rounding, sample-center, edge, border,
+  Contain, Stretch, flip, cycle, mip, layer, alpha interpretation, blending, sRGB/HDR, color-space,
+  presentation, swapchain, asynchronous lifetime, cross-backend, retail-rendering, asset-binding,
+  or gameplay guarantee.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
