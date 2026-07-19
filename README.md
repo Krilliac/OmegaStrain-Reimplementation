@@ -598,6 +598,26 @@ retail instruction blocks, or PS2 execution layer.
   emulator, or PCSX2 input was used. This establishes only synthetic developer UI and no retail menu,
   controls, pause, timing, persistence, private-input, or emulator-equivalence semantics.
   Publication CI remains separate and is not claimed for E-0065.
+- E-0066 adds a portable, metadata-only canonical `TextureStorageIR` to
+  `runtime::DebugImage` adapter. It is not connected to `OmegaApp`, `AssetService`, GPU upload, or
+  the retail TDX decoder. `BuildTextureStorageTopologyDebugImage` borrows one already-canonical
+  value, validates it in a strict typed order under independent block, plane, palette-entry, and
+  output-byte budgets, and returns a fully owned image without I/O or shared state. Source-order
+  blocks occupy 32x32 tiles with at most eight columns. Opaque background and slate borders frame
+  cyan 2x2 sample/transfer-enum masks (`0x1`, `0x9`, `0x7`, `0xf`); palette presence adds one amber
+  plus. After validation, only block order, sample and transfer encodings, and palette presence can
+  affect pixels. Plane and palette bytes and dimensions are validation inputs, not display data.
+  The canonical three-block fixture is 96x32 RGBA8 (12,288 bytes), has exact
+  background/slate/cyan/amber populations 2,667/372/23/10, and FNV-1a-64
+  `0xb56c8db088c5a9fe`. The adapter is reentrant and safe for any worker thread. It establishes no
+  retail pixel expansion, display/channel/alpha/nibble/swizzle/palette interpretation, material or
+  geometry binding, or app/render behavior. MSVC configure, focused-target, and full builds were
+  clean with zero warnings or errors; the executable passed directly and 20/20 repetitions, focused
+  CTest passed, and default CTest passed 30/30. Runtime-off direct and focused checks passed with 27
+  tests registered. The dependency gate checked 155 native files, all 209 tooling tests passed, and
+  Python compile-all passed, and the final staged-tree public gate checked 242 indexed text blobs.
+  Validation used no private data, D-drive content, disc
+  image, retail executable, emulator, or PCSX2 input. Publication CI remains separate and unclaimed.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

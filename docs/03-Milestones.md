@@ -710,6 +710,26 @@ input was used. This proves only synthetic developer presentation and gating, no
 controls, pause, timing, persistence, private-input behavior, or emulator equivalence. Publication CI
 remains separate and unclaimed for E-0065.
 
+E-0066 adds a portable metadata-only `TextureStorageIR` to `runtime::DebugImage` adapter without
+wiring canonical texture storage into `OmegaApp`, `AssetService`, GPU upload, or the retail decoder.
+The reentrant, no-I/O call borrows one canonical value, applies a strict typed fail order and
+independent block/plane/palette-entry/output-byte budgets, then returns fully owned RGBA8 pixels.
+Source-order blocks occupy 32x32 tiles with at most eight columns. Opaque background/slate framing,
+cyan enum masks `0x1`/`0x9`/`0x7`/`0xf`, and an amber palette-presence plus are the complete visual
+vocabulary. After validation, only block order, sample/transfer encodings, and palette presence can
+affect the image; bytes and dimensions remain validation inputs. The canonical three-block fixture
+is 96x32 (12,288 bytes), has exact background/slate/cyan/amber populations 2,667/372/23/10, and
+FNV-1a-64 `0xb56c8db088c5a9fe`.
+
+MSVC configure, focused-target, and full builds were clean with zero warnings or errors. The focused
+test passed directly plus 20/20 repetitions, focused CTest passed, and default CTest passed 30/30.
+Runtime-off direct and focused checks passed with 27 registrations. The dependency gate checked 155
+native files, all 209 tooling tests passed, Python compile-all passed, and the final staged-tree
+public gate checked 242 indexed text blobs. No private data, D-drive content, disc image, retail
+executable, emulator, or PCSX2 input was used.
+Publication CI remains separate and unclaimed. This proves no retail/display/channel/swizzle/palette,
+material, geometry, asset-binding, app, or GPU semantics.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

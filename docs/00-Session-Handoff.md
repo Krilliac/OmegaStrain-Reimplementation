@@ -741,6 +741,32 @@ shipping dependencies or execution mechanisms.
     was used. This proves only synthetic developer presentation and gating, not retail menu art,
     controls, pause, timing, persistence, private-input behavior, or emulator equivalence.
     Publication CI remains separate and unclaimed for E-0065.
+51. E-0066 adds `BuildTextureStorageTopologyDebugImage`, a portable metadata-only adapter from an
+    already-canonical `TextureStorageIR` to one fully owned `runtime::DebugImage`. It borrows the IR
+    only for the call, is reentrant on any worker thread, performs no I/O or shared-state mutation,
+    and is not wired to `OmegaApp`, `AssetService`, GPU upload, or the retail TDX decoder. A strict
+    typed fail order validates top-level dimensions, sample encoding, block presence/count, each
+    source-order block's plane presence/count, plane dimensions/encoding/exact byte size, optional
+    palette dimensions/cardinality, cumulative budgets, and final image dimensions/bytes/allocation.
+    The independent defaults cap blocks, planes, palette entries, and output bytes; a block can emit
+    at most 64 plane markers.
+    Each source-order block occupies one 32x32 tile in rows of at most eight columns. The image uses
+    only opaque background `{8,12,24,255}`, slate `{28,38,58,255}`, cyan `{112,220,255,255}`, and
+    amber `{255,196,64,255}`. Cyan 2x2 masks `0x1`, `0x9`, `0x7`, and `0xf` identify the four
+    validated sample/transfer enum values; optional palette presence draws an amber plus. Once
+    validation succeeds, only block order, sample and transfer encodings, and palette presence affect
+    pixels. Payload/palette bytes and dimensions cannot become display pixels. The canonical
+    three-block fixture is 96x32 RGBA8 (12,288 bytes), has exact background/slate/cyan/amber
+    populations 2,667/372/23/10, and FNV-1a-64 `0xb56c8db088c5a9fe`.
+    MSVC configure, focused-target, and full builds were clean with zero warnings or errors. The
+    focused executable passed directly plus 20/20 repetitions, focused CTest passed, and default
+    CTest passed 30/30. Runtime-off direct and focused checks passed with 27 registrations. The
+    dependency gate checked 155 native files, all 209 tooling tests passed, and Python compile-all
+    passed, and the final staged-tree public gate checked 242 indexed text blobs. No private data,
+    D-drive content, disc image, retail executable, emulator,
+    or PCSX2 input was used. Publication CI remains separate and unclaimed. This contact sheet proves
+    no retail pixel/display expansion, channel/alpha/nibble/palette/swizzle meaning, material or
+    geometry relationship, or app/GPU behavior.
 
 ## Disc observations
 
