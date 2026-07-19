@@ -424,6 +424,23 @@ retail instruction blocks, or PS2 execution layer.
   feeding, pacing, clocking, or state restoration; simulation checkpointing, RNG restoration, or
   world mutation; render, audio, or job work; persistence, serialization, file/wire/stable ABI, or
   cross-process contract; seek, rewind, looping, rollback, or retail timing or determinism claim.
+- E-0058 adds the portable app-layer `RunReplaySession`. The move-only session takes one validated
+  capture pair only after it has created a fresh scheduler from caller-supplied synthetic timing
+  configuration and a fresh empty simulation world with the same fixed step. Each successfully
+  published normal replay frame feeds its exact signed elapsed value to that scheduler and executes
+  every planned simulation step. Separate session observers return owned scheduler and simulation
+  snapshots. A terminal
+  frame completes without changing either subsystem. A lower replay read or reconstruction failure
+  leaves the app session,
+  scheduler, and world unchanged so the same frame can be retried. The defensive representation
+  branch is unreachable under the current 65,536-frame, 64-step-per-frame, and one-second-step
+  bounds. If those bounds expand and it is reached, consumed replay/scheduler work and earlier world
+  steps make it a permanent failed state.
+  This is replay into a fresh synthetic timeline, not restoration of the captured app. Reconstructed
+  input is observable but is not injected into the world. There is no existing-`OmegaApp` replay,
+  host-event synthesis, captured scheduler/world checkpoint, entity or RNG restoration, pacing or
+  clock ownership, rendering, audio, jobs, persistence, file/wire/stable ABI, cross-process
+  compatibility, seek, rewind, loop, rollback, or retail timing or determinism claim.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

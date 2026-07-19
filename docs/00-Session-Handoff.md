@@ -528,6 +528,24 @@ shipping dependencies or execution mechanisms.
     restoration, or world mutation; rendering, audio, or job work; persistence, serialization,
     file/wire/stable ABI, or cross-process contract; seek, rewind, looping, rollback, or retail
     timing or determinism claim.
+43. E-0058 adds the portable `omega_app_core` `RunReplaySession`. This move-only, non-hot-reloadable
+    app value owns a lower replay session plus a fresh scheduler created from caller-supplied
+    synthetic timing configuration and a fresh empty simulation world with the scheduler's fixed
+    step. Creation validates scheduler configuration, entity capacity, and fresh-world construction
+    before transferring the capture pair; expected failure preserves the pair for correction and
+    retry. After publication, the session is exclusive to one game thread.
+    Each successfully published elapsed frame advances the scheduler and executes every planned
+    world step. Separate session observers return owned scheduler and simulation snapshots.
+    Terminal consumption completes without changing either subsystem. A lower replay failure is
+    transactional and retryable. The defensive representation branch is unreachable under the
+    current 65,536-frame, 64-step-per-frame, and one-second-step bounds. If those bounds expand and
+    the branch is reached, consumed replay/scheduler work and earlier world steps make the session
+    permanently failed.
+    This starts from fresh synthetic state under caller configuration. It does not restore captured
+    scheduler or world state, inject reconstructed input into simulation, reconstruct captured
+    gameplay, synthesize host events, restore entities or RNG, pace from a host clock, integrate an
+    existing `OmegaApp` or CLI path, render, mix audio, dispatch jobs, persist data, define a stable
+    ABI, seek, rewind, loop, roll back, or claim retail timing or determinism.
 
 ## Disc observations
 
