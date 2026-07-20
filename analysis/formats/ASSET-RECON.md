@@ -210,10 +210,16 @@ and all track, timing, pose, animation, and playback meaning stay outside the ad
 
 ### PAR particle parameters
 
-All 679 PAR entries are ASCII, CRLF, NUL-padded, and begin with a numeric `;version` comment.
-Observed versions range from 1.3 through 2.1. A tolerant text parser that strips trailing NULs,
-separates values from semicolon comments, and dispatches by declared version is sufficient for
-initial ingestion. Field semantics and compatibility defaults still require implementation.
+All 679 PAR entries are ASCII, CRLF-only, NUL-padded, and begin with a numeric token followed by
+optional whitespace and literal `;version` on line one. The aggregate fingerprint records eight
+exact six-decimal tokens: `1.300000`, `1.400000`, `1.500000`, `1.700000`, `1.800000`, `1.900000`,
+`2.000000`, and `2.100000`. Padding ranges from 1 to 2,040 bytes and physical spans range from
+2,048 to 4,096 bytes.
+
+The bounded native adapter documented in `PAR.md` validates only that envelope, maps the eight
+exact tokens to fixed enum values, retains the complete logical text plus source-order line ranges,
+and omits only the validated trailing NUL padding. It does not split values from comments or assign
+keys, fields, types, paths, asset roles, particle semantics, or compatibility defaults.
 
 ### COL and VUM geometry
 

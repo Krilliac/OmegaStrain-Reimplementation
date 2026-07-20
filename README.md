@@ -95,6 +95,11 @@ retail instruction blocks, or PS2 execution layer.
   final-sized vectors are explicitly allocated inside the typed error boundary. Scratch and nesting
   are unused. The slice is not wired to startup, audio, animation, or playback and assigns no track,
   scalar, timing, interpolation, pose, or VAG-relationship semantics.
+- E-0092 adds a strict native PAR text-envelope boundary over the public aggregate evidence. It
+  preserves exact owned CRLF logical text and source-order line ranges, recognizes only the eight
+  observed six-decimal first-line version tokens, and omits only a validated bounded NUL tail. It
+  assigns no key/value, field, path, asset-role, particle, compatibility, rendering, gameplay, or
+  emulator-equivalence semantics.
 - E-0087 adds a diagnostic-only Indexed8 candidate projection over one strict canonical storage
   shape: one matching `Packed8` plane, one exact 256-entry palette, and exact index, palette, and
   output cardinality. Callers must explicitly choose identity versus bit-3/4 palette permutation,
