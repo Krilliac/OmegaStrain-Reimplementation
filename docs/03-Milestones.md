@@ -19,8 +19,9 @@ hypothesis descriptor and fixed-schema native verifier, the canonical level mani
 COL spatial-mesh adapter, shared-budget level-spatial orchestration, a semantic TDX storage adapter,
 a bounded level-scoped texture store and native verifier, and a semantic VUM material-catalog
 adapter plus a retail-only passive render-payload descriptor are implemented. Bounded passive SKM
-and SKL descriptors plus a fixed-output retail-only SKA descriptor are also implemented; SKAS
-remains separate aggregate-only evidence. Other scene decoders remain incomplete.
+and SKL descriptors, a fixed-output retail-only SKA descriptor, and a bounded canonical LPD
+counted-envelope adapter are also implemented; SKAS remains separate aggregate-only evidence.
+Other scene decoders remain incomplete.
 
 - Native HOG parser validated against all 273 top-level archives and 6,677 nested spans.
 - Virtual filesystem with physical-directory and HOG mounts.
@@ -112,6 +113,16 @@ remains separate aggregate-only evidence. Other scene decoders remain incomplete
   the two-candidate SKAS text envelope remains separate; neither assigns animation semantics. The
   native corpus verifier accepts 213/213 SKA spans with zero errors: 158 exact, 55 zero-padded, and
   2,180,832 aggregate logical bytes.
+- E-0091 adds an owned LPD counted-envelope IR and stateless two-pass decoder for the fixed
+  22-word/21-track structure. It preserves every source-order four-byte entry as opaque bytes,
+  accepts exact input or any all-zero tail through the aggregate-proven 1,932-byte maximum, and
+  reports truncation, the earliest dirty-tail byte, and input/item/output limits deterministically
+  before allocation. The observed 8-byte corpus tail minimum is not promoted to a minimum or
+  alignment rule. The fixed 4,096-byte physical-input maximum derives fixed 1,002-entry,
+  1,024-item, and `sizeof(LpdEnvelopeIR) + 4,008`-byte output ceilings. Explicit final-sized vector
+  construction keeps first and later allocation failures inside the typed error boundary. Scratch
+  and nesting remain zero, and no track, scalar, timing, interpolation, pose, animation, audio-link,
+  or playback semantics are assigned.
 - Bounded POP post-terrain scanning accepts 18/18 level POPs with zero errors and finds 19 aligned
   literal-tag candidates exactly once per file in one shared order, for 342 aggregate hits. The
   literals are not yet decoded section boundaries and assign no placement or visibility semantics.

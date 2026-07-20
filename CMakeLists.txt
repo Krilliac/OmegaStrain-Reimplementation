@@ -92,6 +92,7 @@ target_compile_features(omega_gameplay PUBLIC cxx_std_23)
 add_library(omega_retail_formats STATIC
     native/src/retail/col_spatial_mesh_decoder.cpp
     native/src/retail/container_descriptors.cpp
+    native/src/retail/lpd_envelope_decoder.cpp
     native/src/retail/pop_level_manifest_decoder.cpp
     native/src/retail/pop_post_terrain_hypothesis_descriptor.cpp
     native/src/retail/ska_container_descriptor.cpp
@@ -1340,6 +1341,31 @@ if(BUILD_TESTING)
         target_compile_options(omega_core_tests PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
     endif()
     add_test(NAME omega_core_tests COMMAND omega_core_tests)
+
+    add_executable(omega_lpd_envelope_decoder_tests
+        native/tests/lpd_envelope_decoder_tests.cpp
+    )
+    target_link_libraries(omega_lpd_envelope_decoder_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_lpd_envelope_decoder_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_lpd_envelope_decoder_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_lpd_envelope_decoder_tests COMMAND omega_lpd_envelope_decoder_tests)
+    set_tests_properties(omega_lpd_envelope_decoder_tests PROPERTIES TIMEOUT 5)
 
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_hog_tree
