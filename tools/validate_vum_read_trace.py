@@ -52,10 +52,12 @@ _FAILURE_REASONS = frozenset(
         "runtime_identity_changed",
         "savestate_load_failed",
         "savestate_required",
+        "unexpected_savestate_reload",
         "unaligned_access",
         "unsupported_execution_mode",
         "unsupported_host",
         "unsupported_load_width",
+        "vm_reset_started",
         "wrong_disc",
     )
 )
