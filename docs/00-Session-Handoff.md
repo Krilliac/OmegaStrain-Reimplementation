@@ -1007,6 +1007,35 @@ shipping dependencies or execution mechanisms.
     emulator equivalence. Only public source and generated fixtures were used; no private or owner
     files, D-drive content, disc image, executable, emulator, or PCSX2 input was accessed.
 
+64. E-0079 is the first locally validated Windows portable-package contract. It permits only an
+    MSVC x64 `Release` build and fixes the archive name as
+    `OpenOmega-0.1.0-windows-x86_64.zip`. The ZIP must contain
+    exactly one `OpenOmega-0.1.0-windows-x86_64/` directory with `openomega.exe`,
+    `launch-openomega.cmd`, `README-WINDOWS.md`, `LICENSE`, `NOTICE`, `TRADEMARKS.md`,
+    `THIRD_PARTY_NOTICES.md`, and `LICENSES/SDL3.txt`, with no second wrapper directory or extra
+    entry. The packaged executable uses the static MSVC runtime. The five-line command launcher
+    changes to its package directory, forwards all arguments, and returns the executable's exit code;
+    the contract requires exact `OpenOmega native shell: rendered_frames=0` stdout with empty stderr
+    and an invalid-option forwarding oracle from an unrelated working directory. A sibling
+    `.zip.sha256` file names and hashes the exact
+    archive. The output is an unsigned preview and excludes proprietary inputs and assets, PCSX2,
+    user profiles, PDBs, and developer tools. Serialized local validation generated the package and
+    matching sidecar, passed the focused package contract, and observed one canonical root with
+    exactly two directories and eight files. The launcher is exactly 96 ASCII bytes with five CRLF
+    endings and no BOM; both its zero-frame success and invalid-option forwarding oracles passed.
+    The executable is x64 PE32+ with the Windows console subsystem. The local MSVC 19.38 binary
+    imports exactly 11 allowed direct OS DLLs; the contract additionally permits only the Windows
+    OS synchronization API-set `API-MS-WIN-CORE-SYNCH-L1-2-0` observed under hosted VS 18/MSVC
+    19.51/Windows SDK 26100, while rejecting SDL, MSVC, UCRT, debug-runtime, every other API-set, and every other
+    unapproved import. It contains no source/build path prefix after deterministic `Release` path
+    mapping and the enforced narrow/wide byte scan. Full MSVC CTest
+    passed 32/32 `Debug`, 32/32 `RelWithDebInfo`, and 33/33 `Release`; the 168-file dependency gate,
+    all 209 tooling tests, and Python compile-all passed. The staged public-tree gate checked 258
+    indexed text blobs. Clean-machine behavior, DCO, publication, and exact-main CI remain pending.
+    Validation used only public source and generated output; no private or owner files, D-drive
+    content, disc image, executable,
+    emulator, or PCSX2 input was accessed.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2

@@ -6,6 +6,19 @@ endif()
 
 project(OmegaStrainReimplementation VERSION 0.1.0 LANGUAGES CXX)
 
+set(CMAKE_MSVC_RUNTIME_LIBRARY
+    "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<CONFIG:Release>>:DLL>"
+)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    file(TO_NATIVE_PATH "${CMAKE_BINARY_DIR}" OMEGA_NATIVE_BINARY_DIRECTORY)
+    file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}" OMEGA_NATIVE_SOURCE_DIRECTORY)
+    add_compile_options(
+        "$<$<CONFIG:Release>:/experimental:deterministic>"
+        "$<$<CONFIG:Release>:/pathmap:${OMEGA_NATIVE_BINARY_DIRECTORY}=.build>"
+        "$<$<CONFIG:Release>:/pathmap:${OMEGA_NATIVE_SOURCE_DIRECTORY}=.>"
+    )
+endif()
+
 find_package(Threads REQUIRED)
 
 if(CMAKE_SIZEOF_VOID_P LESS 8)
@@ -239,6 +252,29 @@ else()
 endif()
 
 if(OMEGA_BUILD_RUNTIME)
+    if(WIN32 AND MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        if(NOT CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+            message(FATAL_ERROR
+                "OpenOmega Windows portable packaging requires the MSVC x64 target architecture"
+            )
+        endif()
+
+        set(OMEGA_WINDOWS_PORTABLE_PACKAGE_ENABLED ON)
+        set(OMEGA_WINDOWS_PORTABLE_PACKAGE_ROOT
+            "OpenOmega-${PROJECT_VERSION}-windows-x86_64"
+        )
+
+        # This must remain the first install rule. Unsupported configurations fail before
+        # FetchContent subdirectories or project payloads can mutate the install prefix.
+        install(CODE [=[
+            if(NOT CMAKE_INSTALL_CONFIG_NAME STREQUAL "Release")
+                message(FATAL_ERROR
+                    "OpenOmega Windows portable installation requires Release configuration"
+                )
+            endif()
+        ]=])
+    endif()
+
     include(FetchContent)
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
@@ -317,6 +353,25 @@ if(OMEGA_BUILD_RUNTIME)
         target_compile_options(openomega PRIVATE /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
     else()
         target_compile_options(openomega PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+    endif()
+
+    if(OMEGA_WINDOWS_PORTABLE_PACKAGE_ENABLED)
+        install(TARGETS openomega
+            RUNTIME DESTINATION "${OMEGA_WINDOWS_PORTABLE_PACKAGE_ROOT}"
+        )
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/launch-openomega.cmd"
+            "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/README-WINDOWS.md"
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+            "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TRADEMARKS.md"
+            "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+            DESTINATION "${OMEGA_WINDOWS_PORTABLE_PACKAGE_ROOT}"
+        )
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSES/SDL3.txt"
+            DESTINATION "${OMEGA_WINDOWS_PORTABLE_PACKAGE_ROOT}/LICENSES"
+        )
     endif()
 endif()
 
@@ -992,4 +1047,94 @@ if(BUILD_TESTING)
         omega_tool_empty_level_material_catalogs_signature
         PROPERTIES PASS_REGULAR_EXPRESSION "\"catalogs\":0"
     )
+endif()
+
+if(OMEGA_WINDOWS_PORTABLE_PACKAGE_ENABLED)
+    if(NOT IS_ABSOLUTE "${CMAKE_LINKER}" OR NOT EXISTS "${CMAKE_LINKER}")
+        message(FATAL_ERROR
+            "OpenOmega Windows portable packaging requires an absolute existing MSVC linker"
+        )
+    endif()
+    get_filename_component(OMEGA_MSVC_TOOL_DIRECTORY "${CMAKE_LINKER}" DIRECTORY)
+    unset(OMEGA_WINDOWS_DEPENDENCY_DUMP_TOOL CACHE)
+    unset(OMEGA_WINDOWS_DEPENDENCY_DUMP_TOOL)
+    find_program(OMEGA_WINDOWS_DEPENDENCY_DUMP_TOOL
+        NAMES dumpbin.exe
+        PATHS "${OMEGA_MSVC_TOOL_DIRECTORY}"
+        NO_DEFAULT_PATH
+        NO_CACHE
+    )
+    if(OMEGA_WINDOWS_DEPENDENCY_DUMP_TOOL)
+        set(OMEGA_WINDOWS_DEPENDENCY_DUMP_MODE "DUMPBIN")
+    else()
+        set(OMEGA_WINDOWS_DEPENDENCY_DUMP_TOOL "${CMAKE_LINKER}")
+        set(OMEGA_WINDOWS_DEPENDENCY_DUMP_MODE "LINKER")
+    endif()
+    if(NOT IS_ABSOLUTE "${OMEGA_WINDOWS_DEPENDENCY_DUMP_TOOL}" OR
+       NOT EXISTS "${OMEGA_WINDOWS_DEPENDENCY_DUMP_TOOL}")
+        message(FATAL_ERROR
+            "OpenOmega Windows portable packaging requires an absolute PE dependency dump tool"
+        )
+    endif()
+    unset(OMEGA_WINDOWS_POWERSHELL CACHE)
+    unset(OMEGA_WINDOWS_POWERSHELL)
+    find_program(OMEGA_WINDOWS_POWERSHELL
+        NAMES pwsh.exe powershell.exe
+        REQUIRED
+        NO_CACHE
+    )
+    if(NOT IS_ABSOLUTE "${OMEGA_WINDOWS_POWERSHELL}" OR
+       NOT EXISTS "${OMEGA_WINDOWS_POWERSHELL}")
+        message(FATAL_ERROR
+            "OpenOmega Windows portable packaging requires an absolute PowerShell host"
+        )
+    endif()
+    if(NOT IS_ABSOLUTE "$ENV{ComSpec}" OR NOT EXISTS "$ENV{ComSpec}")
+        message(FATAL_ERROR
+            "OpenOmega Windows portable packaging requires an absolute Windows command processor"
+        )
+    endif()
+
+    if(BUILD_TESTING)
+        add_test(NAME openomega_windows_portable_package_contract
+            COMMAND "${CMAKE_COMMAND}"
+                "-DOPENOMEGA_PACKAGE_CONTRACT_MODE=DRIVER"
+                "-DOPENOMEGA_CPACK_COMMAND=${CMAKE_CPACK_COMMAND}"
+                "-DOPENOMEGA_CPACK_CONFIG=${CMAKE_BINARY_DIR}/CPackConfig.cmake"
+                "-DOPENOMEGA_BUILD_DIRECTORY=${CMAKE_BINARY_DIR}"
+                "-DOPENOMEGA_SOURCE_DIRECTORY=${CMAKE_SOURCE_DIR}"
+                "-DOPENOMEGA_PACKAGE_DIRECTORY=${CMAKE_BINARY_DIR}/package"
+                "-DOPENOMEGA_PACKAGE_STAGE_DIRECTORY=${CMAKE_BINARY_DIR}/package-contract/stage"
+                "-DOPENOMEGA_PACKAGE_EXTRACT_DIRECTORY=${CMAKE_BINARY_DIR}/package-contract/extract"
+                "-DOPENOMEGA_PACKAGE_UNRELATED_DIRECTORY=${CMAKE_BINARY_DIR}/package-contract/unrelated"
+                "-DOPENOMEGA_PACKAGE_PROFILE_DIRECTORY=${CMAKE_BINARY_DIR}/package-contract/profile"
+                "-DOPENOMEGA_PACKAGE_BASENAME=${OMEGA_WINDOWS_PORTABLE_PACKAGE_ROOT}"
+                "-DOPENOMEGA_CONFIGURED_ARCHITECTURE=${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}"
+                "-DOPENOMEGA_DUMP_TOOL=${OMEGA_WINDOWS_DEPENDENCY_DUMP_TOOL}"
+                "-DOPENOMEGA_DUMP_TOOL_MODE=${OMEGA_WINDOWS_DEPENDENCY_DUMP_MODE}"
+                "-DOPENOMEGA_COMSPEC=$ENV{ComSpec}"
+                "-DOPENOMEGA_POWERSHELL=${OMEGA_WINDOWS_POWERSHELL}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/openomega_windows_package_contract.cmake"
+            CONFIGURATIONS Release
+        )
+        set_tests_properties(openomega_windows_portable_package_contract PROPERTIES
+            LABELS "integration;package"
+            RUN_SERIAL TRUE
+            TIMEOUT 420
+        )
+    endif()
+
+    set(CPACK_GENERATOR "ZIP")
+    set(CPACK_PACKAGE_NAME "OpenOmega")
+    set(CPACK_PACKAGE_VENDOR "OpenOmega clean-room project")
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+    set(CPACK_PACKAGE_FILE_NAME "${OMEGA_WINDOWS_PORTABLE_PACKAGE_ROOT}")
+    set(CPACK_PACKAGE_CHECKSUM "SHA256")
+    set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+    set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/package")
+    set(CPACK_PROJECT_CONFIG_FILE
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/openomega_windows_package_contract.cmake"
+    )
+    set(CPACK_OPENOMEGA_PROJECT_CONFIG_MODE ON)
+    include(CPack)
 endif()

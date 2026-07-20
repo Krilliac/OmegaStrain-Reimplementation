@@ -894,6 +894,32 @@ commit, DCO, publication, and exact-main validation remain pending. No channel n
 display-ready, row-order, swizzle, color-space, alpha, material, geometry, gameplay, GPU, E-0077, or
 emulator-equivalence semantics are assigned, and no private or D-drive inputs were used.
 
+E-0079 freezes the first M8 Windows delivery slice without claiming a completed release. The only
+permitted package input is an MSVC x64 `Release` build using the static MSVC runtime. The fixed
+`OpenOmega-0.1.0-windows-x86_64.zip` contains exactly one identically named internal root and eight
+files: `openomega.exe`, `launch-openomega.cmd`, `README-WINDOWS.md`, `LICENSE`, `NOTICE`,
+`TRADEMARKS.md`, `THIRD_PARTY_NOTICES.md`, and `LICENSES/SDL3.txt`. The launcher contract changes to
+its own directory, forwards every argument, and preserves the child exit code; validation must cover
+exact `OpenOmega native shell: rendered_frames=0` stdout with empty stderr and an invalid-option
+oracle from an unrelated working directory. A
+sibling `.zip.sha256` sidecar records the archive's SHA-256 digest for integrity checks. The result is an unsigned preview and
+must contain no proprietary inputs or assets, PCSX2, user profiles, PDBs, or developer tools.
+Serialized local validation generated the package and matching sidecar, passed the focused package
+contract, and observed one canonical root with exactly two directories and eight files. The
+launcher is exactly 96 ASCII bytes with five CRLF endings and no BOM; its success and invalid-option
+forwarding oracles passed. The executable is x64 PE32+ with the Windows console subsystem. The local
+MSVC 19.38 binary imports exactly 11 allowed direct OS DLLs; the contract additionally permits only
+the Windows OS synchronization API-set `API-MS-WIN-CORE-SYNCH-L1-2-0` observed under hosted VS
+18/MSVC 19.51/Windows SDK 26100, while rejecting SDL, MSVC, UCRT, debug-runtime, every other API-set, and every other
+unapproved import. It contains no source/build path prefix after deterministic `Release` path mapping
+and the enforced narrow/wide byte scan. Full
+MSVC CTest passed 32/32 `Debug`, 32/32 `RelWithDebInfo`, and 33/33 `Release`; the 168-file dependency
+gate, all 209 tooling tests, Python compile-all, and the staged public-tree gate over 258 indexed
+text blobs passed. Clean-machine behavior, DCO, publication, and exact-main CI remain pending.
+Validation used only public source and generated output; no private or owner files, D-drive content,
+disc image, executable, emulator,
+or PCSX2 input was accessed.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

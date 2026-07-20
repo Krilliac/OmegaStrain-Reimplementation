@@ -35,6 +35,12 @@
       "configurePreset": "msvc",
       "configuration": "RelWithDebInfo",
       "jobs": 2
+    },
+    {
+      "name": "msvc-release",
+      "configurePreset": "msvc",
+      "configuration": "Release",
+      "jobs": 2
     }
   ],
   "testPresets": [
@@ -52,6 +58,29 @@
       "configuration": "RelWithDebInfo",
       "output": {
         "outputOnFailure": true
+      }
+    },
+    {
+      "name": "msvc-release",
+      "configurePreset": "msvc",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ],
+  "packagePresets": [
+    {
+      "name": "msvc-windows-portable",
+      "configurePreset": "msvc",
+      "generators": [
+        "ZIP"
+      ],
+      "configurations": [
+        "Release"
+      ],
+      "output": {
+        "verbose": true
       }
     }
   ]
