@@ -327,3 +327,40 @@ runtime-off direct/focused checks with 28 registrations, dependency 168, tooling
 compile-all. The staged public-tree gate checked 255 indexed text blobs; commit, DCO, publication,
 and exact-main validation remain pending. No
 private or owner files, D-drive content, disc image, executable, emulator, or PCSX2 input was used.
+
+## Indexed8 display-candidate projection
+
+E-0087 adds `BuildTdxIndexed8CandidateDebugImage`, a renderer-neutral diagnostic over already-owned
+`TextureStorageIR`; it does not alter the TDX decoder or identify a retail display path. The
+accepted shape is deliberately narrower than the complete Indexed8 storage family: one nonzero
+top-level Indexed8 rectangle, exactly one block, exactly one nonzero matching `Packed8` plane, one
+palette whose nonzero rectangle exactly covers its owned entries, exactly 256 palette entries, one
+index byte per rectangle element, and no additional block, plane, or payload.
+
+Every unresolved transformation is a required caller choice. Palette lookup is either identity or
+the bit-3/bit-4 permutation already scored as an analysis candidate. Output slots zero through two
+use one of the six permutations of palette source slots zero through two. Output slot three is
+either the constant `0xff`, source slot three unchanged, or source slot three multiplied by two and
+clamped to `0xff`. Source rows are either copied in linear top-to-bottom order or reversed as whole
+linear rows. No intra-row or page swizzle candidate is implemented in this first direct-`Packed8`
+slice; unsupported layout values fail closed instead of guessing.
+
+The result is an independently owned four-slot `DebugImage`. Its field name does not promote the
+source slots to channel names or the result to display-correct RGBA. Caller limits may tighten but
+cannot exceed the project hard maxima of 16 MiB of index data plus the exact 1,024-byte palette and
+64 MiB of output. Fixed typed diagnostics disclose no dimensions, payload, offset, source identity,
+or exception text. Generated tests exercise all 256 indices, distinguishing palettes, both CLUT
+candidates, all six source-slot permutations, all three alpha candidates, both whole-row
+orientations, exact/one-below caller budgets, non-overridable hard maxima, malformed shapes,
+determinism, nonmutation, and independent ownership. Serialized local validation passes focused
+Debug and Release builds with zero warnings, direct Debug and Release units, 100/100 repeated Debug
+runs, the full 34/34 Debug CTest suite, formatting, diff, the 174-file native dependency gate, all
+212 tooling tests, Python compile-all, and the staged public-tree gate over 265 indexed text blobs.
+Commit, DCO, publication, and exact-main validation remain pending.
+
+This is hypothesis plumbing, not corroboration. It assigns no channel names, alpha meaning or
+scale, row origin, swizzle, color space, premultiplication, filtering, UV, block/plane/mip/frame
+purpose, material binding, menu use, GPU upload, retail rendering, gameplay, or emulator
+equivalence. Only public project source and generated fixtures were used; no private or owner file,
+proprietary input, D-drive content, disc image, retail executable, emulator, or PCSX2 input was
+accessed.
