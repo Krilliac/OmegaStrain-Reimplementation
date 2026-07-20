@@ -40,6 +40,18 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     }
     const runtime::ContentStartupStage content_stage = *classified_content;
 
+    FrontEndStartupModel front_end_startup_model{};
+    if (native_persistence != nullptr)
+    {
+        const auto projected = MakeFrontEndStartupModel(native_persistence->startup_profiles());
+        if (!projected)
+        {
+            return std::unexpected("front-end startup model: " +
+                                   std::string(FrontEndModelErrorMessage(projected.error())));
+        }
+        front_end_startup_model = *projected;
+    }
+
     auto config_owner = std::make_unique<runtime::ConfigStore>(std::move(config));
     auto content_owner = std::make_unique<runtime::ContentStartupState>(std::move(content));
     auto stderr_sink = std::make_unique<runtime::StderrLogSink>();
@@ -113,27 +125,27 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
         runtime::InputBinding{
             .device = runtime::InputDevice::Keyboard,
             .code = static_cast<std::uint16_t>(SDL_SCANCODE_F1),
-            .action = kDiagnosticMenuToggleAction,
+            .action = kFrontEndPrimaryAction,
         },
         runtime::InputBinding{
             .device = runtime::InputDevice::Keyboard,
             .code = static_cast<std::uint16_t>(SDL_SCANCODE_RETURN),
-            .action = kDiagnosticMenuToggleAction,
+            .action = kFrontEndPrimaryAction,
         },
         runtime::InputBinding{
             .device = runtime::InputDevice::Keyboard,
             .code = static_cast<std::uint16_t>(SDL_SCANCODE_KP_ENTER),
-            .action = kDiagnosticMenuToggleAction,
+            .action = kFrontEndPrimaryAction,
         },
         runtime::InputBinding{
             .device = runtime::InputDevice::GamepadButton,
             .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_START),
-            .action = kDiagnosticMenuToggleAction,
+            .action = kFrontEndPrimaryAction,
         },
         runtime::InputBinding{
             .device = runtime::InputDevice::GamepadButton,
             .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_SOUTH),
-            .action = kDiagnosticMenuToggleAction,
+            .action = kFrontEndPrimaryAction,
         },
         runtime::InputBinding{
             .device = runtime::InputDevice::Keyboard,
@@ -224,10 +236,9 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
 
     runtime::DebugImage no_level_diagnostic_image;
     if (!content_owner->debug_image)
-        no_level_diagnostic_image = BuildProjectDiagnosticNoLevelImage();
-    const runtime::DebugImage& diagnostic_image = content_owner->debug_image
-                                                      ? *content_owner->debug_image
-                                                      : no_level_diagnostic_image;
+        no_level_diagnostic_image = BuildProjectFrontEndDiagnosticPlayImage();
+    const runtime::DebugImage &diagnostic_image =
+        content_owner->debug_image ? *content_owner->debug_image : no_level_diagnostic_image;
 
     runtime::DebugImage asset_topology_image;
     std::optional<runtime::DebugImage> asset_transfer_image;
@@ -256,7 +267,7 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     }
     else
     {
-        auto built_asset_topology = BuildProjectDiagnosticAssetTopologyImage();
+        auto built_asset_topology = BuildProjectFrontEndAssetTopologyImage();
         if (!built_asset_topology)
         {
             const std::string error = "project diagnostic asset topology image: " +
@@ -319,7 +330,8 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
         .right = 26624U,
         .bottom = 15872U,
     };
-    // Project-authored diagnostic split only. It assigns no retail layout or texture semantics.
+    // Project-authored diagnostic split only. It assigns no retail layout or
+    // texture semantics.
     constexpr runtime::RenderTargetRectQ16 asset_topology_split_target{
         .left = 2048U,
         .top = 2048U,
@@ -343,25 +355,32 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
             .left = 3584U,
             .top = 7424U,
             .right = 4352U,
-            .bottom = 9344U,
+            .bottom = 8960U,
         },
         runtime::RenderTargetRectQ16{
             .left = 3584U,
-            .top = 10304U,
+            .top = 9344U,
             .right = 4352U,
-            .bottom = 12224U,
+            .bottom = 10880U,
+        },
+        runtime::RenderTargetRectQ16{
+            .left = 3584U,
+            .top = 11264U,
+            .right = 4352U,
+            .bottom = 12800U,
         },
         runtime::RenderTargetRectQ16{
             .left = 3584U,
             .top = 13184U,
             .right = 4352U,
-            .bottom = 15104U,
+            .bottom = 14720U,
         },
     };
-    static_assert(menu_selection_targets.size() == kDiagnosticMenuRowCount);
+    static_assert(menu_selection_targets.size() == kFrontEndMainRowCount);
 
     runtime::RenderTextureHandle diagnostic_texture;
-    runtime::RenderTextureHandle diagnostic_menu_texture;
+    runtime::RenderTextureHandle front_end_texture;
+    runtime::RenderTextureHandle front_end_profiles_texture;
     runtime::RenderTextureHandle diagnostic_controls_texture;
     runtime::RenderTextureHandle diagnostic_asset_topology_texture;
     runtime::RenderTextureHandle diagnostic_asset_transfer_texture;
@@ -410,7 +429,8 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     auto diagnostic_hidden_draw_list = std::move(*created_hidden_draw_list);
     const std::size_t diagnostic_base_command_count = diagnostic_command_count;
 
-    const runtime::DebugImage menu_image = BuildProjectDiagnosticMenuImage(content_stage);
+    const runtime::DebugImage menu_image =
+        BuildProjectFrontEndMainImage(content_stage, front_end_startup_model.total_profiles);
     auto uploaded_menu = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
         .width = menu_image.width,
         .height = menu_image.height,
@@ -418,47 +438,73 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     });
     if (!uploaded_menu)
     {
-        const std::string error =
-            "SDL/GPU diagnostic menu texture upload: " + uploaded_menu.error();
+        const std::string error = "SDL/GPU front-end main texture upload: " + uploaded_menu.error();
         log->Error("startup", error);
         return std::unexpected(error);
     }
-    diagnostic_menu_texture = *uploaded_menu;
-    diagnostic_commands[diagnostic_command_count++] =
-        runtime::RenderTextureBlitCommand{
-            .texture = diagnostic_menu_texture,
-            .source = full_source,
-            .destination = menu_target,
+    front_end_texture = *uploaded_menu;
+    diagnostic_commands[diagnostic_command_count++] = runtime::RenderTextureBlitCommand{
+        .texture = front_end_texture,
+        .source = full_source,
+        .destination = menu_target,
+        .fit_mode = runtime::RenderTextureFitMode::Stretch,
+        .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+    };
+
+    std::array<runtime::RenderDrawList, kFrontEndMainRowCount> front_end_main_draw_lists;
+    for (std::size_t row = 0U; row < menu_selection_targets.size(); ++row)
+    {
+        diagnostic_commands[diagnostic_command_count] = runtime::RenderTextureBlitCommand{
+            .texture = front_end_texture,
+            .source = menu_selection_source,
+            .destination = menu_selection_targets[row],
             .fit_mode = runtime::RenderTextureFitMode::Stretch,
             .filter_mode = runtime::RenderTextureFilterMode::Nearest,
         };
-
-    std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
-        diagnostic_visible_draw_lists;
-    for (std::size_t row = 0U; row < menu_selection_targets.size(); ++row)
-    {
-        diagnostic_commands[diagnostic_command_count] =
-            runtime::RenderTextureBlitCommand{
-                .texture = diagnostic_menu_texture,
-                .source = menu_selection_source,
-                .destination = menu_selection_targets[row],
-                .fit_mode = runtime::RenderTextureFitMode::Stretch,
-                .filter_mode = runtime::RenderTextureFilterMode::Nearest,
-            };
         auto created_visible_draw_list = runtime::RenderDrawList::Create(
             std::span<const runtime::RenderTextureBlitCommand>{
                 diagnostic_commands.data(), diagnostic_command_count + 1U});
         if (!created_visible_draw_list)
         {
-            constexpr std::string_view error =
-                "SDL/GPU diagnostic visible draw-list creation failed";
+            constexpr std::string_view error = "SDL/GPU front-end main draw-list creation failed";
             log->Error("startup", error);
             return std::unexpected(std::string(error));
         }
-        diagnostic_visible_draw_lists[row] = std::move(*created_visible_draw_list);
+        front_end_main_draw_lists[row] = std::move(*created_visible_draw_list);
     }
 
-    const runtime::DebugImage controls_image = BuildProjectDiagnosticControlsImage();
+    const runtime::DebugImage profiles_image = BuildProjectFrontEndProfilesImage(front_end_startup_model);
+    auto uploaded_profiles = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+        .width = profiles_image.width,
+        .height = profiles_image.height,
+        .pixels = profiles_image.pixels(),
+    });
+    if (!uploaded_profiles)
+    {
+        const std::string error = "SDL/GPU front-end profiles texture upload: " + uploaded_profiles.error();
+        log->Error("startup", error);
+        return std::unexpected(error);
+    }
+    front_end_profiles_texture = *uploaded_profiles;
+    diagnostic_commands[diagnostic_base_command_count] = runtime::RenderTextureBlitCommand{
+        .texture = front_end_profiles_texture,
+        .source = full_source,
+        .destination = menu_target,
+        .fit_mode = runtime::RenderTextureFitMode::Stretch,
+        .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+    };
+    auto created_profiles_draw_list =
+        runtime::RenderDrawList::Create(std::span<const runtime::RenderTextureBlitCommand>{
+            diagnostic_commands.data(), diagnostic_base_command_count + 1U});
+    if (!created_profiles_draw_list)
+    {
+        constexpr std::string_view error = "SDL/GPU front-end profiles draw-list creation failed";
+        log->Error("startup", error);
+        return std::unexpected(std::string(error));
+    }
+    auto front_end_profiles_draw_list = std::move(*created_profiles_draw_list);
+
+    const runtime::DebugImage controls_image = BuildProjectFrontEndControlsImage();
     auto uploaded_controls = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
         .width = controls_image.width,
         .height = controls_image.height,
@@ -564,63 +610,53 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
                              std::to_string(jobs->worker_count()) + " workers and " +
                              std::string(audio->driver_name()) + " audio");
 
-    return OmegaApp(std::move(native_persistence), std::move(config_owner),
-        std::move(content_owner), std::move(stderr_sink), std::move(ring_sink),
-        std::move(log), std::move(jobs), std::move(assets),
-        std::move(frame_scheduler), std::move(input), std::move(simulation),
-        debug_locomotion_entity,
-        std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
-        diagnostic_texture, diagnostic_menu_texture, diagnostic_controls_texture,
-        diagnostic_asset_topology_texture, diagnostic_asset_transfer_texture,
-        std::move(diagnostic_hidden_draw_list), std::move(diagnostic_visible_draw_lists),
-        std::move(diagnostic_controls_draw_list),
-        std::move(diagnostic_asset_topology_draw_list));
+    return OmegaApp(std::move(native_persistence), std::move(config_owner), std::move(content_owner),
+                    std::move(stderr_sink), std::move(ring_sink), std::move(log), std::move(jobs), std::move(assets),
+                    std::move(frame_scheduler), std::move(input), std::move(simulation), debug_locomotion_entity,
+                    std::move(platform), std::move(sdl_input), std::move(audio), std::move(host), diagnostic_texture,
+                    front_end_texture, front_end_profiles_texture, diagnostic_controls_texture,
+                    diagnostic_asset_topology_texture, diagnostic_asset_transfer_texture,
+                    std::move(diagnostic_hidden_draw_list), std::move(front_end_main_draw_lists),
+                    std::move(front_end_profiles_draw_list), std::move(diagnostic_controls_draw_list),
+                    std::move(diagnostic_asset_topology_draw_list), content_stage, front_end_startup_model);
 }
 
-OmegaApp::OmegaApp(std::unique_ptr<NativePersistence> native_persistence,
-    std::unique_ptr<runtime::ConfigStore> config,
-    std::unique_ptr<runtime::ContentStartupState> content,
-    std::unique_ptr<runtime::StderrLogSink> stderr_sink,
-    std::unique_ptr<runtime::RingLogSink> ring_sink,
-    std::unique_ptr<runtime::LogService> log, std::unique_ptr<runtime::JobService> jobs,
-    std::unique_ptr<runtime::AssetService> assets,
-    std::unique_ptr<runtime::FrameScheduler> frame_scheduler,
-    std::unique_ptr<runtime::InputTracker> input,
-    std::unique_ptr<simulation::SimulationWorld> simulation,
-    const simulation::EntityId debug_locomotion_entity,
-    std::unique_ptr<SdlPlatformService> platform,
-    std::unique_ptr<SdlInputService> sdl_input,
-    std::unique_ptr<SdlAudioService> audio,
-    std::unique_ptr<SdlGpuHost> host,
-    const runtime::RenderTextureHandle diagnostic_texture,
-    const runtime::RenderTextureHandle diagnostic_menu_texture,
+OmegaApp::OmegaApp(
+    std::unique_ptr<NativePersistence> native_persistence, std::unique_ptr<runtime::ConfigStore> config,
+    std::unique_ptr<runtime::ContentStartupState> content, std::unique_ptr<runtime::StderrLogSink> stderr_sink,
+    std::unique_ptr<runtime::RingLogSink> ring_sink, std::unique_ptr<runtime::LogService> log,
+    std::unique_ptr<runtime::JobService> jobs, std::unique_ptr<runtime::AssetService> assets,
+    std::unique_ptr<runtime::FrameScheduler> frame_scheduler, std::unique_ptr<runtime::InputTracker> input,
+    std::unique_ptr<simulation::SimulationWorld> simulation, const simulation::EntityId debug_locomotion_entity,
+    std::unique_ptr<SdlPlatformService> platform, std::unique_ptr<SdlInputService> sdl_input,
+    std::unique_ptr<SdlAudioService> audio, std::unique_ptr<SdlGpuHost> host,
+    const runtime::RenderTextureHandle diagnostic_texture, const runtime::RenderTextureHandle front_end_texture,
+    const runtime::RenderTextureHandle front_end_profiles_texture,
     const runtime::RenderTextureHandle diagnostic_controls_texture,
     const runtime::RenderTextureHandle diagnostic_asset_topology_texture,
     const runtime::RenderTextureHandle diagnostic_asset_transfer_texture,
     runtime::RenderDrawList diagnostic_hidden_draw_list,
-    std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
-        diagnostic_visible_draw_lists,
-    runtime::RenderDrawList diagnostic_controls_draw_list,
-    runtime::RenderDrawList diagnostic_asset_topology_draw_list) noexcept
-    : native_persistence_(std::move(native_persistence)),
-      config_(std::move(config)), content_(std::move(content)),
-      stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)),
-      log_(std::move(log)), jobs_(std::move(jobs)), assets_(std::move(assets)),
-      frame_scheduler_(std::move(frame_scheduler)), input_(std::move(input)),
-      simulation_(std::move(simulation)),
-      debug_locomotion_entity_(debug_locomotion_entity), platform_(std::move(platform)),
-      sdl_input_(std::move(sdl_input)), audio_(std::move(audio)), host_(std::move(host)),
-      diagnostic_texture_(diagnostic_texture),
-      diagnostic_menu_texture_(diagnostic_menu_texture),
+    std::array<runtime::RenderDrawList, kFrontEndMainRowCount> front_end_main_draw_lists,
+    runtime::RenderDrawList front_end_profiles_draw_list, runtime::RenderDrawList diagnostic_controls_draw_list,
+    runtime::RenderDrawList diagnostic_asset_topology_draw_list, const runtime::ContentStartupStage content_stage,
+    const FrontEndStartupModel front_end_startup_model) noexcept
+    : native_persistence_(std::move(native_persistence)), config_(std::move(config)), content_(std::move(content)),
+      stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)), log_(std::move(log)),
+      jobs_(std::move(jobs)), assets_(std::move(assets)), frame_scheduler_(std::move(frame_scheduler)),
+      input_(std::move(input)), simulation_(std::move(simulation)), debug_locomotion_entity_(debug_locomotion_entity),
+      platform_(std::move(platform)), sdl_input_(std::move(sdl_input)), audio_(std::move(audio)),
+      host_(std::move(host)), diagnostic_texture_(diagnostic_texture), front_end_texture_(front_end_texture),
+      front_end_profiles_texture_(front_end_profiles_texture),
       diagnostic_controls_texture_(diagnostic_controls_texture),
       diagnostic_asset_topology_texture_(diagnostic_asset_topology_texture),
       diagnostic_asset_transfer_texture_(diagnostic_asset_transfer_texture),
       diagnostic_hidden_draw_list_(std::move(diagnostic_hidden_draw_list)),
-      diagnostic_visible_draw_lists_(std::move(diagnostic_visible_draw_lists)),
+      front_end_main_draw_lists_(std::move(front_end_main_draw_lists)),
+      front_end_profiles_draw_list_(std::move(front_end_profiles_draw_list)),
       diagnostic_controls_draw_list_(std::move(diagnostic_controls_draw_list)),
-      diagnostic_asset_topology_draw_list_(
-          std::move(diagnostic_asset_topology_draw_list)),
-      diagnostic_menu_state_(InitialDiagnosticMenuState())
+      diagnostic_asset_topology_draw_list_(std::move(diagnostic_asset_topology_draw_list)),
+      content_stage_(content_stage), front_end_startup_model_(front_end_startup_model),
+      front_end_state_(InitialFrontEndState())
 {
 }
 
@@ -628,7 +664,8 @@ OmegaApp::~OmegaApp() noexcept
 {
     diagnostic_asset_topology_draw_list_ = {};
     diagnostic_controls_draw_list_ = {};
-    for (runtime::RenderDrawList& draw_list : diagnostic_visible_draw_lists_)
+    front_end_profiles_draw_list_ = {};
+    for (runtime::RenderDrawList &draw_list : front_end_main_draw_lists_)
         draw_list = {};
     diagnostic_hidden_draw_list_ = {};
 
@@ -645,7 +682,8 @@ OmegaApp::~OmegaApp() noexcept
         }
         catch (...)
         {
-            // The host remains the authoritative owner and releases all surviving resources.
+            // The host remains the authoritative owner and releases all surviving
+            // resources.
             release_failed = true;
         }
 
@@ -657,25 +695,27 @@ OmegaApp::~OmegaApp() noexcept
             }
             catch (...)
             {
-                // Destruction remains noexcept even if bounded shutdown logging cannot allocate.
+                // Destruction remains noexcept even if bounded shutdown logging
+                // cannot allocate.
             }
         }
     };
 
-    release_texture(diagnostic_asset_transfer_texture_,
-        "diagnostic asset transfer texture release failed; SDL/GPU host cleanup will retry");
-    release_texture(diagnostic_asset_topology_texture_,
-        "diagnostic asset topology texture release failed; SDL/GPU host cleanup will retry");
-    release_texture(diagnostic_controls_texture_,
-        "diagnostic controls texture release failed; SDL/GPU host cleanup will retry");
-    release_texture(diagnostic_menu_texture_,
-        "diagnostic menu texture release failed; SDL/GPU host cleanup will retry");
-    release_texture(diagnostic_texture_,
-        "diagnostic texture release failed; SDL/GPU host cleanup will retry");
+    release_texture(diagnostic_asset_transfer_texture_, "diagnostic asset transfer texture release failed; SDL/GPU "
+                                                        "host cleanup will retry");
+    release_texture(diagnostic_asset_topology_texture_, "diagnostic asset topology texture release failed; SDL/GPU "
+                                                        "host cleanup will retry");
+    release_texture(diagnostic_controls_texture_, "diagnostic controls texture release failed; SDL/GPU host "
+                                                  "cleanup will retry");
+    release_texture(front_end_profiles_texture_, "front-end profiles texture release failed; SDL/GPU host "
+                                                 "cleanup will retry");
+    release_texture(front_end_texture_, "front-end main texture release failed; SDL/GPU host cleanup will retry");
+    release_texture(diagnostic_texture_, "diagnostic texture release failed; SDL/GPU host cleanup will retry");
     diagnostic_asset_topology_texture_ = {};
     diagnostic_asset_transfer_texture_ = {};
     diagnostic_controls_texture_ = {};
-    diagnostic_menu_texture_ = {};
+    front_end_profiles_texture_ = {};
+    front_end_texture_ = {};
     diagnostic_texture_ = {};
 }
 OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
@@ -834,16 +874,13 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             break;
         }
 
-        diagnostic_menu_state_ = UpdateDiagnosticMenu(diagnostic_menu_state_,
-            DiagnosticMenuInputEdges{
-                .primary_pressed =
-                    input_snapshot.WasPressed(kDiagnosticMenuPrimaryAction),
-                .previous_pressed =
-                    input_snapshot.WasPressed(kDiagnosticMenuPreviousAction),
-                .next_pressed = input_snapshot.WasPressed(kDiagnosticMenuNextAction),
-            });
-        const bool simulation_allowed =
-            DiagnosticMenuAllowsSimulation(diagnostic_menu_state_);
+        front_end_state_ =
+            UpdateFrontEnd(front_end_state_, FrontEndInputEdges{
+                                                 .primary_pressed = input_snapshot.WasPressed(kFrontEndPrimaryAction),
+                                                 .previous_pressed = input_snapshot.WasPressed(kFrontEndPreviousAction),
+                                                 .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
+                                             });
+        const bool simulation_allowed = FrontEndAllowsSimulation(front_end_state_);
 
         const auto current_frame = Clock::now();
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -947,7 +984,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             .simulated_time = simulation_snapshot.simulated_time,
             .alive_entities = simulation_snapshot.alive_entities,
             .clear_color = runtime::kDefaultRenderClearColor,
-            .draw_list = CurrentDiagnosticDrawList(),
+            .draw_list = CurrentFrontEndDrawList(),
         };
         auto rendered = host_->RenderFrame(render_packet);
         if (!rendered)
@@ -1001,25 +1038,27 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
     };
 }
 
-const runtime::RenderDrawList& OmegaApp::CurrentDiagnosticDrawList() const noexcept
+const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcept
 {
-    const std::size_t selected_row =
-        static_cast<std::size_t>(diagnostic_menu_state_.selected_row);
-    if (selected_row >= diagnostic_visible_draw_lists_.size())
-        return diagnostic_hidden_draw_list_;
+    const FrontEndView view = BuildFrontEndView(front_end_state_, content_stage_, front_end_startup_model_);
+    const std::size_t selected_main_row = static_cast<std::size_t>(view.selected_main_row);
+    if (selected_main_row >= front_end_main_draw_lists_.size())
+        return front_end_main_draw_lists_.front();
 
-    switch (diagnostic_menu_state_.mode)
+    switch (view.mode)
     {
-    case DiagnosticMenuMode::MainMenu:
-        return diagnostic_visible_draw_lists_[selected_row];
-    case DiagnosticMenuMode::Controls:
+    case FrontEndMode::Main:
+        return front_end_main_draw_lists_[selected_main_row];
+    case FrontEndMode::Profiles:
+        return front_end_profiles_draw_list_;
+    case FrontEndMode::Controls:
         return diagnostic_controls_draw_list_;
-    case DiagnosticMenuMode::AssetTopology:
+    case FrontEndMode::AssetTopology:
         return diagnostic_asset_topology_draw_list_;
-    case DiagnosticMenuMode::DiagnosticPlay:
+    case FrontEndMode::DiagnosticPlay:
         return diagnostic_hidden_draw_list_;
     }
-    return diagnostic_hidden_draw_list_;
+    return front_end_main_draw_lists_.front();
 }
 
 std::string_view OmegaApp::driver_name() const noexcept

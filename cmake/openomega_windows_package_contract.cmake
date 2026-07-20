@@ -931,6 +931,8 @@ endif()
 set(ENV{LOCALAPPDATA} "${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}")
 set(ENV{OPENOMEGA_DISABLE_STARTUP_DIALOG} "1")
 
+# E-0089's packaged zero-frame startup builds the empty bounded front-end model before this early
+# return; the existing stdout and native-save non-mutation contract remain unchanged.
 string(CONCAT zero_frame_stdout
     "OpenOmega native persistence: profiles=0\n"
     "OpenOmega native shell: rendered_frames=0\n"

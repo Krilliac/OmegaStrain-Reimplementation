@@ -151,6 +151,8 @@ string(CONCAT openomega_usage
     "[--frames=N [--capture-run [--replay-capture]]] "
     "[--data-root=PATH [--level=CODE] [--probe-only]]\n"
 )
+# E-0089's empty-profile startup exercises the bounded front-end model without entering the frame
+# loop; stdout remains the established process contract and no profile is implicitly created.
 string(CONCAT zero_frame_stdout
     "OpenOmega native persistence: profiles=0\n"
     "OpenOmega native shell: rendered_frames=0\n"

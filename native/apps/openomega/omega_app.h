@@ -1,6 +1,6 @@
 #pragma once
 
-#include "diagnostic_menu.h"
+#include "front_end.h"
 #include "native_persistence.h"
 #include "run_capture.h"
 #include "sdl_audio_service.h"
@@ -88,7 +88,7 @@ private:
 
     [[nodiscard]] RunLoopResult RunLoop(
         int frame_limit, runtime::RunCaptureSession* capture_session);
-    [[nodiscard]] const runtime::RenderDrawList& CurrentDiagnosticDrawList() const noexcept;
+    [[nodiscard]] const runtime::RenderDrawList& CurrentFrontEndDrawList() const noexcept;
 
     OmegaApp(std::unique_ptr<NativePersistence> native_persistence,
         std::unique_ptr<runtime::ConfigStore> config,
@@ -107,15 +107,19 @@ private:
         std::unique_ptr<SdlAudioService> audio,
         std::unique_ptr<SdlGpuHost> host,
         runtime::RenderTextureHandle diagnostic_texture,
-        runtime::RenderTextureHandle diagnostic_menu_texture,
+        runtime::RenderTextureHandle front_end_texture,
+        runtime::RenderTextureHandle front_end_profiles_texture,
         runtime::RenderTextureHandle diagnostic_controls_texture,
         runtime::RenderTextureHandle diagnostic_asset_topology_texture,
         runtime::RenderTextureHandle diagnostic_asset_transfer_texture,
         runtime::RenderDrawList diagnostic_hidden_draw_list,
-        std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
-            diagnostic_visible_draw_lists,
+        std::array<runtime::RenderDrawList, kFrontEndMainRowCount>
+            front_end_main_draw_lists,
+        runtime::RenderDrawList front_end_profiles_draw_list,
         runtime::RenderDrawList diagnostic_controls_draw_list,
-        runtime::RenderDrawList diagnostic_asset_topology_draw_list) noexcept;
+        runtime::RenderDrawList diagnostic_asset_topology_draw_list,
+        runtime::ContentStartupStage content_stage,
+        FrontEndStartupModel front_end_startup_model) noexcept;
 
     // Declaration order is ownership order; destruction is the required reverse order.
     std::unique_ptr<NativePersistence> native_persistence_;
@@ -138,17 +142,22 @@ private:
     // Non-owning generation-scoped identity. The host remains the backend-resource owner and a
     // default-moved-from app cannot release this copied value because its host_ is null.
     runtime::RenderTextureHandle diagnostic_texture_;
-    runtime::RenderTextureHandle diagnostic_menu_texture_;
+    runtime::RenderTextureHandle front_end_texture_;
+    runtime::RenderTextureHandle front_end_profiles_texture_;
     runtime::RenderTextureHandle diagnostic_controls_texture_;
     runtime::RenderTextureHandle diagnostic_asset_topology_texture_;
     runtime::RenderTextureHandle diagnostic_asset_transfer_texture_;
     // Immutable non-owning draw data, retained independently from the explicit release handles.
     runtime::RenderDrawList diagnostic_hidden_draw_list_;
-    std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
-        diagnostic_visible_draw_lists_;
+    std::array<runtime::RenderDrawList, kFrontEndMainRowCount>
+        front_end_main_draw_lists_;
+    runtime::RenderDrawList front_end_profiles_draw_list_;
     runtime::RenderDrawList diagnostic_controls_draw_list_;
     runtime::RenderDrawList diagnostic_asset_topology_draw_list_;
-    // Project-owned app-layer state. It has no renderer or retail-data lifetime.
-    DiagnosticMenuState diagnostic_menu_state_;
+    // Immutable bounded snapshot and content classification captured before SDL startup.
+    runtime::ContentStartupStage content_stage_ = runtime::ContentStartupStage::NoContent;
+    FrontEndStartupModel front_end_startup_model_{};
+    // Project-owned app-layer state. It has no renderer, database, or retail-data lifetime.
+    FrontEndState front_end_state_;
 };
 } // namespace omega::app
