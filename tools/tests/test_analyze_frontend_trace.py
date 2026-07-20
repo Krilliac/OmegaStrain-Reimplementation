@@ -402,6 +402,35 @@ class FrontendTraceAnalyzerTests(unittest.TestCase):
         self.assertIn(b"phantom_dependency_xyz", completed.stderr)
         self.assertEqual(completed.stdout, b"")
 
+    def test_isolated_fallback_does_not_replace_unrelated_package_module(
+        self,
+    ) -> None:
+        analyzer_path = REPOSITORY_ROOT / "tools" / "analyze_frontend_trace.py"
+        with tempfile.TemporaryDirectory() as unrelated_directory:
+            unrelated_path = Path(unrelated_directory) / "unrelated_validator.py"
+            wrapper = "\n".join(
+                (
+                    "import runpy, sys, types",
+                    "occupied = types.ModuleType('tools.validate_frontend_trace')",
+                    f"occupied.__file__ = {str(unrelated_path)!r}",
+                    "sys.modules['tools.validate_frontend_trace'] = occupied",
+                    f"runpy.run_path({str(analyzer_path)!r}, run_name='__main__')",
+                )
+            )
+            completed = subprocess.run(
+                [sys.executable, "-I", "-E", "-s", "-S", "-B", "-c", wrapper],
+                cwd=unrelated_directory,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=10,
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(b"tools.validate_frontend_trace", completed.stderr)
+        self.assertIn(b"already occupied", completed.stderr)
+        self.assertEqual(completed.stdout, b"")
+
     def test_success_summary_excludes_source_identity_surfaces(self) -> None:
         rendered = analyzer.encode_summary_document(valid_document()).decode("ascii").lower()
         for forbidden in (
