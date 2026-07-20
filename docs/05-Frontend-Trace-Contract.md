@@ -87,7 +87,8 @@ stages have these responsibilities:
 - `Stopping`: stop at the configured frame or quiet-period bound, remove instrumentation, normalize
   all aggregates, and scrub raw observation state.
 - `Finalized`: validate canonical bytes, create a no-clobber private temporary in the destination
-  directory, write and flush it, atomically publish it, and synchronize the directory entry.
+  directory, write and flush it, then atomically publish it with replacement disabled as the final
+  fallible action.
 - `Failed`: remove instrumentation, scrub maps and buffers, delete any unpublished temporary, and
   emit no partial public report.
 
