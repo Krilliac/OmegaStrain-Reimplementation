@@ -868,6 +868,16 @@ occurrence accounting; it explicitly excludes sibling texture containers. The se
 top-level HOG, validates the complete normalized directory, and measures direct TDX members only.
 Both publish structural proxies rather than compiled-ABI Open/Load usage.
 
+E-0086's `measure_frontend_hog_topology.py` is a separate analysis-only boundary. It accepts one
+supplied HOG or recursively discovers root HOGs below one directory, then follows only normalized
+`.hog` members. Its fixed-vocabulary report contains approved extension/category counts, depths,
+exact/zero-padded nested extent families, fixed size buckets, and sibling same-basename extension
+pairs. Unapproved suffixes collapse to one `other` count. It emits no path, member name, hash,
+offset, payload, raw suffix, identifier, row, or exception text and supplies no runtime archive
+index, front-end lookup, menu state, layout, asset binding, renderer, or audio contract. Strict
+configurable and hard caps bound filesystem discovery and recursive HOG parsing. Only synthetic
+fixtures establish this tool contract; an owner-corpus observation remains a separate private pass.
+
 `omega_tool level-texture-store-verify-tree` exercises the native store across every strictly
 discovered level. The confirmed run accepts 18/18 levels, 36 explicit sources, and 5,801
 level-inventory texture occurrences with zero errors. It loads 5,913 storage blocks, 7,603 planes,

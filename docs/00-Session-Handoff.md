@@ -1194,6 +1194,20 @@ shipping dependencies or execution mechanisms.
     proprietary data, D-drive content, disc image, retail executable, emulator, or PCSX2 input was
     accessed.
 
+71. E-0086 adds `measure_frontend_hog_topology.py`, a bounded aggregate-only scanner for one
+    supplied HOG or a recursively discovered directory of HOGs. It follows only normalized `.hog`
+    members and emits a fixed public vocabulary: approved extension/category counts, archive depth,
+    exact versus zero-padded nested extent families, fixed member-size buckets, and sibling
+    same-basename extension-pair totals. All unapproved suffixes collapse into `other`; paths,
+    member names, hashes, offsets, payload bytes, raw suffixes, identifiers, per-archive rows, and
+    exception text remain absent. Configurable limits sit below hard ceilings for filesystem and
+    archive counts, filesystem and archive depth, root/nested/file-directory/name extents, and
+    cumulative parser work. Exact and zero-padded nested fixtures plus malformed offset, name,
+    collision, depth, size, deterministic-output, and identity-containment tests are synthetic.
+    No owner input, proprietary byte, executable, emulator, PCSX2 input, or D-drive content was
+    accessed, and no front-end role, lookup, layout, state, binding, rendering, audio, or behavior
+    is inferred.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2
