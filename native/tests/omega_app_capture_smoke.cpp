@@ -376,6 +376,9 @@ void Check(const bool condition, const std::string_view message)
            left.successful_uploads == right.successful_uploads &&
            left.successful_upload_logical_bytes ==
                right.successful_upload_logical_bytes &&
+           left.successful_updates == right.successful_updates &&
+           left.successful_update_logical_bytes ==
+               right.successful_update_logical_bytes &&
            left.successful_releases == right.successful_releases;
 }
 

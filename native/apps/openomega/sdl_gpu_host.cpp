@@ -427,6 +427,8 @@ struct SdlGpuHost::Impl
     std::string driver;
     std::uint64_t successful_uploads = 0U;
     std::uint64_t successful_upload_logical_bytes = 0U;
+    std::uint64_t successful_updates = 0U;
+    std::uint64_t successful_update_logical_bytes = 0U;
     std::uint64_t successful_releases = 0U;
     std::uint64_t frame_submissions = 0U;
     std::uint64_t blit_submissions = 0U;
@@ -602,6 +604,108 @@ std::expected<runtime::RenderTextureHandle, std::string> SdlGpuHost::UploadRgba8
     catch (...)
     {
         return std::unexpected("render texture upload failed unexpectedly");
+    }
+}
+
+std::expected<void, std::string> SdlGpuHost::UpdateRgba8Texture(
+    const runtime::RenderTextureHandle& handle,
+    const runtime::Rgba8TextureUploadView upload)
+{
+    try
+    {
+        auto metadata = impl_->texture_pool.Get(handle);
+        if (!metadata)
+        {
+            if (!IsDefaultHandle(handle))
+                SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
+            return std::unexpected(PoolError("render texture resolve for update", metadata.error()));
+        }
+
+        const std::uint32_t slot_index = metadata->handle.slot_index;
+        if (slot_index >= impl_->texture_slots.size() ||
+            impl_->texture_slots[slot_index] == nullptr)
+        {
+            SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
+            return std::unexpected("render texture backend slot invariant failed during update");
+        }
+        if (upload.width != metadata->width || upload.height != metadata->height ||
+            upload.pixels.size() != metadata->logical_bytes)
+        {
+            return std::unexpected("render texture update view does not match resident metadata");
+        }
+        if (upload.pixels.size() > std::numeric_limits<std::uint32_t>::max())
+        {
+            return std::unexpected(
+                "render texture update exceeds the SDL transfer-buffer size limit");
+        }
+
+        const SDL_GPUTransferBufferCreateInfo transfer_info{
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            .size = static_cast<std::uint32_t>(upload.pixels.size()),
+            .props = 0,
+        };
+        SDL_GPUTransferBuffer* transfer =
+            SDL_CreateGPUTransferBuffer(impl_->device, &transfer_info);
+        if (transfer == nullptr)
+        {
+            return std::unexpected(
+                SdlError("render texture update transfer-buffer create"));
+        }
+        TransferBufferGuard transfer_guard(impl_->device, transfer);
+
+        void* mapped = SDL_MapGPUTransferBuffer(impl_->device, transfer, false);
+        if (mapped == nullptr)
+            return std::unexpected(SdlError("render texture update transfer-buffer map"));
+        std::memcpy(mapped, upload.pixels.data(), upload.pixels.size());
+        SDL_UnmapGPUTransferBuffer(impl_->device, transfer);
+
+        SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
+        if (commands == nullptr)
+            return std::unexpected(SdlError("render texture update command-buffer acquire"));
+        CommandBufferGuard command_guard(commands);
+
+        SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+        if (copy == nullptr)
+        {
+            std::string error = SdlError("render texture update copy-pass begin");
+            if (!command_guard.Cancel())
+                error += "; " + SdlError("render texture update command-buffer cancel");
+            return std::unexpected(std::move(error));
+        }
+
+        const SDL_GPUTextureTransferInfo source{
+            .transfer_buffer = transfer,
+            .offset = 0,
+            .pixels_per_row = metadata->width,
+            .rows_per_layer = metadata->height,
+        };
+        const SDL_GPUTextureRegion destination{
+            .texture = impl_->texture_slots[slot_index],
+            .mip_level = 0,
+            .layer = 0,
+            .x = 0,
+            .y = 0,
+            .z = 0,
+            .w = metadata->width,
+            .h = metadata->height,
+            .d = 1,
+        };
+        SDL_UploadToGPUTexture(copy, &source, &destination, true);
+        SDL_EndGPUCopyPass(copy);
+        if (!command_guard.Submit())
+            return std::unexpected(SdlError("render texture update command-buffer submit"));
+
+        SaturatingIncrement(impl_->successful_updates);
+        SaturatingAdd(impl_->successful_update_logical_bytes, metadata->logical_bytes);
+        return {};
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected("render texture update error allocation failed");
+    }
+    catch (...)
+    {
+        return std::unexpected("render texture update failed unexpectedly");
     }
 }
 
@@ -1256,6 +1360,8 @@ GpuHostSnapshot SdlGpuHost::Snapshot() const noexcept
         .textures = impl_->texture_pool.Snapshot(),
         .successful_uploads = impl_->successful_uploads,
         .successful_upload_logical_bytes = impl_->successful_upload_logical_bytes,
+        .successful_updates = impl_->successful_updates,
+        .successful_update_logical_bytes = impl_->successful_update_logical_bytes,
         .successful_releases = impl_->successful_releases,
         .frame_submissions = impl_->frame_submissions,
         .blit_submissions = impl_->blit_submissions,
