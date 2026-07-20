@@ -523,6 +523,10 @@ function(validate_dependencies executable)
     )
     set(allowed_imports
         KERNEL32 USER32 GDI32 WINMM IMM32 OLE32 OLEAUT32 VERSION ADVAPI32 SETUPAPI SHELL32
+        # The native H.262 decoder uses the inbox Windows Media Foundation
+        # platform APIs. MFPLAT is an operating-system component, not a
+        # redistributable runtime that belongs in the portable package.
+        MFPLAT
         ${allowed_api_set_imports}
     )
     set(normalized_imports "")
