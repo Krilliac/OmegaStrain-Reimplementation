@@ -915,10 +915,30 @@ unapproved import. It contains no source/build path prefix after deterministic `
 and the enforced narrow/wide byte scan. Full
 MSVC CTest passed 32/32 `Debug`, 32/32 `RelWithDebInfo`, and 33/33 `Release`; the 168-file dependency
 gate, all 209 tooling tests, Python compile-all, and the staged public-tree gate over 258 indexed
-text blobs passed. Clean-machine behavior, DCO, publication, and exact-main CI remain pending.
-Validation used only public source and generated output; no private or owner files, D-drive content,
+text blobs passed. DCO passed, PR #40 merged the slice as exact `main` commit `ff8376b`, and
+exact-main run `29713390065` passed all four jobs and retained the named Windows archive artifact.
+General clean-machine behavior remains unclaimed. Validation used only public source and generated output; no private or owner files, D-drive content,
 disc image, executable, emulator,
 or PCSX2 input was accessed.
+
+E-0080 defines the next bounded M8 delivery check without claiming completed publication or general
+Windows compatibility. On main pushes only, a separate fresh GitHub-hosted `windows-2022` consumer
+depends on the successful package producer and downloads the same run's named artifact without a
+source checkout, compiler, build system, or access to the producer build tree. It requires exactly
+the ZIP and SHA-256 sidecar, validates its BOM-free ASCII lowercase digest, two spaces, exact
+filename, single CRLF, and archive digest, and extracts exactly the
+frozen two-directory/eight-file tree. With a minimal system `PATH`, unrelated working directory, and
+isolated `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `TEMP`, and `TMP`, it runs the packaged launcher
+through the absolute command processor for the exact zero-frame success and invalid-sentinel
+failure/forwarding cases. Before/after SHA-256 manifests require the downloaded artifact, extracted
+package, unrelated working directory, and synthetic profile to remain unchanged after each launch.
+Local emulation of the exact PowerShell body extracted from the workflow YAML passed against both
+the freshly regenerated local package and retained E-0079 main artifact. Full Release CTest passed
+33/33, the 168-file dependency gate and all 209 tooling tests passed, Python compile-all passed, and
+the staged public-tree gate checked 258 indexed text blobs. The static definition is
+confirmed, but exact-main execution remains pending. This slice does not validate a window, menu
+interaction, GPU, audio, owner data, physical or arbitrary clean machines, Windows client editions,
+other Windows Server releases, or other runner images.
 
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
