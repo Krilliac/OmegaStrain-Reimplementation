@@ -270,6 +270,17 @@ transfer planes, and four-byte palette entries while leaving block purpose, mip 
 order, alpha conversion, nibble order, palette permutation, swizzle, and GPU upload unassigned.
 None of these adapters exposes VU/VIF instructions or decoded pixel guesses.
 
+E-0087 adds one optional runtime-side diagnostic after canonical TDX storage exists, without
+changing the decoder or the dependency direction. `BuildTdxIndexed8CandidateDebugImage` is a
+stateless, reentrant worker-thread utility that accepts only one Indexed8 block, one matching
+`Packed8` plane, and one internally exact 256-entry palette. It returns owned four-slot pixels and
+requires the caller to select every candidate transformation: identity or bit-3/4 CLUT lookup, one
+of six source-slot-zero-through-two permutations, opaque/unchanged/doubled-clamped source-slot-three
+alpha, and linear top-down or whole-row-reversed source order. No default policy is available at the
+call boundary. Caller byte budgets only tighten fixed project hard maxima. The utility has no I/O,
+shared state, service, app, renderer, or GPU responsibility and is not composed into startup in this
+slice. It is a diagnostic hypothesis boundary, not a retail display-semantics layer.
+
 SKA has a separate retail-only passive descriptor rather than canonical animation IR. Its fixed
 output contains only the observed version/count words and the computed 112-byte-prefix
 counted-word extent, classified as exact or followed by zero padding. It retains no input span and

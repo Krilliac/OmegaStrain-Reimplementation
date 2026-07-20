@@ -63,6 +63,14 @@ retail instruction blocks, or PS2 execution layer.
   15,442 source-order blocks, 17,960 primary planes, 285,521,272 primary bytes, 15,190 palette
   blocks, and zero errors. It normalizes 4,112 duplicate-proven implicit zero bytes without
   guessing pixel or channel layout.
+- E-0087 adds a diagnostic-only Indexed8 candidate projection over one strict canonical storage
+  shape: one matching `Packed8` plane, one exact 256-entry palette, and exact index, palette, and
+  output cardinality. Callers must explicitly choose identity versus bit-3/4 palette permutation,
+  one of all six source-slot-zero-through-two mappings, opaque/slot-three/doubled-clamped alpha,
+  and linear top-down versus bottom-up rows. Caller budgets can tighten but cannot raise the
+  synthetic 16 MiB-plus-palette source and 64 MiB output hard maxima. This utility is not wired to
+  startup or the renderer and establishes no retail display, channel, alpha, row-origin, swizzle,
+  palette, material, or menu semantics.
 - A bounded common-archive containment scan accepts all 18 runtime levels, 5,351 manifest cell
   occurrences, and 5,413 scanned archive-directory occurrences with zero errors and finds zero
   normalized `.TDX`-suffixed members. This extension-bounded negative result does not exclude

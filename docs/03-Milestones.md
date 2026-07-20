@@ -1020,6 +1020,13 @@ transforms, and visibility remain incomplete. A passive retail-only VUM descript
 pair/reference grammar without asserting vertices, indices, draws, or material assignments, and
 its payload does not enter the canonical level IR.
 
+E-0087 supplies a first strict Indexed8 diagnostic candidate projection over canonical storage. It
+accepts only one matching direct `Packed8` plane and one exact 256-entry palette, and its caller must
+name the CLUT, source-slot, alpha, and linear-row candidate policies explicitly. The output is not
+wired into startup, asset selection, renderer upload, material binding, or menu presentation. It is
+testable hypothesis plumbing for later independent behavioral comparison, not completion of M3
+texture rendering or evidence for any retail display semantics.
+
 - Decode and render MINSK geometry, textures, materials, cameras, and static objects.
 - Match coordinate system, transforms, visibility, and representative frames against PCSX2.
 - Load level through a native command-line option independent of the retail argument parser.

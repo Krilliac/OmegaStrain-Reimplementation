@@ -1173,6 +1173,26 @@ shipping dependencies or execution mechanisms.
     compilation, publication CI, exact-main validation, profile menu actions, active-profile policy,
     and owner data remain unclaimed. No private or owner file, proprietary input, D-drive content,
     disc image, memory-card image, save, executable, emulator, or PCSX2 input was accessed.
+71. E-0087 adds the first strict Indexed8 TDX display-candidate projection without changing the
+    canonical decoder or wiring pixels into startup. One nonzero Indexed8 texture, one block, one
+    matching nonzero `Packed8` plane, exact index cardinality, and one internally exact 256-entry
+    palette are required. The caller must provide all four unresolved policies: identity versus
+    bit-3/4 CLUT permutation, one of six mappings of source slots zero through two, opaque versus
+    unchanged versus doubled-clamped source-slot-three alpha, and linear top-down versus bottom-up
+    whole-row order. Unknown policies and every broader shape fail closed. Caller source/output
+    budgets may tighten but cannot raise the synthetic 16 MiB-plus-1,024-byte and 64 MiB hard maxima.
+    Generated tests cover all 256 indices, two distinguishing palettes, every exposed candidate,
+    exact and one-below budgets, hard-limit rejection, malformed shapes, deterministic independent
+    ownership, and source nonmutation. Serialized local validation passes focused Debug and Release
+    builds with zero warnings, direct units in both configurations, 100/100 repeated Debug runs, the
+    full 34/34 Debug CTest suite, formatting, diff, the 174-file dependency gate, all 212 tooling
+    tests, Python compile-all, and the staged public-tree gate over 265 indexed text blobs.
+    Publication and exact-main validation remain pending. This diagnostic makes no retail
+    channel, alpha, row-origin,
+    swizzle, palette, texture-role, material, menu, GPU, rendering, gameplay, or emulator-equivalence
+    claim. Only public project source and generated fixtures were used; no private or owner input,
+    proprietary data, D-drive content, disc image, retail executable, emulator, or PCSX2 input was
+    accessed.
 
 ## Disc observations
 

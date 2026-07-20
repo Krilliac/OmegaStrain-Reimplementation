@@ -126,6 +126,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/run_capture_session.cpp
     native/src/runtime/scheduler_elapsed_trace.cpp
     native/src/runtime/spatial_debug_image.cpp
+    native/src/runtime/tdx_indexed8_candidate_debug_image.cpp
     native/src/runtime/texture_storage_topology_debug_image.cpp
     native/src/runtime/runtime_settings.cpp
 )
@@ -988,6 +989,32 @@ if(BUILD_TESTING)
     add_test(NAME omega_packed24_transfer_debug_image_tests
         COMMAND omega_packed24_transfer_debug_image_tests)
     set_tests_properties(omega_packed24_transfer_debug_image_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_tdx_indexed8_candidate_debug_image_tests
+        native/tests/tdx_indexed8_candidate_debug_image_tests.cpp
+    )
+    target_link_libraries(omega_tdx_indexed8_candidate_debug_image_tests PRIVATE omega_runtime)
+    if(MSVC)
+        target_compile_options(omega_tdx_indexed8_candidate_debug_image_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_tdx_indexed8_candidate_debug_image_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_tdx_indexed8_candidate_debug_image_tests
+        COMMAND omega_tdx_indexed8_candidate_debug_image_tests)
+    set_tests_properties(omega_tdx_indexed8_candidate_debug_image_tests PROPERTIES TIMEOUT 5)
 
     if(TARGET omega_sdl_backend)
         add_executable(omega_startup_failure_dialog_tests
