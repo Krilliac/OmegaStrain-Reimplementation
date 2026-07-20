@@ -81,6 +81,7 @@ target_compile_features(omega_content PUBLIC cxx_std_23)
 
 add_library(omega_runtime STATIC
     native/src/runtime/asset_service.cpp
+    native/src/runtime/level_texture_topology_preview.cpp
     native/src/runtime/config_service.cpp
     native/src/runtime/content_startup.cpp
     native/src/runtime/content_startup_diagnostic.cpp

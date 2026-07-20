@@ -2,6 +2,7 @@
 #include "run_replay_session.h"
 
 #include "omega/gameplay/debug_locomotion.h"
+#include "omega/runtime/level_texture_topology_preview.h"
 
 #include <SDL3/SDL.h>
 
@@ -217,17 +218,33 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
                                                       ? *content_owner->debug_image
                                                       : no_level_diagnostic_image;
 
-    auto built_asset_topology = BuildProjectDiagnosticAssetTopologyImage();
-    if (!built_asset_topology)
+    runtime::DebugImage asset_topology_image;
+    if (content_stage == runtime::ContentStartupStage::LevelContent)
     {
-        const std::string error = "project diagnostic asset topology image: " +
-                                  std::string(
-                                      runtime::TextureStorageTopologyDebugImageErrorCodeName(
-                                          built_asset_topology.error().code));
-        log->Error("startup", error);
-        return std::unexpected(error);
+        auto built_asset_topology = runtime::BuildFirstLevelTextureTopologyPreview(
+            *assets, *content_owner->level_texture_store);
+        if (!built_asset_topology)
+        {
+            const std::string error(built_asset_topology.error().message);
+            log->Error("startup", error);
+            return std::unexpected(error);
+        }
+        asset_topology_image = std::move(*built_asset_topology);
     }
-    runtime::DebugImage asset_topology_image = std::move(*built_asset_topology);
+    else
+    {
+        auto built_asset_topology = BuildProjectDiagnosticAssetTopologyImage();
+        if (!built_asset_topology)
+        {
+            const std::string error = "project diagnostic asset topology image: " +
+                                      std::string(
+                                          runtime::TextureStorageTopologyDebugImageErrorCodeName(
+                                              built_asset_topology.error().code));
+            log->Error("startup", error);
+            return std::unexpected(error);
+        }
+        asset_topology_image = std::move(*built_asset_topology);
+    }
 
     auto created_platform = SdlPlatformService::Create();
     if (!created_platform)

@@ -2,6 +2,9 @@
 #include "omega_app.h"
 #include "run_replay_session.h"
 
+#include "omega/asset/level_ir.h"
+#include "omega/content/game_data_service.h"
+#include "omega/content/level_texture_store.h"
 #include "omega/runtime/config_service.h"
 #include "omega/runtime/content_startup.h"
 #include "omega/runtime/frame_scheduler.h"
@@ -13,17 +16,22 @@
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace omega::app::detail
 {
@@ -91,6 +99,14 @@ struct OmegaAppTestAccess final
     [[nodiscard]] static GpuHostSnapshot GpuSnapshot(const OmegaApp& app) noexcept
     {
         return app.host_->Snapshot();
+    }
+
+    [[nodiscard]] static std::optional<runtime::AssetServiceSnapshot> AssetSnapshot(
+        const OmegaApp& app) noexcept
+    {
+        if (!app.assets_)
+            return std::nullopt;
+        return app.assets_->Snapshot();
     }
 
     [[nodiscard]] static runtime::RenderTextureHandle DiagnosticTexture(
@@ -391,6 +407,335 @@ struct ExpectedSchedulerAdvance
     return expected;
 }
 
+void WriteFixtureU16(std::vector<std::byte>& bytes, const std::size_t offset,
+    const std::uint16_t value)
+{
+    bytes[offset] = static_cast<std::byte>(value & 0xFFU);
+    bytes[offset + 1U] = static_cast<std::byte>((value >> 8U) & 0xFFU);
+}
+
+void WriteFixtureU32(std::vector<std::byte>& bytes, const std::size_t offset,
+    const std::uint32_t value)
+{
+    for (unsigned shift = 0U; shift < 32U; shift += 8U)
+        bytes[offset + shift / 8U] =
+            static_cast<std::byte>((value >> shift) & 0xFFU);
+}
+
+[[nodiscard]] std::vector<std::byte> MakeFixtureDirect24Tdx()
+{
+    constexpr std::uint16_t width = 16U;
+    constexpr std::uint16_t height = 16U;
+    constexpr std::uint32_t descriptor_bytes = 128U;
+    constexpr std::uint32_t primary_base = 0x20U;
+    constexpr std::uint32_t primary_start = primary_base + descriptor_bytes;
+    constexpr std::uint32_t payload_bytes = width * height * 3U;
+    constexpr std::uint32_t stride = primary_start + payload_bytes;
+
+    std::vector<std::byte> bytes(64U, std::byte{0});
+    WriteFixtureU16(bytes, 0x00U, 5U);
+    WriteFixtureU16(bytes, 0x02U, 0U);
+    WriteFixtureU16(bytes, 0x04U, width);
+    WriteFixtureU16(bytes, 0x06U, height);
+    WriteFixtureU16(bytes, 0x08U, 24U);
+    WriteFixtureU16(bytes, 0x0AU, 0x01U);
+    WriteFixtureU16(bytes, 0x0CU, 1U);
+    WriteFixtureU16(bytes, 0x0EU, 3U);
+    WriteFixtureU16(bytes, 0x22U, 1U);
+    WriteFixtureU16(bytes, 0x24U, 1U);
+    WriteFixtureU16(bytes, 0x26U, 0U);
+    WriteFixtureU16(bytes, 0x34U, descriptor_bytes);
+    WriteFixtureU16(bytes, 0x36U, 0U);
+    WriteFixtureU32(bytes, 0x38U, stride);
+
+    std::vector<std::byte> block(stride, std::byte{0});
+    WriteFixtureU32(block, 0x18U, primary_base);
+    WriteFixtureU32(block, 0x1CU, primary_base);
+    WriteFixtureU32(block, 0x00U, 0x20U);
+    constexpr std::size_t object = primary_base + 0x20U;
+    WriteFixtureU32(block, object + 0x04U, 0x01U << 24U);
+    WriteFixtureU32(block, object + 0x20U, width);
+    WriteFixtureU32(block, object + 0x24U, height);
+    WriteFixtureU32(block, object + 0x40U, payload_bytes / 4U);
+    WriteFixtureU32(block, object + 0x54U, 0U);
+    for (std::uint32_t index = 0U; index < payload_bytes; ++index)
+    {
+        block[primary_start + index] =
+            static_cast<std::byte>(static_cast<std::uint8_t>(0x21U + index));
+    }
+    bytes.insert(bytes.end(), block.begin(), block.end());
+    return bytes;
+}
+
+[[nodiscard]] std::vector<std::byte> MakeFixtureHog(
+    const std::string_view member_name, const std::span<const std::byte> payload)
+{
+    constexpr std::size_t names_offset = 0x1CU;
+    const std::size_t names_end = names_offset + member_name.size() + 1U;
+    const std::size_t data_offset = (names_end + 15U) & ~std::size_t{15U};
+    std::vector<std::byte> bytes(data_offset, std::byte{0});
+    WriteFixtureU32(bytes, 0x00U, 0x4052673DU);
+    WriteFixtureU32(bytes, 0x04U, 1U);
+    WriteFixtureU32(bytes, 0x08U, 0x14U);
+    WriteFixtureU32(bytes, 0x0CU, static_cast<std::uint32_t>(names_offset));
+    WriteFixtureU32(bytes, 0x10U, static_cast<std::uint32_t>(data_offset));
+    WriteFixtureU32(bytes, 0x14U, 0U);
+    WriteFixtureU32(bytes, 0x18U, static_cast<std::uint32_t>(payload.size()));
+    for (std::size_t index = 0U; index < member_name.size(); ++index)
+        bytes[names_offset + index] = static_cast<std::byte>(member_name[index]);
+    bytes.insert(bytes.end(), payload.begin(), payload.end());
+    return bytes;
+}
+
+[[nodiscard]] bool WriteFixtureBytes(
+    const std::filesystem::path& path, const std::span<const std::byte> bytes)
+{
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output)
+        return false;
+    if (!bytes.empty())
+    {
+        output.write(reinterpret_cast<const char*>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size()));
+    }
+    return output.good();
+}
+
+[[nodiscard]] bool WriteFixtureText(
+    const std::filesystem::path& path, const std::string_view text)
+{
+    return WriteFixtureBytes(path,
+        std::span(reinterpret_cast<const std::byte*>(text.data()), text.size()));
+}
+
+class GeneratedLevelContentTree final
+{
+public:
+    GeneratedLevelContentTree()
+    {
+        static std::atomic<std::uint64_t> next{0U};
+        const auto stamp = static_cast<std::uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+        root_ = std::filesystem::temp_directory_path() /
+                ("omega-app-level-content-" + std::to_string(stamp) + "-" +
+                    std::to_string(next.fetch_add(1U)));
+        std::error_code error;
+        std::filesystem::create_directories(root_ / "GAMEDATA" / "TEST", error);
+        const std::vector<std::byte> texture = MakeFixtureDirect24Tdx();
+        const std::vector<std::byte> hog = MakeFixtureHog("A_READY.TDX", texture);
+        ready_ = !error &&
+                 WriteFixtureText(root_ / "SYSTEM.CNF",
+                     "BOOT2 = cdrom0:\\SCUS_972.64;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n") &&
+                 WriteFixtureText(root_ / "SCUS_972.64", "synthetic placeholder") &&
+                 WriteFixtureBytes(root_ / "GAMEDATA" / "TEST" / "TEX.HOG", hog);
+    }
+
+    ~GeneratedLevelContentTree()
+    {
+        std::error_code error;
+        std::filesystem::remove_all(root_, error);
+    }
+
+    GeneratedLevelContentTree(const GeneratedLevelContentTree&) = delete;
+    GeneratedLevelContentTree& operator=(const GeneratedLevelContentTree&) = delete;
+
+    [[nodiscard]] bool ready() const noexcept { return ready_; }
+    [[nodiscard]] const std::filesystem::path& root() const noexcept { return root_; }
+
+private:
+    std::filesystem::path root_;
+    bool ready_ = false;
+};
+
+[[nodiscard]] omega::asset::SourceLocator FixtureDirectSource(
+    const std::string_view game_path)
+{
+    return omega::asset::SourceLocator{
+        .game_path = std::string(game_path), .hog_entries = {}};
+}
+
+[[nodiscard]] std::expected<omega::runtime::ContentStartupState, std::string>
+BuildLevelContentStartupState(const GeneratedLevelContentTree& tree)
+{
+    auto opened = omega::content::GameDataService::Open({.root = tree.root()});
+    if (!opened)
+        return std::unexpected("synthetic level-content game-data open failed");
+
+    omega::runtime::ContentStartupState state;
+    state.game_data.emplace(std::move(*opened));
+    omega::asset::LevelManifestIR manifest;
+    manifest.data_hog_source = FixtureDirectSource("GAMEDATA/TEST/UNUSED.HOG");
+    manifest.texture_sources = {FixtureDirectSource("GAMEDATA/TEST/TEX.HOG")};
+    auto texture_store =
+        omega::content::LevelTextureStore::Open(*state.game_data, manifest);
+    if (!texture_store)
+        return std::unexpected("synthetic level-content texture-store open failed");
+    state.level_texture_store.emplace(std::move(*texture_store));
+    state.level_manifest.emplace(std::move(manifest));
+    state.level_content.emplace();
+    state.debug_image.emplace(omega::runtime::DebugImage{
+        .width = 2U,
+        .height = 2U,
+        .rgba8_pixels = {
+            std::byte{8U}, std::byte{12U}, std::byte{24U}, std::byte{255U},
+            std::byte{8U}, std::byte{12U}, std::byte{24U}, std::byte{255U},
+            std::byte{8U}, std::byte{12U}, std::byte{24U}, std::byte{255U},
+            std::byte{8U}, std::byte{12U}, std::byte{24U}, std::byte{255U},
+        },
+    });
+    return state;
+}
+
+[[nodiscard]] std::expected<omega::runtime::ContentStartupState, std::string>
+BuildDataMountedStartupState(const GeneratedLevelContentTree& tree)
+{
+    auto opened = omega::content::GameDataService::Open({.root = tree.root()});
+    if (!opened)
+        return std::unexpected("synthetic data-mounted game-data open failed");
+    omega::runtime::ContentStartupState state;
+    state.game_data.emplace(std::move(*opened));
+    return state;
+}
+
+[[nodiscard]] bool IsAggregateEmpty(
+    const omega::runtime::AssetServiceSnapshot& snapshot,
+    const std::size_t capacity) noexcept
+{
+    return snapshot.slot_capacity == capacity && snapshot.free_slots == capacity &&
+           snapshot.active_slots == 0U && snapshot.retired_slots == 0U &&
+           snapshot.queued == 0U && snapshot.loading == 0U && snapshot.ready == 0U &&
+           snapshot.failed == 0U && snapshot.in_flight_requests == 0U &&
+           snapshot.resident_logical_bytes == 0U;
+}
+
+void CheckLevelContentPresentation(omega::app::OmegaApp& app)
+{
+    using omega::app::detail::OmegaAppTestAccess;
+    constexpr std::uint64_t kLevelContentPresentationLogicalBytes =
+        2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 2ULL + 32ULL * 32ULL * 4ULL;
+    const auto assets = OmegaAppTestAccess::AssetSnapshot(app);
+    const omega::app::GpuHostSnapshot initial_gpu =
+        OmegaAppTestAccess::GpuSnapshot(app);
+    Check(assets && IsAggregateEmpty(*assets, 64U),
+        "LevelContent consumes and releases canonical texture zero before SDL upload");
+    Check(initial_gpu.successful_uploads == 4U &&
+              initial_gpu.successful_upload_logical_bytes ==
+                  kLevelContentPresentationLogicalBytes &&
+              initial_gpu.successful_releases == 0U &&
+              initial_gpu.textures.reserved_slots == 0U &&
+              initial_gpu.textures.resident_slots == 4U &&
+              initial_gpu.textures.resident_logical_bytes ==
+                  kLevelContentPresentationLogicalBytes,
+        "the 2x2 base, two 128x72 cards, and 32x32 topology own exactly 77,840 bytes");
+
+    const auto topology_texture =
+        OmegaAppTestAccess::DiagnosticAssetTopologyTexture(app);
+    const auto topology_commands =
+        OmegaAppTestAccess::DiagnosticAssetTopologyDrawList(app).commands();
+    constexpr omega::runtime::RenderSourceRectQ16 full_source{
+        .left = 0U,
+        .top = 0U,
+        .right = omega::runtime::kNormalizedRenderExtent,
+        .bottom = omega::runtime::kNormalizedRenderExtent,
+    };
+    constexpr omega::runtime::RenderTargetRectQ16 full_target{
+        .left = 0U,
+        .top = 0U,
+        .right = omega::runtime::kNormalizedRenderExtent,
+        .bottom = omega::runtime::kNormalizedRenderExtent,
+    };
+    constexpr omega::runtime::RenderTargetRectQ16 card_target{
+        .left = 2048U, .top = 2048U, .right = 26624U, .bottom = 15872U};
+    Check(topology_commands.size() == 2U &&
+              topology_commands[0].texture == OmegaAppTestAccess::DiagnosticTexture(app) &&
+              topology_commands[0].source == full_source &&
+              topology_commands[0].destination == full_target &&
+              topology_commands[1].texture == topology_texture &&
+              topology_commands[1].source == full_source &&
+              topology_commands[1].destination == card_target &&
+              topology_commands[1].fit_mode ==
+                  omega::runtime::RenderTextureFitMode::Contain &&
+              topology_commands[1].filter_mode ==
+                  omega::runtime::RenderTextureFilterMode::Nearest,
+        "LevelContent keeps the existing base-plus-topology Contain/Nearest draw path");
+
+    constexpr std::array coordinates{
+        std::array{0U, 0U}, std::array{1U, 1U}, std::array{4U, 4U},
+        std::array{5U, 4U}, std::array{4U, 5U}, std::array{5U, 5U},
+        std::array{8U, 8U}, std::array{9U, 8U}, std::array{8U, 9U},
+        std::array{9U, 9U}, std::array{27U, 27U}, std::array{31U, 31U},
+        std::array{15U, 15U}, std::array{30U, 30U}, std::array{0U, 16U},
+        std::array{16U, 0U},
+    };
+    constexpr omega::runtime::RenderClearColorRgba8 background{
+        .red = 8U, .green = 12U, .blue = 24U, .alpha = 255U};
+    constexpr omega::runtime::RenderClearColorRgba8 slate{
+        .red = 28U, .green = 38U, .blue = 58U, .alpha = 255U};
+    constexpr omega::runtime::RenderClearColorRgba8 cyan{
+        .red = 112U, .green = 220U, .blue = 255U, .alpha = 255U};
+    constexpr std::array expected{
+        slate, background, cyan, cyan,
+        cyan, background, cyan, cyan,
+        cyan, background, background, slate,
+        background, background, slate, slate,
+    };
+    constexpr auto source_begin = [](const std::uint32_t coordinate) noexcept {
+        return static_cast<std::uint32_t>(
+            (static_cast<std::uint64_t>(coordinate) *
+                    omega::runtime::kNormalizedRenderExtent +
+                31U) /
+            32U);
+    };
+    constexpr auto source_end = [](const std::uint32_t coordinate) noexcept {
+        return static_cast<std::uint32_t>(
+            static_cast<std::uint64_t>(coordinate + 1U) *
+            omega::runtime::kNormalizedRenderExtent / 32U);
+    };
+    constexpr auto destination_edge = [](const std::uint32_t coordinate) noexcept {
+        return coordinate * (omega::runtime::kNormalizedRenderExtent / 4U);
+    };
+    std::array<omega::runtime::RenderTextureBlitCommand, 16U> probes{};
+    for (std::size_t index = 0U; index < probes.size(); ++index)
+    {
+        const std::uint32_t column = static_cast<std::uint32_t>(index % 4U);
+        const std::uint32_t row = static_cast<std::uint32_t>(index / 4U);
+        probes[index] = omega::runtime::RenderTextureBlitCommand{
+            .texture = topology_texture,
+            .source = omega::runtime::RenderSourceRectQ16{
+                .left = source_begin(coordinates[index][0]),
+                .top = source_begin(coordinates[index][1]),
+                .right = source_end(coordinates[index][0]),
+                .bottom = source_end(coordinates[index][1]),
+            },
+            .destination = omega::runtime::RenderTargetRectQ16{
+                .left = destination_edge(column),
+                .top = destination_edge(row),
+                .right = destination_edge(column + 1U),
+                .bottom = destination_edge(row + 1U),
+            },
+            .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+        };
+    }
+    auto draw_list = omega::runtime::RenderDrawList::Create(probes);
+    Check(draw_list.has_value(),
+        "the LevelContent sixteen one-pixel topology probes form a valid draw list");
+    if (draw_list)
+    {
+        omega::runtime::RenderFramePacket packet{
+            .clear_color = omega::runtime::kDefaultRenderClearColor,
+            .draw_list = *draw_list,
+        };
+        auto readback =
+            omega::app::detail::SdlGpuHostTestAccess::ReadbackBlitsForTesting(
+                OmegaAppTestAccess::Host(app), packet);
+        Check(readback && *readback == expected,
+            "the real first-texture 32x32 topology preserves all sixteen frozen GPU probes");
+        Check(OmegaAppTestAccess::GpuSnapshot(app) == initial_gpu,
+            "the LevelContent topology readback leaves every GPU counter unchanged");
+    }
+}
+
 [[nodiscard]] bool PushQuit()
 {
     SDL_Event event{};
@@ -451,6 +796,67 @@ int main()
                   "content startup state: inconsistent-ownership" &&
               SDL_WasInit(0) == sdl_before_invalid_create,
         "inconsistent content ownership fails with the exact error before touching SDL");
+
+    GeneratedLevelContentTree generated_content;
+    Check(generated_content.ready(),
+        "the public synthetic LevelContent game-data tree is created");
+    if (generated_content.ready())
+    {
+        auto level_config = omega::runtime::ParseConfigText("");
+        auto level_content = BuildLevelContentStartupState(generated_content);
+        const bool is_level_content = [&level_content] {
+            if (!level_content)
+                return false;
+            const auto stage =
+                omega::runtime::ClassifyContentStartupState(*level_content);
+            return stage && *stage == omega::runtime::ContentStartupStage::LevelContent;
+        }();
+        Check(level_config && level_content && is_level_content,
+            "the generated ownership aggregate classifies as LevelContent");
+        if (level_config && level_content)
+        {
+            auto level_app = omega::app::OmegaApp::Create(std::move(*level_config), settings,
+                std::move(*level_content), false);
+            Check(level_app.has_value(),
+                "OmegaApp starts with the generated canonical first texture");
+            if (level_app)
+                CheckLevelContentPresentation(*level_app);
+        }
+
+        auto mounted_config = omega::runtime::ParseConfigText("");
+        auto mounted_content = BuildDataMountedStartupState(generated_content);
+        const bool is_data_mounted = [&mounted_content] {
+            if (!mounted_content)
+                return false;
+            const auto stage =
+                omega::runtime::ClassifyContentStartupState(*mounted_content);
+            return stage && *stage == omega::runtime::ContentStartupStage::DataMounted;
+        }();
+        Check(mounted_config && mounted_content && is_data_mounted,
+            "the generated data-only ownership aggregate classifies as DataMounted");
+        if (mounted_config && mounted_content)
+        {
+            auto mounted_app = omega::app::OmegaApp::Create(std::move(*mounted_config),
+                settings, std::move(*mounted_content), false);
+            Check(mounted_app.has_value(), "OmegaApp starts from the DataMounted stage");
+            if (mounted_app)
+            {
+                const auto mounted_assets =
+                    omega::app::detail::OmegaAppTestAccess::AssetSnapshot(*mounted_app);
+                const omega::app::GpuHostSnapshot mounted_gpu =
+                    omega::app::detail::OmegaAppTestAccess::GpuSnapshot(*mounted_app);
+                constexpr std::uint64_t kSyntheticPresentationLogicalBytes =
+                    128ULL * 72ULL * 4ULL * 3ULL + 96ULL * 32ULL * 4ULL;
+                Check(!mounted_assets && mounted_gpu.successful_uploads == 4U &&
+                          mounted_gpu.successful_upload_logical_bytes ==
+                              kSyntheticPresentationLogicalBytes &&
+                          mounted_gpu.textures.resident_slots == 4U &&
+                          mounted_gpu.textures.resident_logical_bytes ==
+                              kSyntheticPresentationLogicalBytes,
+                    "DataMounted retains the synthetic 96x32 topology and exactly 122,880 resident bytes");
+            }
+        }
+    }
 
     auto app = omega::app::OmegaApp::Create(std::move(*config), settings,
         omega::runtime::ContentStartupState{}, false);

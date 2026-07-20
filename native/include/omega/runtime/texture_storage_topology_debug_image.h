@@ -138,7 +138,7 @@ struct TextureStorageTopologyDebugImageError
     std::string_view message = TextureStorageTopologyDebugImageErrorMessage(code);
 };
 
-// [any worker thread; reentrant] Produces an owned source-order topology contact sheet. The image
+// [any thread; reentrant] Produces an owned source-order topology contact sheet. The image
 // describes only canonical block, plane, encoding, and palette presence; payload bytes and
 // unassigned retail/display semantics do not affect its pixels. The input is borrowed only for
 // the duration of the call, and the result performs no I/O or shared-state mutation.

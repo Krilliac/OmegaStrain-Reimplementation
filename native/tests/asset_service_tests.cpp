@@ -3,6 +3,7 @@
 #include "omega/content/level_texture_store.h"
 #include "omega/runtime/asset_service.h"
 #include "omega/runtime/job_service.h"
+#include "omega/runtime/level_texture_topology_preview.h"
 #include "omega/runtime/texture_storage_topology_debug_image.h"
 
 #include <algorithm>
@@ -42,8 +43,11 @@ using omega::runtime::AssetServiceErrorCode;
 using omega::runtime::AssetServiceSnapshot;
 using omega::runtime::JobService;
 using omega::runtime::JobServiceConfig;
+using omega::runtime::LevelTextureTopologyPreviewError;
+using omega::runtime::LevelTextureTopologyPreviewErrorCode;
 using omega::runtime::TextureAssetHandle;
 using omega::runtime::TextureAssetState;
+using omega::runtime::TextureStorageTopologyDebugImageErrorCode;
 
 int failures = 0;
 
@@ -87,9 +91,10 @@ std::string PrivacyComparable(const std::string_view value)
 
 bool ContainsForbidden(const std::string_view message, const std::filesystem::path& root)
 {
-    const std::array<std::string, 9> forbidden{
+    const std::array<std::string, 10> forbidden{
         root.string(), root.generic_string(), "GAMEDATA", "TEX.HOG", "A_READY.TDX",
-        "B_READY.TDX", "Z_BROKEN.TDX", "SCUS_972.64", "omega-asset-service-"};
+        "A_BROKEN.TDX", "B_READY.TDX", "Z_BROKEN.TDX", "SCUS_972.64",
+        "omega-asset-service-"};
     const std::string comparable_message = PrivacyComparable(message);
     return std::ranges::any_of(
         forbidden, [&comparable_message](const std::string& value)
@@ -283,17 +288,50 @@ LevelManifestIR MakeManifest()
     return manifest;
 }
 
+enum class ContentFixtureKind
+{
+    Standard,
+    EmptyInventory,
+    MalformedFirst,
+};
+
 class ContentFixture final
 {
 public:
-    explicit ContentFixture(const std::string_view label) : tree_(label), manifest_(MakeManifest())
+    explicit ContentFixture(const std::string_view label,
+        const ContentFixtureKind kind = ContentFixtureKind::Standard)
+        : tree_(label), manifest_(MakeManifest())
     {
-        const auto hog = MakeHog({
-            HogMember{.name = "A_READY.TDX", .payload = MakeDirect24Tdx(0x21)},
-            HogMember{.name = "B_READY.TDX", .payload = MakeDirect24Tdx(0x61)},
-            HogMember{.name = "Z_BROKEN.TDX",
-                .payload = std::vector<std::byte>(32U, std::byte{0x55})},
-        });
+        std::vector<HogMember> members;
+        std::size_t expected_store_size = 0U;
+        switch (kind)
+        {
+        case ContentFixtureKind::Standard:
+            members = {
+                HogMember{.name = "A_READY.TDX", .payload = MakeDirect24Tdx(0x21)},
+                HogMember{.name = "B_READY.TDX", .payload = MakeDirect24Tdx(0x61)},
+                HogMember{.name = "Z_BROKEN.TDX",
+                    .payload = std::vector<std::byte>(32U, std::byte{0x55})},
+            };
+            expected_store_size = 3U;
+            break;
+        case ContentFixtureKind::EmptyInventory:
+            members = {
+                HogMember{.name = "README.BIN",
+                    .payload = std::vector<std::byte>{std::byte{0x01}}},
+            };
+            break;
+        case ContentFixtureKind::MalformedFirst:
+            members = {
+                HogMember{.name = "A_BROKEN.TDX",
+                    .payload = std::vector<std::byte>(32U, std::byte{0x55})},
+                HogMember{.name = "B_READY.TDX", .payload = MakeDirect24Tdx(0x21)},
+            };
+            expected_store_size = 2U;
+            break;
+        }
+
+        const auto hog = MakeHog(members);
         if (!tree_.ready() || !tree_.WriteGameFile("TEX.HOG", hog))
             return;
 
@@ -302,7 +340,7 @@ public:
             return;
         game_data_.emplace(std::move(*opened));
         auto store = LevelTextureStore::Open(*game_data_, manifest_);
-        if (!store || store->size() != 3U)
+        if (!store || store->size() != expected_store_size)
             return;
         texture_store_.emplace(std::move(*store));
         ready_ = true;
@@ -367,6 +405,19 @@ bool IsEmptySnapshot(const AssetServiceSnapshot& snapshot, const std::size_t cap
            snapshot.resident_logical_bytes == 0U;
 }
 
+bool SameSnapshot(
+    const AssetServiceSnapshot& left, const AssetServiceSnapshot& right) noexcept
+{
+    return left.slot_capacity == right.slot_capacity &&
+           left.free_slots == right.free_slots &&
+           left.active_slots == right.active_slots &&
+           left.retired_slots == right.retired_slots && left.queued == right.queued &&
+           left.loading == right.loading && left.ready == right.ready &&
+           left.failed == right.failed &&
+           left.in_flight_requests == right.in_flight_requests &&
+           left.resident_logical_bytes == right.resident_logical_bytes;
+}
+
 std::uint8_t FirstStorageByte(const omega::asset::TextureStorageIR& storage)
 {
     if (storage.blocks.empty() || storage.blocks.front().planes.empty() ||
@@ -385,6 +436,20 @@ std::uint64_t Fnv1a64(const std::span<const std::byte> bytes) noexcept
         hash *= 1099511628211ULL;
     }
     return hash;
+}
+
+bool MatchesPreviewError(
+    const std::expected<omega::runtime::DebugImage, LevelTextureTopologyPreviewError>& result,
+    const LevelTextureTopologyPreviewErrorCode code, const std::string_view message,
+    const std::optional<LevelTextureStoreErrorCode> texture_store_error_code = std::nullopt,
+    const std::optional<AssetServiceErrorCode> asset_error_code = std::nullopt,
+    const std::optional<TextureStorageTopologyDebugImageErrorCode> image_error_code =
+        std::nullopt) noexcept
+{
+    return !result && result.error().code == code && result.error().message == message &&
+           result.error().texture_store_error_code == texture_store_error_code &&
+           result.error().asset_error_code == asset_error_code &&
+           result.error().image_error_code == image_error_code;
 }
 
 std::optional<std::uint64_t> ResidentBytes(
@@ -700,6 +765,242 @@ void CheckOwnedTopologyImageComposition(const ContentFixture& fixture)
     Check(first_image->rgba8_pixels == first_pixels_before_release &&
               second_image->rgba8_pixels == second_pixels_before_release,
         "the independently owned topology images survive source-slot recycling");
+}
+
+void CheckFirstLevelTextureTopologyPreview(const ContentFixture& fixture)
+{
+    Check(static_cast<std::uint8_t>(
+              LevelTextureTopologyPreviewErrorCode::AssetServiceNotEmpty) == 0U &&
+              static_cast<std::uint8_t>(
+                  LevelTextureTopologyPreviewErrorCode::EmptyTextureInventory) == 1U &&
+              static_cast<std::uint8_t>(
+                  LevelTextureTopologyPreviewErrorCode::SourceHandleFailed) == 2U &&
+              static_cast<std::uint8_t>(
+                  LevelTextureTopologyPreviewErrorCode::AssetRequestFailed) == 3U &&
+              static_cast<std::uint8_t>(
+                  LevelTextureTopologyPreviewErrorCode::AssetGetFailed) == 4U &&
+              static_cast<std::uint8_t>(
+                  LevelTextureTopologyPreviewErrorCode::ImageBuildFailed) == 5U &&
+              static_cast<std::uint8_t>(
+                  LevelTextureTopologyPreviewErrorCode::AssetReleaseFailed) == 6U &&
+              static_cast<std::uint8_t>(
+                  LevelTextureTopologyPreviewErrorCode::ResidualAssetState) == 7U,
+        "the level-texture topology preview error ordinals are frozen");
+
+    {
+        auto jobs = MakeJobs(8U);
+        Check(jobs.has_value(), "the first-topology-preview job service is created");
+        if (jobs)
+        {
+            auto created = MakeAssets(*jobs, fixture, Config(1U, 1U, 1ULL << 20U));
+            Check(created.has_value(), "the first-topology-preview asset service is created");
+            if (created)
+            {
+                std::unique_ptr<AssetService> assets = std::move(*created);
+                auto first = omega::runtime::BuildFirstLevelTextureTopologyPreview(
+                    *assets, fixture.texture_store());
+                Check(first.has_value(),
+                    "canonical texture zero builds the first topology preview");
+                Check(IsEmptySnapshot(assets->Snapshot(), 1U),
+                    "the first topology preview restores an exact empty asset service");
+                auto second = omega::runtime::BuildFirstLevelTextureTopologyPreview(
+                    *assets, fixture.texture_store());
+                Check(second.has_value(),
+                    "a second first-topology preview call succeeds after exact cleanup");
+                Check(IsEmptySnapshot(assets->Snapshot(), 1U),
+                    "the repeated topology preview again restores an exact empty service");
+                if (first && second)
+                {
+                    Check(first->width == 32U && first->height == 32U &&
+                              first->rgba8_pixels.size() == 4096U && second->width == 32U &&
+                              second->height == 32U && second->rgba8_pixels.size() == 4096U,
+                        "the adapter returns complete owned 32x32 RGBA8 topology images");
+                    Check(Fnv1a64(first->pixels()) == 0x666d00371feff88dULL &&
+                              Fnv1a64(second->pixels()) == 0x666d00371feff88dULL,
+                        "the first canonical topology preview has the frozen signature");
+                    Check(first->rgba8_pixels == second->rgba8_pixels &&
+                              first->rgba8_pixels.data() != second->rgba8_pixels.data(),
+                        "repeated preview calls are byte-identical and independently owned");
+                }
+
+                omega::runtime::TextureStorageTopologyDebugImageLimits tight_limits;
+                tight_limits.maximum_output_bytes = 4095U;
+                auto limited = omega::runtime::BuildFirstLevelTextureTopologyPreview(
+                    *assets, fixture.texture_store(), tight_limits);
+                Check(MatchesPreviewError(limited,
+                          LevelTextureTopologyPreviewErrorCode::ImageBuildFailed,
+                          "level texture topology preview image build failed", std::nullopt,
+                          std::nullopt,
+                          TextureStorageTopologyDebugImageErrorCode::OutputByteLimitExceeded),
+                    "an output limit failure retains only the topology-image category");
+                Check(IsEmptySnapshot(assets->Snapshot(), 1U),
+                    "an image-build failure releases the loaded source exactly");
+            }
+        }
+    }
+
+    {
+        ContentFixture empty_fixture(
+            "empty-topology-preview", ContentFixtureKind::EmptyInventory);
+        auto jobs = MakeJobs(4U);
+        Check(empty_fixture.ready() && jobs,
+            "the empty-inventory preview dependencies are created");
+        if (empty_fixture.ready() && jobs)
+        {
+            auto created = MakeAssets(
+                *jobs, empty_fixture, Config(1U, 1U, 1ULL << 20U));
+            Check(created.has_value(), "an empty-inventory asset service is created");
+            if (created)
+            {
+                std::unique_ptr<AssetService> assets = std::move(*created);
+                auto preview = omega::runtime::BuildFirstLevelTextureTopologyPreview(
+                    *assets, empty_fixture.texture_store());
+                Check(MatchesPreviewError(preview,
+                          LevelTextureTopologyPreviewErrorCode::EmptyTextureInventory,
+                          "level texture topology preview requires at least one texture"),
+                    "an empty inventory fails before scheduling with no nested category");
+                Check(IsEmptySnapshot(assets->Snapshot(), 1U),
+                    "the empty-inventory rejection performs no asset work");
+            }
+        }
+    }
+
+    {
+        ContentFixture malformed_fixture(
+            "malformed-first-topology-preview", ContentFixtureKind::MalformedFirst);
+        auto jobs = MakeJobs(4U);
+        Check(malformed_fixture.ready() && jobs,
+            "the malformed-first preview dependencies are created");
+        if (malformed_fixture.ready() && jobs)
+        {
+            auto created = MakeAssets(
+                *jobs, malformed_fixture, Config(1U, 1U, 1ULL << 20U));
+            Check(created.has_value(), "the malformed-first asset service is created");
+            if (created)
+            {
+                std::unique_ptr<AssetService> assets = std::move(*created);
+                auto preview = omega::runtime::BuildFirstLevelTextureTopologyPreview(
+                    *assets, malformed_fixture.texture_store());
+                Check(MatchesPreviewError(preview,
+                          LevelTextureTopologyPreviewErrorCode::AssetGetFailed,
+                          "level texture topology preview asset get failed",
+                          LevelTextureStoreErrorCode::DecodeFailed,
+                          AssetServiceErrorCode::LoadFailed),
+                    "a malformed canonical first TDX retains the typed nested load categories");
+                Check(!preview && !ContainsForbidden(preview.error().message,
+                                      malformed_fixture.root()),
+                    "the malformed-first adapter diagnostic contains no source identity");
+                Check(IsEmptySnapshot(assets->Snapshot(), 1U),
+                    "the malformed-first failed slot releases exactly");
+            }
+        }
+    }
+
+    {
+        ContentFixture foreign_fixture("foreign-first-topology-preview");
+        auto jobs = MakeJobs(4U);
+        Check(foreign_fixture.ready() && jobs,
+            "the foreign-store preview dependencies are created");
+        if (foreign_fixture.ready() && jobs)
+        {
+            auto created = MakeAssets(*jobs, fixture, Config(1U, 1U, 1ULL << 20U));
+            Check(created.has_value(), "the foreign-store probe asset service is created");
+            if (created)
+            {
+                std::unique_ptr<AssetService> assets = std::move(*created);
+                auto preview = omega::runtime::BuildFirstLevelTextureTopologyPreview(
+                    *assets, foreign_fixture.texture_store());
+                Check(MatchesPreviewError(preview,
+                          LevelTextureTopologyPreviewErrorCode::AssetGetFailed,
+                          "level texture topology preview asset get failed",
+                          LevelTextureStoreErrorCode::InvalidHandle,
+                          AssetServiceErrorCode::LoadFailed),
+                    "a foreign first handle retains the typed invalid-handle load categories");
+                Check(IsEmptySnapshot(assets->Snapshot(), 1U),
+                    "the foreign-source failed slot releases exactly");
+            }
+        }
+    }
+
+    {
+        auto source = fixture.HandleAt(0U);
+        auto jobs = MakeJobs(4U);
+        Check(source && jobs, "the preoccupied-preview dependencies are created");
+        if (source && jobs)
+        {
+            auto created = MakeAssets(*jobs, fixture, Config(1U, 1U, 1ULL << 20U));
+            Check(created.has_value(), "the preoccupied-preview asset service is created");
+            if (created)
+            {
+                std::unique_ptr<AssetService> assets = std::move(*created);
+                auto occupied = assets->Request(*source);
+                Check(occupied.has_value(), "one source preoccupies the preview asset service");
+                if (occupied)
+                {
+                    assets->WaitForIdle();
+                    const AssetServiceSnapshot before = assets->Snapshot();
+                    auto preview = omega::runtime::BuildFirstLevelTextureTopologyPreview(
+                        *assets, fixture.texture_store());
+                    Check(MatchesPreviewError(preview,
+                              LevelTextureTopologyPreviewErrorCode::AssetServiceNotEmpty,
+                              "level texture topology preview requires an empty asset service"),
+                        "a preoccupied service fails before work with no nested category");
+                    Check(SameSnapshot(before, assets->Snapshot()),
+                        "the preoccupied-service rejection leaves every snapshot field unchanged");
+                    Check(assets->Release(*occupied).has_value(),
+                        "the manually preoccupied source releases after the rejection probe");
+                }
+                Check(IsEmptySnapshot(assets->Snapshot(), 1U),
+                    "the preoccupied-service probe ends exactly empty");
+            }
+        }
+    }
+
+    {
+        auto jobs = MakeJobs(1U);
+        Check(jobs.has_value(), "the preview submission-rejection job service is created");
+        if (jobs)
+        {
+            std::latch blocker_started(1);
+            std::latch blocker_release(1);
+            auto blocker = jobs->Submit(
+                [&blocker_started, &blocker_release]
+                {
+                    blocker_started.count_down();
+                    blocker_release.wait();
+                });
+            Check(blocker.has_value(), "the preview rejection gate is accepted");
+            if (blocker)
+            {
+                blocker_started.wait();
+                auto filler = jobs->Submit([] {});
+                Check(filler.has_value() && jobs->pending_job_count() == 1U,
+                    "the preview probe fills the pending-job budget deterministically");
+                if (filler)
+                {
+                    auto created = MakeAssets(
+                        *jobs, fixture, Config(1U, 1U, 1ULL << 20U));
+                    Check(created.has_value(),
+                        "the preview submission-rejection asset service is created");
+                    if (created)
+                    {
+                        std::unique_ptr<AssetService> assets = std::move(*created);
+                        auto preview = omega::runtime::BuildFirstLevelTextureTopologyPreview(
+                            *assets, fixture.texture_store());
+                        Check(MatchesPreviewError(preview,
+                                  LevelTextureTopologyPreviewErrorCode::AssetRequestFailed,
+                                  "level texture topology preview asset request failed",
+                                  std::nullopt, AssetServiceErrorCode::SubmissionRejected),
+                            "a full queue reports only the typed request-rejection category");
+                        Check(IsEmptySnapshot(assets->Snapshot(), 1U),
+                            "request rejection transactionally restores the exact entry snapshot");
+                    }
+                }
+                blocker_release.count_down();
+                jobs->WaitForIdle();
+            }
+        }
+    }
 }
 
 void CheckHandleIdentityAndSourceValidation(const ContentFixture& fixture)
@@ -1286,6 +1587,7 @@ int main()
         CheckQueuedBusyAndInFlight(fixture);
         CheckDuplicatesPoolReuseAndAccounting(fixture);
         CheckOwnedTopologyImageComposition(fixture);
+        CheckFirstLevelTextureTopologyPreview(fixture);
         CheckHandleIdentityAndSourceValidation(fixture);
         CheckFailedReleaseAndPrivacy(fixture);
         CheckSubmissionRejectionRollback(fixture);
