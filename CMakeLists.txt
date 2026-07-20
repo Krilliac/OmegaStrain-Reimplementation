@@ -100,6 +100,7 @@ add_library(omega_retail_formats STATIC
     native/src/retail/skas_text_envelope_decoder.cpp
     native/src/retail/skm_container_descriptor.cpp
     native/src/retail/skl_container_descriptor.cpp
+    native/src/retail/so_module_descriptor.cpp
     native/src/retail/tdx_texture_storage_decoder.cpp
     native/src/retail/vag_adpcm_decoder.cpp
     native/src/retail/vpk_wrapper_envelope_decoder.cpp
@@ -1446,6 +1447,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_lpd_envelope_decoder_tests COMMAND omega_lpd_envelope_decoder_tests)
     set_tests_properties(omega_lpd_envelope_decoder_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_so_module_descriptor_tests
+        native/tests/so_module_descriptor_tests.cpp
+    )
+    target_link_libraries(omega_so_module_descriptor_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_so_module_descriptor_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_so_module_descriptor_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_so_module_descriptor_tests COMMAND omega_so_module_descriptor_tests)
+    set_tests_properties(omega_so_module_descriptor_tests PROPERTIES TIMEOUT 5)
 
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_hog_tree
