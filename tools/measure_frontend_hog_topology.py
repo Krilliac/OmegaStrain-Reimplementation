@@ -68,6 +68,7 @@ ARCHIVE_EXTENT_FAMILIES = (
 )
 MAXIMUM_REPORTED_ARCHIVE_DEPTH = 16
 MAXIMUM_FILESYSTEM_DEPTH = 64
+NAME_TABLE_SCAN_CHUNK_BYTES = 64 * 1024
 
 ERROR_CATEGORIES = (
     "config",
@@ -447,6 +448,73 @@ def _extent_bucket(size: int) -> str:
     return "16777216_plus"
 
 
+def _precheck_name_table_shape(
+    stream: BinaryIO,
+    table_offset: int,
+    table_size: int,
+    expected_count: int,
+    maximum_name_bytes: int,
+    malformed_category: str,
+) -> None:
+    """Validate split shape with fixed memory before the shared HOG parser.
+
+    ``parse_hog_span`` strips all trailing NUL bytes before splitting. Keep that
+    behavior exactly: pending delimiters count only when a later non-NUL byte
+    proves they are internal to the stripped table.
+    """
+
+    remaining = table_size
+    cursor = table_offset
+    completed_names = 0
+    current_name_bytes = 0
+    pending_nuls = 0
+    saw_non_nul = False
+
+    while remaining:
+        chunk_size = min(remaining, NAME_TABLE_SCAN_CHUNK_BYTES)
+        chunk = read_at(stream, cursor, chunk_size)
+        cursor += chunk_size
+        remaining -= chunk_size
+
+        nul_count = chunk.count(0)
+        if nul_count == len(chunk):
+            pending_nuls += nul_count
+            continue
+        if nul_count == 0:
+            if pending_nuls:
+                completed_names += pending_nuls
+                pending_nuls = 0
+                current_name_bytes = 0
+            if completed_names >= expected_count:
+                raise ScanFailure(malformed_category)
+            saw_non_nul = True
+            current_name_bytes += len(chunk)
+            if current_name_bytes > maximum_name_bytes:
+                raise ScanFailure("archive_name_invalid")
+            continue
+
+        for value in chunk:
+            if value == 0:
+                pending_nuls += 1
+                continue
+
+            if pending_nuls:
+                completed_names += pending_nuls
+                pending_nuls = 0
+                current_name_bytes = 0
+            if completed_names >= expected_count:
+                raise ScanFailure(malformed_category)
+
+            saw_non_nul = True
+            current_name_bytes += 1
+            if current_name_bytes > maximum_name_bytes:
+                raise ScanFailure("archive_name_invalid")
+
+    observed_count = completed_names + 1 if saw_non_nul else 0
+    if observed_count != expected_count:
+        raise ScanFailure(malformed_category)
+
+
 def _bounded_hog(
     stream: BinaryIO,
     span: Span,
@@ -487,6 +555,14 @@ def _bounded_hog(
         budget.add_hog_entries(count)
         budget.add_name_table_bytes(name_bytes)
         budget.add_traversed_span(span.size)
+        _precheck_name_table_shape(
+            stream,
+            span.offset + names_offset,
+            name_bytes,
+            count,
+            budget.limits.maximum_name_bytes,
+            malformed,
+        )
         directory = parse_hog_span(stream, span.offset, span.size)
     except ScanFailure:
         raise

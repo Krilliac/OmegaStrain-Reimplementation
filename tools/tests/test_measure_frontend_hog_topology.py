@@ -9,6 +9,7 @@ import unittest
 from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -40,6 +41,31 @@ def make_hog(entries: list[tuple[str, bytes]]) -> bytes:
     for _name, payload in entries:
         data[cursor : cursor + len(payload)] = payload
         cursor += len(payload)
+    return bytes(data)
+
+
+def make_hog_with_raw_name_table(
+    declared_count: int, names: bytes, payload: bytes = b""
+) -> bytes:
+    offsets_offset = 0x14
+    names_offset = offsets_offset + 4 * (declared_count + 1)
+    data_offset = names_offset + len(names)
+    offsets = [0] * (declared_count + 1)
+    offsets[-1] = len(payload)
+    data = bytearray(data_offset + len(payload))
+    struct.pack_into(
+        "<5I",
+        data,
+        0,
+        0x12345678,
+        declared_count,
+        offsets_offset,
+        names_offset,
+        data_offset,
+    )
+    struct.pack_into(f"<{len(offsets)}I", data, offsets_offset, *offsets)
+    data[names_offset:data_offset] = names
+    data[data_offset:] = payload
     return bytes(data)
 
 
@@ -204,6 +230,61 @@ class FrontendHogTopologyTests(unittest.TestCase):
                     with self.assertRaises(topology.ScanFailure) as raised:
                         topology.scan_input(path)
                 self.assertEqual(raised.exception.category, category)
+
+    def test_name_table_shape_is_bounded_before_shared_parser(self) -> None:
+        malicious = make_hog_with_raw_name_table(1, b"X\0" * 1_000_001)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "PRIVATE.HOG"
+            path.write_bytes(malicious)
+            with mock.patch.object(
+                topology,
+                "parse_hog_span",
+                side_effect=AssertionError("shared parser must not be reached"),
+            ) as parser:
+                with self.assertRaises(topology.ScanFailure) as raised:
+                    topology.scan_input(path)
+        self.assertEqual(raised.exception.category, "root_hog_malformed")
+        parser.assert_not_called()
+
+    def test_name_table_precheck_preserves_trailing_nuls_and_name_limit(self) -> None:
+        trailing_nuls = make_hog_with_raw_name_table(1, b"ITEM.TDX\0\0\0", b"x")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "PRIVATE.HOG"
+            path.write_bytes(trailing_nuls)
+            result = topology.scan_input(path)
+        self.assertEqual(result["totals"]["member_occurrences"], 1)
+        self.assertEqual(result["approved_extension_counts"][".tdx"], 1)
+
+        too_long = make_hog_with_raw_name_table(1, b"ABCDE")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "PRIVATE.HOG"
+            path.write_bytes(too_long)
+            with mock.patch.object(
+                topology,
+                "parse_hog_span",
+                side_effect=AssertionError("shared parser must not be reached"),
+            ) as parser:
+                with self.assertRaises(topology.ScanFailure) as raised:
+                    topology.scan_input(
+                        path,
+                        replace(topology.ScanLimits(), maximum_name_bytes=4),
+                    )
+        self.assertEqual(raised.exception.category, "archive_name_invalid")
+        parser.assert_not_called()
+
+        too_few = make_hog_with_raw_name_table(2, b"ONLY_ONE")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "PRIVATE.HOG"
+            path.write_bytes(too_few)
+            with mock.patch.object(
+                topology,
+                "parse_hog_span",
+                side_effect=AssertionError("shared parser must not be reached"),
+            ) as parser:
+                with self.assertRaises(topology.ScanFailure) as raised:
+                    topology.scan_input(path)
+        self.assertEqual(raised.exception.category, "root_hog_malformed")
+        parser.assert_not_called()
 
     def test_depth_entry_name_and_size_limits_are_enforced(self) -> None:
         leaf = make_hog([("ITEM.TDX", b"x")])
