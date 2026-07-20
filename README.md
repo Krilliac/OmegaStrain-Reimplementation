@@ -798,8 +798,9 @@ retail instruction blocks, or PS2 execution layer.
   asset CTest; default, GPU-opt-in, and restored CTest at 31/35/31; 20/20 repeated D3D12 app smokes;
   runtime-off direct and focused asset checks with 27 registrations; the 165-file dependency gate;
   all 209 tooling tests; and Python compile-all. The staged public-tree gate checked 252 indexed
-  text blobs; commit, DCO, publication, and exact-main validation remain pending. No private or
-  owner files, D-drive
+  text blobs. The merged commit carries its matching DCO sign-off; PR #38 published E-0077 as exact
+  `main` commit `2a9182e560a504125a5b8278a7202fcad7220c44`, and exact-main run `29710089254`
+  passed all three jobs. No private or owner files, D-drive
   content, disc image, executable, emulator, or PCSX2 input was used. This is not a claim about
   display texels, channel or alpha meaning, palettes, nibble order, swizzles, mip levels, UVs,
   materials, cells, placement, visibility, geometry, retail rendering, gameplay, streaming,
@@ -818,8 +819,10 @@ retail instruction blocks, or PS2 execution layer.
   destruction. Serialized local validation passed: focused/full MSVC builds; the direct unit plus
   100/100 repeated runs; focused CTest; default/GPU/restored CTest at 32/36/32; runtime-off direct
   and focused checks with 28 registrations; the 168-file dependency gate; all 209 tooling tests;
-  and Python compile-all. The staged public-tree gate checked 255 indexed text blobs; commit, DCO,
-  publication, and exact-main validation remain pending. This slice changes no app,
+  and Python compile-all. The staged public-tree gate checked 255 indexed text blobs. The merged
+  commit carries its matching DCO sign-off; PR #39 published E-0078 as exact `main` commit
+  `47378588471d9271a43dfaeb56f3138c01137e1f`, and exact-main run `29710670162` passed all three
+  jobs. This slice changes no app,
   GPU, renderer, AssetService, E-0077, or existing test behavior and uses no private or owner files,
   D-drive content, disc image, executable, emulator, or PCSX2 input. It assigns no channel names,
   display-ready meaning, row origin/order, swizzle, color space, alpha semantics, premultiplication,
@@ -872,13 +875,42 @@ retail instruction blocks, or PS2 execution layer.
   emulation of the exact PowerShell body extracted from the workflow YAML passed against both the
   freshly regenerated local package and the retained E-0079 main artifact. Full Release CTest
   passed 33/33, the 168-file dependency gate and all 209 tooling tests passed, Python compile-all
-  passed, and the staged public-tree gate checked 258 indexed text blobs. The static workflow
-  definition is confirmed; exact-main execution remains pending. This consumer
-  covers only same-run artifact transfer, integrity, extraction, package-relative launch, exact
-  process behavior, and non-mutation on that hosted runner. It does not create or validate a window,
-  GPU device, or audio stream; display or interact with the menu; exercise owner data; or establish
-  compatibility for physical machines, arbitrary clean machines, Windows client editions, other
-  Windows Server releases, or other runner images.
+  passed, and the staged public-tree gate checked 258 indexed text blobs. PR #41 merged E-0080 as
+  exact `main` commit `4868e1118bcd32c6713a7f4be57dd243d40996ed`. Exact-main push run
+  `29714679947` completed all five jobs successfully. Consumer job `88266108572` downloaded retained
+  artifact ID `8450186290`; GitHub verified that artifact envelope's SHA-256 as
+  `aea3f4869d17874305bf6027bce370d884ddcaed35e3e9d7a4bc2217aa6baac2`, while the strict
+  sidecar/recompute check verified the retained inner package ZIP SHA-256 as
+  `c06ce722572c5edbb0c34ce6b3fc985bcadd4e24ebda0cc07dff59df65ccfe5d`. The job emitted
+  `fresh-VM portable consumer: OK (artifact, checksum, tree, launch, immutability)`. This hosted
+  result covers only same-run artifact transfer, integrity, extraction, package-relative launch,
+  exact process behavior, and non-mutation on that runner image. Because its zero-frame path returns
+  before application/platform creation, E-0080 does not validate a window, menu interaction, GPU,
+  audio, owner data, physical or arbitrary clean machines, Windows client editions, other Windows
+  Server releases, or other runner images. Both digests identify retained E-0080 artifact
+  `8450186290`; they are not hashes for every later package build.
+- E-0081 locally smoke-validates a separately identified current portable package's generated
+  no-content main menu on the tested Windows host. Its sidecar matched the package ZIP, all eight
+  extracted regular files matched their ZIP members, and the absolute extracted launcher started
+  without arguments from an unrelated empty working directory under an isolated profile. No owner
+  data, level, or configuration argument was supplied. The exact `OpenOmega - native runtime`
+  window title appeared, and a temporary operator-visible screenshot showed only the
+  project-generated no-content OPEN OMEGA diagnostic menu. Its ignored PNG was deleted after
+  display and is not retained or committed. Native Escape closed the visible
+  run, and a second same-package exit oracle returned zero. Direct process evidence contained
+  two stdout lines, exactly three INFO-only stderr records, and zero warning, error, or fatal stderr
+  records. The unrelated work directory remained empty. GPU drivers wrote only shader-cache files
+  inside the isolated profile, so profile immutability is intentionally unclaimed. No proprietary
+  input, retail asset, retail executable, emulator, PCSX2 input, or D-drive filesystem input was
+  accessed.
+  This is not a pixel-golden test or evidence of retail-menu fidelity, owner-data behavior,
+  controller or audio coverage, another machine, another Windows release, or PCSX2 equivalence.
+- A separate private aggregate-only ReSymbol cross-check pinned the explicit
+  `Ps2EeR5900LeCoreV1` decoder profile. Because the frozen ELF was unavailable, it used the
+  available private 32 MiB EE memory and reproduced 38/38 already-public loader control-transfer
+  sites: 33 calls and five branches, with zero mismatch or error classes. No private path, hash,
+  byte, address, symbol, disassembly, input copy, or ReSymbol output is committed. This is a bounded
+  decoder-consistency result, not a semantic, decompilation, or retail-behavior claim.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

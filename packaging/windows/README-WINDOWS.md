@@ -3,11 +3,13 @@
 This archive is an unsigned native Windows x86-64 development preview. Extract the complete
 `OpenOmega-0.1.0-windows-x86_64` directory to a writable location before running it. The package
 imports a Windows synchronization API-set available on Windows 8/Server 2012 and later; that API
-availability is not an OpenOmega package-support guarantee. A main-push-only artifact consumer is
-defined on a separate fresh GitHub-hosted `windows-2022` runner and its exact PowerShell body has
-passed local emulation, but exact-main execution remains pending. This bounded zero-frame check is
-not general clean-machine, interactive, owner-data, GPU, audio, or broader Windows-version
-compatibility validation. The package has exactly this layout:
+availability is not an OpenOmega package-support guarantee. A main-push-only artifact consumer on a
+separate fresh GitHub-hosted `windows-2022` runner passed exact-main push run `29714679947` at commit
+`4868e1118bcd32c6713a7f4be57dd243d40996ed`; consumer job `88266108572` validated retained artifact
+ID `8450186290` and emitted `fresh-VM portable consumer: OK (artifact, checksum, tree, launch,
+immutability)`. This bounded zero-frame check is not general clean-machine, interactive,
+owner-data, GPU, audio, or broader Windows-version compatibility validation. The package has
+exactly this layout:
 
 ```text
 OpenOmega-0.1.0-windows-x86_64/
