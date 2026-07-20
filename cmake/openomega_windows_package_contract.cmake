@@ -21,6 +21,17 @@ if(NOT DEFINED OPENOMEGA_PACKAGE_CONTRACT_MODE OR
     message(FATAL_ERROR "OPENOMEGA_PACKAGE_CONTRACT_MODE=DRIVER is required")
 endif()
 
+# Negative CPack probes normally finish in seconds. A one-minute subprocess ceiling tolerates
+# hosted-runner scheduling and scanner stalls without surrendering deterministic hang detection.
+set(openomega_cpack_negative_timeout_seconds 60)
+set(openomega_install_negative_timeout_seconds 30)
+set(openomega_release_install_timeout_seconds 30)
+set(openomega_dependency_dump_timeout_seconds 20)
+set(openomega_reparse_inspection_timeout_seconds 10)
+set(openomega_positive_package_timeout_seconds 60)
+set(openomega_archive_list_timeout_seconds 20)
+set(openomega_launcher_timeout_seconds 10)
+
 set(required_path_variables
     OPENOMEGA_CPACK_COMMAND
     OPENOMEGA_CPACK_CONFIG
@@ -280,8 +291,16 @@ function(run_cpack_failure case_name generator configuration expected_guard)
         RESULT_VARIABLE result
         OUTPUT_VARIABLE stdout
         ERROR_VARIABLE stderr
-        TIMEOUT 30
+        TIMEOUT ${openomega_cpack_negative_timeout_seconds}
     )
+    if(result MATCHES "[Tt]imeout")
+        message(FATAL_ERROR
+            "${case_name}: CPack subprocess timed out after "
+            "${openomega_cpack_negative_timeout_seconds} seconds before the contract gate "
+            "could be observed\n"
+            "result=[${result}]\nstdout=[${stdout}]\nstderr=[${stderr}]"
+        )
+    endif()
     if(result STREQUAL "0")
         message(FATAL_ERROR "${case_name}: unsupported CPack invocation succeeded")
     endif()
@@ -289,7 +308,7 @@ function(run_cpack_failure case_name generator configuration expected_guard)
     if(NOT combined_output MATCHES "${expected_guard}")
         message(FATAL_ERROR
             "${case_name}: failure did not come from the expected contract gate\n"
-            "stdout=[${stdout}]\nstderr=[${stderr}]"
+            "result=[${result}]\nstdout=[${stdout}]\nstderr=[${stderr}]"
         )
     endif()
 
@@ -319,8 +338,16 @@ function(run_install_failure configuration)
         RESULT_VARIABLE result
         OUTPUT_VARIABLE stdout
         ERROR_VARIABLE stderr
-        TIMEOUT 30
+        TIMEOUT ${openomega_install_negative_timeout_seconds}
     )
+    if(result MATCHES "[Tt]imeout")
+        message(FATAL_ERROR
+            "direct install ${configuration}: CMake install subprocess timed out after "
+            "${openomega_install_negative_timeout_seconds} seconds before the Release gate "
+            "could be observed\n"
+            "result=[${result}]\nstdout=[${stdout}]\nstderr=[${stderr}]"
+        )
+    endif()
     if(result STREQUAL "0")
         message(FATAL_ERROR
             "direct install ${configuration}: unsupported configuration succeeded"
@@ -331,7 +358,7 @@ function(run_install_failure configuration)
        "OpenOmega Windows portable installation requires Release configuration")
         message(FATAL_ERROR
             "direct install ${configuration}: failure did not come from the Release gate\n"
-            "stdout=[${stdout}]\nstderr=[${stderr}]"
+            "result=[${result}]\nstdout=[${stdout}]\nstderr=[${stderr}]"
         )
     endif()
     directory_manifest("${install_prefix}" after)
@@ -472,7 +499,7 @@ function(validate_dependencies executable)
         RESULT_VARIABLE result
         OUTPUT_VARIABLE stdout
         ERROR_VARIABLE stderr
-        TIMEOUT 20
+        TIMEOUT ${openomega_dependency_dump_timeout_seconds}
         ENCODING AUTO
     )
     if(NOT result STREQUAL "0")
@@ -561,7 +588,7 @@ function(require_no_reparse_points root)
         RESULT_VARIABLE result
         OUTPUT_VARIABLE output
         ERROR_VARIABLE error
-        TIMEOUT 10
+        TIMEOUT ${openomega_reparse_inspection_timeout_seconds}
         ENCODING AUTO
     )
     string(STRIP "${output}" output)
@@ -661,7 +688,7 @@ function(run_launcher_case case_name expected_result expected_stdout expected_st
         RESULT_VARIABLE result
         OUTPUT_VARIABLE stdout
         ERROR_VARIABLE stderr
-        TIMEOUT 10
+        TIMEOUT ${openomega_launcher_timeout_seconds}
         ENCODING AUTO
     )
     normalize_process_output(stdout "${stdout}")
@@ -739,7 +766,7 @@ execute_process(
     RESULT_VARIABLE release_install_result
     OUTPUT_VARIABLE release_install_stdout
     ERROR_VARIABLE release_install_stderr
-    TIMEOUT 30
+    TIMEOUT ${openomega_release_install_timeout_seconds}
 )
 if(NOT release_install_result STREQUAL "0")
     message(FATAL_ERROR
@@ -787,7 +814,7 @@ execute_process(
     RESULT_VARIABLE package_result
     OUTPUT_VARIABLE package_stdout
     ERROR_VARIABLE package_stderr
-    TIMEOUT 60
+    TIMEOUT ${openomega_positive_package_timeout_seconds}
 )
 if(NOT package_result STREQUAL "0")
     message(FATAL_ERROR
@@ -841,7 +868,7 @@ execute_process(
     RESULT_VARIABLE archive_list_result
     OUTPUT_VARIABLE archive_list_stdout
     ERROR_VARIABLE archive_list_stderr
-    TIMEOUT 20
+    TIMEOUT ${openomega_archive_list_timeout_seconds}
 )
 if(NOT archive_list_result STREQUAL "0")
     message(FATAL_ERROR
