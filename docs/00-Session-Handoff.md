@@ -1031,10 +1031,37 @@ shipping dependencies or execution mechanisms.
     mapping and the enforced narrow/wide byte scan. Full MSVC CTest
     passed 32/32 `Debug`, 32/32 `RelWithDebInfo`, and 33/33 `Release`; the 168-file dependency gate,
     all 209 tooling tests, and Python compile-all passed. The staged public-tree gate checked 258
-    indexed text blobs. Clean-machine behavior, DCO, publication, and exact-main CI remain pending.
-    Validation used only public source and generated output; no private or owner files, D-drive
+    indexed text blobs. DCO passed, PR #40 merged the slice as exact `main` commit `ff8376b`, and
+    exact-main run `29713390065` passed all four jobs and retained the named Windows archive
+    artifact. General clean-machine behavior remains unclaimed. Validation used only public source
+    and generated output; no private or owner files, D-drive
     content, disc image, executable,
     emulator, or PCSX2 input was accessed.
+
+65. E-0080 defines a main-push-only consumer boundary for the exact retained E-0079 artifact. A
+    separate fresh GitHub-hosted `windows-2022` job depends on `windows-portable-package` and
+    downloads the same workflow run's named `OpenOmega-0.1.0-windows-x86_64` artifact. It has no
+    source checkout or toolchain-setup step and invokes no compiler, CMake, CTest, or producer build
+    tree. The consumer requires exactly the ZIP and `.zip.sha256` sidecar as regular non-reparse
+    files, parses the BOM-free ASCII lowercase digest, two spaces, exact filename, and single-CRLF
+    sidecar syntax, recomputes the archive SHA-256, and extracts exactly the
+    frozen two-directory/eight-file package tree into an isolated directory. It replaces `PATH` with
+    the minimal Windows system directories; redirects `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`,
+    `TEMP`, and `TMP` into an isolated synthetic profile; disables the startup dialog; and invokes
+    the absolute packaged launcher through the absolute system command processor from an unrelated
+    working directory. The two required cases are exact zero-frame stdout, empty stderr, and exit
+    zero, followed by exact invalid-sentinel stderr, empty stdout, and exit one. SHA-256 manifests of
+    the downloaded artifact, extracted package, unrelated working directory, and synthetic profile
+    must remain byte-for-byte identical after each launch. Local emulation of the exact
+    PowerShell body extracted from the workflow YAML passed against both the freshly regenerated
+    local package and retained E-0079 main artifact. Full Release CTest passed 33/33, the 168-file
+    dependency gate and all 209 tooling tests passed, Python compile-all passed, and the staged
+    public-tree gate checked 258 indexed text blobs. This confirms the static job definition and
+    local emulation only; exact-main execution remains pending. A future hosted pass will cover
+    only same-run artifact transfer, integrity, extraction, package-relative launch, exact process
+    behavior, and non-mutation on that runner image. It will not validate a window, menu interaction,
+    GPU, audio, owner data, a physical or arbitrary clean machine, another Windows version, another
+    Windows Server release, or another runner image.
 
 ## Disc observations
 

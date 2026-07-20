@@ -848,10 +848,37 @@ retail instruction blocks, or PS2 execution layer.
   mapping and the enforced narrow/wide byte scan. Full MSVC CTest passed 32/32 `Debug`, 32/32
   `RelWithDebInfo`, and 33/33 `Release`; the 168-file dependency gate, all 209 tooling tests, and
   Python compile-all also passed. The staged public-tree gate checked 258 indexed text blobs.
-  Clean-machine behavior, DCO, publication, and exact-main CI remain pending. Validation used only
+  DCO passed, PR #40 merged the slice as exact `main` commit `ff8376b`, and exact-main run
+  `29713390065` passed all four jobs and retained the named Windows archive artifact. General
+  clean-machine behavior remains unclaimed. Validation used only
   public source and generated output; no private or owner files, D-drive content, disc image,
   executable, emulator, or PCSX2
   input was accessed.
+- E-0080 defines the first main-push-only consumer of the retained Windows archive. After the
+  `windows-portable-package` producer succeeds, a separate fresh GitHub-hosted `windows-2022` job
+  downloads the same run's named `OpenOmega-0.1.0-windows-x86_64` artifact without checking out
+  source or invoking CMake, CTest, a compiler, or the producer build tree. It requires exactly the
+  ZIP and `.zip.sha256` sidecar as regular non-reparse files, parses its BOM-free ASCII lowercase
+  digest, two spaces, exact filename, and single-CRLF syntax,
+  recomputes the archive digest, and extracts exactly the frozen two-directory/eight-file package
+  tree into an isolated directory. It then constrains `PATH` to the Windows system directories and
+  points `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `TEMP`, and `TMP` at an isolated synthetic profile.
+  Through the absolute system command processor, from an unrelated working directory, it requires
+  the packaged launcher to pass both exact process oracles: exit zero, exact
+  `OpenOmega native shell: rendered_frames=0` plus one newline on stdout, and empty stderr for
+  `--frames=0`; then exit one, empty stdout, and the frozen exact diagnostic and usage text on stderr
+  for the invalid sentinel. SHA-256 manifests of the downloaded artifact, extracted package,
+  unrelated working directory, and synthetic profile must be identical after each launch. Local
+  emulation of the exact PowerShell body extracted from the workflow YAML passed against both the
+  freshly regenerated local package and the retained E-0079 main artifact. Full Release CTest
+  passed 33/33, the 168-file dependency gate and all 209 tooling tests passed, Python compile-all
+  passed, and the staged public-tree gate checked 258 indexed text blobs. The static workflow
+  definition is confirmed; exact-main execution remains pending. This consumer
+  covers only same-run artifact transfer, integrity, extraction, package-relative launch, exact
+  process behavior, and non-mutation on that hosted runner. It does not create or validate a window,
+  GPU device, or audio stream; display or interact with the menu; exercise owner data; or establish
+  compatibility for physical machines, arbitrary clean machines, Windows client editions, other
+  Windows Server releases, or other runner images.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
