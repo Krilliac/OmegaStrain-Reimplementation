@@ -45,6 +45,7 @@ using omega::runtime::JobService;
 using omega::runtime::JobServiceConfig;
 using omega::runtime::LevelTextureTopologyPreviewError;
 using omega::runtime::LevelTextureTopologyPreviewErrorCode;
+using omega::runtime::Packed24TransferDebugImageErrorCode;
 using omega::runtime::TextureAssetHandle;
 using omega::runtime::TextureAssetState;
 using omega::runtime::TextureStorageTopologyDebugImageErrorCode;
@@ -822,6 +823,60 @@ void CheckFirstLevelTextureTopologyPreview(const ContentFixture& fixture)
                               first->rgba8_pixels.data() != second->rgba8_pixels.data(),
                         "repeated preview calls are byte-identical and independently owned");
                 }
+
+                auto diagnostic_first =
+                    omega::runtime::BuildFirstLevelTextureDiagnosticPreview(
+                        *assets, fixture.texture_store());
+                auto diagnostic_second =
+                    omega::runtime::BuildFirstLevelTextureDiagnosticPreview(
+                        *assets, fixture.texture_store());
+                Check(diagnostic_first && diagnostic_second &&
+                          IsEmptySnapshot(assets->Snapshot(), 1U),
+                    "combined diagnostic previews repeat after exact source cleanup");
+                if (diagnostic_first && diagnostic_second)
+                {
+                    const auto& first_transfer =
+                        diagnostic_first->packed24_transfer_image;
+                    const auto& second_transfer =
+                        diagnostic_second->packed24_transfer_image;
+                    Check(!diagnostic_first->packed24_transfer_error_code &&
+                              !diagnostic_second->packed24_transfer_error_code &&
+                              first_transfer && second_transfer &&
+                              diagnostic_first->topology_image.width == 32U &&
+                              diagnostic_first->topology_image.height == 32U &&
+                              Fnv1a64(diagnostic_first->topology_image.pixels()) ==
+                                  0x666d00371feff88dULL &&
+                              first_transfer->width == 16U &&
+                              first_transfer->height == 16U &&
+                              first_transfer->rgba8_pixels.size() == 1024U &&
+                              Fnv1a64(first_transfer->pixels()) ==
+                                  0x4abb645f50f5a325ULL,
+                        "one combined call yields the frozen topology and Packed24 diagnostics");
+                    Check(first_transfer && second_transfer &&
+                              first_transfer->rgba8_pixels ==
+                                  second_transfer->rgba8_pixels &&
+                              first_transfer->rgba8_pixels.data() !=
+                                  second_transfer->rgba8_pixels.data() &&
+                              diagnostic_first->topology_image.rgba8_pixels ==
+                                  diagnostic_second->topology_image.rgba8_pixels &&
+                              diagnostic_first->topology_image.rgba8_pixels.data() !=
+                                  diagnostic_second->topology_image.rgba8_pixels.data(),
+                        "combined outputs are byte-stable and independently owned after release");
+                }
+
+                omega::runtime::LevelTextureDiagnosticPreviewLimits transfer_tight;
+                transfer_tight.packed24_transfer.maximum_output_bytes = 1023U;
+                auto transfer_rejected =
+                    omega::runtime::BuildFirstLevelTextureDiagnosticPreview(
+                        *assets, fixture.texture_store(), transfer_tight);
+                Check(transfer_rejected &&
+                          !transfer_rejected->packed24_transfer_image &&
+                          transfer_rejected->packed24_transfer_error_code ==
+                              Packed24TransferDebugImageErrorCode::OutputByteLimitExceeded &&
+                          Fnv1a64(transfer_rejected->topology_image.pixels()) ==
+                              0x666d00371feff88dULL &&
+                          IsEmptySnapshot(assets->Snapshot(), 1U),
+                    "Packed24 rejection is typed and nonfatal while topology and cleanup survive");
 
                 omega::runtime::TextureStorageTopologyDebugImageLimits tight_limits;
                 tight_limits.maximum_output_bytes = 4095U;

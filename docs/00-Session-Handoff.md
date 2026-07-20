@@ -1098,6 +1098,36 @@ shipping dependencies or execution mechanisms.
     disassembly, input copy, or ReSymbol output is committed. This is a bounded decoder-consistency
     result, not a semantic, decompilation, or retail-behavior claim.
 
+68. E-0082 connects the strict E-0078 Packed24 projection to complete `LevelContent` startup without
+    weakening the mandatory E-0077 topology path. `BuildFirstLevelTextureDiagnosticPreview` performs
+    the topology and transfer attempts inside the existing canonical-handle `AssetService`
+    transaction, returns independently owned images, and exposes a typed optional transfer rejection.
+    All Packed24 diagnostic failures are intentionally nonfatal: startup keeps topology-only output
+    and logs one fixed identity-free INFO category. The public synthetic Packed24 fixture produces a
+    frozen 32x32 topology image and a 16x16/1,024-byte transfer image. App-state inspection pins five
+    resident uploads totaling 78,864 bytes and an exact three-command
+    base-plus-split-topology-plus-transfer draw list; a GPU probe checks the first four source triples
+    and their synthetic `0xff` fourth slots. Teardown releases transfer before topology. A synthetic
+    Packed32 fixture remains topology-only with four resident uploads totaling 77,840 bytes and
+    exactly one fixed `unsupported-sample-encoding` INFO record containing no fixture identity. One
+    helper-level output-limit rejection preserves topology and restores aggregate `AssetService`
+    state, while source inspection shows one Request/Release transaction. A test-only exact
+    77,840-byte renderer-pool budget rejects the optional fifth reservation before GPU allocation;
+    startup retains four textures, the full-width topology draw list, exact pool-state preservation, and one
+    fixed identity-free `upload-failed` INFO record. Serialized local
+    validation passed focused/full MSVC builds; direct asset-service and Direct3D12 app smokes;
+    default/GPU-opt-in/restored CTest at 32/36/32; dependency 168; tooling 209; Python compile-all;
+    and the public-tree gate over 258 indexed text blobs. Diff and DCO checks passed. PR, head,
+    publication, and exact-main validation remain unclaimed. The checks do not prove a cumulative
+    exact request count, every rejection category, full-image GPU fidelity, backend-specific
+    fifth-upload failures, release failure, allocation injection, or valid-transfer failure
+    rollback. The GPU integration test ran only in the local opt-in suite; default hosted CI
+    compiles but does not run it. No
+    channel, alpha, row-order, swizzle, color-space, material, geometry, retail-rendering, gameplay,
+    or emulator-equivalence semantics are assigned. Only public source and generated fixtures were
+    used; no private or owner file, proprietary input, D-drive content, disc image, retail executable,
+    emulator, or PCSX2 input was accessed.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2

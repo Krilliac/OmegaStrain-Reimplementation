@@ -21,6 +21,15 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     const runtime::RuntimeSettings& settings, runtime::ContentStartupState content,
     const bool debug_device)
 {
+    return CreateWithTextureConfig(std::move(config), settings, std::move(content),
+        debug_device, {});
+}
+
+std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
+    runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
+    runtime::ContentStartupState content, const bool debug_device,
+    const runtime::RenderTexturePoolConfig texture_config)
+{
     const auto classified_content = runtime::ClassifyContentStartupState(content);
     if (!classified_content)
     {
@@ -219,17 +228,29 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
                                                       : no_level_diagnostic_image;
 
     runtime::DebugImage asset_topology_image;
+    std::optional<runtime::DebugImage> asset_transfer_image;
     if (content_stage == runtime::ContentStartupStage::LevelContent)
     {
-        auto built_asset_topology = runtime::BuildFirstLevelTextureTopologyPreview(
+        auto built_asset_preview = runtime::BuildFirstLevelTextureDiagnosticPreview(
             *assets, *content_owner->level_texture_store);
-        if (!built_asset_topology)
+        if (!built_asset_preview)
         {
-            const std::string error(built_asset_topology.error().message);
+            const std::string error(built_asset_preview.error().message);
             log->Error("startup", error);
             return std::unexpected(error);
         }
-        asset_topology_image = std::move(*built_asset_topology);
+        asset_topology_image = std::move(built_asset_preview->topology_image);
+        asset_transfer_image =
+            std::move(built_asset_preview->packed24_transfer_image);
+        if (built_asset_preview->packed24_transfer_error_code)
+        {
+            const auto rejection =
+                *built_asset_preview->packed24_transfer_error_code;
+            log->Info("startup", "packed-24 transfer diagnostic unavailable: " +
+                                     std::string(
+                                         runtime::Packed24TransferDebugImageErrorCodeName(
+                                             rejection)));
+        }
     }
     else
     {
@@ -270,7 +291,7 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     }
     auto audio = std::make_unique<SdlAudioService>(std::move(*created_audio));
 
-    auto created_host = SdlGpuHost::Create(*platform, debug_device);
+    auto created_host = SdlGpuHost::Create(*platform, debug_device, texture_config);
     if (!created_host)
     {
         log->Error("startup", "SDL/GPU host: " + created_host.error());
@@ -292,6 +313,19 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     };
     constexpr runtime::RenderTargetRectQ16 menu_target{
         .left = 2048U,
+        .top = 2048U,
+        .right = 26624U,
+        .bottom = 15872U,
+    };
+    // Project-authored diagnostic split only. It assigns no retail layout or texture semantics.
+    constexpr runtime::RenderTargetRectQ16 asset_topology_split_target{
+        .left = 2048U,
+        .top = 2048U,
+        .right = 13824U,
+        .bottom = 15872U,
+    };
+    constexpr runtime::RenderTargetRectQ16 asset_transfer_target{
+        .left = 14848U,
         .top = 2048U,
         .right = 26624U,
         .bottom = 15872U,
@@ -328,7 +362,15 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     runtime::RenderTextureHandle diagnostic_menu_texture;
     runtime::RenderTextureHandle diagnostic_controls_texture;
     runtime::RenderTextureHandle diagnostic_asset_topology_texture;
-    std::array<runtime::RenderTextureBlitCommand, 3U> diagnostic_commands{};
+    runtime::RenderTextureHandle diagnostic_asset_transfer_texture;
+    constexpr std::size_t kDiagnosticBaseCommandCapacity = 1U;
+    constexpr std::size_t kDiagnosticMaximumOverlayCommandCapacity = 2U;
+    constexpr std::size_t kDiagnosticCommandCapacity =
+        kDiagnosticBaseCommandCapacity + kDiagnosticMaximumOverlayCommandCapacity;
+    static_assert(kDiagnosticCommandCapacity <=
+                  runtime::kMaximumRenderTextureBlitsPerFrame);
+    std::array<runtime::RenderTextureBlitCommand, kDiagnosticCommandCapacity>
+        diagnostic_commands{};
     std::size_t diagnostic_command_count = 0U;
     auto uploaded = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
         .width = diagnostic_image.width,
@@ -467,13 +509,45 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
         runtime::RenderTextureBlitCommand{
             .texture = diagnostic_asset_topology_texture,
             .source = full_source,
-            .destination = menu_target,
+            .destination = asset_transfer_image
+                ? asset_topology_split_target
+                : menu_target,
             .fit_mode = runtime::RenderTextureFitMode::Contain,
             .filter_mode = runtime::RenderTextureFilterMode::Nearest,
         };
+    std::size_t diagnostic_asset_topology_command_count =
+        diagnostic_base_command_count + 1U;
+    if (asset_transfer_image)
+    {
+        auto uploaded_asset_transfer = host->UploadRgba8Texture(
+            runtime::Rgba8TextureUploadView{
+                .width = asset_transfer_image->width,
+                .height = asset_transfer_image->height,
+                .pixels = asset_transfer_image->pixels(),
+            });
+        if (!uploaded_asset_transfer)
+        {
+            log->Info("startup",
+                "packed-24 transfer diagnostic unavailable: upload-failed");
+        }
+        else
+        {
+            diagnostic_asset_transfer_texture = *uploaded_asset_transfer;
+            diagnostic_commands[diagnostic_asset_topology_command_count++] =
+                runtime::RenderTextureBlitCommand{
+                    .texture = diagnostic_asset_transfer_texture,
+                    .source = full_source,
+                    .destination = asset_transfer_target,
+                    .fit_mode = runtime::RenderTextureFitMode::Contain,
+                    .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+                };
+        }
+    }
+    diagnostic_commands[diagnostic_base_command_count].destination =
+        diagnostic_asset_transfer_texture.valid() ? asset_topology_split_target : menu_target;
     auto created_asset_topology_draw_list = runtime::RenderDrawList::Create(
         std::span<const runtime::RenderTextureBlitCommand>{
-            diagnostic_commands.data(), diagnostic_base_command_count + 1U});
+            diagnostic_commands.data(), diagnostic_asset_topology_command_count});
     if (!created_asset_topology_draw_list)
     {
         constexpr std::string_view error =
@@ -494,7 +568,7 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
         debug_locomotion_entity,
         std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
         diagnostic_texture, diagnostic_menu_texture, diagnostic_controls_texture,
-        diagnostic_asset_topology_texture,
+        diagnostic_asset_topology_texture, diagnostic_asset_transfer_texture,
         std::move(diagnostic_hidden_draw_list), std::move(diagnostic_visible_draw_lists),
         std::move(diagnostic_controls_draw_list),
         std::move(diagnostic_asset_topology_draw_list));
@@ -518,6 +592,7 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
     const runtime::RenderTextureHandle diagnostic_menu_texture,
     const runtime::RenderTextureHandle diagnostic_controls_texture,
     const runtime::RenderTextureHandle diagnostic_asset_topology_texture,
+    const runtime::RenderTextureHandle diagnostic_asset_transfer_texture,
     runtime::RenderDrawList diagnostic_hidden_draw_list,
     std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
         diagnostic_visible_draw_lists,
@@ -534,6 +609,7 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
       diagnostic_menu_texture_(diagnostic_menu_texture),
       diagnostic_controls_texture_(diagnostic_controls_texture),
       diagnostic_asset_topology_texture_(diagnostic_asset_topology_texture),
+      diagnostic_asset_transfer_texture_(diagnostic_asset_transfer_texture),
       diagnostic_hidden_draw_list_(std::move(diagnostic_hidden_draw_list)),
       diagnostic_visible_draw_lists_(std::move(diagnostic_visible_draw_lists)),
       diagnostic_controls_draw_list_(std::move(diagnostic_controls_draw_list)),
@@ -581,6 +657,8 @@ OmegaApp::~OmegaApp() noexcept
         }
     };
 
+    release_texture(diagnostic_asset_transfer_texture_,
+        "diagnostic asset transfer texture release failed; SDL/GPU host cleanup will retry");
     release_texture(diagnostic_asset_topology_texture_,
         "diagnostic asset topology texture release failed; SDL/GPU host cleanup will retry");
     release_texture(diagnostic_controls_texture_,
@@ -590,6 +668,7 @@ OmegaApp::~OmegaApp() noexcept
     release_texture(diagnostic_texture_,
         "diagnostic texture release failed; SDL/GPU host cleanup will retry");
     diagnostic_asset_topology_texture_ = {};
+    diagnostic_asset_transfer_texture_ = {};
     diagnostic_controls_texture_ = {};
     diagnostic_menu_texture_ = {};
     diagnostic_texture_ = {};
