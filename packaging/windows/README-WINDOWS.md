@@ -40,6 +40,11 @@ validates content and returns without touching native persistence. Owner-supplie
 outside this archive and can be selected with the documented `--data-root` and optional `--level`
 arguments or configuration.
 
+Interactive startup uses a project-generated native Main screen with Start Diagnostic, Profiles,
+Controls, and Asset Topology rows. Profiles are a bounded read-only startup snapshot: this preview
+does not create, select, import, or export one from the front end. The screen is development shell
+UI, not reproduced retail artwork or a retail-behavior claim.
+
 The adjacent `.zip.sha256` file records the archive's SHA-256 digest for integrity checks. This preview is not code-signed
 and may trigger Windows reputation warnings. It is an early native clean-room runtime, not a claim
 of retail behavior or PCSX2 equivalence.

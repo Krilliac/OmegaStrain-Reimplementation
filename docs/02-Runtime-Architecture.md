@@ -1776,3 +1776,21 @@ The runtime contains no MIPS execution path. This boundary is permanent and docu
 The initial host backend is SDL 3.4.10 for windowing, events, gamepads, audio streams, and the
 modern GPU device. SDL is private to the platform/render/audio/input leaves, as documented in
 `docs/adr/0002-sdl3-platform-layer.md`.
+
+### E-0089 bounded native front end
+
+`NativePersistence` remains the sole database owner. Before platform creation, `OmegaApp` builds a
+fixed `FrontEndStartupModel` from the catalog's already-sorted startup summaries. The builder accepts
+at most 1,024 profiles, copies only the total count and first three projected labels, validates UTF-8
+by scalar, uppercases the project-font ASCII subset, substitutes unsupported scalars, and truncates
+only at a scalar boundary into 24 fixed cells. It performs no persistence mutation and defines no
+active-profile policy.
+
+Startup rasterizes and uploads immutable project-generated diagnostic, Main, Profiles, Controls,
+and AssetTopology images once. Each frame selects an already-owned draw list from the normalized
+`FrontEndState`; it does not enumerate profiles, allocate, rasterize, or upload. The four Main rows
+are StartDiagnostic, Profiles, Controls, and AssetTopology. Primary has priority over simultaneous
+previous/next edges, modal cards return to their originating row, invalid state normalizes to the
+initial Main row, and `FrontEndAllowsSimulation` is true only for DiagnosticPlay. Live capture and
+replay use the same pure reducer and retain the existing fixed input/capture schema. These are native
+host-shell policies backed only by public synthetic fixtures, not retail front-end semantics.

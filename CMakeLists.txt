@@ -280,12 +280,13 @@ else()
 endif()
 
 add_library(omega_app_core STATIC
-    native/apps/openomega/diagnostic_menu.cpp
+    native/apps/openomega/front_end.cpp
     native/apps/openomega/run_capture.cpp
     native/apps/openomega/run_replay_session.cpp
 )
 target_include_directories(omega_app_core PUBLIC native/apps/openomega)
-target_link_libraries(omega_app_core PUBLIC omega_runtime omega_simulation omega_gameplay)
+target_link_libraries(omega_app_core
+    PUBLIC omega_profiles omega_runtime omega_simulation omega_gameplay)
 target_compile_features(omega_app_core PUBLIC cxx_std_23)
 if(MSVC)
     target_compile_options(omega_app_core PRIVATE
@@ -976,12 +977,12 @@ if(BUILD_TESTING)
     add_test(NAME omega_gameplay_tests COMMAND omega_gameplay_tests)
     set_tests_properties(omega_gameplay_tests PROPERTIES TIMEOUT 5)
 
-    add_executable(omega_diagnostic_menu_tests
-        native/tests/diagnostic_menu_tests.cpp
+    add_executable(omega_front_end_tests
+        native/tests/front_end_tests.cpp
     )
-    target_link_libraries(omega_diagnostic_menu_tests PRIVATE omega_app_core)
+    target_link_libraries(omega_front_end_tests PRIVATE omega_app_core)
     if(MSVC)
-        target_compile_options(omega_diagnostic_menu_tests PRIVATE
+        target_compile_options(omega_front_end_tests PRIVATE
             /W4
             /WX
             /permissive-
@@ -990,7 +991,7 @@ if(BUILD_TESTING)
             /utf-8
         )
     else()
-        target_compile_options(omega_diagnostic_menu_tests PRIVATE
+        target_compile_options(omega_front_end_tests PRIVATE
             -Wall
             -Wextra
             -Wpedantic
@@ -998,8 +999,8 @@ if(BUILD_TESTING)
             -Wno-missing-field-initializers
         )
     endif()
-    add_test(NAME omega_diagnostic_menu_tests COMMAND omega_diagnostic_menu_tests)
-    set_tests_properties(omega_diagnostic_menu_tests PROPERTIES TIMEOUT 5)
+    add_test(NAME omega_front_end_tests COMMAND omega_front_end_tests)
+    set_tests_properties(omega_front_end_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_render_texture_pool_tests
         native/tests/render_texture_pool_tests.cpp

@@ -54,7 +54,11 @@ retail instruction blocks, or PS2 execution layer.
   fallback, missing-established-slot rejection, post-recovery commit, hard-link containment,
   namespace anchoring, both-slot corruption, future-version rejection, and competing owners.
   The native profile catalog and app-owned startup composition are implemented without an implicit
-  default or active profile; menu actions remain a separate next slice. The standalone
+  default or active profile. E-0089 snapshots at most 1,024 already-existing profiles before SDL
+  startup, projects at most three sorted names into a fixed project font, and owns immutable
+  project-generated Main, Profiles, Controls, and AssetTopology cards for the host lifetime. The
+  front end never creates or selects a profile, and only DiagnosticPlay advances simulation; this
+  synthetic shell establishes no retail art, layout, behavior, or fidelity. The standalone
   `omega_ps2_compat` layer now recognizes strict standard 8 MiB logical/raw card envelopes, reads
   one explicitly selected top-level directory as ordered opaque files, and creates a new
   deterministic logical or raw card without patching an existing image. Owner saves and exported

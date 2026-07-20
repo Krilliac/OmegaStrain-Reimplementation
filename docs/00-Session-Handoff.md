@@ -1225,6 +1225,20 @@ shipping dependencies or execution mechanisms.
     `0xA426`, and maps allocation failures to typed results. Warning-free focused Debug and Release
     builds, their direct tests and focused CTest 3/3, plus the full Debug build and CTest 40/40 passed.
 
+73. E-0089 replaces the earlier diagnostic-menu shell with a bounded native front end. Startup
+    snapshots the already-open native profile catalog once, rejects more than 1,024 summaries,
+    preserves strict `ProfileId` order, and projects at most three valid UTF-8 display names into
+    fixed 24-cell project-font labels without creating or selecting a profile. `OmegaApp` owns one
+    immutable diagnostic base plus Main, Profiles, Controls, and AssetTopology cards and draw lists;
+    frame updates perform no catalog access, upload, or allocation. Four main rows use primary-first
+    reduction, all card screens return to their originating row, invalid states normalize to the
+    initial Main row, and only DiagnosticPlay advances the scheduler and simulation. Capture/replay
+    retains its fixed schema while renaming the in-process state field to `front_end`. Synthetic
+    reducer, raster-hash, persistence-boundary, SDL/GPU, capture, replay, process, and package
+    coverage is present; final serialized C++ validation is recorded in E-0089's ledger entry. This
+    is project-owned bootstrap UI and makes no retail menu, art, font, input, timing, save-policy,
+    behavior, or emulator-equivalence claim. No private or owner input was accessed.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2

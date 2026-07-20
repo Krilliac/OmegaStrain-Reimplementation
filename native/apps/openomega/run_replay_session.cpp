@@ -116,7 +116,7 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
 
     RunReplaySession session(
         std::move(*scheduler), std::move(*world), std::move(*replay),
-        debug_locomotion_entity, config.initial_diagnostic_menu_state);
+        debug_locomotion_entity, config.initial_front_end_state);
     return std::expected<RunReplaySession, RunReplayError>{std::move(session)};
 }
 
@@ -124,12 +124,12 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
     simulation::SimulationWorld&& simulation,
     runtime::RunCaptureReplaySession&& replay,
     const std::optional<simulation::EntityId> debug_locomotion_entity,
-    const std::optional<DiagnosticMenuState> diagnostic_menu_state) noexcept
+    const std::optional<FrontEndState> front_end_state) noexcept
     : scheduler_(std::in_place, std::move(scheduler)),
       simulation_(std::in_place, std::move(simulation)),
       replay_(std::in_place, std::move(replay)),
       debug_locomotion_entity_(debug_locomotion_entity),
-      diagnostic_menu_state_(diagnostic_menu_state),
+      front_end_state_(front_end_state),
       state_(replay_->complete()
                  ? RunReplaySessionState::Complete
                  : RunReplaySessionState::Ready)
@@ -142,8 +142,8 @@ RunReplaySession::RunReplaySession(RunReplaySession&& other) noexcept
       replay_(std::move(other.replay_)),
       debug_locomotion_entity_(std::exchange(
           other.debug_locomotion_entity_, std::nullopt)),
-      diagnostic_menu_state_(std::exchange(
-          other.diagnostic_menu_state_, std::nullopt)),
+      front_end_state_(std::exchange(
+          other.front_end_state_, std::nullopt)),
       state_(std::exchange(other.state_, RunReplaySessionState::Inert))
 {
     other.NormalizeInert();
@@ -153,7 +153,7 @@ void RunReplaySession::NormalizeInert() noexcept
 {
     replay_.reset();
     debug_locomotion_entity_.reset();
-    diagnostic_menu_state_.reset();
+    front_end_state_.reset();
     simulation_.reset();
     scheduler_.reset();
     state_ = RunReplaySessionState::Inert;
@@ -187,21 +187,21 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             RunReplayFrame(std::move(*replay_frame))};
     }
 
-    if (diagnostic_menu_state_)
+    if (front_end_state_)
     {
-        *diagnostic_menu_state_ = UpdateDiagnosticMenu(*diagnostic_menu_state_,
-            DiagnosticMenuInputEdges{
+        *front_end_state_ = UpdateFrontEnd(*front_end_state_,
+            FrontEndInputEdges{
                 .primary_pressed =
-                    replay_frame->input().WasPressed(kDiagnosticMenuPrimaryAction),
+                    replay_frame->input().WasPressed(kFrontEndPrimaryAction),
                 .previous_pressed =
-                    replay_frame->input().WasPressed(kDiagnosticMenuPreviousAction),
+                    replay_frame->input().WasPressed(kFrontEndPreviousAction),
                 .next_pressed =
-                    replay_frame->input().WasPressed(kDiagnosticMenuNextAction),
+                    replay_frame->input().WasPressed(kFrontEndNextAction),
             });
     }
-    const bool simulation_allowed = !diagnostic_menu_state_ ||
-                                    DiagnosticMenuAllowsSimulation(
-                                        *diagnostic_menu_state_);
+    const bool simulation_allowed = !front_end_state_ ||
+                                    FrontEndAllowsSimulation(
+                                        *front_end_state_);
     const std::optional<std::chrono::nanoseconds> elapsed = replay_frame->elapsed();
     const std::chrono::nanoseconds effective_elapsed = simulation_allowed
         ? *elapsed
@@ -289,9 +289,9 @@ RunReplaySession::debug_locomotion_position() const noexcept
     return simulation_->PositionOf(*debug_locomotion_entity_);
 }
 
-std::optional<DiagnosticMenuState>
-RunReplaySession::diagnostic_menu_state() const noexcept
+std::optional<FrontEndState>
+RunReplaySession::front_end_state() const noexcept
 {
-    return diagnostic_menu_state_;
+    return front_end_state_;
 }
 } // namespace omega::app

@@ -272,7 +272,7 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     };
     config.enable_debug_locomotion = std::ranges::includes(
         traces->input_trace().actions(), debug_locomotion_actions);
-    config.initial_diagnostic_menu_state = omega::app::InitialDiagnosticMenuState();
+    config.initial_front_end_state = omega::app::InitialFrontEndState();
     auto created = omega::app::RunReplaySession::Create(std::move(*traces), config);
     if (!created)
     {
