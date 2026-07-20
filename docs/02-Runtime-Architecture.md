@@ -644,6 +644,49 @@ publication, and exact-main validation remain pending; no private or owner files
 disc image, executable,
 emulator, or PCSX2 input was used.
 
+## Windows portable delivery boundary
+
+E-0079 defines a deployment boundary around the existing native host without adding a runtime,
+asset, or emulator dependency. Packaging is restricted to MSVC x64 `Release`, and the packaged
+`openomega.exe` uses the static MSVC runtime. The fixed output is
+`OpenOmega-0.1.0-windows-x86_64.zip` with exactly one internal
+`OpenOmega-0.1.0-windows-x86_64/` root. That root contains only `openomega.exe`,
+`launch-openomega.cmd`, `README-WINDOWS.md`, `LICENSE`, `NOTICE`, `TRADEMARKS.md`,
+`THIRD_PARTY_NOTICES.md`, and `LICENSES/SDL3.txt`. Explicit install entries own this manifest; no
+directory-wide install rule, glob, second archive wrapper, or additional package entry is part of
+the contract.
+
+`launch-openomega.cmd` is a minimal package-local process boundary. It changes the working directory
+to its own location, invokes the adjacent executable with the caller's complete argument list, and
+returns the child exit code. Validation must launch it through the absolute Windows command
+processor from an unrelated working directory and an isolated empty user-profile root. The positive
+oracle is exact `OpenOmega native shell: rendered_frames=0` stdout followed by one newline, empty
+stderr, and exit zero; an invalid sentinel must preserve the existing exact stderr and exit-one
+contract, proving argument and exit-code forwarding. Archive validation also
+requires the exact regular-file tree, rejects links and Windows reparse-point entries, checks the
+x86-64 PE32+ console executable and allowed system imports, and proves that no dynamically linked
+SDL or MSVC/UCRT runtime accompanies the static-runtime package.
+
+The package directory also owns a sibling `.zip.sha256` sidecar naming and hashing the exact ZIP.
+This output is an unsigned preview, not an installer or signed release. Proprietary inputs and
+assets, PCSX2, user profiles, PDBs, and developer tools are permanently outside the payload. The
+contract uses only project source, generated build output, and redistributable notices. Serialized
+local validation generated the package and matching sidecar, passed the focused package contract,
+and observed one canonical root with exactly two directories and eight files. The launcher is
+exactly 96 ASCII bytes with five CRLF endings and no BOM; both its zero-frame success and
+invalid-option forwarding oracles passed from the isolated profile and unrelated working directory.
+The executable is x64 PE32+ with the Windows console subsystem. The local MSVC 19.38 binary imports
+exactly 11 allowed direct OS DLLs. The contract additionally permits only the Windows OS
+synchronization API-set `API-MS-WIN-CORE-SYNCH-L1-2-0` observed under hosted VS 18/MSVC
+19.51/Windows SDK 26100, while rejecting SDL, MSVC, UCRT, debug-runtime, every other API-set, and every other unapproved import.
+Deterministic `Release` path mapping plus the enforced narrow/wide byte scan proved the source and
+build path prefixes absent. Full MSVC CTest
+passed 32/32 `Debug`, 32/32 `RelWithDebInfo`, and 33/33 `Release`; the 168-file dependency gate, all
+209 tooling tests, Python compile-all, and the staged public-tree gate over 258 indexed text blobs
+passed. Clean-machine compatibility, DCO, publication, and exact-main CI remain pending. No private
+or owner files, D-drive content, disc image, executable, emulator, or PCSX2 input was used for this
+validation.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

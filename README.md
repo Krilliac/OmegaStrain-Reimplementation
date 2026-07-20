@@ -825,6 +825,33 @@ retail instruction blocks, or PS2 execution layer.
   display-ready meaning, row origin/order, swizzle, color space, alpha semantics, premultiplication,
   block/plane purpose, Packed32/indexed expansion, palette/nibble policy, material/UV/geometry
   binding, gameplay behavior, or emulator equivalence.
+- E-0079 freezes the first Windows portable-delivery contract. Only an MSVC x64 `Release` build may
+  produce `OpenOmega-0.1.0-windows-x86_64.zip`; that archive must contain exactly one internal
+  `OpenOmega-0.1.0-windows-x86_64/` root with `openomega.exe`, `launch-openomega.cmd`,
+  `README-WINDOWS.md`, `LICENSE`, `NOTICE`, `TRADEMARKS.md`, `THIRD_PARTY_NOTICES.md`, and
+  `LICENSES/SDL3.txt`. The executable uses the static MSVC runtime for this package. The command
+  launcher changes to its own directory, forwards every argument to `openomega.exe`, and preserves
+  the process exit code; the package contract requires exact
+  `OpenOmega native shell: rendered_frames=0` stdout with empty stderr plus an invalid-option
+  forwarding check from an unrelated working directory. A sibling `.zip.sha256` sidecar covers the
+  exact archive. This is an unsigned preview, not an installer or signed release, and it deliberately
+  excludes proprietary inputs or assets, PCSX2, user profiles, PDBs, and developer tools. Serialized
+  local validation generated the package and matching SHA-256 sidecar, passed the focused package
+  contract, and observed one canonical root containing exactly two directories and eight files. The
+  launcher is exactly 96 ASCII bytes with five CRLF line endings and no BOM; its success and
+  invalid-option forwarding oracles passed. The executable is x64 PE32+ with the Windows console
+  subsystem. The local MSVC 19.38 binary imports exactly 11 allowed direct operating-system DLLs;
+  the contract also permits only the Windows OS synchronization API-set
+  `API-MS-WIN-CORE-SYNCH-L1-2-0` observed under hosted VS 18/MSVC 19.51/Windows SDK 26100, while rejecting SDL, MSVC,
+  UCRT, debug-runtime, every other API-set, and every other unapproved import. The executable
+  contains no source/build path prefix after deterministic `Release` path
+  mapping and the enforced narrow/wide byte scan. Full MSVC CTest passed 32/32 `Debug`, 32/32
+  `RelWithDebInfo`, and 33/33 `Release`; the 168-file dependency gate, all 209 tooling tests, and
+  Python compile-all also passed. The staged public-tree gate checked 258 indexed text blobs.
+  Clean-machine behavior, DCO, publication, and exact-main CI remain pending. Validation used only
+  public source and generated output; no private or owner files, D-drive content, disc image,
+  executable, emulator, or PCSX2
+  input was accessed.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

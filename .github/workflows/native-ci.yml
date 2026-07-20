@@ -85,3 +85,40 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CMake build failed: $LASTEXITCODE" }
           ctest --preset msvc-debug --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "CTest failed: $LASTEXITCODE" }
+
+  windows-portable-package:
+    name: Windows x86-64 portable package
+    needs: public-tree
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Configure MSVC x64 environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: x64
+
+      - name: Build and validate portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:CC = 'cl'
+          $env:CXX = 'cl'
+          cmake --preset msvc
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed: $LASTEXITCODE" }
+          cmake --build --preset msvc-release
+          if ($LASTEXITCODE -ne 0) { throw "Release build failed: $LASTEXITCODE" }
+          ctest --preset msvc-release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Release test suite failed: $LASTEXITCODE" }
+
+      - name: Retain portable package
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: OpenOmega-0.1.0-windows-x86_64
+          path: |
+            build/msvc/package/OpenOmega-0.1.0-windows-x86_64.zip
+            build/msvc/package/OpenOmega-0.1.0-windows-x86_64.zip.sha256
+          if-no-files-found: error
