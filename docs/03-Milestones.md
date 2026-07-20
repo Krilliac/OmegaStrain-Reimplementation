@@ -846,6 +846,24 @@ non-missing inspection-error oracle was explicitly skipped
 because MSVC maps the available invalid and overlong candidates to not-found. Commit, DCO,
 publication, and exact-main validation remain unclaimed.
 
+E-0076 adds a stateless, app-private startup-failure dialog for the already-fatal pre-SDL
+runtime-configuration, runtime-settings, content-launch-profile, and content-startup paths. Exact
+stderr and exit behavior remains unchanged; stderr is flushed before a best-effort parentless SDL
+error message. Fixed 48-byte category and 384-byte detail projections use bounded local stack
+storage to produce an owned 640-byte result, sanitize hostile bytes to bounded ASCII, and retain no
+source text. Only exact
+`OPENOMEGA_DISABLE_STARTUP_DIALOG=1` suppresses presentation, invalid policies fail closed, and
+CMake suppresses all automated process/capture presentation. The unit source exercises only
+suppressed calls and verifies no SDL initialization. Later startup and runtime failures stay
+console-only. Serialized local validation passed: focused and full MSVC builds; the direct dialog
+unit and exact process contract; CTest 31/35/31; runtime-off direct and focused `omega_core_tests`
+with 27 registrations and no dialog target; the 163-file dependency gate; all 209 tooling tests;
+Python compile-all; and the staged public-tree gate checked 250 indexed text blobs. Interactive
+dialog smoke, commit, DCO, publication, and exact-main validation remain unclaimed. No private or
+owner files, D-drive content, disc image,
+executable,
+emulator, or PCSX2 input was used.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

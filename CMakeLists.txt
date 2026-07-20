@@ -257,6 +257,7 @@ if(OMEGA_BUILD_RUNTIME)
         native/apps/openomega/sdl_gpu_host.cpp
         native/apps/openomega/sdl_input_service.cpp
         native/apps/openomega/sdl_platform_service.cpp
+        native/apps/openomega/startup_failure_dialog.cpp
     )
     target_include_directories(omega_sdl_backend PUBLIC native/apps/openomega)
     target_link_libraries(omega_sdl_backend
@@ -340,6 +341,7 @@ if(BUILD_TESTING)
             "LOCALAPPDATA=${profile_root}/local-app-data"
             "XDG_CONFIG_HOME=${profile_root}/xdg-config-home"
             "HOME=${profile_root}/home"
+            "OPENOMEGA_DISABLE_STARTUP_DIALOG=1"
         )
     endfunction()
 
@@ -721,6 +723,32 @@ if(BUILD_TESTING)
     set_tests_properties(omega_texture_storage_topology_debug_image_tests PROPERTIES TIMEOUT 5)
 
     if(TARGET omega_sdl_backend)
+        add_executable(omega_startup_failure_dialog_tests
+            native/tests/startup_failure_dialog_tests.cpp
+        )
+        target_link_libraries(omega_startup_failure_dialog_tests PRIVATE omega_sdl_backend)
+        if(MSVC)
+            target_compile_options(omega_startup_failure_dialog_tests PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_startup_failure_dialog_tests PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+        add_test(NAME omega_startup_failure_dialog_tests
+            COMMAND omega_startup_failure_dialog_tests)
+        set_tests_properties(omega_startup_failure_dialog_tests PROPERTIES TIMEOUT 5)
+
         add_executable(omega_sdl_gpu_texture_smoke
             native/tests/sdl_gpu_texture_smoke.cpp
         )
