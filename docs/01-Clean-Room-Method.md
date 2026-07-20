@@ -38,6 +38,11 @@ Research reports expose only the narrow facts needed to implement a contract: in
 state transitions, layouts, invariants, hashes, and reproducible observations. They do not expose
 retail instruction sequences, pseudocode, expression-level structure, or symbol dumps.
 
+Front-end behavioral captures use the narrower
+[`omega-frontend-trace-v1`](05-Frontend-Trace-Contract.md) boundary. That contract permits only
+canonical anonymous aggregates and explicitly excludes paths, names, hashes, executable positions,
+addresses, offsets, registers, raw state, and payload bytes from its public report.
+
 Native implementation reviews cite an approved report or observable test, explain the independent
 design choice, and compare behavior rather than source structure. A contributor who inspected raw
 retail code must disclose that fact in the review record; before a public playable release, counsel
