@@ -64,6 +64,7 @@ target_link_libraries(omega_profiles PUBLIC omega_persistence)
 target_compile_features(omega_profiles PUBLIC cxx_std_23)
 
 add_library(omega_ps2_compat STATIC
+    native/src/compat/ps2_memory_card_export.cpp
     native/src/compat/ps2_memory_card_filesystem.cpp
     native/src/compat/ps2_memory_card_image.cpp
 )
@@ -606,6 +607,32 @@ if(BUILD_TESTING)
     add_test(NAME omega_ps2_memory_card_filesystem_tests
         COMMAND omega_ps2_memory_card_filesystem_tests)
     set_tests_properties(omega_ps2_memory_card_filesystem_tests PROPERTIES TIMEOUT 20)
+
+    add_executable(omega_ps2_memory_card_export_tests
+        native/tests/ps2_memory_card_export_tests.cpp
+    )
+    target_link_libraries(omega_ps2_memory_card_export_tests PRIVATE omega_ps2_compat)
+    if(MSVC)
+        target_compile_options(omega_ps2_memory_card_export_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_ps2_memory_card_export_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_ps2_memory_card_export_tests
+        COMMAND omega_ps2_memory_card_export_tests)
+    set_tests_properties(omega_ps2_memory_card_export_tests PROPERTIES TIMEOUT 30)
 
     add_executable(omega_profile_catalog_tests
         native/tests/profile_catalog_tests.cpp
