@@ -1,5 +1,6 @@
 #pragma once
 
+#include "boot_sequence.h"
 #include "front_end.h"
 #include "native_persistence.h"
 #include "run_capture.h"
@@ -23,6 +24,7 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -30,6 +32,8 @@
 
 namespace omega::app
 {
+class OpeningMoviePlayer;
+
 namespace detail
 {
 struct OmegaAppTestAccess;
@@ -44,7 +48,8 @@ public:
     [[nodiscard]] static std::expected<OmegaApp, std::string> Create(
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
         runtime::ContentStartupState content, NativePersistence native_persistence,
-        bool debug_device);
+        bool debug_device,
+        std::optional<std::filesystem::path> opening_movie_path = std::nullopt);
 
     // [game/main thread, after all worker clients have stopped]
     ~OmegaApp() noexcept;
@@ -80,7 +85,8 @@ private:
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
         runtime::ContentStartupState content,
         std::unique_ptr<NativePersistence> native_persistence, bool debug_device,
-        runtime::RenderTexturePoolConfig texture_config);
+        runtime::RenderTexturePoolConfig texture_config,
+        std::optional<std::filesystem::path> opening_movie_path = std::nullopt);
 
     struct RunLoopResult
     {
@@ -112,6 +118,10 @@ private:
         std::unique_ptr<SdlInputService> sdl_input,
         std::unique_ptr<SdlAudioService> audio,
         std::unique_ptr<SdlGpuHost> host,
+        std::unique_ptr<OpeningMoviePlayer> opening_movie_player,
+        runtime::RenderTextureHandle opening_movie_texture,
+        runtime::RenderDrawList opening_movie_draw_list,
+        BootSequenceState boot_sequence_state,
         runtime::RenderTextureHandle diagnostic_texture,
         runtime::RenderTextureHandle front_end_texture,
         runtime::RenderTextureHandle front_end_profiles_texture,
@@ -147,6 +157,12 @@ private:
     std::unique_ptr<SdlInputService> sdl_input_;
     std::unique_ptr<SdlAudioService> audio_;
     std::unique_ptr<SdlGpuHost> host_;
+    // The synchronous decoder is destroyed before the host. Its source path is
+    // never retained; the stable texture handle remains backend-owned.
+    std::unique_ptr<OpeningMoviePlayer> opening_movie_player_;
+    runtime::RenderTextureHandle opening_movie_texture_;
+    runtime::RenderDrawList opening_movie_draw_list_;
+    BootSequenceState boot_sequence_state_{};
     // Non-owning generation-scoped identity. The host remains the backend-resource owner and a
     // default-moved-from app cannot release this copied value because its host_ is null.
     runtime::RenderTextureHandle diagnostic_texture_;

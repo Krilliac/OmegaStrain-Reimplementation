@@ -75,6 +75,19 @@ add_library(omega_assets INTERFACE)
 target_include_directories(omega_assets INTERFACE native/include)
 target_compile_features(omega_assets INTERFACE cxx_std_23)
 
+add_library(omega_media STATIC
+    native/src/media/media_foundation_h262_decoder.cpp
+    native/src/media/mpeg_program_stream_descriptor.cpp
+    native/src/media/mpeg_video_elementary_stream.cpp
+    native/src/media/nv12_to_rgba8.cpp
+)
+target_include_directories(omega_media PUBLIC native/include)
+target_link_libraries(omega_media PUBLIC omega_assets)
+target_compile_features(omega_media PUBLIC cxx_std_23)
+if(WIN32)
+    target_link_libraries(omega_media PRIVATE mfplat mfuuid ole32)
+endif()
+
 add_library(omega_simulation STATIC
     native/src/simulation/entity_registry.cpp
     native/src/simulation/simulation_world.cpp
@@ -153,6 +166,25 @@ target_link_libraries(omega_runtime
         Threads::Threads
 )
 target_compile_features(omega_runtime PUBLIC cxx_std_23)
+
+if(MSVC)
+    target_compile_options(omega_media PRIVATE
+        /W4
+        /WX
+        /permissive-
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /utf-8
+    )
+else()
+    target_compile_options(omega_media PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+        -Wno-missing-field-initializers
+    )
+endif()
 
 if(MSVC)
     target_compile_options(omega_core PRIVATE
@@ -420,12 +452,14 @@ if(OMEGA_BUILD_RUNTIME)
     endif()
 
     add_library(omega_app_host STATIC
+        native/apps/openomega/opening_movie_player.cpp
         native/apps/openomega/omega_app.cpp
     )
     target_include_directories(omega_app_host PUBLIC native/apps/openomega)
     target_link_libraries(omega_app_host
         PUBLIC
             omega_app_core
+            omega_media
             omega_native_persistence
             omega_runtime
             omega_simulation
@@ -512,6 +546,31 @@ if(BUILD_TESTING)
             "OPENOMEGA_DISABLE_STARTUP_DIALOG=1"
         )
     endfunction()
+
+    add_executable(omega_boot_sequence_tests
+        native/tests/boot_sequence_tests.cpp
+    )
+    target_include_directories(omega_boot_sequence_tests PRIVATE native/apps/openomega)
+    if(MSVC)
+        target_compile_options(omega_boot_sequence_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_boot_sequence_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_boot_sequence_tests COMMAND omega_boot_sequence_tests)
+    set_tests_properties(omega_boot_sequence_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_save_database_tests
         native/tests/save_database_tests.cpp
@@ -639,6 +698,110 @@ if(BUILD_TESTING)
     add_test(NAME omega_vpk_wrapper_envelope_decoder_tests
         COMMAND omega_vpk_wrapper_envelope_decoder_tests)
     set_tests_properties(omega_vpk_wrapper_envelope_decoder_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_mpeg_program_stream_descriptor_tests
+        native/tests/mpeg_program_stream_descriptor_tests.cpp
+    )
+    target_link_libraries(omega_mpeg_program_stream_descriptor_tests PRIVATE omega_media)
+    if(MSVC)
+        target_compile_options(omega_mpeg_program_stream_descriptor_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_mpeg_program_stream_descriptor_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_mpeg_program_stream_descriptor_tests
+        COMMAND omega_mpeg_program_stream_descriptor_tests)
+    set_tests_properties(omega_mpeg_program_stream_descriptor_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_mpeg_video_elementary_stream_tests
+        native/tests/mpeg_video_elementary_stream_tests.cpp
+    )
+    target_link_libraries(omega_mpeg_video_elementary_stream_tests PRIVATE omega_media)
+    if(MSVC)
+        target_compile_options(omega_mpeg_video_elementary_stream_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_mpeg_video_elementary_stream_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_mpeg_video_elementary_stream_tests
+        COMMAND omega_mpeg_video_elementary_stream_tests)
+    set_tests_properties(omega_mpeg_video_elementary_stream_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_nv12_to_rgba8_tests
+        native/tests/nv12_to_rgba8_tests.cpp
+    )
+    target_link_libraries(omega_nv12_to_rgba8_tests PRIVATE omega_media)
+    if(MSVC)
+        target_compile_options(omega_nv12_to_rgba8_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_nv12_to_rgba8_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_nv12_to_rgba8_tests
+        COMMAND omega_nv12_to_rgba8_tests)
+    set_tests_properties(omega_nv12_to_rgba8_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_media_foundation_h262_decoder_tests
+        native/tests/media_foundation_h262_decoder_tests.cpp
+    )
+    target_link_libraries(omega_media_foundation_h262_decoder_tests PRIVATE omega_media)
+    if(MSVC)
+        target_compile_options(omega_media_foundation_h262_decoder_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_media_foundation_h262_decoder_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_media_foundation_h262_decoder_tests
+        COMMAND omega_media_foundation_h262_decoder_tests)
+    set_tests_properties(omega_media_foundation_h262_decoder_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_ps2_memory_card_image_tests
         native/tests/ps2_memory_card_image_tests.cpp

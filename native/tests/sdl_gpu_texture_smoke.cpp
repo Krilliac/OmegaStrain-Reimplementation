@@ -370,15 +370,98 @@ int main()
         if (host.Snapshot() != before_blit_readback)
             return Fail("blit readback probe mutated production host state");
 
+        constexpr std::array<std::byte, 2U * 2U * 4U> updated_probe_pixels{
+            static_cast<std::byte>(0xFFU), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0x00U), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0x00U), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0xFFU), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0xFFU), static_cast<std::byte>(0x00U),
+            static_cast<std::byte>(0xFFU), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0xFFU), static_cast<std::byte>(0xFFU),
+            static_cast<std::byte>(0xFFU), static_cast<std::byte>(0xFFU),
+        };
+        const omega::app::GpuHostSnapshot before_probe_update = host.Snapshot();
+        auto updated_probe = host.UpdateRgba8Texture(*uploaded_probe,
+            omega::runtime::Rgba8TextureUploadView{
+                .width = 2U,
+                .height = 2U,
+                .pixels = updated_probe_pixels,
+            });
+        if (!updated_probe)
+            return Fail("resident probe update failed", updated_probe.error());
+        const omega::app::GpuHostSnapshot after_probe_update = host.Snapshot();
+        if (after_probe_update.textures != before_probe_update.textures ||
+            after_probe_update.successful_uploads != before_probe_update.successful_uploads ||
+            after_probe_update.successful_updates != 1U ||
+            after_probe_update.successful_update_logical_bytes != updated_probe_pixels.size())
+        {
+            return Fail("resident probe update changed identity/residency or counters incorrectly");
+        }
+
+        auto mismatched_probe_update = host.UpdateRgba8Texture(*uploaded_probe,
+            omega::runtime::Rgba8TextureUploadView{
+                .width = 1U,
+                .height = 4U,
+                .pixels = updated_probe_pixels,
+            });
+        if (mismatched_probe_update || host.Snapshot() != after_probe_update)
+            return Fail("mismatched resident probe update was accepted or mutated state");
+
+        constexpr omega::runtime::RenderClearColorRgba8 opaque_yellow{
+            .red = 255U,
+            .green = 255U,
+            .blue = 0U,
+            .alpha = 255U,
+        };
+        constexpr omega::runtime::RenderClearColorRgba8 opaque_cyan{
+            .red = 0U,
+            .green = 255U,
+            .blue = 255U,
+            .alpha = 255U,
+        };
+        constexpr omega::runtime::RenderClearColorRgba8 opaque_magenta{
+            .red = 255U,
+            .green = 0U,
+            .blue = 255U,
+            .alpha = 255U,
+        };
+        constexpr std::array expected_updated_probe_readback{
+            opaque_black, opaque_black, opaque_black, opaque_black,
+            opaque_yellow, opaque_yellow, opaque_magenta, opaque_cyan,
+            opaque_yellow, opaque_yellow, opaque_magenta, opaque_cyan,
+            opaque_black, opaque_black, opaque_black, opaque_black,
+        };
+        auto updated_probe_readback = omega::app::detail::SdlGpuHostTestAccess::
+            ReadbackBlitsForTesting(host, packet);
+        if (!updated_probe_readback)
+            return Fail("updated resident probe readback failed", updated_probe_readback.error());
+        if (*updated_probe_readback != expected_updated_probe_readback)
+            return Fail("resident probe update did not replace the exact RGBA8 pixels");
+        if (host.Snapshot() != after_probe_update)
+            return Fail("updated resident probe readback mutated production host state");
+
         auto released_probe = host.ReleaseTexture(*uploaded_probe);
         if (!released_probe)
             return Fail("blit readback probe release failed", released_probe.error());
         const omega::app::GpuHostSnapshot after_probe_release = host.Snapshot();
         if (after_probe_release.successful_uploads != 1U ||
             after_probe_release.successful_upload_logical_bytes != probe_pixels.size() ||
+            after_probe_release.successful_updates != 1U ||
+            after_probe_release.successful_update_logical_bytes != updated_probe_pixels.size() ||
             after_probe_release.successful_releases != 1U ||
             !PoolIsEmpty(after_probe_release.textures))
             return Fail("blit readback probe release did not restore empty residency");
+
+        auto stale_probe_update = host.UpdateRgba8Texture(*uploaded_probe,
+            omega::runtime::Rgba8TextureUploadView{
+                .width = 2U,
+                .height = 2U,
+                .pixels = updated_probe_pixels,
+            });
+        omega::app::GpuHostSnapshot expected_stale_probe_update = after_probe_release;
+        ++expected_stale_probe_update.rejected_nondefault_texture_handles;
+        if (stale_probe_update || host.Snapshot() != expected_stale_probe_update)
+            return Fail("stale resident probe update was accepted or mutated unrelated state");
 
         packet = omega::runtime::RenderFramePacket{};
         std::array<std::byte, 8U * 8U * 4U> pixels_a{};
@@ -648,10 +731,12 @@ int main()
         if (final.successful_uploads != 4U ||
             final.successful_upload_logical_bytes !=
                 probe_pixels.size() + pixels_a.size() + pixels_b.size() + pixels_c.size() ||
+            final.successful_updates != 1U ||
+            final.successful_update_logical_bytes != updated_probe_pixels.size() ||
             final.successful_releases != 4U || final.blit_submissions != 2U ||
             final.successful_blit_draws != 4U ||
             final.clear_submissions != 1U ||
-            final.rejected_nondefault_texture_handles != 1U ||
+            final.rejected_nondefault_texture_handles != 2U ||
             final.frame_submissions !=
                 3U + final.unavailable_swapchain_submissions ||
             !PoolIsEmpty(final.textures))
@@ -660,7 +745,7 @@ int main()
     }
 
     std::cout << "omega_sdl_gpu_texture_smoke: passed driver=" << driver
-              << " uploads=4 releases=4 blit_frames=2 blit_draws=4 unavailable="
+              << " uploads=4 updates=1 releases=4 blit_frames=2 blit_draws=4 unavailable="
               << unavailable_submissions << '\n';
     return 0;
 }

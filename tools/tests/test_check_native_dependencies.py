@@ -46,6 +46,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             ("native/src/archive/example.cpp", "omega/asset/decode.h"),
             ("native/src/profiles/example.cpp", "omega/persistence/save_database.h"),
             ("native/src/simulation/example.cpp", "omega/asset/decode.h"),
+            ("native/src/media/example.cpp", "omega/asset/decode.h"),
             ("native/src/retail/example.cpp", "omega/archive/archive_reader.h"),
             ("native/src/retail/example.cpp", "omega/asset/audio_ir.h"),
             ("native/src/content/example.cpp", "omega/retail/pop_level_manifest_decoder.h"),
@@ -53,6 +54,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             ("native/apps/openomega/sdl_example.cpp", "omega/runtime/render_frame_packet.h"),
             ("native/apps/openomega/example.cpp", "omega/simulation/simulation_world.h"),
             ("native/apps/openomega/example.cpp", "omega/profiles/profile_catalog.h"),
+            ("native/apps/openomega/example.cpp", "omega/media/nv12_to_rgba8.h"),
         )
         for relative_path, include in cases:
             with self.subTest(relative_path=relative_path, include=include):
@@ -68,6 +70,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             ("native/src/persistence/example.cpp", "omega/profiles/profile_catalog.h"),
             ("native/src/profiles/example.cpp", "omega/runtime/frame_scheduler.h"),
             ("native/src/simulation/example.cpp", "omega/runtime/frame_scheduler.h"),
+            ("native/src/media/example.cpp", "omega/retail/vag_adpcm_decoder.h"),
             ("native/src/retail/example.cpp", "omega/content/game_data_service.h"),
             ("native/src/content/example.cpp", "omega/simulation/simulation_world.h"),
             ("native/src/runtime/example.cpp", "omega/simulation/simulation_world.h"),
@@ -90,6 +93,78 @@ class NativeDependencyGateTests(unittest.TestCase):
             "native/src/runtime/example.cpp",
             '#include "omega/simulation/simulation_world.h"\n',
             "omega_runtime includes forbidden dependency",
+        )
+
+    def test_media_header_and_source_allow_only_self_assets_and_stdlib(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/include/omega/media/descriptor.h": (
+                    "#pragma once\n"
+                    "#include <vector>\n"
+                    '#include "omega/asset/decode.h"\n'
+                ),
+                "native/src/media/descriptor.cpp": (
+                    '#include "omega/media/descriptor.h"\n'
+                    "#include <algorithm>\n"
+                ),
+                "native/include/omega/media/mpeg_video_elementary_stream.h": (
+                    "#pragma once\n"
+                    '#include "omega/media/mpeg_program_stream_descriptor.h"\n'
+                    "#include <span>\n"
+                ),
+                "native/src/media/mpeg_video_elementary_stream.cpp": (
+                    '#include "omega/media/mpeg_video_elementary_stream.h"\n'
+                    "#include <array>\n"
+                ),
+            }
+        )
+        self.assertEqual(checked, 4)
+        self.assertEqual(errors, [])
+
+    def test_media_foundation_backend_has_an_exact_platform_header_allowlist(
+        self,
+    ) -> None:
+        allowed_headers = (
+            "windows.h",
+            "mfapi.h",
+            "mferror.h",
+            "mfidl.h",
+            "mftransform.h",
+            "wrl/client.h",
+        )
+        source = "".join(f"#include <{header}>\n" for header in allowed_headers)
+        checked, errors = self.check_source(
+            "native/src/media/media_foundation_h262_decoder.cpp", source
+        )
+        self.assertEqual(checked, 1)
+        self.assertEqual(errors, [])
+
+        self.assert_rejected(
+            "native/src/media/example.cpp",
+            "#include <windows.h>\n",
+            "omega_media includes unapproved external header",
+        )
+        self.assert_rejected(
+            "native/src/media/media_foundation_h262_decoder.cpp",
+            "#include <shlwapi.h>\n",
+            "omega_media includes unapproved external header",
+        )
+        self.assert_rejected(
+            "native/src/media/media_foundation_h262_decoder.cpp",
+            '#include "windows.h"\n',
+            "omega_media includes unresolved local header",
+        )
+
+    def test_media_classification_remains_fail_closed(self) -> None:
+        self.assert_rejected(
+            "native/src/media_extra/example.cpp",
+            "constexpr int example = 0;\n",
+            "unclassified shipping native source path",
+        )
+        self.assert_rejected(
+            "native/src/media/example.cpp",
+            '#include "omega/media_extra/example.h"\n',
+            "unclassified project include",
         )
 
     def test_gameplay_header_and_source_allow_only_self_simulation_and_stdlib(
@@ -165,6 +240,19 @@ class NativeDependencyGateTests(unittest.TestCase):
                 checked, errors = self.check_source(
                     relative_path,
                     '#include "omega/gameplay/debug_locomotion.h"\n',
+                )
+                self.assertEqual(checked, 1)
+                self.assertEqual(errors, [])
+
+    def test_openomega_movie_presentation_may_depend_on_media(self) -> None:
+        for relative_path in (
+            "native/apps/openomega/opening_movie_player.h",
+            "native/apps/openomega/opening_movie_player.cpp",
+        ):
+            with self.subTest(relative_path=relative_path):
+                checked, errors = self.check_source(
+                    relative_path,
+                    '#include "omega/media/nv12_to_rgba8.h"\n',
                 )
                 self.assertEqual(checked, 1)
                 self.assertEqual(errors, [])

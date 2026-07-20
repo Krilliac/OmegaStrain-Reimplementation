@@ -496,7 +496,8 @@ int main(const int argc, char** argv)
 #endif
     auto app = omega::app::OmegaApp::Create(
         std::move(*config), *settings, std::move(content),
-        std::move(*native_persistence), debug_device);
+        std::move(*native_persistence), debug_device,
+        std::move(options->opening_movie_path));
     if (!app)
     {
         std::cerr << app.error() << '\n';

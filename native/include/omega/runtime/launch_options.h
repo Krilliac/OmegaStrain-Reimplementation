@@ -23,6 +23,7 @@ struct LaunchOptions
     int frame_limit = -1;
     std::optional<std::filesystem::path> data_root;
     std::optional<std::string> level_code;
+    std::optional<std::filesystem::path> opening_movie_path;
     std::optional<std::filesystem::path> config_path;
     std::vector<LaunchConfigOverride> config_overrides;
     bool capture_run = false;

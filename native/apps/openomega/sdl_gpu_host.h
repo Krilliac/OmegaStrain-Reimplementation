@@ -26,6 +26,8 @@ struct GpuHostSnapshot
     runtime::RenderTexturePoolSnapshot textures;
     std::uint64_t successful_uploads = 0U;
     std::uint64_t successful_upload_logical_bytes = 0U;
+    std::uint64_t successful_updates = 0U;
+    std::uint64_t successful_update_logical_bytes = 0U;
     std::uint64_t successful_releases = 0U;
     std::uint64_t frame_submissions = 0U;
     std::uint64_t blit_submissions = 0U;
@@ -61,6 +63,12 @@ public:
     // pixels are borrowed only through command submission and are never retained.
     [[nodiscard]] std::expected<runtime::RenderTextureHandle, std::string>
         UploadRgba8Texture(runtime::Rgba8TextureUploadView upload);
+
+    // [main/render thread] Replaces one exact resident texture in place. Width, height, handle
+    // generation, and logical byte count remain unchanged; pixels are not retained after submit.
+    [[nodiscard]] std::expected<void, std::string> UpdateRgba8Texture(
+        const runtime::RenderTextureHandle& handle,
+        runtime::Rgba8TextureUploadView upload);
 
     // [main/render thread] Waits for GPU idle before releasing one exact resident generation.
     [[nodiscard]] std::expected<void, std::string> ReleaseTexture(

@@ -39,7 +39,8 @@ int LaunchOptionsFailureCount()
 {
     auto defaults = Parse({});
     Check(defaults && defaults->frame_limit == -1 && !defaults->data_root &&
-              !defaults->level_code && !defaults->config_path &&
+              !defaults->level_code && !defaults->opening_movie_path &&
+              !defaults->config_path &&
               defaults->config_overrides.empty() && !defaults->capture_run &&
               !defaults->replay_capture && !defaults->probe_only &&
               !defaults->show_help,
@@ -58,6 +59,12 @@ int LaunchOptionsFailureCount()
         "ordinary finite rendering does not silently enable capture or replay");
     Check(Parse({"--data-root=D:/Owned Game"}).has_value(),
         "a data root may be validated without selecting a level");
+
+    auto opening_movie = Parse({"--opening-movie=C:/Owned Media/opening.pss"});
+    Check(opening_movie && opening_movie->opening_movie_path &&
+              opening_movie->opening_movie_path->generic_string() ==
+                  "C:/Owned Media/opening.pss",
+        "an explicit opening movie path is preserved without filesystem access");
 
     auto configured = Parse({"--config=D:/OpenOmega/runtime.cfg",
         "--set=log.minimum_severity=debug", "--set=frame.max_steps_per_frame=4"});
@@ -187,6 +194,22 @@ int LaunchOptionsFailureCount()
     Check(!Parse({"--data-root="}), "empty data-root values are rejected");
     Check(!Parse({"--data-root=A", "--data-root=B"}),
         "duplicate data roots are rejected");
+    CheckError(Parse({"--opening-movie="}), "--opening-movie requires a path",
+        "empty opening movie paths are rejected");
+    CheckError(Parse({"--opening-movie=A", "--opening-movie=B"}),
+        "--opening-movie may be specified only once",
+        "opening movie paths are once-only");
+    constexpr std::string_view opening_capture_error =
+        "--opening-movie cannot be combined with --capture-run";
+    CheckError(Parse({"--opening-movie=C:/Owned Media/opening.pss", "--capture-run", "--frames=1"}),
+               opening_capture_error, "opening movie playback cannot enter deterministic capture");
+    CheckError(Parse({"--frames=1", "--capture-run", "--opening-movie=C:/Owned Media/opening.pss"}),
+               opening_capture_error,
+               "capture cannot initialize opening movie playback in reverse argument order");
+    CheckError(Parse({"--replay-capture", "--opening-movie=C:/Owned Media/opening.pss",
+                      "--frames=1", "--capture-run"}),
+               opening_capture_error,
+               "capture replay remains isolated from unrepresented opening movie state");
     Check(!Parse({"--config="}), "empty config paths are rejected");
     Check(!Parse({"--config=A", "--config=B"}), "duplicate config paths are rejected");
     Check(!Parse({"--set=missing_separator"}), "configuration overrides require an equals sign");
@@ -203,6 +226,9 @@ int LaunchOptionsFailureCount()
         "duplicate probe flags are rejected");
     Check(!Parse({"--data-root=A", "--probe-only", "--frames=1"}),
         "headless probing cannot silently discard a frame limit");
+    CheckError(Parse({"--data-root=A", "--probe-only", "--opening-movie=B"}),
+        "--probe-only cannot be combined with --opening-movie",
+        "headless content probing cannot initialize movie playback");
     CheckError(Parse({"--replay-capture", "--capture-run", "--data-root=A",
                          "--probe-only", "--frames=1"}),
         "--probe-only cannot be combined with --frames",
@@ -238,7 +264,8 @@ int LaunchOptionsFailureCount()
     Check(usage == "usage: openomega [-h|--help]\n"
                    "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
                    "[--frames=N [--capture-run [--replay-capture]]] "
-                   "[--data-root=PATH [--level=CODE] [--probe-only]]\n",
+                   "[--data-root=PATH [--level=CODE] [--probe-only]] "
+                   "[--opening-movie=PATH]\n",
         "usage exactly documents standalone help and nested replay dependencies");
     return failures;
 }

@@ -201,8 +201,27 @@ class ModuleRule:
     platform_neutral: bool = False
 
 
+# Keep platform-header exceptions exact and local to the translation unit that
+# owns the platform boundary. Adding a Windows backend must not make the rest
+# of an otherwise platform-neutral module eligible to include arbitrary SDK
+# headers.
+_EXACT_EXTERNAL_HEADER_ALLOWLIST = {
+    "native/src/media/media_foundation_h262_decoder.cpp": frozenset(
+        {
+            "windows.h",
+            "mfapi.h",
+            "mferror.h",
+            "mfidl.h",
+            "mftransform.h",
+            "wrl/client.h",
+        }
+    ),
+}
+
+
 _CORE_EDGES = frozenset({"omega_core", "omega_assets"})
 _ASSET_EDGES = frozenset({"omega_assets"})
+_MEDIA_EDGES = frozenset({"omega_media", "omega_assets"})
 _SIMULATION_EDGES = frozenset({"omega_simulation", "omega_assets", "omega_core"})
 _GAMEPLAY_EDGES = frozenset({"omega_gameplay", "omega_simulation"})
 _PERSISTENCE_EDGES = frozenset({"omega_persistence"})
@@ -221,6 +240,7 @@ _APP_EDGES = frozenset(
         "openomega",
         "omega_persistence",
         "omega_profiles",
+        "omega_media",
         "omega_sdl_backend",
         "omega_runtime",
         "omega_simulation",
@@ -319,6 +339,18 @@ MODULE_RULES = (
         platform_neutral=True,
     ),
     ModuleRule(
+        "native/include/omega/media/",
+        "omega_media",
+        _MEDIA_EDGES,
+        platform_neutral=True,
+    ),
+    ModuleRule(
+        "native/src/media/",
+        "omega_media",
+        _MEDIA_EDGES,
+        platform_neutral=True,
+    ),
+    ModuleRule(
         "native/include/omega/retail/",
         "omega_retail_formats",
         _RETAIL_EDGES,
@@ -376,6 +408,7 @@ PROJECT_HEADER_MODULES = (
     ("omega/simulation/", "omega_simulation"),
     ("omega/runtime/", "omega_runtime"),
     ("omega/content/", "omega_content"),
+    ("omega/media/", "omega_media"),
     ("omega/retail/", "omega_retail_formats"),
     ("omega/asset/", "omega_assets"),
     ("omega/archive/", "omega_core"),
@@ -817,6 +850,15 @@ def check_include(
 
     if rule is not None and rule.platform_neutral:
         if delimiter == "<" and normalized in STANDARD_LIBRARY_HEADERS:
+            return None
+        exact_external_headers = _EXACT_EXTERNAL_HEADER_ALLOWLIST.get(
+            relative_path.as_posix()
+        )
+        if (
+            delimiter == "<"
+            and exact_external_headers is not None
+            and normalized in exact_external_headers
+        ):
             return None
         return _format_error(
             relative_path,

@@ -1,4 +1,5 @@
 #include "omega_app.h"
+#include "opening_movie_player.h"
 #include "run_replay_session.h"
 
 #include "omega/gameplay/debug_locomotion.h"
@@ -14,23 +15,26 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace omega::app
 {
 std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore config,
     const runtime::RuntimeSettings& settings, runtime::ContentStartupState content,
-    NativePersistence native_persistence, const bool debug_device)
+    NativePersistence native_persistence, const bool debug_device,
+    std::optional<std::filesystem::path> opening_movie_path)
 {
     return CreateWithTextureConfig(std::move(config), settings, std::move(content),
         std::make_unique<NativePersistence>(std::move(native_persistence)),
-        debug_device, {});
+        debug_device, {}, std::move(opening_movie_path));
 }
 
 std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
     runtime::ContentStartupState content,
     std::unique_ptr<NativePersistence> native_persistence, const bool debug_device,
-    const runtime::RenderTexturePoolConfig texture_config)
+    const runtime::RenderTexturePoolConfig texture_config,
+    std::optional<std::filesystem::path> opening_movie_path)
 {
     const auto classified_content = runtime::ClassifyContentStartupState(content);
     if (!classified_content)
@@ -639,6 +643,92 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     auto diagnostic_asset_topology_draw_list =
         std::move(*created_asset_topology_draw_list);
 
+    std::unique_ptr<OpeningMoviePlayer> opening_movie_player;
+    runtime::RenderTextureHandle opening_movie_texture;
+    runtime::RenderDrawList opening_movie_draw_list;
+    BootSequenceState boot_sequence_state{};
+    if (opening_movie_path)
+    {
+        auto created_opening_movie = OpeningMoviePlayer::Create(*opening_movie_path);
+        if (!created_opening_movie)
+        {
+            log->Warning("opening_movie", created_opening_movie.error().message);
+        }
+        else
+        {
+            auto candidate =
+                std::make_unique<OpeningMoviePlayer>(std::move(*created_opening_movie));
+            const std::uint64_t logical_bytes =
+                static_cast<std::uint64_t>(candidate->width()) * candidate->height() * 4U;
+            if (logical_bytes == 0U ||
+                logical_bytes > static_cast<std::uint64_t>(
+                                    std::numeric_limits<std::size_t>::max()))
+            {
+                log->Warning("opening_movie",
+                    "opening movie presentation rejected an invalid frame extent");
+            }
+            else
+            {
+                std::vector<std::byte> black_frame(
+                    static_cast<std::size_t>(logical_bytes), std::byte{0});
+                for (std::size_t alpha = 3U; alpha < black_frame.size(); alpha += 4U)
+                    black_frame[alpha] = std::byte{255};
+
+                auto uploaded_opening_movie =
+                    host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+                        .width = candidate->width(),
+                        .height = candidate->height(),
+                        .pixels = black_frame,
+                    });
+                if (!uploaded_opening_movie)
+                {
+                    log->Warning("opening_movie",
+                        "opening movie presentation texture upload failed");
+                }
+                else
+                {
+                    constexpr runtime::RenderTargetRectQ16 movie_target{
+                        .left = 0U,
+                        .top = 0U,
+                        .right = runtime::kNormalizedRenderExtent,
+                        .bottom = runtime::kNormalizedRenderExtent,
+                    };
+                    const std::array movie_commands{
+                        runtime::RenderTextureBlitCommand{
+                            .texture = *uploaded_opening_movie,
+                            .source = full_source,
+                            .destination = movie_target,
+                            .fit_mode = runtime::RenderTextureFitMode::Contain,
+                            .filter_mode = runtime::RenderTextureFilterMode::Linear,
+                        },
+                    };
+                    auto created_opening_movie_draw_list =
+                        runtime::RenderDrawList::Create(movie_commands);
+                    if (!created_opening_movie_draw_list)
+                    {
+                        log->Warning("opening_movie",
+                            "opening movie presentation draw-list creation failed");
+                        static_cast<void>(host->ReleaseTexture(*uploaded_opening_movie));
+                    }
+                    else
+                    {
+                        opening_movie_texture = *uploaded_opening_movie;
+                        opening_movie_draw_list =
+                            std::move(*created_opening_movie_draw_list);
+                        boot_sequence_state = InitialBootSequenceState(
+                            BootSequenceConfig{
+                                .duration_ticks = candidate->safety_duration_ticks(),
+                                .source_available = true,
+                            });
+                        opening_movie_player = std::move(candidate);
+                        log->Info("opening_movie",
+                            "opening movie presentation is ready");
+                    }
+                }
+            }
+        }
+    }
+
     log->Info("startup", "runtime services ready with " +
                              std::to_string(jobs->worker_count()) + " workers and " +
                              std::string(audio->driver_name()) + " audio");
@@ -646,7 +736,9 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     return OmegaApp(std::move(native_persistence), std::move(config_owner), std::move(content_owner),
                     std::move(stderr_sink), std::move(ring_sink), std::move(log), std::move(jobs), std::move(assets),
                     std::move(frame_scheduler), std::move(input), std::move(simulation), debug_locomotion_entity,
-                    std::move(platform), std::move(sdl_input), std::move(audio), std::move(host), diagnostic_texture,
+                    std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
+                    std::move(opening_movie_player), opening_movie_texture,
+                    std::move(opening_movie_draw_list), boot_sequence_state, diagnostic_texture,
                     front_end_texture, front_end_profiles_texture, diagnostic_controls_texture,
                     diagnostic_asset_topology_texture, diagnostic_asset_transfer_texture,
                     std::move(diagnostic_hidden_draw_list), std::move(front_end_main_draw_lists),
@@ -664,6 +756,10 @@ OmegaApp::OmegaApp(
     std::unique_ptr<simulation::SimulationWorld> simulation, const simulation::EntityId debug_locomotion_entity,
     std::unique_ptr<SdlPlatformService> platform, std::unique_ptr<SdlInputService> sdl_input,
     std::unique_ptr<SdlAudioService> audio, std::unique_ptr<SdlGpuHost> host,
+    std::unique_ptr<OpeningMoviePlayer> opening_movie_player,
+    const runtime::RenderTextureHandle opening_movie_texture,
+    runtime::RenderDrawList opening_movie_draw_list,
+    const BootSequenceState boot_sequence_state,
     const runtime::RenderTextureHandle diagnostic_texture, const runtime::RenderTextureHandle front_end_texture,
     const runtime::RenderTextureHandle front_end_profiles_texture,
     const runtime::RenderTextureHandle diagnostic_controls_texture,
@@ -681,7 +777,11 @@ OmegaApp::OmegaApp(
       jobs_(std::move(jobs)), assets_(std::move(assets)), frame_scheduler_(std::move(frame_scheduler)),
       input_(std::move(input)), simulation_(std::move(simulation)), debug_locomotion_entity_(debug_locomotion_entity),
       platform_(std::move(platform)), sdl_input_(std::move(sdl_input)), audio_(std::move(audio)),
-      host_(std::move(host)), diagnostic_texture_(diagnostic_texture), front_end_texture_(front_end_texture),
+      host_(std::move(host)), opening_movie_player_(std::move(opening_movie_player)),
+      opening_movie_texture_(opening_movie_texture),
+      opening_movie_draw_list_(std::move(opening_movie_draw_list)),
+      boot_sequence_state_(boot_sequence_state), diagnostic_texture_(diagnostic_texture),
+      front_end_texture_(front_end_texture),
       front_end_profiles_texture_(front_end_profiles_texture),
       diagnostic_controls_texture_(diagnostic_controls_texture),
       diagnostic_asset_topology_texture_(diagnostic_asset_topology_texture),
@@ -699,6 +799,8 @@ OmegaApp::OmegaApp(
 
 OmegaApp::~OmegaApp() noexcept
 {
+    opening_movie_draw_list_ = {};
+    opening_movie_player_.reset();
     diagnostic_asset_topology_draw_list_ = {};
     diagnostic_controls_draw_list_ = {};
     for (runtime::RenderDrawList& draw_list : front_end_profile_selection_draw_lists_)
@@ -740,6 +842,7 @@ OmegaApp::~OmegaApp() noexcept
         }
     };
 
+    release_texture(opening_movie_texture_, "opening movie texture release failed; SDL/GPU host cleanup will retry");
     release_texture(diagnostic_asset_transfer_texture_, "diagnostic asset transfer texture release failed; SDL/GPU "
                                                         "host cleanup will retry");
     release_texture(diagnostic_asset_topology_texture_, "diagnostic asset topology texture release failed; SDL/GPU "
@@ -750,6 +853,7 @@ OmegaApp::~OmegaApp() noexcept
                                                  "cleanup will retry");
     release_texture(front_end_texture_, "front-end main texture release failed; SDL/GPU host cleanup will retry");
     release_texture(diagnostic_texture_, "diagnostic texture release failed; SDL/GPU host cleanup will retry");
+    opening_movie_texture_ = {};
     diagnostic_asset_topology_texture_ = {};
     diagnostic_asset_transfer_texture_ = {};
     diagnostic_controls_texture_ = {};
@@ -913,21 +1017,10 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             break;
         }
 
-        const FrontEndReduction front_end =
-            ReduceFrontEnd(front_end_state_,
-                FrontEndInputEdges{
-                    .primary_pressed = input_snapshot.WasPressed(kFrontEndPrimaryAction),
-                    .previous_pressed = input_snapshot.WasPressed(kFrontEndPreviousAction),
-                    .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
-                },
-                front_end_startup_model_.visible_profiles);
-        front_end_state_ = front_end.state;
-        ApplyFrontEndCommand(front_end.command);
-        const bool simulation_allowed = FrontEndAllowsSimulation(front_end_state_);
-
         const auto current_frame = Clock::now();
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
             current_frame - previous_frame);
+        previous_frame = current_frame;
         if (capture_session != nullptr)
         {
             const auto captured = capture_session->AppendElapsed(elapsed);
@@ -941,11 +1034,115 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 };
             }
         }
+
+        const bool movie_was_active = IsBootSequenceActive(boot_sequence_state_);
+        if (movie_was_active)
+        {
+            const bool primary_pressed =
+                input_snapshot.WasPressed(kFrontEndPrimaryAction);
+            bool source_failed = false;
+            bool source_completed = false;
+            if (!primary_pressed)
+            {
+                if (opening_movie_player_ == nullptr)
+                {
+                    source_failed = true;
+                }
+                else
+                {
+                    auto movie_update = opening_movie_player_->Advance(elapsed);
+                    if (!movie_update)
+                    {
+                        log_->Warning("opening_movie", movie_update.error().message);
+                        source_failed = true;
+                    }
+                    else
+                    {
+                        source_completed = movie_update->status ==
+                            OpeningMoviePlayerStatus::Completed;
+                        if (movie_update->frame_updated)
+                        {
+                            if (movie_update->current_frame == nullptr)
+                            {
+                                log_->Warning("opening_movie",
+                                    "opening movie published an empty frame update");
+                                source_failed = true;
+                            }
+                            else
+                            {
+                                const media::Rgba8VideoFrame& frame =
+                                    *movie_update->current_frame;
+                                auto updated = host_->UpdateRgba8Texture(
+                                    opening_movie_texture_,
+                                    runtime::Rgba8TextureUploadView{
+                                        .width = frame.width,
+                                        .height = frame.height,
+                                        .pixels = frame.pixels,
+                                    });
+                                if (!updated)
+                                {
+                                    log_->Warning("opening_movie",
+                                        "opening movie presentation texture update failed");
+                                    source_failed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            const auto elapsed_microseconds =
+                std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+            const std::uint64_t elapsed_ticks = elapsed_microseconds > 0
+                ? static_cast<std::uint64_t>(elapsed_microseconds)
+                : 0U;
+            const BootSequenceReduction boot = ReduceBootSequence(
+                boot_sequence_state_,
+                BootSequenceInput{
+                    .elapsed_ticks = elapsed_ticks,
+                    .primary_pressed = primary_pressed,
+                    .source_failed = source_failed,
+                    .source_completed = source_completed,
+                });
+            boot_sequence_state_ = boot.state;
+            if (boot.entered_front_end)
+            {
+                opening_movie_player_.reset();
+                opening_movie_draw_list_ = {};
+                if (opening_movie_texture_.valid())
+                {
+                    auto released = host_->ReleaseTexture(opening_movie_texture_);
+                    if (!released)
+                    {
+                        log_->Warning("opening_movie",
+                            "opening movie texture release failed; host cleanup will retry");
+                    }
+                    else
+                    {
+                        opening_movie_texture_ = {};
+                    }
+                }
+            }
+        }
+        else
+        {
+            const FrontEndReduction front_end =
+                ReduceFrontEnd(front_end_state_,
+                    FrontEndInputEdges{
+                        .primary_pressed = input_snapshot.WasPressed(kFrontEndPrimaryAction),
+                        .previous_pressed = input_snapshot.WasPressed(kFrontEndPreviousAction),
+                        .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
+                    },
+                    front_end_startup_model_.visible_profiles);
+            front_end_state_ = front_end.state;
+            ApplyFrontEndCommand(front_end.command);
+        }
+        const bool simulation_allowed =
+            !movie_was_active && FrontEndAllowsSimulation(front_end_state_);
         const std::chrono::nanoseconds effective_elapsed = simulation_allowed
             ? elapsed
             : std::chrono::nanoseconds::zero();
         const runtime::FramePlan plan = frame_scheduler_->BeginFrame(effective_elapsed);
-        previous_frame = current_frame;
         if (plan.simulation_steps >
             std::numeric_limits<std::uint64_t>::max() - result.planned_simulation_steps)
         {
@@ -1021,13 +1218,24 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         }
 
         const simulation::SimulationState simulation_snapshot = simulation_->Snapshot();
+        const bool movie_is_active = IsBootSequenceActive(boot_sequence_state_);
+        constexpr runtime::RenderClearColorRgba8 kOpeningMovieClearColor{
+            .red = 0U,
+            .green = 0U,
+            .blue = 0U,
+            .alpha = 255U,
+        };
         const runtime::RenderFramePacket render_packet{
             .rendered_frame_index = static_cast<std::uint64_t>(result.rendered_frames),
             .completed_simulation_steps = simulation_snapshot.completed_steps,
             .simulated_time = simulation_snapshot.simulated_time,
             .alive_entities = simulation_snapshot.alive_entities,
-            .clear_color = runtime::kDefaultRenderClearColor,
-            .draw_list = CurrentFrontEndDrawList(),
+            .clear_color = movie_is_active
+                ? kOpeningMovieClearColor
+                : runtime::kDefaultRenderClearColor,
+            .draw_list = movie_is_active
+                ? opening_movie_draw_list_
+                : CurrentFrontEndDrawList(),
         };
         auto rendered = host_->RenderFrame(render_packet);
         if (!rendered)
