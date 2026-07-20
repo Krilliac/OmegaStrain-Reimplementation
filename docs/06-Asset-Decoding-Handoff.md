@@ -27,9 +27,11 @@ a regression. See `docs/01-Clean-Room-Method.md` and `analysis/evidence/ledger.j
 
 ### 1. Evidence collection to unblock front-end decoding (highest priority)
 
-This is the only work that can advance `.gui`/`.fnt`/`.ie` decoding, and it requires the owner
-corpus that this workstream cannot access. **Build and run in the Codex workstream, against the
-private extracted disc, where the schema can be validated against real bytes.**
+This is the necessary next structural-evidence step for `.gui`/`.fnt`/`.ie` decoding, and it
+requires the owner corpus that this workstream cannot access. It is not sufficient by itself:
+consumer behavior still needs independent corroboration before field semantics are claimed.
+**Build and run in the Codex workstream, against the private extracted disc, where the schema can
+be validated against real bytes.**
 
 Spec for a bounded, privacy-safe structural fingerprint collector (a new tool, e.g.
 `tools/measure_member_structural_fingerprint.py`):
@@ -38,8 +40,9 @@ Spec for a bounded, privacy-safe structural fingerprint collector (a new tool, e
   `.gui`, `.fnt`, `.ie`. Derive each member's payload extent only from the already-proven HOG
   offset-table grammar (`analysis/formats/HOG.md`); do not re-infer container layout.
 - **Output (fixed-schema aggregate only):** per suffix — candidate count; payload-size distribution
-  as `min`, `max`, and distinct-size count; and an alignment family expressed as the GCD of all
-  observed sizes. Nothing else.
+  as `min`, `max`, and distinct-size count; and `size_gcd`, the common divisor of observed payload
+  sizes. `size_gcd` is not payload-address alignment and must never be reported as such. Nothing
+  else.
 - **Explicitly forbidden in output:** input paths, member names, hashes, per-file rows, byte values,
   offsets tied to an individual member, unknown raw suffixes, and exception messages. Typed,
   path-free error categories only. Add a privacy test that asserts secret paths/names never appear
@@ -61,17 +64,18 @@ by the same method if menu-audio/weapon-menu evidence is wanted.
 Add missing tests to the LPD, PAR, SKAS, and VPK adapters **without changing their semantics**.
 Sources and their current tests:
 
-- LPD — `native/include/omega/retail/par_text_envelope_decoder.h` family; `native/src/retail/*`.
+- LPD — `native/include/omega/retail/lpd_envelope_decoder.h` family; `native/src/retail/*`.
 - PAR — `native/include/omega/retail/par_text_envelope_decoder.h`.
 - SKAS — `native/include/omega/retail/skas_text_envelope_decoder.h`.
 - VPK — `native/include/omega/retail/vpk_wrapper_envelope_decoder.h` (see ledger `E-0094`).
 
 Cases to cover for each, if not already present: truncated prefix at every signature byte; span one
-below the minimum and one above the fixed hard ceiling; misaligned span; a caller `DecodeLimits`
-more generous than the hard ceiling (assert the ceiling does **not** rise); repeated-call
-determinism; typed path-free error on every rejection; and allocation-failure behavior (there is no
-shared `decode_test_hooks.h` — each test rolls its own failure hook; see item 4). Serialize builds
-(`-j 1`) and run focused + full CTest per the evidence bar in the AI brief.
+below the minimum and one above the fixed hard ceiling; an unaligned backing slice when the format
+does not require alignment (do not invent an alignment rule); a caller `DecodeLimits` more generous
+than the hard ceiling (assert the ceiling does **not** rise); repeated-call determinism; typed
+path-free error on every rejection; and allocation-failure behavior (there is no shared
+`decode_test_hooks.h` — each test rolls its own failure hook; see item 4). Serialize builds (`-j 1`)
+and run focused + full CTest per the evidence bar in the AI brief.
 
 ### 3. Mechanical verification for existing retail adapters
 
@@ -93,11 +97,10 @@ test-hook header. Correct the brief before the next pass.
 
 ### 5. RE-tool integration (private oracle only)
 
-A local PS2 Emotion Engine ELF32 little-endian MIPS symbol-recovery tool now exists (the ReSymbol
-`resymbol-ps2` crate: bounded header/segment/section/symbol recovery, no execution, no emulation,
-`forbid(unsafe_code)`, synthetic-tested, clippy-clean). It is currently uncommitted in the ReSymbol
-tree because that workspace's manifest is under concurrent edit; register its workspace member once
-the concurrent crate lands.
+An in-progress local ReSymbol `resymbol-ps2` facade binds owned PS2 Emotion Engine ELF bytes to
+ReSymbol's authoritative, bounded ELF analysis without execution or emulation. Its workspace
+registration and focused synthetic validation are still under review, so do not treat it as a
+finished or independently validated oracle yet.
 
 Intended use: run it on the retail boot ELF **in a private workspace** to recover front-end
 loader function symbols and cross-references as a behavioral-oracle input. Its output is a private
