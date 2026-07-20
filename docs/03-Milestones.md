@@ -1098,7 +1098,7 @@ never creates or selects a default profile. `OmegaApp` owns the database/catalog
 `NativePersistence`; `--probe-only` does not touch persistence and `--frames=0` returns after
 bootstrap. The bounded standard PS2 memory-card container/filesystem codec is also implemented.
 E-0089 adds a bounded project-generated Main/Profiles/Controls/AssetTopology shell that snapshots
-existing profile summaries once and displays at most three fixed labels. E-0095 extends that shell
+existing profile summaries once and displays at most three fixed labels. E-0096 extends that shell
 with explicit, session-only active-profile selection: the startup snapshot copies the matching
 fixed-size IDs, the pure reducer emits a typed first/second/third-slot command, and `OmegaApp`
 resolves and owns the selected ID on its game thread. Selection never mutates the profile catalog,

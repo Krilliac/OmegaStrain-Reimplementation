@@ -63,7 +63,7 @@ retail instruction blocks, or PS2 execution layer.
   namespace anchoring, both-slot corruption, future-version rejection, and competing owners.
   The native profile catalog and app-owned startup composition are implemented without an implicit
   default profile. E-0089 snapshots at most 1,024 already-existing profiles before SDL startup and
-  projects at most three sorted names into a fixed project font. E-0095 also copies those three IDs
+  projects at most three sorted names into a fixed project font. E-0096 also copies those three IDs
   into the immutable startup model and lets an explicit project-owned Profiles action select one as
   session-only `OmegaApp` state. Selection never creates, updates, or persists a profile and performs
   no frame-time catalog access. Main, Profiles, Controls, and AssetTopology cards, markers, and draw

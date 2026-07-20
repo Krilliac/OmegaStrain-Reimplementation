@@ -1834,7 +1834,7 @@ initial Main row, and `FrontEndAllowsSimulation` is true only for DiagnosticPlay
 replay use the same pure reducer and retain the existing fixed input/capture schema. These are native
 host-shell policies backed only by public synthetic fixtures, not retail front-end semantics.
 
-### E-0095 explicit session active profile
+### E-0096 explicit session active profile
 
 `NativePersistence` remains the sole owner of `SaveDatabase`, `ProfileCatalog`, and the sorted startup
 summary vector. `MakeFrontEndStartupModel` now copies the immutable `ProfileId` together with each of

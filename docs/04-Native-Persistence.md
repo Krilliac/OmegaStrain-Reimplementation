@@ -10,7 +10,7 @@ The bottom-level foundation is `omega::persistence::SaveDatabase`. `omega::profi
 adds the first typed native schema, and the app-level `NativePersistence` service composes both into
 `OmegaApp`. These are non-hot-reloadable services. The database and profile layers remain
 independent of runtime, content, retail-format, simulation, gameplay, app, SDL, and PCSX2 code;
-only the app composition root owns them. E-0095 adds app-session active-profile selection without
+only the app composition root owns them. E-0096 adds app-session active-profile selection without
 moving that ownership boundary; campaign records, profile mutation UI, and PS2 compatibility
 adapters remain separate slices.
 

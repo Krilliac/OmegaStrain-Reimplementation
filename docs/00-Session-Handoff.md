@@ -1323,7 +1323,7 @@ shipping dependencies or execution mechanisms.
     tree built with zero warnings or errors, and full Debug CTest passed 40/40. Rebase, one signed
     commit, and DCO are complete; publication, owner-corpus validation, runtime integration, and
     exact-main validation remain deliberately unclaimed.
-78. E-0095 adds explicit session-only active-profile selection to the synthetic native Profiles
+78. E-0096 adds explicit session-only active-profile selection to the synthetic native Profiles
     screen without moving persistence ownership. `NativePersistence` remains the sole
     `SaveDatabase`, `ProfileCatalog`, and sorted-summary owner. Before SDL startup,
     `MakeFrontEndStartupModel` copies the first three displayed fixed labels and their immutable
@@ -1346,19 +1346,20 @@ shipping dependencies or execution mechanisms.
     three plus adversarial counts, every edge combination, primary priority, exact marker lists,
     app-thread selection, unchanged catalog population, capture/replay parity, and terminal
     precedence. The exhaustive reducer checks cover 3,145,728 mode/row/count/edge combinations and
-    245,760 valid-mode/row plus byte-slot/count/edge combinations. On exact `main` commit
-    `d4be840837e08fe701be914cefd1c6e367d542e1`, the `openomega` executable and three focused MSVC
-    Debug test targets built with zero warnings or errors. Focused CTest passed 2/2, the direct
-    SDL/GPU app smoke passed with dummy audio, and the manual capture/replay CLI smoke passed. The
-    two changed Profiles rasters were independently rechecked from exact 36,864-byte RGBA dumps
+    245,760 valid-mode/row plus byte-slot/count/edge combinations. After rebasing onto exact `main`
+    commit `2c5689dbb9d3f670f12cf5b6364f96beb9b748f6`, the `openomega` executable and three focused MSVC
+    Debug test targets built with zero warnings or errors. Focused CTest passed 2/2, and the direct
+    SDL/GPU app smoke passed with dummy audio. The runtime capture/replay CLI smoke was not rerun in
+    this integration-only pass. The previously verified two changed Profiles rasters were
+    independently rechecked from exact 36,864-byte RGBA dumps
     using a separate Python FNV-1a implementation, SHA-256, and four-color histograms; the temporary
     dumps and test instrumentation were removed. Static validation passed the 211-file
-    native-dependency gate, all 249 tooling tests,
-    Python compile-all, diff checks, and the public-tree gate over 318 indexed text blobs. No
-    private or owner data, D-drive content, proprietary
-    input, disc image, executable, save, memory-card image, savestate, emulator, PCSX2 runtime, or
-    network input was accessed. No full integration build, Release build, commit, push, or
-    retail-fidelity validation is claimed.
+    native-dependency gate, all 251 tooling tests,
+    ledger JSONL parsing, diff checks, and the public-tree gate over 321 indexed text blobs. No
+    private or owner data, D-drive content, proprietary input, disc image, proprietary executable,
+    save, memory-card image, savestate, emulator, PCSX2 runtime, or runtime network input was
+    accessed. No full integration build, Release build, push, or retail-fidelity validation is
+    claimed.
 
 ## Disc observations
 
@@ -1381,7 +1382,7 @@ shipping dependencies or execution mechanisms.
 ## Next focused pass
 
 1. Define the next profile-owned campaign/checkpoint schema only from independently corroborated
-   evidence, and decide any persistent active-profile policy separately from E-0095's session-only
+   evidence, and decide any persistent active-profile policy separately from E-0096's session-only
    selection. Preserve process/package isolation by redirecting persistence in tests. Build the
    separately evidenced Omega Strain payload mapper over the now-bounded standard card codecs;
    never make a PS2 memory-card device, guest RAM, or emulator savestate part of the shipping
