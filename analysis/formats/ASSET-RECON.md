@@ -164,6 +164,12 @@ CRLF delimiters, a final CRLF, 72 lines, 5 blank lines, 67 lines containing exac
 bounded text-shape check; labels, values, relationships, and any association with SKA are not yet
 established. No native SKAS descriptor is implied by the SKA implementation.
 
+E-0093 implements only that strict aggregate envelope in `omega_retail_formats`. It returns exact
+owned logical text plus source-order opaque line ranges and terminator lengths, while retaining
+only structural counts and omitting the validated zero tail. It does not split colon-bearing lines
+or assign label, value, relationship, animation, skeleton, or SKA semantics. See
+[SKAS.md](SKAS.md) for the fixed bounds and non-claims.
+
 ### VAG audio
 
 All 8,665 entries match the conventional big-endian `VAGp` header layout:

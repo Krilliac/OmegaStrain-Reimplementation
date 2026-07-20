@@ -1019,6 +1019,15 @@ boundary; owner audio and other proprietary bytes are absent. Runtime asset look
 sound roles/marker behavior, audio-service publication, behavioral comparison, and mixing remain
 in progress.
 
+E-0093 supplies a separate canonical SKAS structural text value without connecting it to content or
+runtime systems. One bounded reentrant retail adapter validates only the two-candidate aggregate
+physical/logical-size, zero-tail, printable-ASCII, CRLF, 72-line, five-blank-line, and
+67-single-colon-line envelope. It owns the exact text and opaque source-order line ranges but does
+not split labels and values or associate the text with SKA, animation, skeleton, actors, or
+gameplay. Project-generated adversarial fixtures cover the strict envelope and resource boundary;
+owner data is absent. Semantic decoding, lookup, association, and behavioral comparison remain in
+progress.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

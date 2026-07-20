@@ -44,6 +44,10 @@ retail instruction blocks, or PS2 execution layer.
   48-byte-header/version/rate/zero-tail envelope and standard five-predictor PS-ADPCM frames. Raw
   frame flags and marker sample offsets survive as data, but no flag applies playback, looping,
   resampling, mixing, asset selection, or title-specific audio policy.
+- E-0093 adds a separate bounded SKAS structural-text adapter for the two-candidate aggregate
+  envelope. It owns the exact printable-ASCII/CRLF text and 72 opaque source-order line ranges,
+  validates five blank lines, 67 one-colon lines, and one through three trailing zero bytes, and
+  assigns no label, value, relationship, animation, skeleton, or SKA-association semantics.
 - An app-owned, non-hot-reloadable SDL input leaf owns the gamepad subsystem, the process-global
   event pump, and one primary gamepad. It filters controller events by SDL instance ID, resets only
   gamepad controls when that device disconnects, and promotes the next available device. A
