@@ -120,6 +120,40 @@ class NativeDependencyGateTests(unittest.TestCase):
         self.assertEqual(checked, 4)
         self.assertEqual(errors, [])
 
+    def test_media_foundation_backend_has_an_exact_platform_header_allowlist(
+        self,
+    ) -> None:
+        allowed_headers = (
+            "windows.h",
+            "mfapi.h",
+            "mferror.h",
+            "mfidl.h",
+            "mftransform.h",
+            "wrl/client.h",
+        )
+        source = "".join(f"#include <{header}>\n" for header in allowed_headers)
+        checked, errors = self.check_source(
+            "native/src/media/media_foundation_h262_decoder.cpp", source
+        )
+        self.assertEqual(checked, 1)
+        self.assertEqual(errors, [])
+
+        self.assert_rejected(
+            "native/src/media/example.cpp",
+            "#include <windows.h>\n",
+            "omega_media includes unapproved external header",
+        )
+        self.assert_rejected(
+            "native/src/media/media_foundation_h262_decoder.cpp",
+            "#include <shlwapi.h>\n",
+            "omega_media includes unapproved external header",
+        )
+        self.assert_rejected(
+            "native/src/media/media_foundation_h262_decoder.cpp",
+            '#include "windows.h"\n',
+            "omega_media includes unresolved local header",
+        )
+
     def test_media_classification_remains_fail_closed(self) -> None:
         self.assert_rejected(
             "native/src/media_extra/example.cpp",
