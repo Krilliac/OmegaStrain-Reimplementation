@@ -777,6 +777,33 @@ retail instruction blocks, or PS2 execution layer.
   exact-main validation remain unclaimed. No private or
   owner files, D-drive content, disc image, executable,
   emulator, or PCSX2 input was used.
+- E-0077 adds a stateless startup adapter that selects only canonical
+  `LevelTextureStore::HandleAt(0)`, loads it through the existing asynchronous `AssetService`, and
+  feeds the borrowed immutable storage to the existing metadata-only topology raster. It requires
+  exclusive access to an aggregate-empty asset service, rejects an empty inventory, waits only for
+  the accepted asset request, and always attempts `Release` for an accepted handle before returning
+  an independently owned image. Fixed identity-free diagnostics retain only the applicable typed
+  texture-store, asset-service, or topology-image enum; release failure outranks residual-state
+  mismatch, which outranks an earlier Get or image failure. Entry and final snapshots are captured;
+  after a successful `Release`, all ten public fields are compared while deliberately ignoring the
+  hidden recycled-slot generation.
+  `OmegaApp::Create` builds the resulting 32x32 RGBA8 image only for complete `LevelContent` before
+  SDL creation; the later GPU upload retains the existing fourth-texture path. Its 2x2 fixture base,
+  two 128x72 cards, and topology image total four
+  resident textures and 77,840 logical bytes. `NoContent` and `DataMounted` retain the project
+  synthetic 96x32 topology and 122,880-byte presentation. Public generated contracts pin the
+  32x32 hash, repeat ownership, exact cleanup, bounded and nested failures, canonical-first
+  selection, GPU probes, upload order, draw policy, and unchanged fallback branches. Serialized
+  local validation passed: focused and full MSVC builds; direct asset and D3D12 app smokes; focused
+  asset CTest; default, GPU-opt-in, and restored CTest at 31/35/31; 20/20 repeated D3D12 app smokes;
+  runtime-off direct and focused asset checks with 27 registrations; the 165-file dependency gate;
+  all 209 tooling tests; and Python compile-all. The staged public-tree gate checked 252 indexed
+  text blobs; commit, DCO, publication, and exact-main validation remain pending. No private or
+  owner files, D-drive
+  content, disc image, executable, emulator, or PCSX2 input was used. This is not a claim about
+  display texels, channel or alpha meaning, palettes, nibble order, swizzles, mip levels, UVs,
+  materials, cells, placement, visibility, geometry, retail rendering, gameplay, streaming,
+  eviction, GPU pinning, asynchronous upload, or emulator equivalence.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

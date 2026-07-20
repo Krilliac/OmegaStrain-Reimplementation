@@ -948,6 +948,39 @@ shipping dependencies or execution mechanisms.
     used only public project source and generated literals; no private or owner files, D-drive
     content, disc image, executable, emulator, or PCSX2 input was used.
 
+62. E-0077 adds `BuildFirstLevelTextureTopologyPreview`, a blocking, non-hot-reloadable startup
+    adapter for exclusive game/main-thread use. It requires the concrete `AssetService` aggregate
+    snapshot to be empty, requires at least one canonical texture, selects only
+    `LevelTextureStore::HandleAt(0)`, requests once, waits for that service, borrows the immutable
+    ready view only while building the existing metadata-only topology image, and always attempts
+    `Release` for every accepted handle before return. Request rejection verifies transactional
+    rollback. Accepted-path precedence is release failure, then residual public snapshot mismatch,
+    then an earlier Get or
+    image error, then success. The final snapshot is always captured; after successful `Release`,
+    comparison covers capacity, free, active, retired, queued, loading, ready, failed, in-flight,
+    and resident-byte fields; the hidden generation may
+    advance and is intentionally outside the aggregate contract. Eight fixed diagnostics expose no
+    paths, names, locators, hashes, offsets, payloads, or nested text, while optional enums retain
+    only the applicable texture-store, asset-service, and topology-image categories.
+    `OmegaApp::Create` uses this adapter only for the complete `LevelContent` shape and still does so
+    before SDL/GPU initialization. The existing upload order and base-plus-card Contain/Nearest draw
+    list are unchanged. A generated one-texture fixture yields an independently owned 32x32/4096
+    byte image with FNV-1a-64 `0x666d00371feff88d`; with its 2x2 base and two 128x72 cards the host
+    owns four textures and 77,840 logical bytes. `NoContent` and `DataMounted` continue to use the
+    synthetic 96x32 topology and 122,880-byte presentation. Source and generated contracts cover
+    repeat cleanup, bounded image failure, empty inventory, malformed and foreign first handles,
+    preoccupied service, queue rollback, GPU probes, and fallback residency. Serialized local
+    validation passed: focused and full MSVC builds; direct asset and D3D12 app smokes; focused asset
+    CTest; default/GPU/restored CTest at 31/35/31; 20/20 repeated D3D12 app smokes; runtime-off
+    direct/focused asset checks with 27 registrations; the 165-file dependency gate; all 209 tooling
+    tests; and Python compile-all. The staged public-tree gate checked 252 indexed text blobs;
+    commit, DCO, publication, and exact-main validation remain pending. Implementation used only public
+    source and generated fixtures; no private or owner files, D-drive content, disc image,
+    executable, emulator, or PCSX2 input was used. No display-texel, channel, alpha, palette,
+    nibble, swizzle, mip, UV, material, cell, placement, visibility, geometry, retail rendering,
+    gameplay, streaming, eviction, GPU-pinning, asynchronous-upload, or emulator-equivalence claim
+    is made.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2

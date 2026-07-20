@@ -575,6 +575,45 @@ smoke, commit, DCO, publication, and exact-main validation remain unclaimed. No 
 files, D-drive content, disc image, executable,
 emulator, or PCSX2 input was used.
 
+E-0077 adds one stateless bridge between the canonical level texture inventory and the existing
+portable topology raster. `BuildFirstLevelTextureTopologyPreview` is a blocking game/main-thread
+startup operation that requires exclusive access to a concrete `AssetService`. It first captures
+the ten-field public service snapshot and accepts only aggregate-empty state: free slots equal
+capacity and active, retired, queued, loading, ready, failed, in-flight, and resident logical bytes
+are all zero. It then requires a nonempty store and requests only `HandleAt(0)`, whose lexical,
+deduplicated ordering remains owned by `LevelTextureStore`.
+
+After one accepted request the adapter waits for the asset service, obtains one immutable borrowed
+view, and invokes `BuildTextureStorageTopologyDebugImage` while that view is valid. The owned image
+does not retain the view. Every accepted request reaches `Release`; the final snapshot is always
+captured and, after successful `Release`, compared field by field with the entry snapshot. Slot
+recycling may advance a hidden generation, which is
+deliberately not observable through this aggregate equality. Error precedence is release failure,
+residual snapshot mismatch, earlier Get or image failure, then success. Rejected submission also
+must restore the exact entry snapshot. The fixed error object contains only one of eight category
+messages plus optional enum values. Source-handle failures retain only the texture-store code;
+Request and Release retain only the asset code; Get retains the asset code and its nested
+texture-store code when present; image construction retains only the topology-image code. No
+diagnostic carries source identity or nested free-form text.
+
+The composition root selects this bridge only when `ClassifyContentStartupState` reports complete
+`LevelContent`. It builds the image after AssetService creation but before SDL; the later upload
+uses the unchanged fourth-texture slot and retains the existing base-plus-card Contain/Nearest
+draw list and reverse release order. A generated direct-24 one-block texture produces a 32x32,
+4096-byte image with FNV-1a-64 `0x666d00371feff88d`; the synthetic host contract combines it with a
+2x2 base and two 128x72 cards for four textures and 77,840 resident logical bytes. `NoContent` and
+`DataMounted` continue through `BuildProjectDiagnosticAssetTopologyImage`, preserving the synthetic
+96x32 topology and 122,880-byte presentation. Serialized local validation passed focused/full MSVC,
+direct asset and D3D12 app smokes, focused asset CTest, default/GPU/restored CTest at 31/35/31,
+20/20 repeated D3D12 app smokes, runtime-off direct/focused asset checks with 27 registrations, the
+165-file dependency gate, all 209 tooling tests, and Python compile-all. The staged public-tree gate
+checked 252 indexed text blobs; commit, DCO, publication, and exact-main validation remain pending.
+The bridge
+does not assign display texels, channel or alpha semantics, palette or nibble interpretation,
+swizzle or mip behavior, UVs, materials, cells, placement, visibility, geometry, retail rendering,
+gameplay, streaming, eviction, GPU pinning, asynchronous upload, or emulator equivalence; source
+payload bytes remain invisible to topology pixels.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

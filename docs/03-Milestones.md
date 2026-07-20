@@ -864,6 +864,23 @@ owner files, D-drive content, disc image,
 executable,
 emulator, or PCSX2 input was used.
 
+E-0077 connects the first canonical `LevelTextureStore` entry to the existing metadata-only
+topology raster through a stateless, exclusive-startup `AssetService` adapter. The adapter admits
+only an aggregate-empty service, requests canonical handle zero exactly once, waits, builds while
+the immutable view is borrowed, makes every accepted request reach `Release`, and requires all ten
+public snapshot fields to match for success. Fixed identity-free errors retain only applicable typed
+nested enums, with release and residual-state failures taking precedence over earlier Get/image
+results. Complete
+`LevelContent` now builds the resulting independently owned 32x32 topology before SDL startup,
+then uploads it through the unchanged fourth-texture path; the generated fixture pins four textures
+and 77,840 resident bytes plus exact GPU probes.
+`NoContent` and `DataMounted` retain the synthetic 96x32 topology and 122,880 bytes. Serialized local
+validation passed focused/full MSVC, direct and 20/20 repeated D3D12 app smokes, 31/35/31 CTest,
+runtime-off focused checks with 27 registrations, dependency 165, tooling 209, and compile-all. The
+staged public-tree gate checked 252 indexed text blobs; commit, DCO, publication, and exact-main
+validation remain pending, and no retail display,
+material, geometry, gameplay, streaming, or emulator-equivalence semantics are assigned.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.
