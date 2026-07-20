@@ -229,7 +229,7 @@ The initial native build targets express the same direction:
   bytes, with no dependency on persistence, retail payloads, PCSX2, or emulator state;
 - `omega_assets`: canonical owned IR values and decode contracts;
 - `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
-- `omega_retail_formats`: stateless POP/COL/VUM/TDX/SKM/SKL/SKA adapters that may depend on the
+- `omega_retail_formats`: stateless POP/COL/VUM/TDX/VAG/SKM/SKL/SKA adapters that may depend on the
   first two targets;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
   orchestration;
@@ -266,6 +266,17 @@ bounded IFC/FAT chains, and returns ordered owned opaque file payloads. Export a
 new deterministic card, allocation tables, directory entries, chains, and ECC; it cannot patch an
 existing image. The layer owns no filesystem path or persistence service and assigns no Omega Strain
 slot, checksum, compression, encryption, campaign, guest-memory, or emulator-state meaning.
+
+E-0090 keeps audio decode at the same retail-to-canonical boundary. `DecodeVagAdpcm` is a stateless,
+reentrant worker-thread function over one borrowed input span and caller `DecodeLimits`; it returns
+only an owned `MonoPcm16IR`. That IR owns the sample rate, mono PCM16 payload, and one raw source flag
+plus sample offset per source frame. The adapter validates the complete observed VAG header,
+version, rate, frame-alignment, and zero-tail envelope, then applies the standard five-predictor
+PS-ADPCM transform with deterministic integer rounding, cross-frame history, and per-sample clamp.
+Fixed caps remain tighter than global decoder defaults and cannot be raised by a caller. No source
+view, retail offset, path, audio device, voice, callback, resampler, mixer, loop cursor, or automatic
+end/repeat behavior crosses into the canonical value. Audio selection, title-specific marker
+meaning, playback policy, and conversion into the SDL backend remain higher-layer work.
 
 VUM has a bounded semantic adapter that returns owned source-order names plus one-to-three dense
 name indices per material. A separate retail-only passive descriptor preserves only the three

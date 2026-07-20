@@ -98,6 +98,7 @@ add_library(omega_retail_formats STATIC
     native/src/retail/skm_container_descriptor.cpp
     native/src/retail/skl_container_descriptor.cpp
     native/src/retail/tdx_texture_storage_decoder.cpp
+    native/src/retail/vag_adpcm_decoder.cpp
     native/src/retail/vum_layout_internal.cpp
     native/src/retail/vum_material_catalog_decoder.cpp
     native/src/retail/vum_render_payload_descriptor.cpp
@@ -556,6 +557,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_native_save_path_tests COMMAND omega_native_save_path_tests)
     set_tests_properties(omega_native_save_path_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_vag_adpcm_decoder_tests
+        native/tests/vag_adpcm_decoder_tests.cpp
+    )
+    target_link_libraries(omega_vag_adpcm_decoder_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_vag_adpcm_decoder_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_vag_adpcm_decoder_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_vag_adpcm_decoder_tests COMMAND omega_vag_adpcm_decoder_tests)
+    set_tests_properties(omega_vag_adpcm_decoder_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_ps2_memory_card_image_tests
         native/tests/ps2_memory_card_image_tests.cpp

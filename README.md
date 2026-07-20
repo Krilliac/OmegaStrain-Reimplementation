@@ -38,8 +38,12 @@ retail instruction blocks, or PS2 execution layer.
   manifest cells with matching owned spatial meshes, and renders a deterministic synthetic
   canonical-COL wireframe contact sheet through SDL_GPU/D3D12.
 - The native host opens and resumes the system-default SDL playback stream as 48 kHz stereo F32;
-  its fixed-buffer callback supplies project-owned silence until clean-room audio decode and
-  mixing land, with a deterministic dummy-device test covering the callback boundary.
+  its fixed-buffer callback supplies project-owned silence until decoded assets and mixing are
+  wired, with a deterministic dummy-device test covering the callback boundary. E-0090 separately
+  adds a backend-neutral, bounded VAG-to-owned-mono-PCM16 decoder for the complete observed
+  48-byte-header/version/rate/zero-tail envelope and standard five-predictor PS-ADPCM frames. Raw
+  frame flags and marker sample offsets survive as data, but no flag applies playback, looping,
+  resampling, mixing, asset selection, or title-specific audio policy.
 - An app-owned, non-hot-reloadable SDL input leaf owns the gamepad subsystem, the process-global
   event pump, and one primary gamepad. It filters controller events by SDL instance ID, resets only
   gamepad controls when that device disconnects, and promotes the next available device. A
