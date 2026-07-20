@@ -1,5 +1,6 @@
 #include "omega/retail/vpk_wrapper_envelope_decoder.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -138,6 +139,13 @@ int main()
     Check(interior && interior->aligned_block_count == 646U,
           "VPK accepts an aligned physical span inside the bounded range");
 
+    std::vector<std::byte> unaligned_storage(minimum_bytes.size() + 1U, std::byte{0xA5});
+    std::copy(minimum_bytes.begin(), minimum_bytes.end(), unaligned_storage.begin() + 1);
+    const auto unaligned = omega::retail::DecodeVpkWrapperEnvelope(
+        std::span<const std::byte>(unaligned_storage.data() + 1, minimum_bytes.size()));
+    Check(minimum && unaligned && *unaligned == *minimum,
+          "VPK accepts an unaligned backing slice; only physical length has a 2048-byte rule");
+
     bool every_short_prefix_is_truncated = true;
     for (std::size_t size = 0; size < 16U; ++size)
     {
@@ -155,6 +163,12 @@ int main()
                        DecodeErrorCode::UnsupportedVariant,
                        "VPK rejects an aligned physical span below the observed range");
 
+    CheckPathFreeError(
+        omega::retail::DecodeVpkWrapperEnvelope(
+            std::span<const std::byte>(minimum_bytes.data(), minimum_bytes.size() - 1U)),
+        DecodeErrorCode::UnsupportedVariant,
+        "VPK rejects the physical span exactly one byte below the observed minimum");
+
     auto misaligned = MakeVpk(static_cast<std::size_t>(omega::retail::kVpkWrapperMinimumInputBytes + 1U));
     CheckPathFreeError(omega::retail::DecodeVpkWrapperEnvelope(misaligned), DecodeErrorCode::Malformed,
                        "VPK rejects a physical span not divisible by 2048");
@@ -163,6 +177,13 @@ int main()
                                                                 omega::retail::kVpkPhysicalAlignmentBytes));
     CheckPathFreeError(omega::retail::DecodeVpkWrapperEnvelope(above_fixed_maximum), DecodeErrorCode::LimitExceeded,
                        "VPK rejects the first aligned block above the fixed physical ceiling");
+
+    const auto one_above_fixed_maximum = std::span<const std::byte>(
+        above_fixed_maximum.data(),
+        static_cast<std::size_t>(omega::retail::kVpkWrapperMaximumInputBytes + 1U));
+    CheckPathFreeError(omega::retail::DecodeVpkWrapperEnvelope(one_above_fixed_maximum),
+                       DecodeErrorCode::LimitExceeded,
+                       "VPK rejects the physical span exactly one byte above the fixed ceiling");
 
     for (std::size_t index = 0; index < kMagic.size(); ++index)
     {
