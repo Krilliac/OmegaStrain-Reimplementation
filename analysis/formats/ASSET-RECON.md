@@ -202,6 +202,12 @@ One file is exact; 861 have an all-zero tail. In the same HOG directory, 852 of 
 have a VAG companion. The structure and pairing strongly suggest dialogue lip/pose curves, but the
 meaning of the 21 tracks and each four-byte sample is still inferred rather than decoded.
 
+The native bounded-envelope contract is documented in `LPD.md`. It uses the observed 1,932-byte
+maximum as a fixed tail ceiling and the observed 4,096-byte span maximum as a fixed physical-input
+ceiling, but does not turn the observed 8-byte minimum into an invented minimum or alignment rule.
+Canonical output retains only 21 source-order tracks of opaque four-byte entries; the VAG pairing
+and all track, timing, pose, animation, and playback meaning stay outside the adapter.
+
 ### PAR particle parameters
 
 All 679 PAR entries are ASCII, CRLF, NUL-padded, and begin with a numeric `;version` comment.

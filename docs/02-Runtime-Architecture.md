@@ -229,8 +229,8 @@ The initial native build targets express the same direction:
   bytes, with no dependency on persistence, retail payloads, PCSX2, or emulator state;
 - `omega_assets`: canonical owned IR values and decode contracts;
 - `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
-- `omega_retail_formats`: stateless POP/COL/VUM/TDX/VAG/SKM/SKL/SKA adapters that may depend on the
-  first two targets;
+- `omega_retail_formats`: stateless POP/COL/VUM/TDX/VAG/LPD/SKM/SKL/SKA adapters that may depend on
+  the first two targets;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
   orchestration;
 - `omega_runtime`: launch/configuration services and renderer-neutral diagnostic scene values
@@ -290,6 +290,19 @@ unassigned. TDX has a separate bounded `TextureStorageIR` adapter that owns sour
 transfer planes, and four-byte palette entries while leaving block purpose, mip meaning, channel
 order, alpha conversion, nibble order, palette permutation, swizzle, and GPU upload unassigned.
 None of these adapters exposes VU/VIF instructions or decoded pixel guesses.
+
+LPD has a flat two-pass `LpdEnvelopeIR` adapter. It requires the fixed 22-word little-endian header,
+uses the remaining 21 words only as source-track entry counts, and owns every counted four-byte
+entry without numeric interpretation. One root, 21 embedded track objects, and all entries debit
+the item budget; the root plus entry bytes debit logical output; and the complete physical span
+debits input. Scratch and nesting are unused. Exact inputs and any all-zero tail through the fixed
+aggregate-proven 1,932-byte ceiling canonicalize identically. The observed corpus minimum of eight
+tail bytes is evidence, not an invented decoder minimum or alignment rule. The fixed 4,096-byte
+physical-input ceiling derives 1,002-entry, 1,024-item, and `sizeof(LpdEnvelopeIR) + 4,008`-byte
+logical-output ceilings that caller limits cannot raise. All 21 final-sized vectors are explicitly
+constructed inside the typed allocation-error boundary. The adapter has no I/O, shared state,
+service, app, audio, animation, or playback responsibility and assigns no track, scalar, timing,
+interpolation, pose, or VAG relationship.
 
 E-0087 adds one optional runtime-side diagnostic after canonical TDX storage exists, without
 changing the decoder or the dependency direction. `BuildTdxIndexed8CandidateDebugImage` is a

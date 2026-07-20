@@ -1253,6 +1253,31 @@ shipping dependencies or execution mechanisms.
     and determinism. No owner audio, proprietary input, D-drive content, executable byte, emulator
     capture, or retail asset is present in the implementation or tests. Runtime selection, SDL
     upload, playback/mixing policy, title-specific flag meaning, and retail comparison remain open.
+75. E-0091 adds a stateless reentrant LPD counted-envelope decoder and fully owned canonical IR.
+    The fixed 22-word little-endian header supplies exactly 21 source-track entry counts; every
+    counted four-byte entry is retained in source order as opaque bytes. Checked preflight debits the
+    complete physical input, one root plus 21 tracks plus all entries, and the root plus entry bytes
+    before allocation. Scratch and nesting are unused. Exact inputs and zero-only tails through the
+    aggregate-proven fixed 1,932-byte maximum canonicalize identically. The observed 8-byte corpus
+    minimum is not enforced as an invented minimum or alignment rule. The fixed 4,096-byte
+    physical-input maximum derives 1,002-entry, 1,024-item, and
+    `sizeof(LpdEnvelopeIR) + 4,008`-byte output ceilings that callers cannot raise. All 21 final-sized
+    vectors are constructed inside the typed allocation-error boundary. Truncated headers and
+    payloads, a wrong first word, hostile counts, the first nonzero tail byte, the first byte beyond
+    the tail ceiling, exact/one-below caller budgets, and first/later output allocation failures have
+    synthetic coverage. The adapter is not composed into content, startup, audio, animation, or
+    playback and assigns no track, scalar, timing, interpolation, pose, or VAG relationship. Only
+    tracked aggregate evidence and project-generated fixtures were used; no private or owner file,
+    proprietary input, D-drive content, disc image, retail executable, emulator, or PCSX2 runtime
+    input was accessed. The focused MSVC Debug target then built with zero warnings or errors, its
+    direct executable returned zero, and focused CTest passed 1/1. One initial test-only MSVC C3535
+    failure from a mixed-type braced range was corrected with an explicit fixed `size_t` case array
+    before the clean rerun. The focused MSVC Release target also built with zero warnings or errors,
+    its direct executable returned zero, and focused CTest passed 1/1. Post-rebase static validation
+    passed the 200-file dependency gate, all 246 tooling tests, the 303-blob public-tree gate, and DCO
+    for the one signed commit. The runtime-OFF full MSVC Debug integration tree built with zero
+    warnings or errors and full Debug CTest passed 37/37. Rebase and signed commit are complete;
+    publication and exact-main validation remain pending.
 
 ## Disc observations
 

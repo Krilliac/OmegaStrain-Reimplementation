@@ -85,6 +85,16 @@ retail instruction blocks, or PS2 execution layer.
   15,442 source-order blocks, 17,960 primary planes, 285,521,272 primary bytes, 15,190 palette
   blocks, and zero errors. It normalizes 4,112 duplicate-proven implicit zero bytes without
   guessing pixel or channel layout.
+- E-0091 adds a stateless bounded LPD counted-envelope adapter. It requires the fixed 22-word
+  little-endian header, preflights the 21 source-track counts and exact payload extent, and owns each
+  source-order four-byte entry without interpreting it. Exact inputs and all-zero physical tails up
+  to the aggregate-proven 1,932-byte maximum canonicalize identically; the observed 8-byte minimum
+  is not enforced as an invented minimum or alignment rule. The aggregate-proven 4,096-byte
+  physical-input ceiling derives fixed maxima of 1,002 entries, 1,024 items, and
+  `sizeof(LpdEnvelopeIR) + 4,008` output bytes; caller limits may only tighten them. All 21
+  final-sized vectors are explicitly allocated inside the typed error boundary. Scratch and nesting
+  are unused. The slice is not wired to startup, audio, animation, or playback and assigns no track,
+  scalar, timing, interpolation, pose, or VAG-relationship semantics.
 - E-0087 adds a diagnostic-only Indexed8 candidate projection over one strict canonical storage
   shape: one matching `Packed8` plane, one exact 256-entry palette, and exact index, palette, and
   output cardinality. Callers must explicitly choose identity versus bit-3/4 palette permutation,
