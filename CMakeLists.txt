@@ -77,6 +77,7 @@ target_compile_features(omega_assets INTERFACE cxx_std_23)
 
 add_library(omega_media STATIC
     native/src/media/mpeg_program_stream_descriptor.cpp
+    native/src/media/mpeg_video_elementary_stream.cpp
 )
 target_include_directories(omega_media PUBLIC native/include)
 target_link_libraries(omega_media PUBLIC omega_assets)
@@ -691,6 +692,32 @@ if(BUILD_TESTING)
     add_test(NAME omega_mpeg_program_stream_descriptor_tests
         COMMAND omega_mpeg_program_stream_descriptor_tests)
     set_tests_properties(omega_mpeg_program_stream_descriptor_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_mpeg_video_elementary_stream_tests
+        native/tests/mpeg_video_elementary_stream_tests.cpp
+    )
+    target_link_libraries(omega_mpeg_video_elementary_stream_tests PRIVATE omega_media)
+    if(MSVC)
+        target_compile_options(omega_mpeg_video_elementary_stream_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_mpeg_video_elementary_stream_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_mpeg_video_elementary_stream_tests
+        COMMAND omega_mpeg_video_elementary_stream_tests)
+    set_tests_properties(omega_mpeg_video_elementary_stream_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_ps2_memory_card_image_tests
         native/tests/ps2_memory_card_image_tests.cpp

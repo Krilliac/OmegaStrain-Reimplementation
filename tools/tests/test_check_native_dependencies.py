@@ -106,9 +106,18 @@ class NativeDependencyGateTests(unittest.TestCase):
                     '#include "omega/media/descriptor.h"\n'
                     "#include <algorithm>\n"
                 ),
+                "native/include/omega/media/mpeg_video_elementary_stream.h": (
+                    "#pragma once\n"
+                    '#include "omega/media/mpeg_program_stream_descriptor.h"\n'
+                    "#include <span>\n"
+                ),
+                "native/src/media/mpeg_video_elementary_stream.cpp": (
+                    '#include "omega/media/mpeg_video_elementary_stream.h"\n'
+                    "#include <array>\n"
+                ),
             }
         )
-        self.assertEqual(checked, 2)
+        self.assertEqual(checked, 4)
         self.assertEqual(errors, [])
 
     def test_media_classification_remains_fail_closed(self) -> None:
