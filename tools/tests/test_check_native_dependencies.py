@@ -297,6 +297,39 @@ class NativeDependencyGateTests(unittest.TestCase):
         self.assertTrue(header_rule.platform_neutral)
         self.assertTrue(source_rule.platform_neutral)
 
+    def test_ps2_compat_is_dependency_free_and_platform_neutral(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/include/omega/compat/card.h": (
+                    "#pragma once\n"
+                    "#include <expected>\n"
+                    "#include <span>\n"
+                    "#include <vector>\n"
+                ),
+                "native/src/compat/card.cpp": (
+                    '#include "omega/compat/card.h"\n'
+                    "#include <algorithm>\n"
+                ),
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(errors, [])
+
+        header_rule = gate.module_rule(Path("native/include/omega/compat/card.h"))
+        source_rule = gate.module_rule(Path("native/src/compat/card.cpp"))
+        self.assertIsNotNone(header_rule)
+        self.assertIsNotNone(source_rule)
+        self.assertEqual(header_rule.name, "omega_ps2_compat")
+        self.assertEqual(source_rule.name, "omega_ps2_compat")
+        self.assertEqual(
+            header_rule.allowed_omega_modules, frozenset({"omega_ps2_compat"})
+        )
+        self.assertEqual(
+            source_rule.allowed_omega_modules, frozenset({"omega_ps2_compat"})
+        )
+        self.assertTrue(header_rule.platform_neutral)
+        self.assertTrue(source_rule.platform_neutral)
+
     def test_profiles_reject_cross_layer_and_pcsx2_dependencies(self) -> None:
         cases = (
             (
@@ -314,6 +347,30 @@ class NativeDependencyGateTests(unittest.TestCase):
             with self.subTest(relative_path=relative_path, source=source):
                 self.assert_rejected(relative_path, source, message)
 
+    def test_ps2_compat_rejects_cross_layer_platform_and_pcsx2_dependencies(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "native/src/compat/example.cpp",
+                '#include "omega/persistence/save_database.h"\n',
+                "omega_ps2_compat includes forbidden dependency",
+            ),
+            (
+                "native/src/compat/example.cpp",
+                "#include <Windows.h>\n",
+                "omega_ps2_compat includes unapproved external header",
+            ),
+            (
+                "native/include/omega/compat/example.h",
+                '#include "pcsx2/SIO/Memcard/MemoryCardFile.h"\n',
+                "omega_ps2_compat includes forbidden PCSX2 header",
+            ),
+        )
+        for relative_path, source, message in cases:
+            with self.subTest(relative_path=relative_path, source=source):
+                self.assert_rejected(relative_path, source, message)
+
     def test_profiles_classification_remains_fail_closed(self) -> None:
         self.assert_rejected(
             "native/src/profiles_extra/example.cpp",
@@ -323,6 +380,18 @@ class NativeDependencyGateTests(unittest.TestCase):
         self.assert_rejected(
             "native/src/profiles/example.cpp",
             '#include "omega/profiles_extra/example.h"\n',
+            "unclassified project include",
+        )
+
+    def test_ps2_compat_classification_remains_fail_closed(self) -> None:
+        self.assert_rejected(
+            "native/src/compatibility/example.cpp",
+            "constexpr int example = 0;\n",
+            "unclassified shipping native source path",
+        )
+        self.assert_rejected(
+            "native/src/compat/example.cpp",
+            '#include "omega/compatibility/example.h"\n',
             "unclassified project include",
         )
 
