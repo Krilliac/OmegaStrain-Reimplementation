@@ -10,8 +10,9 @@ The bottom-level foundation is `omega::persistence::SaveDatabase`. `omega::profi
 adds the first typed native schema, and the app-level `NativePersistence` service composes both into
 `OmegaApp`. These are non-hot-reloadable services. The database and profile layers remain
 independent of runtime, content, retail-format, simulation, gameplay, app, SDL, and PCSX2 code;
-only the app composition root owns them. Active-profile selection, campaign records, menu actions,
-and PS2 compatibility adapters remain separate slices.
+only the app composition root owns them. E-0096 adds app-session active-profile selection without
+moving that ownership boundary; campaign records, profile mutation UI, and PS2 compatibility
+adapters remain separate slices.
 
 ## Ownership and thread contract
 
@@ -30,6 +31,10 @@ and PS2 compatibility adapters remain separate slices.
   and then moves the complete owner into `OmegaApp`.
 - `OmegaApp` declares native persistence before its other services, so reverse member destruction
   destroys all app consumers before the catalog and then destroys the catalog before its database.
+- Before SDL startup, `OmegaApp` copies at most the three displayed `ProfileId` values and fixed
+  labels into `FrontEndStartupModel`. Frame-time selection resolves only a typed bounded model slot
+  and copies its ID into an optional app-session value. It retains no catalog view and performs no
+  database read, write, defaulting, or mutation.
 - Bootstrap and every subsequent catalog/database operation run on the externally serialized
   persistence/game thread. Neither layer creates a worker or performs hidden asynchronous I/O.
 

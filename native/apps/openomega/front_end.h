@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -46,6 +47,15 @@ enum class FrontEndMainRow : std::uint8_t
     AssetTopology = 3U,
 };
 
+// Startup-model positions only. These are project-owned presentation slots,
+// not retail save slots, memory-card positions, or persistent identifiers.
+enum class FrontEndProfileSlot : std::uint8_t
+{
+    First = 0U,
+    Second = 1U,
+    Third = 2U,
+};
+
 // Fixed project-font cells. Unused cells remain NUL-filled; length is
 // authoritative and never exceeds the array extent. Projection uppercases ASCII
 // a-z, preserves supported project-font ASCII, maps each other Unicode scalar
@@ -59,14 +69,25 @@ struct FrontEndLabel
     friend constexpr bool operator==(const FrontEndLabel &, const FrontEndLabel &) noexcept = default;
 };
 
+struct FrontEndProfile
+{
+    // Present for every visible profile produced by MakeFrontEndStartupModel.
+    // Optional keeps the zero model inert and default-constructible without
+    // inventing a default ProfileId.
+    std::optional<profiles::ProfileId> id;
+    FrontEndLabel label{};
+
+    friend constexpr bool operator==(const FrontEndProfile &, const FrontEndProfile &) noexcept = default;
+};
+
 // Immutable bounded snapshot copied from the ID-sorted native catalog before
 // SDL startup. It contains no borrowed string, catalog, database, or renderer
-// lifetime.
+// lifetime and defines no implicit or default active profile.
 struct FrontEndStartupModel
 {
     std::uint16_t total_profiles = 0U;
     std::uint8_t visible_profiles = 0U;
-    std::array<FrontEndLabel, kFrontEndVisibleProfiles> profiles{};
+    std::array<FrontEndProfile, kFrontEndVisibleProfiles> profiles{};
 
     friend constexpr bool operator==(const FrontEndStartupModel &, const FrontEndStartupModel &) noexcept = default;
 };
@@ -103,6 +124,7 @@ struct FrontEndState
 {
     FrontEndMode mode = FrontEndMode::DiagnosticPlay;
     FrontEndMainRow selected_main_row = FrontEndMainRow::StartDiagnostic;
+    FrontEndProfileSlot selected_profile_slot = FrontEndProfileSlot::First;
 
     friend constexpr bool operator==(const FrontEndState &, const FrontEndState &) noexcept = default;
 };
@@ -116,10 +138,36 @@ struct FrontEndInputEdges
     friend constexpr bool operator==(const FrontEndInputEdges &, const FrontEndInputEdges &) noexcept = default;
 };
 
+enum class FrontEndCommandType : std::uint8_t
+{
+    None = 0U,
+    SetActiveProfile = 1U,
+};
+
+// Fully owned reducer publication. SetActiveProfile carries only one of the
+// three bounded startup-model positions; it never carries a catalog view or
+// performs persistence work.
+struct FrontEndCommand
+{
+    FrontEndCommandType type = FrontEndCommandType::None;
+    FrontEndProfileSlot profile_slot = FrontEndProfileSlot::First;
+
+    friend constexpr bool operator==(const FrontEndCommand &, const FrontEndCommand &) noexcept = default;
+};
+
+struct FrontEndReduction
+{
+    FrontEndState state{};
+    FrontEndCommand command{};
+
+    friend constexpr bool operator==(const FrontEndReduction &, const FrontEndReduction &) noexcept = default;
+};
+
 struct FrontEndView
 {
     FrontEndMode mode = FrontEndMode::Main;
     FrontEndMainRow selected_main_row = FrontEndMainRow::StartDiagnostic;
+    FrontEndProfileSlot selected_profile_slot = FrontEndProfileSlot::First;
     runtime::ContentStartupStage content_stage = runtime::ContentStartupStage::NoContent;
     FrontEndStartupModel profiles{};
 
@@ -133,6 +181,7 @@ struct FrontEndView
     return FrontEndState{
         .mode = FrontEndMode::Main,
         .selected_main_row = FrontEndMainRow::StartDiagnostic,
+        .selected_profile_slot = FrontEndProfileSlot::First,
     };
 }
 
@@ -145,44 +194,81 @@ struct FrontEndView
                            state.selected_main_row == FrontEndMainRow::Profiles ||
                            state.selected_main_row == FrontEndMainRow::Controls ||
                            state.selected_main_row == FrontEndMainRow::AssetTopology;
-    return valid_mode && valid_row;
+    const bool valid_profile_slot = state.selected_profile_slot == FrontEndProfileSlot::First ||
+                                    state.selected_profile_slot == FrontEndProfileSlot::Second ||
+                                    state.selected_profile_slot == FrontEndProfileSlot::Third;
+    return valid_mode && valid_row && valid_profile_slot;
 }
 
-// [any thread; reentrant] Consumes already-routed logical press edges. Invalid
-// input state fails closed to the initial front-end before considering any
-// edge. Primary has priority over navigation; each project screen returns to
-// its own main row; simultaneous navigation edges are neutral; navigation is
-// press-edge-only and clamps at both bounds.
-[[nodiscard]] constexpr FrontEndState UpdateFrontEnd(FrontEndState state, const FrontEndInputEdges input) noexcept
+// [any thread; reentrant] Consumes already-routed logical press edges and a
+// caller-owned startup-model count. Invalid input state fails closed to the
+// initial front-end before considering any edge. The count is clamped to the
+// three project-owned slots. Primary has priority over navigation. A selectable
+// Profiles slot publishes one typed command and returns to its Main row; an
+// empty or out-of-range slot publishes no command and retains the existing
+// return transition. Empty selection/navigation is otherwise inert. Simultaneous
+// navigation edges are neutral, and navigation is press-edge-only and clamps at
+// both bounds. No allocation, I/O, catalog access, or persistence mutation occurs.
+[[nodiscard]] constexpr FrontEndReduction ReduceFrontEnd(
+    FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots) noexcept
 {
     if (!IsValidFrontEndState(state))
-        return InitialFrontEndState();
+        return FrontEndReduction{.state = InitialFrontEndState()};
+
+    constexpr std::uint8_t kMaximumSelectableProfiles = static_cast<std::uint8_t>(kFrontEndVisibleProfiles);
+    const std::uint8_t selectable_profiles =
+        visible_profile_slots < kMaximumSelectableProfiles ? visible_profile_slots : kMaximumSelectableProfiles;
+    const bool profile_slot_is_selectable =
+        state.mode != FrontEndMode::Profiles ||
+        static_cast<std::uint8_t>(state.selected_profile_slot) < selectable_profiles;
+    if (!profile_slot_is_selectable)
+    {
+        state.selected_profile_slot = FrontEndProfileSlot::First;
+    }
 
     if (input.primary_pressed)
     {
         switch (state.mode)
         {
         case FrontEndMode::Profiles:
-            return FrontEndState{
-                .mode = FrontEndMode::Main,
-                .selected_main_row = FrontEndMainRow::Profiles,
+            if (!profile_slot_is_selectable)
+            {
+                return FrontEndReduction{.state = FrontEndState{
+                                             .mode = FrontEndMode::Main,
+                                             .selected_main_row = FrontEndMainRow::Profiles,
+                                             .selected_profile_slot = FrontEndProfileSlot::First,
+                                         }};
+            }
+            return FrontEndReduction{
+                .state = FrontEndState{
+                    .mode = FrontEndMode::Main,
+                    .selected_main_row = FrontEndMainRow::Profiles,
+                    .selected_profile_slot = FrontEndProfileSlot::First,
+                },
+                .command = FrontEndCommand{
+                    .type = FrontEndCommandType::SetActiveProfile,
+                    .profile_slot = state.selected_profile_slot,
+                },
             };
         case FrontEndMode::DiagnosticPlay:
-            return InitialFrontEndState();
+            return FrontEndReduction{.state = InitialFrontEndState()};
         case FrontEndMode::Controls:
-            return FrontEndState{
-                .mode = FrontEndMode::Main,
-                .selected_main_row = FrontEndMainRow::Controls,
-            };
+            return FrontEndReduction{.state = FrontEndState{
+                                         .mode = FrontEndMode::Main,
+                                         .selected_main_row = FrontEndMainRow::Controls,
+                                         .selected_profile_slot = FrontEndProfileSlot::First,
+                                     }};
         case FrontEndMode::AssetTopology:
-            return FrontEndState{
-                .mode = FrontEndMode::Main,
-                .selected_main_row = FrontEndMainRow::AssetTopology,
-            };
+            return FrontEndReduction{.state = FrontEndState{
+                                         .mode = FrontEndMode::Main,
+                                         .selected_main_row = FrontEndMainRow::AssetTopology,
+                                         .selected_profile_slot = FrontEndProfileSlot::First,
+                                     }};
         case FrontEndMode::Main:
             break;
         }
 
+        state.selected_profile_slot = FrontEndProfileSlot::First;
         switch (state.selected_main_row)
         {
         case FrontEndMainRow::StartDiagnostic:
@@ -190,6 +276,7 @@ struct FrontEndView
             break;
         case FrontEndMainRow::Profiles:
             state.mode = FrontEndMode::Profiles;
+            state.selected_profile_slot = FrontEndProfileSlot::First;
             break;
         case FrontEndMainRow::Controls:
             state.mode = FrontEndMode::Controls;
@@ -198,11 +285,31 @@ struct FrontEndView
             state.mode = FrontEndMode::AssetTopology;
             break;
         }
-        return state;
+        return FrontEndReduction{.state = state};
     }
 
-    if (state.mode != FrontEndMode::Main || input.previous_pressed == input.next_pressed)
-        return state;
+    if (input.previous_pressed == input.next_pressed)
+        return FrontEndReduction{.state = state};
+
+    if (state.mode == FrontEndMode::Profiles)
+    {
+        if (selectable_profiles == 0U)
+            return FrontEndReduction{.state = state};
+
+        const std::uint8_t slot = static_cast<std::uint8_t>(state.selected_profile_slot);
+        if (input.previous_pressed && slot > 0U)
+        {
+            state.selected_profile_slot = static_cast<FrontEndProfileSlot>(slot - 1U);
+        }
+        else if (input.next_pressed && slot + 1U < selectable_profiles)
+        {
+            state.selected_profile_slot = static_cast<FrontEndProfileSlot>(slot + 1U);
+        }
+        return FrontEndReduction{.state = state};
+    }
+
+    if (state.mode != FrontEndMode::Main)
+        return FrontEndReduction{.state = state};
 
     const std::uint8_t row = static_cast<std::uint8_t>(state.selected_main_row);
     if (input.previous_pressed && row > 0U)
@@ -213,7 +320,7 @@ struct FrontEndView
     {
         state.selected_main_row = static_cast<FrontEndMainRow>(row + 1U);
     }
-    return state;
+    return FrontEndReduction{.state = state};
 }
 
 // [any thread; reentrant] Simulation is enabled only by a fully valid
@@ -239,6 +346,7 @@ struct FrontEndView
     return FrontEndView{
         .mode = normalized.mode,
         .selected_main_row = normalized.selected_main_row,
+        .selected_profile_slot = normalized.selected_profile_slot,
         .content_stage = normalized_stage,
         .profiles = profiles,
     };
@@ -260,15 +368,23 @@ BuildProjectFrontEndAssetTopologyImage();
 
 static_assert(std::is_trivially_copyable_v<FrontEndLabel>);
 static_assert(std::is_standard_layout_v<FrontEndLabel>);
+static_assert(std::is_trivially_copyable_v<FrontEndProfile>);
+static_assert(std::is_standard_layout_v<FrontEndProfile>);
 static_assert(std::is_trivially_copyable_v<FrontEndStartupModel>);
 static_assert(std::is_standard_layout_v<FrontEndStartupModel>);
 static_assert(std::is_trivially_copyable_v<FrontEndState>);
 static_assert(std::is_standard_layout_v<FrontEndState>);
 static_assert(std::is_trivially_copyable_v<FrontEndInputEdges>);
 static_assert(std::is_standard_layout_v<FrontEndInputEdges>);
+static_assert(std::is_trivially_copyable_v<FrontEndCommand>);
+static_assert(std::is_standard_layout_v<FrontEndCommand>);
+static_assert(std::is_trivially_copyable_v<FrontEndReduction>);
+static_assert(std::is_standard_layout_v<FrontEndReduction>);
 static_assert(std::is_trivially_copyable_v<FrontEndView>);
 static_assert(std::is_standard_layout_v<FrontEndView>);
 static_assert(sizeof(FrontEndMode) == 1U);
 static_assert(sizeof(FrontEndMainRow) == 1U);
+static_assert(sizeof(FrontEndProfileSlot) == 1U);
+static_assert(sizeof(FrontEndCommandType) == 1U);
 static_assert(sizeof(FrontEndModelError) == 1U);
 } // namespace omega::app

@@ -350,6 +350,14 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
         .right = 59392U,
         .bottom = 14563U,
     };
+    // Project-owned solid cyan sample from the already-uploaded Profiles card
+    // border. Startup draw lists stretch it into the three cursor markers.
+    constexpr runtime::RenderSourceRectQ16 profile_selection_source{
+        .left = 0U,
+        .top = 0U,
+        .right = 512U,
+        .bottom = 512U,
+    };
     constexpr std::array menu_selection_targets{
         runtime::RenderTargetRectQ16{
             .left = 3584U,
@@ -377,6 +385,7 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
         },
     };
     static_assert(menu_selection_targets.size() == kFrontEndMainRowCount);
+    static_assert(kFrontEndVisibleProfiles <= kFrontEndMainRowCount);
 
     runtime::RenderTextureHandle diagnostic_texture;
     runtime::RenderTextureHandle front_end_texture;
@@ -504,6 +513,30 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     }
     auto front_end_profiles_draw_list = std::move(*created_profiles_draw_list);
 
+    std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>
+        front_end_profile_selection_draw_lists;
+    for (std::size_t slot = 0U; slot < front_end_profile_selection_draw_lists.size(); ++slot)
+    {
+        diagnostic_commands[diagnostic_base_command_count + 1U] = runtime::RenderTextureBlitCommand{
+            .texture = front_end_profiles_texture,
+            .source = profile_selection_source,
+            .destination = menu_selection_targets[slot],
+            .fit_mode = runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        };
+        auto created_selection_draw_list = runtime::RenderDrawList::Create(
+            std::span<const runtime::RenderTextureBlitCommand>{
+                diagnostic_commands.data(), diagnostic_base_command_count + 2U});
+        if (!created_selection_draw_list)
+        {
+            constexpr std::string_view error =
+                "SDL/GPU front-end profile selection draw-list creation failed";
+            log->Error("startup", error);
+            return std::unexpected(std::string(error));
+        }
+        front_end_profile_selection_draw_lists[slot] = std::move(*created_selection_draw_list);
+    }
+
     const runtime::DebugImage controls_image = BuildProjectFrontEndControlsImage();
     auto uploaded_controls = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
         .width = controls_image.width,
@@ -617,7 +650,8 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
                     front_end_texture, front_end_profiles_texture, diagnostic_controls_texture,
                     diagnostic_asset_topology_texture, diagnostic_asset_transfer_texture,
                     std::move(diagnostic_hidden_draw_list), std::move(front_end_main_draw_lists),
-                    std::move(front_end_profiles_draw_list), std::move(diagnostic_controls_draw_list),
+                    std::move(front_end_profiles_draw_list), std::move(front_end_profile_selection_draw_lists),
+                    std::move(diagnostic_controls_draw_list),
                     std::move(diagnostic_asset_topology_draw_list), content_stage, front_end_startup_model);
 }
 
@@ -637,7 +671,9 @@ OmegaApp::OmegaApp(
     const runtime::RenderTextureHandle diagnostic_asset_transfer_texture,
     runtime::RenderDrawList diagnostic_hidden_draw_list,
     std::array<runtime::RenderDrawList, kFrontEndMainRowCount> front_end_main_draw_lists,
-    runtime::RenderDrawList front_end_profiles_draw_list, runtime::RenderDrawList diagnostic_controls_draw_list,
+    runtime::RenderDrawList front_end_profiles_draw_list,
+    std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles> front_end_profile_selection_draw_lists,
+    runtime::RenderDrawList diagnostic_controls_draw_list,
     runtime::RenderDrawList diagnostic_asset_topology_draw_list, const runtime::ContentStartupStage content_stage,
     const FrontEndStartupModel front_end_startup_model) noexcept
     : native_persistence_(std::move(native_persistence)), config_(std::move(config)), content_(std::move(content)),
@@ -653,6 +689,7 @@ OmegaApp::OmegaApp(
       diagnostic_hidden_draw_list_(std::move(diagnostic_hidden_draw_list)),
       front_end_main_draw_lists_(std::move(front_end_main_draw_lists)),
       front_end_profiles_draw_list_(std::move(front_end_profiles_draw_list)),
+      front_end_profile_selection_draw_lists_(std::move(front_end_profile_selection_draw_lists)),
       diagnostic_controls_draw_list_(std::move(diagnostic_controls_draw_list)),
       diagnostic_asset_topology_draw_list_(std::move(diagnostic_asset_topology_draw_list)),
       content_stage_(content_stage), front_end_startup_model_(front_end_startup_model),
@@ -664,6 +701,8 @@ OmegaApp::~OmegaApp() noexcept
 {
     diagnostic_asset_topology_draw_list_ = {};
     diagnostic_controls_draw_list_ = {};
+    for (runtime::RenderDrawList& draw_list : front_end_profile_selection_draw_lists_)
+        draw_list = {};
     front_end_profiles_draw_list_ = {};
     for (runtime::RenderDrawList &draw_list : front_end_main_draw_lists_)
         draw_list = {};
@@ -874,12 +913,16 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             break;
         }
 
-        front_end_state_ =
-            UpdateFrontEnd(front_end_state_, FrontEndInputEdges{
-                                                 .primary_pressed = input_snapshot.WasPressed(kFrontEndPrimaryAction),
-                                                 .previous_pressed = input_snapshot.WasPressed(kFrontEndPreviousAction),
-                                                 .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
-                                             });
+        const FrontEndReduction front_end =
+            ReduceFrontEnd(front_end_state_,
+                FrontEndInputEdges{
+                    .primary_pressed = input_snapshot.WasPressed(kFrontEndPrimaryAction),
+                    .previous_pressed = input_snapshot.WasPressed(kFrontEndPreviousAction),
+                    .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
+                },
+                front_end_startup_model_.visible_profiles);
+        front_end_state_ = front_end.state;
+        ApplyFrontEndCommand(front_end.command);
         const bool simulation_allowed = FrontEndAllowsSimulation(front_end_state_);
 
         const auto current_frame = Clock::now();
@@ -1038,6 +1081,22 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
     };
 }
 
+void OmegaApp::ApplyFrontEndCommand(const FrontEndCommand command) noexcept
+{
+    if (command.type != FrontEndCommandType::SetActiveProfile)
+        return;
+
+    const std::size_t slot = static_cast<std::size_t>(command.profile_slot);
+    if (slot >= kFrontEndVisibleProfiles || slot >= front_end_startup_model_.visible_profiles ||
+        slot >= front_end_startup_model_.total_profiles)
+        return;
+
+    const std::optional<profiles::ProfileId>& profile_id = front_end_startup_model_.profiles[slot].id;
+    if (!profile_id)
+        return;
+    active_profile_id_ = *profile_id;
+}
+
 const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcept
 {
     const FrontEndView view = BuildFrontEndView(front_end_state_, content_stage_, front_end_startup_model_);
@@ -1050,7 +1109,15 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
     case FrontEndMode::Main:
         return front_end_main_draw_lists_[selected_main_row];
     case FrontEndMode::Profiles:
+    {
+        const std::size_t profile_slot = static_cast<std::size_t>(view.selected_profile_slot);
+        if (profile_slot < view.profiles.visible_profiles &&
+            profile_slot < front_end_profile_selection_draw_lists_.size())
+        {
+            return front_end_profile_selection_draw_lists_[profile_slot];
+        }
         return front_end_profiles_draw_list_;
+    }
     case FrontEndMode::Controls:
         return diagnostic_controls_draw_list_;
     case FrontEndMode::AssetTopology:
@@ -1079,5 +1146,10 @@ int OmegaApp::audio_sample_rate() const noexcept
 int OmegaApp::audio_channel_count() const noexcept
 {
     return SdlAudioService::kChannelCount;
+}
+
+std::optional<profiles::ProfileId> OmegaApp::active_profile_id() const noexcept
+{
+    return active_profile_id_;
 }
 } // namespace omega::app

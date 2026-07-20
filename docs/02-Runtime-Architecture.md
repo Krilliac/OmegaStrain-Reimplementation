@@ -1833,3 +1833,29 @@ previous/next edges, modal cards return to their originating row, invalid state 
 initial Main row, and `FrontEndAllowsSimulation` is true only for DiagnosticPlay. Live capture and
 replay use the same pure reducer and retain the existing fixed input/capture schema. These are native
 host-shell policies backed only by public synthetic fixtures, not retail front-end semantics.
+
+### E-0096 explicit session active profile
+
+`NativePersistence` remains the sole owner of `SaveDatabase`, `ProfileCatalog`, and the sorted startup
+summary vector. `MakeFrontEndStartupModel` now copies the immutable `ProfileId` together with each of
+the existing three displayed fixed labels. The model owns those values before SDL starts; no catalog,
+database, string, renderer, or borrowed-summary lifetime reaches the frame loop.
+
+The pure reducer consumes the visible-slot count and publishes an owned `FrontEndReduction`. Its
+typed `SetActiveProfile` command can carry only First, Second, or Third. Previous/next edges clamp
+within the displayed startup slots. Primary wins over simultaneous navigation and selects the
+pre-navigation slot. An empty model or stale slot outside the supplied count publishes no selection
+command; empty navigation is inert and primary retains the established return-to-Main transition.
+`OmegaApp` resolves the command on the game/main thread, revalidates the slot against the immutable
+model, and copies the ID into an optional session value. It never creates, defaults, updates,
+deletes, or persists a profile.
+
+The Profiles texture is still rasterized and uploaded once. One base draw list and three fixed
+cursor-marker draw lists are built at startup from that texture; frame-time navigation only chooses
+an existing list. Normal and terminal teardown clear fixed lists before releasing the existing
+texture and add no allocator, worker, global, or hot-reload boundary. Capture bytes are unchanged.
+Production fresh-replay setup supplies the same bounded startup count to `RunReplaySession`, which
+derives and publishes the same typed command from the captured logical edges; terminal frames still
+complete before reduction, so a captured simultaneous primary edge cannot select a profile. This
+is project-owned native host policy only, not a claim about retail profile
+order, menu layout, controls, active-save behavior, persistence policy, timing, or fidelity.

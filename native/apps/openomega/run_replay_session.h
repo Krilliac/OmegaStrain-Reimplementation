@@ -32,6 +32,10 @@ struct RunReplaySessionConfig
     // Null preserves legacy nonmodal replay. A supplied value enables replay-owned menu reduction
     // and gates simulation from each resulting state without changing the captured elapsed value.
     std::optional<FrontEndState> initial_front_end_state;
+    // Caller-owned startup-model count used only by the pure reducer. Values above
+    // three clamp to the bounded displayed slots. This is replay configuration,
+    // not captured schema, profile identity, or persistence state.
+    std::uint8_t front_end_visible_profile_slots = 0U;
 
     friend constexpr bool operator==(
         const RunReplaySessionConfig&, const RunReplaySessionConfig&) noexcept = default;
@@ -184,16 +188,20 @@ public:
     [[nodiscard]] std::optional<runtime::RunCaptureTerminalInput>
     terminal_input() const noexcept;
     [[nodiscard]] std::optional<runtime::FramePlan> frame_plan() const noexcept;
+    // [any thread; reentrant after publication] Owned command derived from the
+    // replayed input. Terminal and legacy-nonmodal frames publish None.
+    [[nodiscard]] FrontEndCommand front_end_command() const noexcept;
 
 private:
     friend class RunReplaySession;
 
     RunReplayFrame(runtime::RunCaptureReplayFrame&& replay_frame,
-        runtime::FramePlan frame_plan) noexcept;
+        runtime::FramePlan frame_plan, FrontEndCommand front_end_command) noexcept;
     explicit RunReplayFrame(runtime::RunCaptureReplayFrame&& replay_frame) noexcept;
 
     runtime::RunCaptureReplayFrame replay_frame_;
     std::optional<runtime::FramePlan> frame_plan_;
+    FrontEndCommand front_end_command_{};
 };
 
 // Exclusive game-thread composition of a fresh scheduler, fresh simulation world, and one owned
@@ -238,7 +246,8 @@ private:
         simulation::SimulationWorld&& simulation,
         runtime::RunCaptureReplaySession&& replay,
         std::optional<simulation::EntityId> debug_locomotion_entity,
-        std::optional<FrontEndState> front_end_state) noexcept;
+        std::optional<FrontEndState> front_end_state,
+        std::uint8_t front_end_visible_profile_slots) noexcept;
     void NormalizeInert() noexcept;
 
     std::optional<runtime::FrameScheduler> scheduler_;
@@ -246,6 +255,7 @@ private:
     std::optional<runtime::RunCaptureReplaySession> replay_;
     std::optional<simulation::EntityId> debug_locomotion_entity_;
     std::optional<FrontEndState> front_end_state_;
+    std::uint8_t front_end_visible_profile_slots_ = 0U;
     RunReplaySessionState state_ = RunReplaySessionState::Inert;
 };
 } // namespace omega::app

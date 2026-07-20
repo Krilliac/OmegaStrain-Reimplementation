@@ -36,8 +36,9 @@ namespace
 } // namespace
 
 RunReplayFrame::RunReplayFrame(runtime::RunCaptureReplayFrame&& replay_frame,
-    const runtime::FramePlan frame_plan) noexcept
-    : replay_frame_(std::move(replay_frame)), frame_plan_(frame_plan)
+    const runtime::FramePlan frame_plan, const FrontEndCommand front_end_command) noexcept
+    : replay_frame_(std::move(replay_frame)), frame_plan_(frame_plan),
+      front_end_command_(front_end_command)
 {
 }
 
@@ -65,6 +66,11 @@ RunReplayFrame::terminal_input() const noexcept
 std::optional<runtime::FramePlan> RunReplayFrame::frame_plan() const noexcept
 {
     return frame_plan_;
+}
+
+FrontEndCommand RunReplayFrame::front_end_command() const noexcept
+{
+    return front_end_command_;
 }
 
 std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
@@ -116,7 +122,8 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
 
     RunReplaySession session(
         std::move(*scheduler), std::move(*world), std::move(*replay),
-        debug_locomotion_entity, config.initial_front_end_state);
+        debug_locomotion_entity, config.initial_front_end_state,
+        config.front_end_visible_profile_slots);
     return std::expected<RunReplaySession, RunReplayError>{std::move(session)};
 }
 
@@ -124,12 +131,14 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
     simulation::SimulationWorld&& simulation,
     runtime::RunCaptureReplaySession&& replay,
     const std::optional<simulation::EntityId> debug_locomotion_entity,
-    const std::optional<FrontEndState> front_end_state) noexcept
+    const std::optional<FrontEndState> front_end_state,
+    const std::uint8_t front_end_visible_profile_slots) noexcept
     : scheduler_(std::in_place, std::move(scheduler)),
       simulation_(std::in_place, std::move(simulation)),
       replay_(std::in_place, std::move(replay)),
       debug_locomotion_entity_(debug_locomotion_entity),
       front_end_state_(front_end_state),
+      front_end_visible_profile_slots_(front_end_visible_profile_slots),
       state_(replay_->complete()
                  ? RunReplaySessionState::Complete
                  : RunReplaySessionState::Ready)
@@ -144,6 +153,8 @@ RunReplaySession::RunReplaySession(RunReplaySession&& other) noexcept
           other.debug_locomotion_entity_, std::nullopt)),
       front_end_state_(std::exchange(
           other.front_end_state_, std::nullopt)),
+      front_end_visible_profile_slots_(std::exchange(
+          other.front_end_visible_profile_slots_, std::uint8_t{0U})),
       state_(std::exchange(other.state_, RunReplaySessionState::Inert))
 {
     other.NormalizeInert();
@@ -154,6 +165,7 @@ void RunReplaySession::NormalizeInert() noexcept
     replay_.reset();
     debug_locomotion_entity_.reset();
     front_end_state_.reset();
+    front_end_visible_profile_slots_ = 0U;
     simulation_.reset();
     scheduler_.reset();
     state_ = RunReplaySessionState::Inert;
@@ -187,9 +199,10 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             RunReplayFrame(std::move(*replay_frame))};
     }
 
+    FrontEndCommand front_end_command{};
     if (front_end_state_)
     {
-        *front_end_state_ = UpdateFrontEnd(*front_end_state_,
+        const FrontEndReduction front_end = ReduceFrontEnd(*front_end_state_,
             FrontEndInputEdges{
                 .primary_pressed =
                     replay_frame->input().WasPressed(kFrontEndPrimaryAction),
@@ -197,7 +210,10 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
                     replay_frame->input().WasPressed(kFrontEndPreviousAction),
                 .next_pressed =
                     replay_frame->input().WasPressed(kFrontEndNextAction),
-            });
+            },
+            front_end_visible_profile_slots_);
+        *front_end_state_ = front_end.state;
+        front_end_command = front_end.command;
     }
     const bool simulation_allowed = !front_end_state_ ||
                                     FrontEndAllowsSimulation(
@@ -247,7 +263,7 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
                  ? RunReplaySessionState::Complete
                  : RunReplaySessionState::Ready;
     return std::expected<RunReplayFrame, RunReplayError>{
-        RunReplayFrame(std::move(*replay_frame), plan)};
+        RunReplayFrame(std::move(*replay_frame), plan, front_end_command)};
 }
 
 RunReplaySessionState RunReplaySession::state() const noexcept
