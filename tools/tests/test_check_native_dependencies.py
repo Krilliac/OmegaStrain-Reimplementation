@@ -174,6 +174,85 @@ class NativeDependencyGateTests(unittest.TestCase):
             "unclassified project include",
         )
 
+    def test_persistence_header_and_source_form_standalone_layer(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/include/omega/persistence/types.h": (
+                    "#pragma once\n"
+                    "#include <cstdint>\n"
+                ),
+                "native/include/omega/persistence/store.h": (
+                    "#pragma once\n"
+                    '#include "omega/persistence/types.h"\n'
+                    "#include <filesystem>\n"
+                ),
+                "native/src/persistence/detail.h": "#pragma once\n",
+                "native/src/persistence/store.cpp": (
+                    '#include "omega/persistence/store.h"\n'
+                    '#include "detail.h"\n'
+                    "#include <Windows.h>\n"
+                ),
+            }
+        )
+        self.assertEqual(checked, 4)
+        self.assertEqual(errors, [])
+
+        header_rule = gate.module_rule(
+            Path("native/include/omega/persistence/store.h")
+        )
+        source_rule = gate.module_rule(Path("native/src/persistence/store.cpp"))
+        self.assertIsNotNone(header_rule)
+        self.assertIsNotNone(source_rule)
+        self.assertEqual(header_rule.name, "omega_persistence")
+        self.assertEqual(source_rule.name, "omega_persistence")
+        self.assertEqual(
+            header_rule.allowed_omega_modules, frozenset({"omega_persistence"})
+        )
+        self.assertEqual(
+            source_rule.allowed_omega_modules, frozenset({"omega_persistence"})
+        )
+        self.assertTrue(header_rule.platform_neutral)
+        self.assertFalse(source_rule.platform_neutral)
+
+    def test_persistence_rejects_cross_layer_and_pcsx2_dependencies(self) -> None:
+        cases = (
+            (
+                "native/src/persistence/example.cpp",
+                '#include "omega/runtime/frame_scheduler.h"\n',
+                "omega_persistence includes forbidden dependency",
+            ),
+            (
+                "native/src/runtime/example.cpp",
+                '#include "omega/persistence/store.h"\n',
+                "omega_runtime includes forbidden dependency",
+            ),
+            (
+                "native/include/omega/persistence/example.h",
+                '#include "PCSX2/VMManager.h"\n',
+                "omega_persistence includes forbidden PCSX2 header",
+            ),
+            (
+                "native/src/persistence/example.cpp",
+                '#include "pcsx2/GS/GS.h"\n',
+                "omega_persistence includes forbidden PCSX2 header",
+            ),
+        )
+        for relative_path, source, message in cases:
+            with self.subTest(relative_path=relative_path, source=source):
+                self.assert_rejected(relative_path, source, message)
+
+    def test_persistence_classification_remains_fail_closed(self) -> None:
+        self.assert_rejected(
+            "native/src/persistence_extra/example.cpp",
+            "constexpr int example = 0;\n",
+            "unclassified shipping native source path",
+        )
+        self.assert_rejected(
+            "native/src/persistence/example.cpp",
+            '#include "omega/persistence_extra/example.h"\n',
+            "unclassified project include",
+        )
+
     def test_platform_neutral_modules_accept_standard_headers(self) -> None:
         source = "".join(
             f"#include <{header}>\n"

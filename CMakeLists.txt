@@ -49,6 +49,12 @@ target_include_directories(omega_core
 
 target_compile_features(omega_core PUBLIC cxx_std_23)
 
+add_library(omega_persistence STATIC
+    native/src/persistence/save_database.cpp
+)
+target_include_directories(omega_persistence PUBLIC native/include)
+target_compile_features(omega_persistence PUBLIC cxx_std_23)
+
 add_library(omega_assets INTERFACE)
 target_include_directories(omega_assets INTERFACE native/include)
 target_compile_features(omega_assets INTERFACE cxx_std_23)
@@ -136,6 +142,25 @@ if(MSVC)
     )
 else()
     target_compile_options(omega_core PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+endif()
+
+if(MSVC)
+    target_compile_options(omega_persistence PRIVATE
+        /W4
+        /WX
+        /permissive-
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /utf-8
+    )
+else()
+    target_compile_options(omega_persistence PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+        -Wno-missing-field-initializers
+    )
 endif()
 
 if(MSVC)
@@ -401,6 +426,31 @@ if(BUILD_TESTING)
             "OPENOMEGA_DISABLE_STARTUP_DIALOG=1"
         )
     endfunction()
+
+    add_executable(omega_save_database_tests
+        native/tests/save_database_tests.cpp
+    )
+    target_link_libraries(omega_save_database_tests PRIVATE omega_persistence)
+    if(MSVC)
+        target_compile_options(omega_save_database_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_save_database_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_save_database_tests COMMAND omega_save_database_tests)
+    set_tests_properties(omega_save_database_tests PROPERTIES TIMEOUT 10)
 
     if(TARGET openomega)
         add_test(NAME openomega_process_contract
