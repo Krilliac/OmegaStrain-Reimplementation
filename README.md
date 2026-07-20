@@ -13,6 +13,18 @@ retail instruction blocks, or PS2 execution layer.
 
 - Official PCSX2 `master` built from commit `86d76bbf590566d9ea74d381eeff3acd9856503a`.
 - Build output: `third_party/pcsx2/bin/pcsx2-qtx64-avx2.exe` (PCSX2 2.7.485).
+- E-0099 records runnable-tool and configuration-initialization readiness for a separately
+  maintained local custom PCSX2 branch based on that exact source. The branch combines bounded VUM
+  producer commit `13df8ef7`, front-end producer commit `78ea3c8`, and coordinated-lifecycle commit
+  `d17a521c`. Its one-job MSVC RelWithDebInfo `PCSX2` core target and true Release `pcsx2-qt` target
+  both build successfully. The Release executable has SHA-256
+  `2D3EAC421BDD1E6C09C8454F574D4AF32AD41F4E51BF87AA254CDAFB93BEA870`; import inspection confirms
+  release Qt/KDDockWidgets dependencies with no debug-CRT chain, and linked-image inspection finds
+  both private producer namespaces. An isolated `-version` launch reports
+  `v2.7.485-3-gd17a521ca` before its intentional exit 1, and an isolated external
+  `-datapath -testconfig` launch exits 0. The custom source, build tree, executable, configuration,
+  and any future private inputs or reports remain outside this repository. No producer capture,
+  BIOS, disc, savestate, private site, or owner input was used for E-0099.
 - Official Windows dependency archive SHA-256:
   `9C02B2CF15DA632B7D862131486B6CD8D7C58979D5F8C345F0BA4E0E2AEC3FD1`.
 - Owned NTSC-U disc image SHA-256:

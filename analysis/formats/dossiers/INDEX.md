@@ -140,7 +140,7 @@ interfaces—for example VUM's canonical material catalog and separate passive r
 
 ## Provenance
 
-The initial 47-dossier corpus and collector draft came from Claude commit `98b5096`, preserved after
-rebasing as `6c0e7e8`. Codex corrected the integration against current-main evidence and the hardened
+The initial 47-dossier corpus and collector draft came from Claude commit `98b5096`, integrated in
+PR #64 as `38b7c0fc`. Codex corrected the integration against current-main evidence and the hardened
 collector contract. The evidence-first promotion checklist distills Claude commit `a2fdf3d`,
-preserved as `238aa87`, without retaining its premature C++ declarations.
+integrated in PR #64 as `2421adf`, without retaining its premature C++ declarations.

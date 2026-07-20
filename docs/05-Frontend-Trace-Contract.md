@@ -3,10 +3,13 @@
 ## Scope
 
 `omega-frontend-trace-v1` is a repository-side interchange and validation contract for a
-future, separately maintained behavioral-observation producer. It records only bounded,
-anonymous aggregates needed to compare five front-end actions. It does not implement an emulator
-hook, identify executable locations, decode a retail state machine, or assign meaning to any
-observed transition or resource.
+separately maintained private behavioral-observation producer. An out-of-tree custom PCSX2 branch
+based on the pinned official source now implements that producer and its bounded runner; its source,
+build tree, executable, configuration, raw observations, and private fragments remain outside
+OpenOmega version control. This document defines only the public sanitized boundary. The schema
+records bounded anonymous aggregates needed to compare five front-end actions. OpenOmega does not
+vendor or invoke an emulator hook, identify executable locations, decode a retail state machine, or
+assign meaning to any observed transition or resource.
 
 Only a bundle accepted by `tools/validate_frontend_trace.py` may cross from private research into
 the public clean-room repository. Producer logs, failed captures, temporary files, and all raw
@@ -66,7 +69,7 @@ minimum signal check, not proof that an action, transition, or resource has been
 
 ## Fail-closed producer lifecycle
 
-A future private producer must mirror the established bounded tracer lifecycle:
+The reviewed out-of-tree private producer mirrors the established bounded tracer lifecycle:
 
 `Disabled -> Configured -> Loading -> Armed -> Stopping -> Finalized`
 
@@ -84,14 +87,23 @@ stages have these responsibilities:
 - `Stopping`: stop at the configured frame or quiet-period bound, remove instrumentation, normalize
   all aggregates, and scrub raw observation state.
 - `Finalized`: validate canonical bytes, create a no-clobber private temporary in the destination
-  directory, write and flush it, atomically publish it, and synchronize the directory entry.
+  directory, write and flush it, then atomically publish it with replacement disabled as the final
+  fallible action.
 - `Failed`: remove instrumentation, scrub maps and buffers, delete any unpublished temporary, and
   emit no partial public report.
 
-The producer must never reuse ordinary debugging facilities while collecting a trace, overwrite an
-existing destination, or publish directly to its final name. A publish error is failure even when
-the final namespace result cannot be determined. These requirements are intentionally documented
-here; this slice implements only the public contract and validator.
+The runner must never reuse ordinary debugging facilities while collecting a trace, overwrite an
+existing destination, or publish directly to its final name. Every failure before the no-replace
+rename emits no final report. After the rename succeeds, only nonthrowing cleanup may follow, so the
+runner cannot report failure after the report is already visible. OpenOmega implements the public
+contract, validator, and bounded sanitized analyzer; the producer and runner remain out of tree.
+
+The exact combined local source at `d17a521ca03e4de1f063f704142540da5aaaa343` has passed
+independent source/API review, compiled as both a one-job MSVC RelWithDebInfo `PCSX2` core target and
+a true Release `pcsx2-qt` target, and reached isolated version and configuration initialization. This
+establishes runnable-tool readiness only. The producer has not been armed or run, and no BIOS, disc,
+savestate, private observer site, owner input, fragment, capture, or public report was used or
+produced by that validation.
 
 ## Privacy boundary
 
