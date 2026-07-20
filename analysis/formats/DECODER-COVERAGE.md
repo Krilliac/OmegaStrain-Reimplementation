@@ -65,7 +65,7 @@ unless separately demonstrated, independent of the classification below.
 | `.bon` | aggregate scanner only | Raw suffix count only | none |
 | `.gun` | aggregate scanner only | Raw suffix count only (`asset-fingerprints.json`; absent from `hog-validation.json`'s narrower top-level tally) | none |
 | `.prn` | aggregate scanner only | Raw suffix count only | none |
-| `.pss` | aggregate scanner only | Raw suffix count only; also in `check_public_tree.py`'s blocklist | none |
+| `.pss` | aggregate scanner only | Raw suffix count only; also in `check_public_tree.py`'s blocklist. `omega::media::InspectMpegProgramStream` is a generic MPEG-2 Program Stream/PES inspector backed only by project-generated fixtures; no tracked evidence connects that syntax to `.pss`, so it is not a `.pss` decoder or descriptor | none for `.pss`; generic framing tests only in `native/tests/mpeg_program_stream_descriptor_tests.cpp` |
 | `.scc` | aggregate scanner only | Raw suffix count only in both archive inventories, plus a separate whole-disc count in `disc-summary.json` | none |
 | `.skel` | aggregate scanner only | Raw suffix count only | none |
 | `.skf` | aggregate scanner only | Raw suffix count only | none |
@@ -85,6 +85,10 @@ Every native header listed above as canonical/envelope/descriptor has a matching
 matching focused test registered either through its own executable/CTest pair or as part of
 `omega_core_tests`. **No missing CMake registration was found** for any of the 14 retail-format
 headers or `hog_archive`/`pop_terrain_index`/`container_descriptors`.
+
+The separate `omega_media` target registers the generic MPEG-2 Program Stream inspector and its
+generated-fixture test. It is intentionally outside `omega_retail_formats`: the public tree has no
+evidence-backed mapping from that standardized framing grammar to any retail suffix.
 
 ## 3. Mixed-layer families and mechanical inconsistencies (not fixed)
 

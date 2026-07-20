@@ -46,6 +46,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             ("native/src/archive/example.cpp", "omega/asset/decode.h"),
             ("native/src/profiles/example.cpp", "omega/persistence/save_database.h"),
             ("native/src/simulation/example.cpp", "omega/asset/decode.h"),
+            ("native/src/media/example.cpp", "omega/asset/decode.h"),
             ("native/src/retail/example.cpp", "omega/archive/archive_reader.h"),
             ("native/src/retail/example.cpp", "omega/asset/audio_ir.h"),
             ("native/src/content/example.cpp", "omega/retail/pop_level_manifest_decoder.h"),
@@ -68,6 +69,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             ("native/src/persistence/example.cpp", "omega/profiles/profile_catalog.h"),
             ("native/src/profiles/example.cpp", "omega/runtime/frame_scheduler.h"),
             ("native/src/simulation/example.cpp", "omega/runtime/frame_scheduler.h"),
+            ("native/src/media/example.cpp", "omega/retail/vag_adpcm_decoder.h"),
             ("native/src/retail/example.cpp", "omega/content/game_data_service.h"),
             ("native/src/content/example.cpp", "omega/simulation/simulation_world.h"),
             ("native/src/runtime/example.cpp", "omega/simulation/simulation_world.h"),
@@ -90,6 +92,35 @@ class NativeDependencyGateTests(unittest.TestCase):
             "native/src/runtime/example.cpp",
             '#include "omega/simulation/simulation_world.h"\n',
             "omega_runtime includes forbidden dependency",
+        )
+
+    def test_media_header_and_source_allow_only_self_assets_and_stdlib(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/include/omega/media/descriptor.h": (
+                    "#pragma once\n"
+                    "#include <vector>\n"
+                    '#include "omega/asset/decode.h"\n'
+                ),
+                "native/src/media/descriptor.cpp": (
+                    '#include "omega/media/descriptor.h"\n'
+                    "#include <algorithm>\n"
+                ),
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(errors, [])
+
+    def test_media_classification_remains_fail_closed(self) -> None:
+        self.assert_rejected(
+            "native/src/media_extra/example.cpp",
+            "constexpr int example = 0;\n",
+            "unclassified shipping native source path",
+        )
+        self.assert_rejected(
+            "native/src/media/example.cpp",
+            '#include "omega/media_extra/example.h"\n',
+            "unclassified project include",
         )
 
     def test_gameplay_header_and_source_allow_only_self_simulation_and_stdlib(

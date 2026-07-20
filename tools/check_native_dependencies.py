@@ -203,6 +203,7 @@ class ModuleRule:
 
 _CORE_EDGES = frozenset({"omega_core", "omega_assets"})
 _ASSET_EDGES = frozenset({"omega_assets"})
+_MEDIA_EDGES = frozenset({"omega_media", "omega_assets"})
 _SIMULATION_EDGES = frozenset({"omega_simulation", "omega_assets", "omega_core"})
 _GAMEPLAY_EDGES = frozenset({"omega_gameplay", "omega_simulation"})
 _PERSISTENCE_EDGES = frozenset({"omega_persistence"})
@@ -319,6 +320,18 @@ MODULE_RULES = (
         platform_neutral=True,
     ),
     ModuleRule(
+        "native/include/omega/media/",
+        "omega_media",
+        _MEDIA_EDGES,
+        platform_neutral=True,
+    ),
+    ModuleRule(
+        "native/src/media/",
+        "omega_media",
+        _MEDIA_EDGES,
+        platform_neutral=True,
+    ),
+    ModuleRule(
         "native/include/omega/retail/",
         "omega_retail_formats",
         _RETAIL_EDGES,
@@ -376,6 +389,7 @@ PROJECT_HEADER_MODULES = (
     ("omega/simulation/", "omega_simulation"),
     ("omega/runtime/", "omega_runtime"),
     ("omega/content/", "omega_content"),
+    ("omega/media/", "omega_media"),
     ("omega/retail/", "omega_retail_formats"),
     ("omega/asset/", "omega_assets"),
     ("omega/archive/", "omega_core"),
