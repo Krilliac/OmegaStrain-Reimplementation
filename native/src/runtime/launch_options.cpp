@@ -210,6 +210,8 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
         return std::unexpected("--probe-only cannot be combined with --opening-movie");
     if (result.show_help && arguments.size() != 1U)
         return std::unexpected("--help cannot be combined with other options");
+    if (result.opening_movie_path && result.capture_run)
+        return std::unexpected("--opening-movie cannot be combined with --capture-run");
     if (result.replay_capture && !result.capture_run)
         return std::unexpected("--replay-capture requires --capture-run");
     if (result.capture_run && !saw_frames)

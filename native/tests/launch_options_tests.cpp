@@ -199,6 +199,17 @@ int LaunchOptionsFailureCount()
     CheckError(Parse({"--opening-movie=A", "--opening-movie=B"}),
         "--opening-movie may be specified only once",
         "opening movie paths are once-only");
+    constexpr std::string_view opening_capture_error =
+        "--opening-movie cannot be combined with --capture-run";
+    CheckError(Parse({"--opening-movie=C:/Owned Media/opening.pss", "--capture-run", "--frames=1"}),
+               opening_capture_error, "opening movie playback cannot enter deterministic capture");
+    CheckError(Parse({"--frames=1", "--capture-run", "--opening-movie=C:/Owned Media/opening.pss"}),
+               opening_capture_error,
+               "capture cannot initialize opening movie playback in reverse argument order");
+    CheckError(Parse({"--replay-capture", "--opening-movie=C:/Owned Media/opening.pss",
+                      "--frames=1", "--capture-run"}),
+               opening_capture_error,
+               "capture replay remains isolated from unrepresented opening movie state");
     Check(!Parse({"--config="}), "empty config paths are rejected");
     Check(!Parse({"--config=A", "--config=B"}), "duplicate config paths are rejected");
     Check(!Parse({"--set=missing_separator"}), "configuration overrides require an equals sign");
