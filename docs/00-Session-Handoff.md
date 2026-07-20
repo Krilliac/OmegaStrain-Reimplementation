@@ -1156,6 +1156,24 @@ shipping dependencies or execution mechanisms.
     D-drive content, disc image, save, memory-card image, savestate, executable, emulator, or PCSX2
     input was accessed.
 
+70. E-0084 adds the first typed native schema and composes persistence into startup. The bottom-level
+    `omega_profiles` catalog borrows one stable `SaveDatabase`, accepts exact 128-bit lowercase-hex
+    identifiers, and stores one bounded versioned metadata marker per explicit profile. Display names
+    must be control-free UTF-8 from 1 through 64 bytes; caller-supplied UTC-millisecond timestamps are
+    bounded, creation time is immutable, modification time cannot move backwards, and successful
+    database generations are exposed only as opaque optimistic-concurrency tokens. Listing is
+    deterministic by identifier, ignores unrelated records, and never creates or selects a default.
+    The pure native-save path resolver accepts only absolute already-captured platform roots for
+    Windows, macOS, and XDG hosts. App-owned `NativePersistence` heap-owns the database and catalog at
+    stable addresses, validates the catalog before platform creation, and moves into `OmegaApp` with
+    catalog-before-database destruction. Probe-only startup never touches persistence; zero-frame
+    startup bootstraps it and reports the profile count. Synthetic unit, process, package, and
+    fresh-runner contracts cover creation, validation, optimistic updates, reopen, exact genesis,
+    path failure, probe non-mutation, and future schema rejection. Static validation passed; C++
+    compilation, publication CI, exact-main validation, profile menu actions, active-profile policy,
+    and owner data remain unclaimed. No private or owner file, proprietary input, D-drive content,
+    disc image, memory-card image, save, executable, emulator, or PCSX2 input was accessed.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2

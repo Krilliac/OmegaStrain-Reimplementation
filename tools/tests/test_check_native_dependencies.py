@@ -44,12 +44,14 @@ class NativeDependencyGateTests(unittest.TestCase):
     def test_explicit_allowed_module_edges(self) -> None:
         cases = (
             ("native/src/archive/example.cpp", "omega/asset/decode.h"),
+            ("native/src/profiles/example.cpp", "omega/persistence/save_database.h"),
             ("native/src/simulation/example.cpp", "omega/asset/decode.h"),
             ("native/src/retail/example.cpp", "omega/archive/archive_reader.h"),
             ("native/src/content/example.cpp", "omega/retail/pop_level_manifest_decoder.h"),
             ("native/src/runtime/example.cpp", "omega/content/game_data_service.h"),
             ("native/apps/openomega/sdl_example.cpp", "omega/runtime/render_frame_packet.h"),
             ("native/apps/openomega/example.cpp", "omega/simulation/simulation_world.h"),
+            ("native/apps/openomega/example.cpp", "omega/profiles/profile_catalog.h"),
         )
         for relative_path, include in cases:
             with self.subTest(relative_path=relative_path, include=include):
@@ -62,6 +64,8 @@ class NativeDependencyGateTests(unittest.TestCase):
     def test_explicit_forbidden_module_edges(self) -> None:
         cases = (
             ("native/src/archive/example.cpp", "omega/runtime/frame_scheduler.h"),
+            ("native/src/persistence/example.cpp", "omega/profiles/profile_catalog.h"),
+            ("native/src/profiles/example.cpp", "omega/runtime/frame_scheduler.h"),
             ("native/src/simulation/example.cpp", "omega/runtime/frame_scheduler.h"),
             ("native/src/retail/example.cpp", "omega/content/game_data_service.h"),
             ("native/src/content/example.cpp", "omega/simulation/simulation_world.h"),
@@ -250,6 +254,75 @@ class NativeDependencyGateTests(unittest.TestCase):
         self.assert_rejected(
             "native/src/persistence/example.cpp",
             '#include "omega/persistence_extra/example.h"\n',
+            "unclassified project include",
+        )
+
+    def test_profiles_allow_only_self_and_persistence(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/include/omega/profiles/types.h": (
+                    "#pragma once\n"
+                    "#include <cstdint>\n"
+                ),
+                "native/include/omega/profiles/catalog.h": (
+                    "#pragma once\n"
+                    '#include "omega/profiles/types.h"\n'
+                    '#include "omega/persistence/save_database.h"\n'
+                ),
+                "native/src/profiles/catalog.cpp": (
+                    '#include "omega/profiles/catalog.h"\n'
+                    '#include "omega/persistence/save_database.h"\n'
+                ),
+            }
+        )
+        self.assertEqual(checked, 3)
+        self.assertEqual(errors, [])
+
+        header_rule = gate.module_rule(
+            Path("native/include/omega/profiles/catalog.h")
+        )
+        source_rule = gate.module_rule(Path("native/src/profiles/catalog.cpp"))
+        self.assertIsNotNone(header_rule)
+        self.assertIsNotNone(source_rule)
+        self.assertEqual(header_rule.name, "omega_profiles")
+        self.assertEqual(source_rule.name, "omega_profiles")
+        self.assertEqual(
+            header_rule.allowed_omega_modules,
+            frozenset({"omega_profiles", "omega_persistence"}),
+        )
+        self.assertEqual(
+            source_rule.allowed_omega_modules,
+            frozenset({"omega_profiles", "omega_persistence"}),
+        )
+        self.assertTrue(header_rule.platform_neutral)
+        self.assertTrue(source_rule.platform_neutral)
+
+    def test_profiles_reject_cross_layer_and_pcsx2_dependencies(self) -> None:
+        cases = (
+            (
+                "native/src/profiles/example.cpp",
+                '#include "omega/runtime/frame_scheduler.h"\n',
+                "omega_profiles includes forbidden dependency",
+            ),
+            (
+                "native/include/omega/profiles/example.h",
+                '#include "pcsx2/MemoryCardFile.h"\n',
+                "omega_profiles includes forbidden PCSX2 header",
+            ),
+        )
+        for relative_path, source, message in cases:
+            with self.subTest(relative_path=relative_path, source=source):
+                self.assert_rejected(relative_path, source, message)
+
+    def test_profiles_classification_remains_fail_closed(self) -> None:
+        self.assert_rejected(
+            "native/src/profiles_extra/example.cpp",
+            "constexpr int example = 0;\n",
+            "unclassified shipping native source path",
+        )
+        self.assert_rejected(
+            "native/src/profiles/example.cpp",
+            '#include "omega/profiles_extra/example.h"\n',
             "unclassified project include",
         )
 

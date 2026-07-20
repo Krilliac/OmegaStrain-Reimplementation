@@ -206,6 +206,7 @@ _ASSET_EDGES = frozenset({"omega_assets"})
 _SIMULATION_EDGES = frozenset({"omega_simulation", "omega_assets", "omega_core"})
 _GAMEPLAY_EDGES = frozenset({"omega_gameplay", "omega_simulation"})
 _PERSISTENCE_EDGES = frozenset({"omega_persistence"})
+_PROFILES_EDGES = frozenset({"omega_profiles", "omega_persistence"})
 _RETAIL_EDGES = frozenset({"omega_retail_formats", "omega_assets", "omega_core"})
 _CONTENT_EDGES = frozenset(
     {"omega_content", "omega_retail_formats", "omega_assets", "omega_core"}
@@ -217,6 +218,8 @@ _SDL_EDGES = frozenset({"omega_sdl_backend", "omega_runtime"})
 _APP_EDGES = frozenset(
     {
         "openomega",
+        "omega_persistence",
+        "omega_profiles",
         "omega_sdl_backend",
         "omega_runtime",
         "omega_simulation",
@@ -253,6 +256,18 @@ MODULE_RULES = (
         "native/src/persistence/",
         "omega_persistence",
         _PERSISTENCE_EDGES,
+    ),
+    ModuleRule(
+        "native/include/omega/profiles/",
+        "omega_profiles",
+        _PROFILES_EDGES,
+        platform_neutral=True,
+    ),
+    ModuleRule(
+        "native/src/profiles/",
+        "omega_profiles",
+        _PROFILES_EDGES,
+        platform_neutral=True,
     ),
     ModuleRule(
         "native/include/omega/simulation/",
@@ -342,6 +357,7 @@ EXACT_MODULE_RULES = {
 
 PROJECT_HEADER_MODULES = (
     ("omega/gameplay/", "omega_gameplay"),
+    ("omega/profiles/", "omega_profiles"),
     ("omega/persistence/", "omega_persistence"),
     ("omega/simulation/", "omega_simulation"),
     ("omega/runtime/", "omega_runtime"),

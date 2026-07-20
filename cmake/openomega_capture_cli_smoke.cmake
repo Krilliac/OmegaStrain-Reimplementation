@@ -25,7 +25,8 @@ if(NOT openomega_result STREQUAL "0")
 endif()
 
 string(CONCAT expected_stdout_pattern
-    "^OpenOmega native shell: GPU driver=[A-Za-z0-9_.-]+ audio_driver=dummy "
+    "^OpenOmega native persistence: profiles=0\n"
+    "OpenOmega native shell: GPU driver=[A-Za-z0-9_.-]+ audio_driver=dummy "
     "audio_format=f32/[0-9]+Hz/[0-9]+ch\n"
     "OpenOmega native shell: rendered_frames=2 "
     "planned_simulation_steps=[0-9]+ executed_simulation_steps=[0-9]+ "

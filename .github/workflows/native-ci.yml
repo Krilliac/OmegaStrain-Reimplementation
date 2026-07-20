@@ -213,6 +213,62 @@ jobs:
             }
           }
 
+          function Assert-NativeSaveGenesis {
+            param([Parameter(Mandatory = $true)][string] $ProfileRoot)
+
+            $expectedEntries = @(
+              'AppData/',
+              'LocalAppData/',
+              'LocalAppData/OpenOmega/',
+              'LocalAppData/OpenOmega/native-save/',
+              'LocalAppData/OpenOmega/native-save/openomega-save-a.oodb',
+              'LocalAppData/OpenOmega/native-save/openomega-save-b.oodb',
+              'LocalAppData/OpenOmega/native-save/openomega-save.lock',
+              'Temp/'
+            )
+            $actualEntries = @(
+              Get-ChildItem -LiteralPath $ProfileRoot -Force -Recurse -ErrorAction Stop |
+                ForEach-Object {
+                  if (($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw 'Synthetic profile contains a reparse point'
+                  }
+                  $relative = Get-RelativeEntryPath `
+                    -RootFullName $ProfileRoot `
+                    -EntryFullName $_.FullName
+                  if ($_.PSIsContainer) {
+                    "$relative/"
+                  } elseif ($_ -is [IO.FileInfo]) {
+                    $relative
+                  } else {
+                    throw 'Synthetic profile contains a non-regular entry'
+                  }
+                }
+            )
+            $difference = @(
+              Compare-Object -ReferenceObject $expectedEntries -DifferenceObject $actualEntries -CaseSensitive
+            )
+            if ($difference.Count -ne 0) {
+              throw 'Synthetic profile does not contain exactly the native-save genesis tree'
+            }
+
+            $nativeSave = Join-Path $ProfileRoot 'LocalAppData/OpenOmega/native-save'
+            foreach ($snapshotName in @('openomega-save-a.oodb', 'openomega-save-b.oodb')) {
+              $snapshot = Get-Item -LiteralPath (Join-Path $nativeSave $snapshotName) -Force -ErrorAction Stop
+              if ($snapshot.PSIsContainer -or $snapshot -isnot [IO.FileInfo] -or
+                  $snapshot.Length -ne 64) {
+                throw "$snapshotName is not a generation-zero snapshot"
+              }
+              $snapshotHash = (Get-FileHash -LiteralPath $snapshot.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($snapshotHash -cne '5017fce9c2b7f1fe487d6d35ed3ae5af6ac1826460044af0c03af5155d6d11f4') {
+                throw "$snapshotName bytes do not match format-v1 genesis"
+              }
+            }
+            $lock = Get-Item -LiteralPath (Join-Path $nativeSave 'openomega-save.lock') -Force -ErrorAction Stop
+            if ($lock.PSIsContainer -or $lock -isnot [IO.FileInfo] -or $lock.Length -ne 0) {
+              throw 'Native-save lock is not an empty regular file'
+            }
+          }
+
           function Invoke-LauncherCase {
             param(
               [Parameter(Mandatory = $true)][string] $Name,
@@ -388,7 +444,6 @@ jobs:
           $artifactManifestBefore = Get-TreeManifest -Root $artifactDirectory
           $packageManifestBefore = Get-TreeManifest -Root $packageRoot
           $unrelatedManifestBefore = Get-TreeManifest -Root $unrelatedDirectory
-          $profileManifestBefore = Get-TreeManifest -Root $profileDirectory
 
           $env:ComSpec = $comspec
           $env:PATH = "$systemDirectory;$env:SystemRoot"
@@ -407,12 +462,28 @@ jobs:
             -WorkingDirectory $unrelatedDirectory `
             -Arguments @('--frames=0') `
             -ExpectedExitCode 0 `
-            -ExpectedStdout "OpenOmega native shell: rendered_frames=0`n" `
+            -ExpectedStdout "OpenOmega native persistence: profiles=0`nOpenOmega native shell: rendered_frames=0`n" `
             -ExpectedStderr ''
           Assert-TreeManifest -Name 'Downloaded artifact' -Root $artifactDirectory -Expected $artifactManifestBefore
           Assert-TreeManifest -Name 'Extracted package' -Root $packageRoot -Expected $packageManifestBefore
           Assert-TreeManifest -Name 'Unrelated working directory' -Root $unrelatedDirectory -Expected $unrelatedManifestBefore
-          Assert-TreeManifest -Name 'Synthetic profile' -Root $profileDirectory -Expected $profileManifestBefore
+          Assert-NativeSaveGenesis -ProfileRoot $profileDirectory
+          $profileManifestAfterFirstNativeStartup = Get-TreeManifest -Root $profileDirectory
+
+          Invoke-LauncherCase `
+            -Name 'zero-frame native persistence reopen' `
+            -Comspec $comspec `
+            -Taskkill $taskkill `
+            -Launcher $launcher `
+            -WorkingDirectory $unrelatedDirectory `
+            -Arguments @('--frames=0') `
+            -ExpectedExitCode 0 `
+            -ExpectedStdout "OpenOmega native persistence: profiles=0`nOpenOmega native shell: rendered_frames=0`n" `
+            -ExpectedStderr ''
+          Assert-TreeManifest -Name 'Downloaded artifact' -Root $artifactDirectory -Expected $artifactManifestBefore
+          Assert-TreeManifest -Name 'Extracted package' -Root $packageRoot -Expected $packageManifestBefore
+          Assert-TreeManifest -Name 'Unrelated working directory' -Root $unrelatedDirectory -Expected $unrelatedManifestBefore
+          Assert-TreeManifest -Name 'Synthetic profile native persistence reopen' -Root $profileDirectory -Expected $profileManifestAfterFirstNativeStartup
 
           $sentinelStderr = @(
             'unknown option: --openomega-package-contract-sentinel',
@@ -433,6 +504,6 @@ jobs:
           Assert-TreeManifest -Name 'Downloaded artifact' -Root $artifactDirectory -Expected $artifactManifestBefore
           Assert-TreeManifest -Name 'Extracted package' -Root $packageRoot -Expected $packageManifestBefore
           Assert-TreeManifest -Name 'Unrelated working directory' -Root $unrelatedDirectory -Expected $unrelatedManifestBefore
-          Assert-TreeManifest -Name 'Synthetic profile' -Root $profileDirectory -Expected $profileManifestBefore
+          Assert-TreeManifest -Name 'Synthetic profile' -Root $profileDirectory -Expected $profileManifestAfterFirstNativeStartup
 
-          Write-Host 'fresh-VM portable consumer: OK (artifact, checksum, tree, launch, immutability)'
+          Write-Host 'fresh-VM portable consumer: OK (artifact, checksum, tree, native persistence, launch, immutability)'

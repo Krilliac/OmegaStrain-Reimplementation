@@ -175,6 +175,66 @@ function(require_same_manifest case_name expected actual)
     endif()
 endfunction()
 
+function(require_windows_native_save_genesis case_name profile_root)
+    set(native_save_directory "${profile_root}/OpenOmega/native-save")
+    if(NOT EXISTS "${native_save_directory}" OR
+       NOT IS_DIRECTORY "${native_save_directory}" OR
+       IS_SYMLINK "${native_save_directory}")
+        message(FATAL_ERROR "${case_name}: native-save directory is invalid")
+    endif()
+
+    file(GLOB_RECURSE profile_entries
+        LIST_DIRECTORIES TRUE
+        RELATIVE "${profile_root}"
+        "${profile_root}/*"
+    )
+    list(SORT profile_entries)
+    set(expected_profile_entries
+        "OpenOmega"
+        "OpenOmega/native-save"
+        "OpenOmega/native-save/openomega-save-a.oodb"
+        "OpenOmega/native-save/openomega-save-b.oodb"
+        "OpenOmega/native-save/openomega-save.lock"
+    )
+    list(SORT expected_profile_entries)
+    if(NOT profile_entries STREQUAL expected_profile_entries)
+        message(FATAL_ERROR
+            "${case_name}: synthetic profile entries differ\n"
+            "expected=[${expected_profile_entries}]\n"
+            "actual=[${profile_entries}]"
+        )
+    endif()
+
+    foreach(snapshot IN ITEMS openomega-save-a.oodb openomega-save-b.oodb)
+        set(snapshot_path "${native_save_directory}/${snapshot}")
+        if(NOT EXISTS "${snapshot_path}" OR IS_DIRECTORY "${snapshot_path}" OR
+           IS_SYMLINK "${snapshot_path}")
+            message(FATAL_ERROR "${case_name}: ${snapshot} is not a regular file")
+        endif()
+        file(SIZE "${snapshot_path}" snapshot_size)
+        if(NOT snapshot_size EQUAL 64)
+            message(FATAL_ERROR
+                "${case_name}: ${snapshot} is not a generation-zero snapshot")
+        endif()
+        file(SHA256 "${snapshot_path}" snapshot_hash)
+        if(NOT snapshot_hash STREQUAL
+           "5017fce9c2b7f1fe487d6d35ed3ae5af6ac1826460044af0c03af5155d6d11f4")
+            message(FATAL_ERROR
+                "${case_name}: ${snapshot} bytes do not match format-v1 genesis")
+        endif()
+    endforeach()
+
+    set(lock_path "${native_save_directory}/openomega-save.lock")
+    if(NOT EXISTS "${lock_path}" OR IS_DIRECTORY "${lock_path}" OR
+       IS_SYMLINK "${lock_path}")
+        message(FATAL_ERROR "${case_name}: native-save lock is not a regular file")
+    endif()
+    file(SIZE "${lock_path}" lock_size)
+    if(NOT lock_size EQUAL 0)
+        message(FATAL_ERROR "${case_name}: native-save lock file is not empty")
+    endif()
+endfunction()
+
 function(clean_cpack_outputs)
     file(REMOVE
         "${package_zip}"
@@ -719,7 +779,6 @@ clean_cpack_outputs()
 require_known_outputs_absent("positive package precondition")
 directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" package_before)
 directory_manifest("${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}" unrelated_before)
-directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}" profile_before)
 
 execute_process(
     COMMAND "${OPENOMEGA_CPACK_COMMAND}"
@@ -872,8 +931,21 @@ endif()
 set(ENV{LOCALAPPDATA} "${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}")
 set(ENV{OPENOMEGA_DISABLE_STARTUP_DIALOG} "1")
 
-set(zero_frame_stdout "OpenOmega native shell: rendered_frames=0\n")
+string(CONCAT zero_frame_stdout
+    "OpenOmega native persistence: profiles=0\n"
+    "OpenOmega native shell: rendered_frames=0\n"
+)
 run_launcher_case(package_launcher_zero_frames 0 "${zero_frame_stdout}" "" --frames=0)
+require_windows_native_save_genesis(
+    "packaged first zero-frame startup" "${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}")
+directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}"
+    profile_after_first_native_startup)
+run_launcher_case(package_launcher_zero_frames_reopen 0
+    "${zero_frame_stdout}" "" --frames=0)
+directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}"
+    profile_after_native_reopen)
+require_same_manifest("packaged second zero-frame native-save reopen"
+    "${profile_after_first_native_startup}" "${profile_after_native_reopen}")
 string(CONCAT launch_usage
     "usage: openomega [-h|--help]\n"
     "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
@@ -902,6 +974,7 @@ directory_manifest("${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}" unrelated_after)
 directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}" profile_after)
 directory_manifest("${package_root}" package_root_after_launch)
 require_same_manifest("launcher unrelated directory" "${unrelated_before}" "${unrelated_after}")
-require_same_manifest("launcher synthetic profile" "${profile_before}" "${profile_after}")
+require_same_manifest("launcher synthetic profile"
+    "${profile_after_first_native_startup}" "${profile_after}")
 require_same_manifest("launcher package root"
     "${package_root_before_launch}" "${package_root_after_launch}")

@@ -1,7 +1,9 @@
 #include "omega_app.h"
+#include "native_persistence.h"
 #include "run_replay_session.h"
 #include "startup_failure_dialog.h"
 
+#include "omega/persistence/native_save_path.h"
 #include "omega/runtime/content_startup.h"
 #include "omega/runtime/content_startup_diagnostic.h"
 #include "omega/runtime/launch_options.h"
@@ -78,6 +80,37 @@ CaptureDefaultRuntimeConfigPath()
     }
 }
 
+[[nodiscard]] std::expected<std::filesystem::path, std::string>
+CaptureDefaultNativeSavePath()
+{
+    try
+    {
+        omega::persistence::NativeSaveSearchRoots roots;
+        const omega::persistence::NativeSavePlatform platform =
+            omega::persistence::HostNativeSavePlatform();
+#if defined(_WIN32)
+        roots.local_app_data = ReadWideEnvironmentPath(L"LOCALAPPDATA");
+#elif defined(__APPLE__)
+        roots.home = ReadEnvironmentPath("HOME");
+#else
+        roots.xdg_data_home = ReadEnvironmentPath("XDG_DATA_HOME");
+        roots.home = ReadEnvironmentPath("HOME");
+#endif
+        auto path = omega::persistence::ResolveDefaultNativeSavePath(platform, roots);
+        if (!path)
+        {
+            return std::unexpected(
+                "native persistence default path: no usable absolute platform data root");
+        }
+        return std::move(*path);
+    }
+    catch (...)
+    {
+        return std::unexpected(
+            "native persistence default path: unable to resolve native-save path");
+    }
+}
+
 void PresentStartupFailureDialogAfterStderr(
     const omega::app::StartupFailureStage stage,
     const std::string_view category,
@@ -136,6 +169,24 @@ void PrintContentError(const omega::runtime::ContentStartupError& error)
     PresentStartupFailureDialogAfterStderr(
         omega::app::StartupFailureStage::ContentStartup,
         diagnostic->category, diagnostic->message);
+}
+
+void PrintNativePersistencePathError(const std::string_view detail)
+{
+    constexpr std::string_view category = "path-unavailable";
+    std::cerr << "native persistence [" << category << "]: " << detail << '\n';
+    PresentStartupFailureDialogAfterStderr(
+        omega::app::StartupFailureStage::NativePersistence, category, detail);
+}
+
+void PrintNativePersistenceError(
+    const omega::app::NativePersistenceStartupError& error)
+{
+    const std::string_view category =
+        omega::app::NativePersistenceStartupErrorCodeName(error.code);
+    std::cerr << "native persistence [" << category << "]: " << error.message << '\n';
+    PresentStartupFailureDialogAfterStderr(
+        omega::app::StartupFailureStage::NativePersistence, category, error.message);
 }
 
 void PrintRunCaptureDiagnostics(const omega::app::RunCaptureOutcome& outcome)
@@ -406,7 +457,29 @@ int main(const int argc, char** argv)
         }
     }
 
-    if (options->probe_only || options->frame_limit == 0)
+    if (options->probe_only)
+    {
+        std::cout << "OpenOmega native shell: rendered_frames=0\n";
+        return EXIT_SUCCESS;
+    }
+
+    auto native_save_path = CaptureDefaultNativeSavePath();
+    if (!native_save_path)
+    {
+        PrintNativePersistencePathError(native_save_path.error());
+        return EXIT_FAILURE;
+    }
+    auto native_persistence =
+        omega::app::NativePersistence::Bootstrap(std::move(*native_save_path));
+    if (!native_persistence)
+    {
+        PrintNativePersistenceError(native_persistence.error());
+        return EXIT_FAILURE;
+    }
+    std::cout << "OpenOmega native persistence: profiles="
+              << native_persistence->startup_profiles().size() << '\n';
+
+    if (options->frame_limit == 0)
     {
         std::cout << "OpenOmega native shell: rendered_frames=0\n";
         return EXIT_SUCCESS;
@@ -418,7 +491,8 @@ int main(const int argc, char** argv)
     constexpr bool debug_device = false;
 #endif
     auto app = omega::app::OmegaApp::Create(
-        std::move(*config), *settings, std::move(content), debug_device);
+        std::move(*config), *settings, std::move(content),
+        std::move(*native_persistence), debug_device);
     if (!app)
     {
         std::cerr << app.error() << '\n';
