@@ -57,84 +57,23 @@ tracked evidence — the fingerprinting tool only computes such aggregates
 
 ## 5. Hypotheses
 
-All items below are explicitly labeled hypotheses. None are asserted as
-fact. Each lists the privacy-safe, aggregate-only observation that would
-confirm or refute it without violating clean-room rules.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
 
-- **H-1: `.bon` denotes a bone/skeleton-adjacent asset family (name-similarity guess only).**
-  The suffix visually resembles "bone" and the codebase already has
-  bone/skeleton container formats (`.ska`, `.skl`, `.skas`, `.skm`,
-  `BONENOSCALE` magic). This is a naming-pattern guess, not evidence — the
-  tracked sources establish no connection between `.bon` and any bone/skeleton
-  decoder.
-  *Confirms/refutes:* Add a structural handler for `.bon` to
-  `tools/fingerprint_assets.py` that inspects only the first N bytes of each
-  span for a magic/tag pattern and emits an aggregate hit-count (e.g.
-  "N of 156 `.bon` spans begin with tag X"), mirroring the existing
-  `BONENOSCALE`-style checks. A nonzero aggregate hit rate for a
-  skeleton-related magic would support H-1; an aggregate hit rate of 0, or a
-  distinct/unrelated magic distribution, would refute it.
-
-- **H-2: `.bon` members are uniformly small (config/metadata-scale) rather than large binary payloads.**
-  Suggested only by its position in the suffix-frequency table relative to
-  known small-file formats (analogous count magnitude to `.vpk` at 85 and
-  `.skf` at 26, versus large binary families like `.tdx` at 15248). This is
-  speculative pattern-matching on count alone, not a size observation.
-  *Confirms/refutes:* Extend the fingerprinter to compute an aggregate size
-  histogram (min/max/mean/bucketed distribution) for `.bon` spans, identical
-  in shape to the aggregates already published for handled formats, and add
-  it to `asset-fingerprints.json`. A tight small-size cluster would support
-  H-2; a wide or large-size distribution would refute it.
-
-- **H-3: All 156 `.bon` occurrences are single-depth (depth 0 or 1) HOG members, not present inside nested HOGs.**
-  Suggested only by recursive-in-HOG count (156) exactly equaling top-level-HOG
-  count (156); this equality is consistent with, but does not prove, a
-  single-depth distribution.
-  *Confirms/refutes:* Emit a per-extension depth breakdown (a `scan.depth`
-  histogram keyed by extension rather than only globally) in
-  `asset-fingerprints.json`. If `.bon`'s depth histogram shows 100% mass at
-  one depth, H-3 is confirmed; any split across depths refutes it.
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- **No header/magic-byte sample for `.bon`.** Tracked evidence contains zero
-  bytes of `.bon` content — no header dump, no magic literal, no field
-  layout. *Privacy-safe collection:* a structural-handler function (in the
-  style of the existing `fingerprint_*` functions in
-  `tools/fingerprint_assets.py`) that reads only the first 16–32 bytes of
-  each `.bon` span, buckets them into an aggregate tag/magic-frequency table,
-  and stores counts only (no payload bytes) — matching the existing
-  `formats.*` aggregate pattern already in `asset-fingerprints.json`.
-
-- **No size distribution for `.bon`.** The current pipeline only computes size
-  aggregates inside per-extension handlers, which `.bon` lacks. *Privacy-safe
-  collection:* add `.bon` to `FORMAT_HANDLERS` with a minimal handler that
-  records aggregate size buckets and alignment flags (e.g.
-  `span_2048_byte_aligned`), following the pattern already used for `.col`,
-  `.lpd`, etc.
-
-- **No per-extension nesting-depth breakdown.** `scan.depth` in
-  `asset-fingerprints.json` is a global histogram across all extensions
-  combined, so depth cannot currently be attributed to `.bon` alone.
-  *Privacy-safe collection:* extend `scan_asset()` to count depth per
-  extension (`scan.count(f"depth_{extension}", depth)` or equivalent),
-  publishing only the resulting aggregate counts.
-
-- **No evidence-ledger entry.** `.bon` has never been the subject of a
-  confirmed or rejected claim in `analysis/evidence/ledger.jsonl`.
-  *Privacy-safe collection:* once a structural handler exists and produces
-  an aggregate observation (magic distribution, size distribution), file a
-  ledger entry (`E-####`) citing that aggregate as the evidence, so future
-  dossier revisions have a citable claim ID instead of a fresh ad hoc
-  re-derivation.
-
-- **No sibling-adjacency evidence.** Tracked sources do not record which
-  other suffixes typically co-occur in the same HOG alongside `.bon` members
-  (e.g. whether `.bon` files travel with `.skl`/`.ska`/`.skm` sets). *Privacy-safe
-  collection:* an aggregate co-occurrence count (e.g. "of the top-level HOGs
-  containing at least one `.bon` member, N also contain at least one `.skl`
-  member") computed and published as archive-level counts only — no member
-  names or paths.
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -165,35 +104,12 @@ means `.bon` has not yet entered the decoder pipeline at all.
 
 ## 8. Codex work order
 
-Ranked, concrete, privacy-safe. Each item operates only on tracked
-infrastructure/aggregation code, never on private inputs directly, and each
-output must remain an aggregate count.
-
-1. **Add a `.bon` entry to `FORMAT_HANDLERS`** in
-   `tools/fingerprint_assets.py` with a minimal `fingerprint_bon()` that
-   reads only the first 16–32 bytes of each span and records an aggregate
-   magic/tag-frequency table (mirroring the existing `BONENOSCALE`-detection
-   pattern in `fingerprint_skl`) plus a size-bucket histogram and the
-   standard `span_2048_byte_aligned`-style alignment flag. Output must land
-   in `asset-fingerprints.json` under a new `formats.bon` key, aggregate
-   counts only.
-2. **Re-run the fingerprinting scan** against the tracked/owner corpus with
-   the new handler and diff the regenerated `asset-fingerprints.json`
-   against the current one — confirm the `.bon` count stays at 156 (sanity
-   check that the new handler doesn't change span discovery) and capture the
-   new `formats.bon` aggregate block.
-3. **Add a per-extension depth breakdown** to `scan_asset()` so `.bon`'s
-   nesting-depth distribution (H-3) can be evaluated from an aggregate count
-   rather than inferred from the coincidental 156=156 equality.
-4. **File an evidence-ledger entry** (next `E-####`) once step 1–2 produce a
-   citable aggregate, recording the magic/size aggregate as the new
-   Confirmed or Aggregate-only fact — this converts today's Hypotheses
-   section into either Confirmed facts or explicitly Rejected claims on the
-   next dossier revision.
-5. **Only after** 1–4 land and show a stable, structured magic/size pattern,
-   consider whether a native structural-envelope decoder is warranted
-   (i.e., promote from `aggregate_scanner_only` toward
-   `structural_envelope_only`). Do not skip ahead to writing a native
-   decoder or descriptor header on the strength of the naming hypothesis
-   (H-1) alone — that would be inventing semantics the evidence does not
-   yet support.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

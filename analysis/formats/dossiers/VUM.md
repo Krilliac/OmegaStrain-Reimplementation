@@ -74,54 +74,25 @@ Aggregate counts/ranges with no semantic interpretation attached (already publis
 
 ## 5. Hypotheses
 
-Explicitly labeled; none is treated as fact anywhere above.
 
-- **H1 (rejected by tracked evidence, retained for completeness):** the final payload
-  region is a flat vertex/position table. Tracked evidence (VUM.md render-geometry gate)
-  already tested and rejected this for the observed corpus; retained here only as a
-  documented negative result, not an open hypothesis.
-- **H2:** the middle- and/or final-payload regions encode PS2 VU/VIF packet or geometry
-  data consumed by a renderer. **Confirming/refuting observation:** a privacy-safe,
-  sanitized consumer-read trace (same schema as `tools/validate_vum_read_trace.py`) that
-  captures reads into the middle/final payload byte ranges specifically (current accepted
-  traces are confined to the header-vector block only, per VUM.md) — reported only as
-  VUM-relative offsets/widths/counts, no payload bytes.
-- **H3:** the opaque correlated code words at `0x48`/`0x4C`/`0x50` in each `MTRL` record
-  encode a texture-slot or material-layer role. **Confirming/refuting observation:** an
-  aggregate-only cross-tabulation of those code values against the already-confirmed
-  active-reference-count field at `0x58`, reported as a frequency table with no per-file
-  or per-name detail, checked for a stable many-to-one or one-to-one structural relation
-  across the full 38,899-record corpus.
-- **H4:** VUM catalog names participate in retail texture lookup through a mechanism other
-  than the two tested string-equality families (exact `.TDX` suffix; one-terminal-extension
-  elision). **Confirming/refuting observation:** extend
-  `tools/measure_level_material_texture_name_candidates.py` with an additional candidate
-  family (e.g. basename/stem comparison) under the same sanitized-report schema and check
-  whether the unmatched population (currently the entire 34,267 names / 34,589 material records under
-  exact-equality) shrinks.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- No tracked evidence establishes the semantic role of the two homogeneous float vectors
-  at header offset `0x20`–`0x4F`, nor of scalar words `0x08`/`0x0C` in each `MTRL` record.
-  **Privacy-safe collection:** an aggregate cross-tabulation of these float/word values
-  against already-confirmed structural fields (record counts, group values), reported only
-  as value-bucket histograms with no per-file or per-name detail.
-- No tracked evidence exists for a consumer-read trace that reaches the metadata-record
-  region, the middle payload, or the final payload (the two accepted trace pairs in
-  VUM.md are confined to the header-vector block). **Privacy-safe collection:** additional
-  bounded, sanitized captures using the existing `validate_vum_read_trace.py` schema,
-  targeting VUM-relative offset ranges beyond the current header-only window, reported as
-  the same allow-listed aggregate fields (offsets/widths/counts only).
-- No tracked evidence tests whether `.vum` catalog names correlate with any container
-  class other than the two direct `.TDX` locator classes already tested. **Privacy-safe
-  collection:** run the existing candidate-family harness against additional sibling
-  container classes (already known to the tracked manifest data) under the same
-  zero-payload, aggregate-only report schema.
-- No tracked evidence quantifies whether the 47 files with a nonzero trailing region past
-  `0x58` share a common trailing-region grammar. **Privacy-safe collection:** extend the
-  native aggregate verifier to report a sanitized histogram of trailing-region byte lengths
-  and 16-byte-alignment status for that 47-file subset, with no per-file identification.
+
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -161,31 +132,13 @@ render-payload regions.
 
 ## 8. Codex work order
 
-Ranked, privacy-safe next steps. None fabricates semantics; each targets closing a
-Missing-observation or testing a Hypothesis from Sections 5–6 against the owner corpus.
 
-1. **(Highest priority)** Extend the existing consumer-read trace harness
-   (`tools/validate_vum_read_trace.py`) to capture additional bounded, sanitized trace
-   pairs that specifically target VUM-relative offset ranges in the metadata-record and
-   payload regions (beyond the current header-only-confirmed window), reusing the exact
-   allow-listed schema (VUM-relative offsets/widths/counts, anonymous instrumentation
-   sites, VIF ranges, lifecycle status only — no payload bytes, no paths, no hashes). This
-   is the most direct path to either promoting H2 or producing a further confirmed
-   negative result, and it reuses infrastructure already proven to pass its
-   containment/determinism gates.
-2. Run the aggregate cross-tabulation described in H3 (opaque `MTRL` correlated code words
-   vs. active-reference-count field) as a new bounded analysis script, output limited to
-   value-bucket frequency tables with no per-file/per-name rows, to test whether a stable
-   structural relation exists before any semantic label is proposed.
-3. Add the trailing-region histogram described in Missing-observation 4 to the native
-   aggregate verifier (`asset-metadata-verify-tree`), reporting only a sanitized bucketed
-   byte-length/alignment summary for the 47-file nonzero-tail subset.
-4. Extend `tools/measure_level_material_texture_name_candidates.py` with one additional
-   candidate family (e.g. basename/stem comparison) per H4, under the same
-   zero-payload/aggregate-only report schema, to determine whether the unmatched
-   34,267 names / 34,589 material records shrinks under a broader alias policy.
-5. Re-run the existing native verifiers
-   (`asset-metadata-verify-tree`, `level-material-catalogs-verify-tree`) against the full
-   owner corpus after any of the above changes to confirm the zero-error baseline (7,036
-   catalogs / 18 levels / 5,351 manifest catalogs) is preserved, before promoting any new
-   aggregate claim into this dossier's Confirmed section.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

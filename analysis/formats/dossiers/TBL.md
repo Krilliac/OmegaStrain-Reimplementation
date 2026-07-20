@@ -37,21 +37,25 @@ Each row below is mechanically citable from a named tracked file.
 
 ## 4. Hypotheses
 
-All statements below are explicitly labeled hypotheses, not facts. None are asserted in the dossier body above.
 
-- **H1 — Front-end/menu data table.** The topology tool's own author-assigned category label `"table"`, combined with `.tbl`'s membership in the same fixed vocabulary as other front-end HOG-topology suffixes (`.gui`-adjacent categories such as scene/text/texture/material), suggests a plausible role as a front-end lookup or configuration table (e.g., a menu/UI data table) consumed alongside `.hog`-packed front-end assets. This is disfavored as a strong hypothesis because the one real `.tbl` file is whole-disc-only (never observed packed inside any `.hog`), which cuts against a tight structural association with the front-end HOG-topology assets the tool actually measures.
-  - *Privacy-safe confirmation/refutation:* add a `.tbl`-specific aggregate pass to `tools/fingerprint_assets.py` (analogous to `direct_map_summary()`) that reports size range, ASCII/non-ASCII split, and coarse token/delimiter-shape statistics for the single tracked `.tbl` file, without emitting filename, path, or raw content. A record-shaped or delimiter-repeating structure would move this toward Confirmed; a mismatch would weaken it without fully refuting it (n=1).
-- **H2 — PS2 toolchain/generic data-table artifact unrelated to the retail asset pipeline.** `.tbl` is a common generic suffix for lookup/data tables across many platforms and toolchains, independent of any Syphon Filter–specific semantics; the single occurrence could be an unrelated build-time or debug artifact bundled onto the disc image.
-  - *Privacy-safe confirmation/refutation:* the same size/ASCII aggregate proposed in H1 would also help here — a very small size or non-record-shaped content would favor H2 over H1. Neither hypothesis can be adjudicated with the currently tracked evidence (only the whole-disc count of 1 and the extension-histogram co-occurrence exist today; no size, byte-range, or content classification has ever been run against the real file).
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 5. Missing observations
 
-- **No aggregate scanner has ever been run against the single real `.tbl` file** — not even the minimal size-range / ASCII-classification pass that `.map` received via `direct_map_summary()`. This is the single biggest gap: today there is zero structural or even coarse-content evidence about the one tracked `.tbl` instance beyond its bare existence in the whole-disc extension histogram.
-- **The front-end HOG-topology tool's `.tbl` → `"table"` vocabulary entry has never been exercised against owner-corpus data.** `E-0086` explicitly scopes the tool's confirmed claim to synthetic fixtures only; no tracked artifact records what `approved_extension_counts[".tbl"]` or `approved_category_counts["table"]` would be if the tool were run against the real front-end HOG tree (and, per §1, the recursive/top-level HOG counts are independently already known to be 0, so any real run would report zero `.tbl` occurrences there too).
-- **No additional same-suffix samples exist in the tracked corpus** (whole-disc count = 1, HOG counts = 0), so no genuine size/content distribution can be built from the current pipeline output.
-- **No ledger entry** records a confirmed or rejected claim about `.tbl` file content, structure, or role specifically (only the tool-vocabulary-scoped `E-0086` entry names the suffix at all).
-- **No native decoder, descriptor type, or CMake/CTest registration** references the `.tbl` suffix family in any form.
-- **No cross-reference has been attempted against other published tracked grammar docs** (`HOG.md`, `TDX.md`, `COL.md`, `VUM.md`, `POP.md`, `SO.md`, `ASSET-RECON.md`) to see whether any of them independently reference or explain the `.tbl` file's role; a targeted search found no mention in `ASSET-RECON.md` (§2 fact 9), and no other tracked `*.md` grammar doc names `.tbl` at all.
+
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 6. Decoder/tooling status
 
@@ -65,11 +69,13 @@ All statements below are explicitly labeled hypotheses, not facts. None are asse
 
 ## 7. Codex work order
 
-Ranked, privacy-safe, no semantic speculation:
 
-1. **Add a `.tbl`-specific aggregate pass to `tools/fingerprint_assets.py`**, modeled directly on `direct_map_summary()` for `.MAP`: glob the disc root for `*.TBL`, and emit `file_count`, a size range via the shared `Aggregate.observe`, and an ASCII/non-ASCII content split — no filenames, paths, or raw content. This is the single highest-priority action: it is the only proposed change that would move this dossier's decoder status from `unknown` to at least `aggregate_scanner_only`, and it is the prerequisite for adjudicating H1 vs. H2 in §4.
-2. **Record the resulting aggregate as a new top-level block** in `analysis/formats/asset-fingerprints.json` (e.g. `direct_tbl_files`, mirroring the existing `direct_map_files` shape) so future dossier revisions have a real structural aggregate instead of only the bare whole-disc count.
-3. **If step 1's output is ASCII and shows a record-repeating or delimiter-repeating shape**, extend the scanner further with the same privacy-safe token-shape statistics proposed in the `.map` dossier's work order (line count, delimiter-character histogram, no raw text) to test H1 more precisely, while continuing to emit zero filenames/paths/content.
-4. **Re-run the front-end HOG-topology tool (`measure_frontend_hog_topology.py`) against the tracked front-end HOG tree** at least once and record the resulting aggregate JSON (per its already-published, privacy-safe schema) so that `approved_extension_counts[".tbl"]` and `approved_category_counts["table"]` are grounded in real corpus data rather than remaining purely a fixed-vocabulary design choice per `E-0086`. Expect this to confirm the already-known recursive/top-level-in-HOG count of 0 for `.tbl` (§1); record it explicitly rather than leaving it inferred.
-5. **Grep the full set of published `analysis/formats/*.md` docs once more** (case-insensitive, whole-word `tbl`) to positively confirm no other tracked document already classifies this suffix's role beyond the fixed-vocabulary mentions in `FRONTEND-TOPOLOGY.md` found in this pass.
-6. **Do not** attempt to open, print, name, or hash-fingerprint the single private `.tbl` instance beyond what `disc-summary.json`/`asset-fingerprints.json` already record (or will record per step 1/2) in aggregate; do not access `private/`, `runtime/`, `third_party/` (including `third_party/pcsx2`), or `downloads/` in pursuit of a second `.tbl` sample.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

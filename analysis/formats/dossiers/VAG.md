@@ -16,8 +16,9 @@ PCM16 samples; it assigns no playback, container-selection, or cross-format (e.g
 | Top-level-HOG member count | 8,665 | `analysis/formats/hog-validation.json` (`extensions`/`.vag`) |
 | Whole-disc occurrences | 0 | `analysis/manifests/disc-summary.json` / `analysis/manifests/disc-files.jsonl` |
 
-The format is exclusively packed inside HOG archives (never present as a whole-disc top-level
-file), matching the recursive-in-HOG and top-level-HOG counts being identical (8,665 = 8,665).
+In the current tracked inventory, all 8,665 observed `.vag` members are direct top-level-HOG
+members and the whole-disc filesystem-entry count is 0. This establishes no universal placement
+rule for other releases or corpora.
 
 ## 3. Confirmed facts
 
@@ -62,60 +63,25 @@ No semantic interpretation attached — counts and ranges only, all from
 
 ## 5. Hypotheses
 
-Each is explicitly unconfirmed; each states the privacy-safe collection that would move it to
-Confirmed or Rejected.
 
-- **H1 — LPD/VAG basename pairing is a real cross-reference used by the retail engine (e.g. lip-sync
-  driven by dialogue audio).** ASSET-RECON already flags this as suggestive but undecoded (C15).
-  Confirming observation: a tracked, privacy-safe structural analysis of retail code paths, executable
-  strings, or script/table text (already in-tree, not extracted from disc images) that names an
-  LPD-to-VAG lookup rule, OR a documented format spec (already published, non-owner) describing the
-  same pairing convention for this engine family. Absent such a source, this remains speculative and
-  must not be encoded into any decoder.
-- **H2 — The three observed version values (`0`, `4`, `0x20`) correspond to distinct VAG sub-variants
-  (e.g. mono vs. interleaved, or tool-version markers) rather than being an unstructured version
-  counter.** Confirming observation: a tracked published spec or engine source excerpt that assigns
-  meaning to VAG version constants; absent that, the field remains an opaque accepted-but-uninterpreted
-  value in the decoder (per C11/`VAG.md`).
-- **H3 — The 28-byte "opaque header bytes" region (offset `0x14`–`0x2F`) carries loop points, channel
-  count, or other PS-ADPCM metadata (as in some retail VAG variants documented in the broader PS2
-  ecosystem).** Confirming observation: an aggregate byte-value/entropy breakdown of that specific
-  byte range across the full 8,665-entry population (not a single file), produced by extending
-  `fingerprint_assets.py` to bucket those 28 bytes, checked in as a new aggregate field — without
-  ever printing per-file values.
-- **H4 — The non-16-byte-aligned zero-tail lengths (16–2,032 bytes) reflect padding to a fixed
-  container-record boundary (e.g. sector or bucket alignment) inside the owning HOG archive, rather
-  than being VAG-format padding.** Confirming observation: an aggregate cross-tabulation of VAG tail
-  length against enclosing-HOG entry alignment/stride, computed and published as an aggregate field
-  (no per-file rows), to see whether tail length is a deterministic function of container alignment
-  rather than of the VAG payload itself.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- No published byte-level breakdown of the 28 "opaque" header bytes (offset `0x14`–`0x2F`) exists in
-  any tracked `*.md` or `asset-fingerprints.json` field — only "ignored" per `VAG.md`. A privacy-safe
-  collection step would extend `fingerprint_vag` to emit aggregate per-offset statistics (e.g.
-  all-zero rate, distinct-value counts) over the full corpus, not any single file's bytes.
-- No tracked evidence establishes a decoded relationship between VAG entries and LPD entries beyond
-  same-directory basename co-occurrence counts (C14/C15). No lookup-table, index, or script-level
-  reference has been mechanically confirmed.
-- No tracked evidence covers adversarial/hostile VAG inputs (malformed magic, oversized declared
-  data, truncated headers) at the *aggregate corpus* level — the native decoder's adversarial test
-  coverage (per `VAG.md`/E-0090) is against project-authored synthetic fixtures only, not against a
-  scan of the real corpus for boundary-violating entries. A privacy-safe collection step: extend the
-  fingerprinter to count corpus entries that would be *rejected* by the decoder's exact acceptance
-  rules (e.g. version not in {0,4,0x20}, tail length outside 0 or 16–2,032, unaligned data span) and
-  publish that as a new aggregate bucket — this would show whether the decoder's envelope already
-  covers 100% of the tracked corpus or diverges from some entries.
-- No tracked evidence records per-archive (HOG-file) distribution of `.vag` counts (e.g. how many
-  VAG entries per SNDVAG.HOG-style archive across the full 273-archive population) — `hog-validation.json`
-  gives only the aggregate top-level suffix count (8,665), not a per-archive-type breakdown. A
-  privacy-safe collection step: aggregate `.vag` member counts grouped by archive *type* (generic
-  container name, not path), already partially visible in the archive list's `entry_count` field but
-  not broken out by contained suffix.
-- No tracked evidence connects VAG's PCM16 output to any runtime audio backend, mixer, or SDL
-  integration — this is explicitly non-claimed in `VAG.md` and E-0090, and no other tracked file
-  changes that.
+
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -148,26 +114,13 @@ Confirmed or Rejected.
 
 ## 8. Codex work order
 
-Ranked, concrete, privacy-safe next steps. Some require an authorized private owner-corpus rerun;
-only fixed aggregate output may be reviewed for publication, with owner paths and bytes remaining
-outside version control.
 
-1. **Highest priority — corpus-coverage sweep.** Extend `tools/fingerprint_assets.py`'s
-   `fingerprint_vag` to additionally count, in aggregate only, how many of the 8,665 real corpus
-   entries would be accepted vs. rejected by `DecodeVagAdpcm`'s exact acceptance rules (version ∈
-   {0,4,0x20}; reserved=0; rate=22050; data-size % 16 == 0; tail ∈ {0} ∪ [16,2032]). Publish the
-   resulting aggregate bucket in `asset-fingerprints.json` and note it in `VAG.md`/`ASSET-RECON.md`.
-   This closes the owner-corpus coverage gap noted in Section 7 without touching any
-   per-file identity.
-2. Do not publish raw opaque-header values or distinct byte patterns. Any future probe must use a
-   predeclared, fixed classification whose output cannot reconstruct source bytes.
-3. Add an aggregate cross-tabulation of VAG zero-tail length against the alignment/stride of its
-   enclosing HOG entry (using already-tracked `hog-validation.json` archive metadata) to test
-   Hypothesis H4 — publish only bucketed counts (e.g. "N entries with tail length T at container
-   stride S"), never per-file rows.
-4. Run the existing registered CTest target (`omega_vag_adpcm_decoder_tests`) during the next
-   proportionate native verification pass; do not describe publication itself as pending.
-5. If H1 (LPD/VAG cross-reference) is ever to be pursued, restrict investigation strictly to other
-   already-tracked, non-owner sources (published engine documentation, in-repo script/table text) —
-   do not attempt to infer the relationship from corpus byte content, and do not encode any lookup
-   rule into a decoder until a tracked source names it explicitly.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

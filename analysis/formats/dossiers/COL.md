@@ -61,65 +61,25 @@ No semantic interpretation attached — counts and structural observations only.
 
 ## 5. Hypotheses
 
-Each is explicitly labeled and untested against the tracked evidence; each states the privacy-safe
-observation that would confirm or refute it.
 
-- **H1 — COL is per-cell collision/physics geometry, one member per manifest cell.** The tracked
-  grammar doc treats COL as "spatial geometry" and the content-service loader requires exactly one
-  COL member per resolved cell HOG, but no tracked source assigns a gameplay role (collision vs.
-  visibility vs. pathing) to the structure. Confirming/refuting observation: a privacy-safe survey
-  correlating COL edge-depth/leaf-count distributions against POP candidate-record placement
-  aggregates (already-published `POP.md` / E-0032 style aggregates) for the same manifest cells,
-  looking for a structural correlation (e.g., mesh triangle density vs. record density) without
-  reading any private payload semantics.
-- **H2 — The four opaque/unassigned fields (word at `+0x28`, primitive bytes `+0x00/+0x0A/+0x0C`,
-  and the sole-node sentinel's exact float bit pattern) encode a material or surface-type tag.**
-  No tracked source assigns meaning to these fields; they are explicitly called "opaque" in
-  `COL.md`. Confirming/refuting observation: an aggregate bit-pattern/entropy profile of these
-  fields across the full 7036-span corpus (in the style of the POP `profile_pop_candidate_record_shapes.py`
-  aggregate profiler) — reporting value-distribution shape only, no per-file rows — would show
-  whether the field looks like a small enum (low-entropy, few distinct values) consistent with a
-  material/surface tag, versus a derived numeric quantity.
-- **H3 — Version 3 spans (3 of 7036) represent an earlier-build or degenerate-content variant
-  rather than a structurally distinct grammar.** Only version 3 and version 5 are observed, with
-  version 3 vastly outnumbered. No tracked source states what differs, if anything, in the
-  version-3 header/table layout beyond the shared 48-byte header and counted-table formulas
-  already confirmed to hold for all 7036 spans. Confirming/refuting observation: an aggregate-only
-  diff of the confirmed structural invariants (node/leaf/triangle/vertex counts, edge depth, empty
-  sentinel presence) segmented by version_byte==3 vs version_byte==5, reported as bucketed
-  aggregates only.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- No tracked source records a COL-to-owning-container relationship beyond "resolved via the
-  manifest's normalized DATA.HOG source, nested container chain, and cell HOG" (`COL.md`); no
-  tracked aggregate states which top-level HOG kinds (per `disc-summary.json` archive listing,
-  e.g. DATA.HOG vs OBJECTS.HOG) COL spans are nested under, or in what proportion. A privacy-safe
-  collection: extend the existing recursive fingerprint scan (`tools/fingerprint_assets.py`) to
-  emit an aggregate histogram of COL-count-per-immediate-container-suffix (e.g. "N COL spans found
-  nested under DATA.HOG-class containers, M under OBJECTS.HOG-class containers") without naming
-  any specific member or file path.
-- No tracked source records cross-format co-location aggregates (e.g., how many manifest cells
-  have both a COL and a POP/VUM member, versus COL-only cells). A privacy-safe collection: an
-  aggregate cardinality report from the already-existing `GameDataService`/manifest traversal
-  (same style as E-0021/E-0033) counting cells-with-COL vs cells-with-COL-and-VUM vs cells-with-
-  COL-and-POP, published as totals only.
-- No tracked source runs an adversarial/fuzz/resource-boundary test against the COL decoder beyond
-  what `native/tests/col_spatial_mesh_decoder_tests.cpp` already covers per `COL.md`'s claim of
-  "malformed numerics/references/topology, and exact/one-below resource budgets" — the dossier
-  cannot independently verify the adversarial-test *content* without reading the test file, which
-  is in scope (tracked, non-private) but was not opened for this dossier; the ledger does not carry
-  a dedicated E-#### entry naming exact adversarial-case counts for COL the way E-0093 does for
-  SKAS. Privacy-safe collection: read/summarize `native/tests/col_spatial_mesh_decoder_tests.cpp`
-  (tracked source, no private data) and, if warranted, add a ledger entry enumerating the exact
-  adversarial case classes and pass counts, matching the granularity already given for SKAS
-  (E-0093) and the texture debug image adapter (E-0066).
-- No tracked source states whether the COL decoder enforces distinct upper bounds on node/leaf/
-  triangle/vertex counts independent of overall span-byte-size limits (i.e., whether a
-  maliciously large count field in an otherwise short span is rejected before allocation). Privacy-
-  safe collection: inspect the decoder's `DecodeLimits`-style preflight logic (already described in
-  `COL.md` as "preflights caller-provided input, item, logical-output, and scratch limits") and
-  record the exact numeric ceilings as a Confirmed fact once read, or as a dedicated ledger entry.
+
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -150,32 +110,13 @@ observation that would confirm or refute it.
 
 ## 8. Codex work order
 
-Ranked, privacy-safe, concrete next steps. No menu-role, layout, or gameplay-semantic speculation.
 
-1. **(Highest priority) Backfill a dedicated ledger entry for the COL decoder's adversarial/
-   boundary test suite**, matching the granularity of E-0093 (SKAS) and E-0066 (texture debug
-   image): read `native/tests/col_spatial_mesh_decoder_tests.cpp` (tracked, non-private) and record
-   exact case-class names and pass/fail counts (version boundary, root-shape boundary, empty-
-   sentinel normalization, malformed-numeric rejection, malformed-reference rejection, malformed-
-   topology rejection, exact/one-below resource-limit boundaries) as a new `E-####` entry in
-   `analysis/evidence/ledger.jsonl`, with a `check` command reproducing the CTest run.
-2. Extend `tools/fingerprint_assets.py` (or a new small aggregate tool alongside it) to emit a
-   COL-count-per-immediate-container-suffix histogram (e.g., counts under DATA.HOG-class vs.
-   OBJECTS.HOG-class containers) as an aggregate addition to `asset-fingerprints.json`, closing the
-   Section 6 gap on container co-location without naming any specific archive or member.
-3. Add a cross-format co-location aggregate pass over the existing `GameDataService` manifest
-   traversal (reusing the machinery behind E-0021/E-0033) reporting cell counts by COL/POP/VUM
-   membership combination as plain totals, to test Hypothesis H1 structurally without inferring
-   gameplay role.
-4. Run (or re-run and re-verify) `build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree
-   private/extracted-disc` and `level-spatial-verify-tree private/extracted-disc` against the owner
-   corpus to reconfirm the E-0018/E-0020/E-0021 aggregate totals are still reproduced with zero
-   errors after any decoder change, before merging.
-5. Add an aggregate bit-pattern/entropy profile of the four currently-opaque COL fields (`+0x28`
-   word, primitive bytes `+0x00/+0x0A/+0x0C`, sentinel bounds bit pattern) using a POP-profiler-
-   style tool, to gather evidence toward or against Hypothesis H2 — publish only the aggregate
-   value-distribution shape, never per-file rows or byte offsets tied to an individual private
-   input.
-6. Segment the existing structural-invariant aggregates (node/leaf/triangle/vertex counts, edge
-   depth, empty-sentinel rate) by `version_byte` (3 vs. 5) and publish as a small aggregate table in
-   `COL.md`, to test Hypothesis H3.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

@@ -14,11 +14,11 @@ established by tracked evidence; those remain explicitly unknown (see §5–6).
 |---|---|---|
 | Recursive-in-HOG occurrences | 85 | `analysis/formats/asset-fingerprints.json` (`entry_extensions[".vpk"]` and the `"vpk"` format-aggregate block) |
 | Top-level-HOG member count | 85 | `analysis/formats/hog-validation.json` (`entry_extensions[".vpk"]`, over `archive_count: 273`, `total_entries: 32351`) |
-| Whole-disc occurrences | 0 | (per task framing; not separately re-derived from a whole-disc histogram file in this pass) |
+| Whole-disc filesystem-entry occurrences | 0 | `analysis/manifests/disc-summary.json` (`extensions`, no `.vpk` key) |
 
-Because the whole-disc count is 0 and the in-HOG count is 85, `.vpk` is exclusively a HOG-container
-member format in the tracked evidence, which is why this dossier is a full evidence-tiered writeup
-rather than a stub.
+In the current tracked inventories, all 85 observed `.vpk` occurrences are HOG members and the
+whole-disc filesystem-entry count is 0. This establishes no universal placement rule for other
+releases or corpora.
 
 ## 3. Confirmed facts
 
@@ -56,27 +56,23 @@ These are tracked aggregates with no semantic interpretation attached.
 
 ## 5. Hypotheses
 
-Each is explicitly labeled as unconfirmed. Per clean-room rules, none of these may be inferred as fact; they are recorded to guide privacy-safe future collection.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
 
-- **H1 — "VPK" reversed-bytes naming.** The raw signature `20 4B 50 56` reads as `b" KPV"`, which is `b"VPK "` byte-reversed within the 4-byte field (ignoring the leading space/word-order framing). *Confirms/refutes via*: a privacy-safe structural note already exists distinguishing raw bytes from the visually forward reading (`VPK.md` "Nonclaims"); this is flagged as a naming curiosity only. No further private-input inspection is needed or permitted to resolve intent — the raw-byte fact is already the ceiling of what can be claimed.
-- **H2 — The `0x08` word denotes a declared header or block size.** Because the word's value (2048) numerically equals the observed physical alignment, one might guess it declares a header/block size. *Confirms/refutes via*: an aggregate, privacy-safe structural scan of bytes `0x10` onward across the existing 85 tracked spans (no new private inputs) to see whether any internal boundary, count, or sub-structure aligns with multiples of the `0x08` word in a way distinguishable from mere alignment coincidence. This must remain aggregate-only (counts/ranges, not per-file rows).
-- **H3 — `.vpk` carries streaming or storage-media significance (e.g., disc-block staging).** The consistent 2,048-byte alignment and the format's HOG-only occurrence suggest possible read-block staging. *Confirms/refutes via*: aggregate comparison of `.vpk` alignment/size-quantization behavior against other already-characterized 2,048-or-similar-aligned formats in tracked docs (e.g., HOG container `data_offset` values, many of which are also multiples of 16/2048 per `hog-validation.json`), reported only as aggregate correlation statistics — never by asserting a role.
-- **H4 — Bytes `0x04..0x07` and `0x0c..0x0f` are a version/tag pair (paralleling the HOG container's own per-archive `tag` field observed in `hog-validation.json`).** *Confirms/refutes via*: an aggregate-only frequency count of the two opaque 4-byte fields across all 85 spans (distinct-value counts and ranges only, no raw value-to-path mapping) to see if they cluster the way HOG `tag` values do per subdirectory.
-- **H5 — `.vpk` payload (bytes beyond the 16-byte prefix) holds compressed or encoded data.** *Confirms/refutes via*: extending the existing compression-magic scan (already run for other non-HOG spans per `ASSET-RECON.md` §"Wrappers and compression check") to the VPK payload region specifically, reporting only aggregate hit/miss counts per known magic — never payload bytes or per-file identifiers.
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-Tracked evidence does not currently establish, and privacy-safe collection could add:
-
-- **No sub-structure inventory beyond the 16-byte prefix.** `asset-fingerprints.json`'s `vpk` aggregate block stops at the header word, alignment, and total span size. A deeper structural pass (still aggregate-only: value-frequency tables, range tables, no per-file rows) over bytes `0x10` onward would be needed to test H2/H5.
-- **No per-directory/per-archive distribution of `.vpk` counts.** `hog-validation.json`'s archive list does not appear to name which specific `.HOG` archives contain `.vpk` members (the `entry_extensions` histogram is corpus-wide, not per-archive) — an aggregate per-archive count (archive path → vpk member count only, no member names) would let H3/H4 be tested against HOG subdirectory groupings already visible in `hog-validation.json`.
-- **No opaque-field value distribution.** The two 4-byte opaque fields (`0x04..0x07`, `0x0c..0x0f`) have no recorded distinct-value counts or ranges in any tracked doc — needed for H4.
-- **No compression/encoding magic scan specific to VPK payload.** `ASSET-RECON.md`'s compression check is described corpus-wide over "non-HOG asset spans"; it is not clear from tracked text whether `.vpk` (a HOG member) was included. An aggregate hit-count table scoped to VPK spans would resolve H5.
-- **No adversarial/fuzz corpus size documented beyond the native test file's existence.** The test file `native/tests/vpk_wrapper_envelope_decoder_tests.cpp` exists and E-0094's ledger entry claims coverage of specific boundary classes (min/interior/max/below-range/misaligned/over-limit spans, truncated prefixes, signature-byte rejection, endian adversary, opaque-prefix preservation, payload independence, lifetime, determinism, budgets), but this dossier's tracked-source pass did not itself re-enumerate individual test cases; a Codex follow-up could verify the test file's case count matches the ledger's claimed coverage classes (see §8).
-- **Owner-corpus validation is explicitly unclaimed.** E-0094 predates publication; the decoder is
-  present on current main at commit `4163680`. It has not been run against the full owner corpus of
-  85 real `.vpk` members to confirm 85/85 acceptance; only the aggregate fingerprint that supplied
-  its constants covers all 85.
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -92,11 +88,12 @@ Tracked evidence does not currently establish, and privacy-safe collection could
 
 ## 8. Codex work order
 
-Ranked, concrete, privacy-safe. None of these steps require inventing semantics; all stay within the wrapper-envelope boundary already proven.
-
-1. **Highest priority — Run the existing `DecodeVpkWrapperEnvelope` against the full owner corpus (all 85 tracked `.vpk` members) and record only aggregate pass/fail counts.** This closes the "owner-corpus validation... deliberately unclaimed" gap noted in E-0094, without emitting any per-file row, path, or byte content — output should be a single aggregate line (e.g., "85/85 accepted" or a failure count plus the rejection-code histogram from `asset::DecodeErrorCode`).
-2. **Extend `fingerprint_assets.py`'s `vpk` structural handler to emit an aggregate distinct-value count (not full distribution) for the two opaque 4-byte fields (`0x04..0x07`, `0x0c..0x0f`) across all 85 members.** This directly tests H4 with zero privacy risk (counts only, e.g., "opaque_0x04: 12 distinct values across 85 spans").
-3. **Add an aggregate-only structural pass over bytes `0x10` onward of the 85 VPK spans, scoped to answering H2/H5 (header/block-size correlation, compression-magic presence) as pure count/range tables**, mirroring the existing `ASSET-RECON.md` compression-magic methodology but explicitly scoped to VPK spans (current text does not confirm VPK was included in that earlier scan).
-4. **Cross-reference `.vpk` member counts against the per-archive `HOG` list in `hog-validation.json` to produce an aggregate table of (archive-path → vpk-member-count) with no member names**, to test H3 (possible correlation with specific HOG archive types/subdirectories already named in that file, e.g., which `GAMEDATA/<LEVEL>/*.HOG` archives carry `.vpk` members vs. zero).
-5. **Independently verify the native test file's case count against the coverage classes claimed in ledger entry E-0094** (min/interior/max/below-range/misaligned/over-limit, truncated prefixes, signature/endian adversaries, opaque-prefix preservation, payload independence, lifetime, determinism, budget boundaries) to confirm no coverage-class drift since E-0094 was recorded — a documentation-consistency check only, no new decode logic.
-6. **Do not attempt to decode or characterize bytes past the 16-byte prefix as a semantic format (no payload parser, no "block" or "sector" reader) until Codex step 3 above produces aggregate evidence supporting a specific structural claim.** Any decoder work beyond the current envelope must stay behind a new, separately-justified aggregate observation to avoid the "plausible invented decoder" regression this task explicitly warns against.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

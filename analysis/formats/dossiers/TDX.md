@@ -17,14 +17,17 @@ policy-gated experiments, not confirmed decoders of retail meaning.
 
 | Count | Scope | Attributed tracked source |
 |---|---|---|
-| 15,248 | Recursive occurrences inside HOG archives | `analysis/formats/asset-fingerprints.json` (`/formats/tdx/count`, `/scan/extensions/.tdx`) |
+| 15,248 | Mixed structural-fingerprinter candidates: direct handled filesystem entries at depth −1 plus recursive HOG members | `analysis/formats/asset-fingerprints.json` (`/formats/tdx/count`, `/scan/extensions/.tdx`); `tools/fingerprint_assets.py` (`scan_disc`) |
+| 15,246 | Recursive HOG-member occurrences at all archive depths | Derived from the mixed 15,248 total minus the 2 directly scanned filesystem entries; `tools/fingerprint_assets.py` (`scan_disc`); `analysis/manifests/disc-summary.json` (`/extensions/.tdx`) |
 | 11,166 | Top-level HOG member-suffix count | `analysis/formats/hog-validation.json` (`/entry_extensions/.tdx`) |
-| 2 | Whole-disc file histogram | `analysis/manifests/disc-summary.json` (`/extensions/.tdx`) |
+| 2 | Whole-disc filesystem entries, also scanned directly at depth −1 because `.tdx` is handled | `analysis/manifests/disc-summary.json` (`/extensions/.tdx`); `tools/fingerprint_assets.py` (`scan_disc`) |
 
-These three counts come from three independent tracked scans (per-format structural fingerprinter,
-top-level HOG suffix validator, and whole-disc file histogram) and are not asserted to describe the
-same denominator; recursive-in-HOG, top-level-HOG, and whole-disc are different scopes by
-construction.
+The structural fingerprinter's 15,248 total is deliberately mixed: after recursively scanning HOG
+members it directly scans loose files whose suffix is registered in `FORMAT_HANDLERS`, recording
+those five corpus-wide candidates at depth −1. Two are `.tdx`, so the HOG-only recursive count is
+15,248 − 2 = 15,246. The top-level-HOG count remains a narrower HOG-member scope. Structural facts
+reported over all 15,248 candidates therefore include the two direct filesystem entries and must
+not be labeled HOG-only.
 
 ## 3. Confirmed facts
 
@@ -72,28 +75,23 @@ Purely quantitative, non-semantic, sourced from `analysis/formats/asset-fingerpr
 
 ## 5. Hypotheses
 
-Each is explicitly labeled as unconfirmed in tracked sources; each row states the privacy-safe
-observation that would confirm or refute it.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
 
-1. **Four-bit indexed nibble order is low-nibble-first.** Basis: `score_tdx_layout_hypotheses.py` shows lower aggregate local-adjacency delta for low-nibble-first across 2,014 planes (E-0029). This is a content-smoothness heuristic, not a bitstream proof. *Confirming/refuting observation:* a privacy-safe behavioral cross-check — e.g., comparing the scorer's ranking stability under an independently generated synthetic 4-bit fixture with a known ground-truth nibble order, or any tracked emulator/behavioral trace that fixes nibble order without touching private disc bytes — is currently absent from tracked evidence.
-2. **Eight-bit indexed CLUT lookup uses the bit-3/bit-4 permutation, not identity.** Basis: same scorer, 162 planes, lower delta for the permuted lookup (E-0029). *Confirming/refuting observation:* an aggregate-only comparison against a second, independent content-coherence metric (e.g., a different neighbor-distance kernel) over the same 162-plane population, reported only in aggregate, would either corroborate or contradict the ranking without adding semantic claims.
-3. **Packed-32 (`0x00`) storage rectangles on indexed textures represent pre-swizzled GPU-upload layout rather than display texel order.** Basis: `TDX.md` states these should not be scored as display coherence and are deliberately excluded from the layout-hypothesis scorer. *Confirming/refuting observation:* no tracked source establishes swizzle rule or upload target; a privacy-safe collection would be an aggregate-only count of how many `0x00`-transfer planes recur across near-duplicate dimension buckets (a proxy for shared-swizzle-table reuse) without reproducing any payload bytes.
-4. **VUM material-catalog names ending `.TDX` (after exact or single-extension-elision normalization) identify the primary or map sibling-container `.TDX` members.** Basis: E-0041/E-0042 run two lexical-coverage experiments; both explicitly disclaim that this establishes retail lookup, ownership, or binding — they report only exact-string/one-extension-elision candidate coverage (5,690 of 5,801 locator occurrences reached only via elision; 111 unreached; zero reached via exact equality alone). *Confirming/refuting observation:* a further privacy-safe aggregate experiment — e.g., counting whether elision-reached candidates cluster by container class or by catalog position, reported only in aggregate — is not yet in tracked evidence; genuine confirmation would require behavioral (emulator/native runtime lookup trace) evidence, which is explicitly out of scope for this format family per the task instructions.
-5. **The `24/0x01` bit-depth/format pairing (packed 24-bit) always mismatches the area-bit storage formula (68 of 68, 100%) because it uses a distinct storage-word convention from the 4/8-bit indexed families.** Basis: aggregate mismatch counts in `asset-fingerprints.json` (`storage_formula_mismatch_by_bit_depth`). *Confirming/refuting observation:* an aggregate-only breakdown of the 24-bit population by `width_unit_word`/`storage_unit_word` values (already present as header fields) reported as a bucketed count, without exposing per-file rows, would show whether a single alternate formula fits all 68 uniformly or whether the family is itself heterogeneous.
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-Tracked evidence does not exist for the following; each entry states a privacy-safe collection that
-would close the gap without violating clean-room rules.
-
-1. **No tracked ground-truth for channel order, alpha meaning, color space, or premultiplication.** No decoder, ledger entry, or `*.md` claims these. A privacy-safe collection would be a synthetic/generated (non-disc) fixture-based behavioral test comparable to the existing E-0066/E-0078/E-0087 synthetic fixtures, extended to probe a specific channel-order hypothesis against an independently-authored reference renderer — never against private disc bytes.
-2. **No tracked evidence connects any `.TDX` occurrence to a cell, material, mesh, draw call, placement, or visibility state.** E-0033/E-0036/E-0037/E-0041/E-0042 are explicit that they establish containment or lexical-candidate coverage only. A privacy-safe collection would be additional aggregate-only cross-container candidate experiments (as already done for VUM names) restricted to counts, never exposing member names or offsets.
-3. **No tracked evidence of mip/slice/frame purpose for `primary_plane_count` values of 2, 3, or 4.** The scorer explicitly does not assign a mip rank to later planes. A privacy-safe collection would be an aggregate-only positional statistic (e.g., whether later-plane dimensions are consistently a power-of-two fraction of the first plane's dimensions, reported as a bucketed count) computed from already-decoded header fields.
-4. **No property-based fuzzer is registered.** The deterministic native suite already covers every
-   short header prefix, invalid and duplicate references, unsupported encodings, malformed palette
-   and plane geometry, padding/gap/overlap/tail failures, and exact/one-below resource limits. A
-   future property test would be additive hardening, not a missing basic adversarial suite.
-5. **No tracked whole-disc top-level `.TDX` member identity or count breakdown beyond the raw count of 2.** `disc-summary.json` gives only the aggregate; no `*.md` narrative interprets it. A privacy-safe collection would be an aggregate note in `analysis/manifests/disc-summary.json`'s companion documentation distinguishing these 2 from the 11,166 top-level-HOG occurrences (e.g., confirming they are or are not HOG containers themselves), computed purely from already-tracked manifest fields.
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -113,14 +111,12 @@ Justification (each clause cites its tracked source):
 
 ## 8. Codex work order
 
-Ranked, concrete, privacy-safe. No item requires new access to private/, runtime/, third_party/,
-downloads/, disc images, or any untracked content; all reference only the owner's already-tracked
-corpus and tooling.
-
-1. **Resolved for deterministic boundaries.** Keep the existing generated adversarial suite; add a
-   property-based target only if its new invariant and bounded execution contract are specified.
-2. **Extend the aggregate-only positional statistic for multi-plane textures** (Missing Observation 3): compute and publish, via a small addition to `tools/fingerprint_assets.py` or a new bounded scanner, whether plane 2/3/4 dimensions are power-of-two fractions of plane 1's dimensions, reported strictly as bucketed counts (no per-file rows). This narrows the mip/slice/frame-purpose unknown without inventing semantics.
-3. **Re-run `score_tdx_layout_hypotheses.py` with a second, independent coherence metric** (e.g., a different neighbor kernel) over the same 2,176-plane population and publish the aggregate ranking alongside the existing E-0029 result, to corroborate or contradict Hypotheses 1 and 2 before any decoder policy is hardened as default.
-4. **Bucket the 24-bit (`0x01`) `storage_formula_mismatch` population** (Hypothesis 5) by `width_unit_word`/`storage_unit_word` and publish as an aggregate table in `asset-fingerprints.json`'s companion doc, to determine whether a single alternate storage formula covers all 68 packed-24-bit spans.
-5. **Document the 2 whole-disc top-level `.TDX` occurrences' relationship to the 11,166 top-level-HOG occurrences** (Missing Observation 5) using only fields already present in `analysis/manifests/disc-summary.json` / `disc-files.jsonl` — e.g., whether the 2 are themselves HOG containers — and add a one-line aggregate note to `TDX.md`'s Occurrence section.
-6. **Do not** add any new "display-ready" or channel-semantic decoder, and do not promote any Section-5 hypothesis to Confirmed, until a corroborating second aggregate metric or an explicitly project-generated behavioral fixture (never private-disc-derived) exists per items 2–4 above.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

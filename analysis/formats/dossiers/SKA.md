@@ -14,16 +14,17 @@ name prefix.
 
 | Metric | Count | Source |
 | --- | ---: | --- |
-| Recursive-in-HOG occurrences (all nesting depths) | 213 | `analysis/formats/asset-fingerprints.json` (`ska.count`) |
+| Mixed structural-fingerprinter candidates (direct depth −1 plus recursive HOG members) | 213 | `analysis/formats/asset-fingerprints.json` (`ska.count`); `tools/fingerprint_assets.py` (`scan_disc`) |
+| Recursive HOG-member occurrences (all nesting depths) | 212 | Mixed total minus the 1 directly scanned filesystem entry; `tools/fingerprint_assets.py` (`scan_disc`) |
 | Top-level-HOG member-suffix occurrences | 212 | `analysis/formats/hog-validation.json` (`.ska: 212`) |
-| Whole-disc occurrences (loose, non-HOG files) | 1 | `analysis/manifests/disc-summary.json` (`.ska: 1`) |
+| Whole-disc filesystem entries, also scanned directly at depth −1 because `.ska` is handled | 1 | `analysis/manifests/disc-summary.json` (`.ska: 1`); `tools/fingerprint_assets.py` (`scan_disc`) |
 | Top-level HOG containers carrying `.ska`-suffixed members | `GAMEDATA/COMMON/SKA.HOG` (entry_count 157) + `GAMEDATA/COMMON/SKALEVEL.HOG` (entry_count 55) = 212 | `analysis/formats/hog-validation.json` |
 
-The 212 top-level count plus the 1 whole-disc loose file accounts for 213 of the 213
-recursive-in-HOG occurrences reported by the fingerprinter; the fingerprinter's 213 figure is
-the aggregate structural-scan count over the full recursive HOG walk (`tools/fingerprint_assets.py`),
-independently corroborated by `ASSET-RECON.md`'s "SKA | 213 |" corpus-results row and by
-evidence-ledger entries E-0026/E-0027 (both state "213").
+The fingerprinter's 213 figure is a mixed structural-candidate total, not a recursive-HOG count.
+`scan_disc` recursively scans HOGs and then directly scans handled loose files at depth −1. Thus
+the 212 top-level HOG members plus 1 direct filesystem candidate account for all 213 structural
+candidates, and no nested `.ska` member is implied. The 213-candidate total is independently
+corroborated by `ASSET-RECON.md` and evidence-ledger entries E-0026/E-0027.
 
 ## 3. Confirmed facts (mechanically citable)
 
@@ -47,25 +48,32 @@ evidence-ledger entries E-0026/E-0027 (both state "213").
 
 ## 4. Aggregate-only facts
 
-- `span_bytes_range`: 464-125,776 bytes across all 213 spans (`asset-fingerprints.json` `ska.span_bytes_range`, identical to `computed_logical_bytes_range`).
+- `span_bytes_range`: 464-125,776 bytes across all 213 mixed structural candidates (`asset-fingerprints.json` `ska.span_bytes_range`, identical to `computed_logical_bytes_range`).
 - `computed_counted_word_span_padding_bytes_range`: 16-2,000 bytes of zero padding observed among the 55 zero-padded spans.
 - `observed_word_0x08_0x10_pair` joint distribution: `56/0`: 16, `88/0`: 122, `88/1`: 70, `92/0`: 2, `92/1`: 3 (sums to 213).
 - Aggregate native-decoder logical-byte total across the full owned corpus: 2,180,832 bytes (E-0027; `asset_commands.cpp` `stats.ska_structural.logical_bytes` accumulator).
-- All 213 spans are 16-byte aligned at the container level; this is an alignment observation only, not a claimed record-size rule.
+- All 213 mixed structural candidates are 16-byte aligned; this is an input-size observation only, not a claimed HOG-only or record-size rule.
 - No compression-magic signature (gzip/ZIP/bzip2/XZ/7zip/LZ4-frame/Zstandard/RNC1/RNC2/LZSS/LZ77/Yaz0) was found among the 46,603 non-HOG asset spans scanned corpus-wide, which includes `.ska` members; this rules out those specific whole-file wrapper signatures for this family but says nothing about internal/headerless encoding (`ASSET-RECON.md` §"Wrappers and compression check").
 
 ## 5. Hypotheses (explicitly labeled — none decoded, none confirmed)
 
-- **H-SKA-1 (bone/skeleton animation channel table).** The word-count-and-stride shape (`word_0x04` × `word_0x08`, gated by `word_0x10`) is consistent in *shape* with a per-channel or per-frame keyframe table, given the file suffix's conventional association with skeletal animation in similar-era titles. Privacy-safe confirming observation: cross-tabulating `word_0x04`/`word_0x08`/`word_0x10` against the SKL "skeleton/loadout reference list" bone-count or profile-label distribution (both are aggregate, already-tracked artifacts) to test whether `word_0x08` values (56/88/92) correlate with SKL bone-count buckets. A refuting observation would be no stable correlation across the corpus.
-- **H-SKA-2 (SKA/SKAS relationship).** The shared name prefix invites a hypothesis that SKAS text spans describe or index SKA binary spans (e.g., a label/metadata sidecar). Tracked evidence explicitly withholds this: `ASSET-RECON.md` states SKAS "labels, values, relationships, and any association with SKA are not yet established," and the native descriptor header states SKAS "is intentionally outside this API." Confirming observation: with only 2 SKAS instances against 213 SKA instances, no meaningful cross-reference is currently possible from tracked aggregates; a privacy-safe basename/co-location cross-tabulation (analogous to the LPD/VAG basename-pairing check already done in `ASSET-RECON.md`) would be the way to test this without exposing payload content.
-- **H-SKA-3 (`word_0x10` as a compression/format-variant flag).** Its restriction to exactly `{0, 1}` and its role in the extent formula (adding one unit to the word count when 0) is consistent with a boolean mode flag (e.g., "has extra trailer row" vs. not) rather than a compression flag. Confirming/refuting observation: none available from aggregate counts alone; would require decoding actual counted-word content, which is out of scope for this dossier and the current descriptor.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- No published `SKA.md` grammar document exists (unlike `SKAS.md`, `TDX.md`, `COL.md`, `VUM.md`, `POP.md`); the grammar currently lives only as a subsection of `ASSET-RECON.md`. A privacy-safe collection step: promote that subsection into a standalone `analysis/formats/SKA.md` mirroring the `SKAS.md` structure (aggregate-only, no payload bytes), so downstream tooling and Codex work orders have a single per-format citation target.
-- `native/tests/ska_container_descriptor_tests.cpp` already exercises every rejection branch implemented in `fingerprint_assets.py`'s `fingerprint_ska()`: non-3 version word (`CheckUnsupportedWord(0, ...)` over `{2U, 4U}`), zero counted-word rejection (`CheckUnsupportedWord` over `word_0x04 ∈ {0U, 358U, 0xFFFFFFFFU}` and `word_0x08 ∈ {0U, 55U, 57U, 87U, 89U, 91U, 93U}`), unsupported `word_0x10` rejection (`CheckUnsupportedWord` over `{2U, 0xFFFFFFFFU}`), and header-too-short/truncation rejection (the loop asserting every prefix shorter than the full envelope is classified `Truncated`). Extent-exceeds-input is likewise covered by the nonzero-trailing-byte `Malformed` checks. No coverage gap against the Python fingerprinter's rejection branches was found.
-- No aggregate cross-tabulation exists between `.ska` container-hog membership (`SKA.HOG` vs. `SKALEVEL.HOG`) and any of the observed word buckets (`word_0x08` ∈ {56,88,92}, `word_0x10` ∈ {0,1}). Producing this split (which HOG contributes which bucket counts) would be a privacy-safe aggregate-only extension of `tools/fingerprint_assets.py` (bucket the existing per-span stats by containing top-level HOG path) and might sharpen or refute H-SKA-1.
-- No decoded-content research (VIF/vertex-style tracing, as done for VUM/COL) has been attempted against `.ska`'s counted-word region; `ASSET-RECON.md`'s loader-priority list places "SKM/SKL for characters and weapons" as priority 6 but does not mention SKA at all, meaning it has not yet been scheduled into the loader-priority research plan.
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status: **passive_descriptor_only**
 
@@ -78,8 +86,12 @@ evidence-ledger entries E-0026/E-0027 (both state "213").
 
 ## 8. Codex work order (ranked, privacy-safe, no semantic speculation)
 
-1. **Resolved — no gap found.** Re-inspection of `native/tests/ska_container_descriptor_tests.cpp` confirms every rejection branch already implemented in `tools/fingerprint_assets.py::fingerprint_ska()` — non-3 version word, zero `word_0x04`/`word_0x08`, `word_0x10` outside `{0,1}`, span shorter than 112 bytes, and computed extent exceeding the physical span — already has an explicit synthetic-byte-buffer assertion (`CheckUnsupportedWord`, the all-prefixes-truncated loop, and the nonzero-tail `Malformed` checks). No new rejection-path unit tests are needed; this item is closed.
-2. Promote the SKA grammar currently embedded in `analysis/formats/ASSET-RECON.md` §"SKA and SKAS structural envelopes" into a standalone `analysis/formats/SKA.md`, mirroring the structure of `analysis/formats/SKAS.md` (aggregate-only; no payload bytes; explicit non-claims section). This gives future dossiers and tooling a single canonical citation target instead of a subsection of a larger recon document.
-3. Extend `tools/fingerprint_assets.py`'s `ska` aggregate to bucket the existing per-span statistics (`word_0x04`, `word_0x08`, `word_0x10`, exact/zero-padded classification) by containing top-level HOG path (`SKA.HOG` vs `SKALEVEL.HOG`), and re-run against the owner corpus to regenerate `analysis/formats/asset-fingerprints.json`. This is a privacy-safe aggregate-only change (adds one more grouping key to output already limited to counts) and would let H-SKA-1 be tested or refuted without any new payload exposure.
-4. Re-run `build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc` after step 1's test additions land, and confirm the reported `stats.ska.valid == 213`, `stats.ska.errors == 0`, and `stats.ska_structural.logical_bytes == 2,180,832` still match the E-0027 ledger baseline exactly — a regression here would indicate the new rejection tests exposed a live bug rather than just adding coverage.
-5. Do **not** attempt to decode the counted-word payload region, assign bone/channel/animation semantics, or establish an SKA/SKAS relationship until a dedicated, ledger-tracked research pass explicitly targets that question with its own privacy-safe evidence plan (per §5's confirming/refuting observations) — this dossier's `passive_descriptor_only` classification is not a green light to add semantic decoding without a new evidence-ledger entry.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

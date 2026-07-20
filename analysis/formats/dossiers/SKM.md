@@ -19,8 +19,8 @@ here.
 
 The recursive count (4,219) exceeds the top-level count (2,808), consistent with `.skm` members
 also occurring inside nested HOGs (HOGs within HOGs), per the aggregate-scan methodology documented
-for other families in `analysis/formats/HOG.md`. The whole-disc count of 0 confirms `.skm` is
-exclusively a packed-archive asset, never a loose disc file.
+for other families in `analysis/formats/HOG.md`. In the current tracked inventory, the whole-disc
+filesystem-entry count is 0; this establishes no universal rule for other versions or corpora.
 
 ## 3. Confirmed facts
 
@@ -58,59 +58,23 @@ No semantic interpretation attached; these are corpus-wide numeric aggregates on
 
 ## 5. Hypotheses
 
-Each is explicitly labeled speculative and paired with a privacy-safe confirming/refuting observation.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
 
-- **H1 — "secondary_count" is a per-chunk vertex or primitive count.** The fingerprint script's
-  variable name `vertex_counts` (assigned from the same field the decoder calls
-  `observed_secondary_count`) suggests this reading, but `ASSET-RECON.md` explicitly flags it as
-  "semantic name not yet proven," and the native descriptor's doc comment says it "assigns no
-  semantics" to that field. **Confirms/refutes with:** an aggregate cross-tabulation of
-  `secondary_count` against the qword_count of the same chunk and against known VIF/GS packet-size
-  constants from a public, already-tracked format grammar (no payload bytes needed) — if a fixed
-  linear relation (e.g., `qword_count ≈ f(secondary_count)`) holds across all 4,219 files without
-  exception, that is aggregate corroboration; a single counted-exception in the aggregate scan
-  refutes it.
-- **H2 — the 16-byte qword-aligned chunk payloads carry PS2 VIFcode/VU microcode or GS packet
-  data (a "mesh" in the PS2-graphics sense).** This is suggested only by the informal ASSET-RECON.md
-  label "SKM mesh" and the qword (16-byte) granularity, which is the native PS2 VIF/DMA transfer
-  unit size across the platform generally. No tracked file inspects payload bytes. **Confirms/refutes
-  with:** an aggregate, payload-byte-position histogram (e.g., "byte 0 of each chunk payload takes
-  value X in N% of chunks") computed by extending the existing passive fingerprint script — still
-  no per-file rows or payload dumps, just corpus-wide value-frequency counts — checked against
-  published PS2 VIFcode tag-byte value ranges already appearing in this repo's tracked grammar docs
-  (if any exist) or flagged UNKNOWN if none do.
-- **H3 — `.skm` files pair 1:1 or N:1 with `.skl` files for a given character/weapon (the
-  "SKM/SKL for characters and weapons" grouping in the roadmap).** `ASSET-RECON.md`'s research
-  roadmap groups SKM and SKL together as a future work item (item 6), but no tracked evidence
-  establishes a pairing rule, naming convention, or archive-adjacency fact. **Confirms/refutes
-  with:** an aggregate-only same-basename-group count (already a documented technique per
-  `FRONTEND-TOPOLOGY.md`'s "same-basename groups/pairs" aggregate) restricted to `.skm`/`.skl`
-  stems, reporting only counts of paired vs. unpaired basenames — no filenames disclosed beyond the
-  generic extensions already public.
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- **No FourCC/magic exists to corroborate independently** — the format's self-identification rests
-  entirely on the version-byte-is-3 convention, which the corpus satisfies 100% of the time but
-  which is not a strong discriminator on its own. Nothing further is missing here structurally; this
-  is a property of the format, not a gap in current tooling.
-- **No decoding of chunk-payload internals anywhere in the tracked evidence.** Neither the fingerprint
-  script nor the native descriptor reads past the per-chunk qword_count/secondary_count byte pair;
-  payload bytes are only ever range-validated (bounds/overflow) or, for the zero-padded tail, checked
-  to be all-zero. The privacy-safe collection that would begin to close this gap is an extension of
-  `tools/fingerprint_assets.py::fingerprint_skm` that adds aggregate-only, corpus-wide statistics over
-  payload byte *positions* relative to chunk start (e.g., min/max/mode of byte 0, byte 1, ... of each
-  16-byte qword slot, bucketed and counted across all 4,219 files) — this stays aggregate-only
-  because it reports value-frequency histograms, never a specific file's raw bytes.
-  Not run under this task (no evidence-collection commands were executed here; this doc reports what
-  already exists in tracked files).
-- **No cross-format correlation data (SKM↔SKL, SKM↔SKAS, SKM↔SKA) exists in any tracked file.** Only
-  the roadmap notes an intended future grouping (`ASSET-RECON.md` item 6); no aggregate
-  same-basename-pair counts for `.skm` specifically have been computed and published anywhere in the
-  tracked corpus.
-- **No adversarial/fuzz test asset exists for the byte-value distributions themselves** (see §7 for
-  the decoder's existing boundary-condition test coverage, which is present but distinct from
-  payload-content fuzzing).
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -147,29 +111,12 @@ Justification:
 
 ## 8. Codex work order
 
-Ranked, concrete, privacy-safe. None of these require reading payload bytes, filenames, or per-file
-identifiers beyond what is already public in tracked docs.
-
-1. **Resolved — no listed test gap remains.** The tracked synthetic test file covers the non-limit
-   and limit branches enumerated in §7. Add cases only when the implementation grows a genuinely new
-   boundary.
-2. Extend `tools/fingerprint_assets.py::fingerprint_skm` to emit an aggregate-only, corpus-wide
-   frequency histogram of `secondary_count` conditioned on `qword_count` (bucketed counts, not
-   per-file rows) to test Hypothesis H1 without publishing any payload bytes or file identities.
-3. Extend the same aggregate-scan pass to compute a same-basename-stem pairing count between `.skm`
-   and `.skl` members (count of stems present in both extensions vs. stems present in only one),
-   surfaced as a single aggregate number in `analysis/formats/asset-fingerprints.json`, to test
-   Hypothesis H3.
-4. Run the existing `tools/fingerprint_assets.py` scan against the owner's already-authorized private
-   corpus (per the existing `E-0011` check command pattern in `analysis/evidence/ledger.jsonl`) to
-   regenerate `asset-fingerprints.json` after any script changes from items 2–3, and record any new
-   confirmed claims as new ledger entries rather than editing existing `E-####` rows in place.
-5. If items 2–3 produce a clean, exception-free aggregate pattern, promote the corresponding
-   hypothesis to a Confirmed fact in this dossier (with the new ledger entry as citation) rather than
-   inferring semantics from the pattern alone — a clean aggregate correlation is still not proof of
-   meaning without an independent citable source (e.g., a public PS2 VIF/GS grammar reference already
-   tracked elsewhere in this repo).
-6. Do not attempt chunk-payload byte interpretation (VIF/VU opcode decoding, vertex extraction) until
-   items 1–5 are complete and a public, already-tracked grammar reference for that byte layout is
-   identified — per the CLEAN-ROOM RULES, inventing such a decoder from plausibility alone is a
-   regression.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

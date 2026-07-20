@@ -54,19 +54,25 @@ No semantic interpretation attached — counts/ranges only.
 
 ## 5. Hypotheses
 
-Each is explicitly unconfirmed. Stated with the privacy-safe observation that would move it to Confirmed or Rejected.
 
-- **H1 — Post-TER section markers are true section boundaries.** The 19 four-byte-aligned literal tags observed after `GOB:` (`SND:`, `ACL:`, `INL:`, `NPC:`, `WPN:`, `PLR:`, `SKY:`, `PNT:`, `DIR:`, `ENV:`, `NOD:`, `GEN:`, `GRP:`, `BOX:`, `FIR:`, `CAM:`, `INV:`, `BUG:`, plus `TER:`/`GOB:`) are currently only "candidate marker" occurrences (`analysis/formats/POP.md`). Confirming observation: an independent, privacy-safe cross-check (e.g. a second unrelated byte pattern, or a runtime/tool-derived boundary list) that agrees the literal position is a true section start rather than coincidental payload bytes. Refuting observation: any literal-shaped 4-byte sequence found embedded inside a candidate section's payload at a non-boundary offset.
-- **H2 — The five scored count-word/stride tuples (`INL:`+4/36B, `PNT:`+4/88B, `DIR:`+4/44B, `ENV:`+4/76B, `INV:`+4/84B) are genuine `{count, fixed-size record[]}` sections.** Currently only an arithmetic fit across all 18 files (ledger E-0030/E-0031). Confirming observation: an independently derived record schema (e.g. from a public tool, spec, or a second unrelated structural signal) that assigns the same stride and count semantics. Refuting observation: a 19th corpus file (if the owner corpus ever grows) where the "+4 word" is nonzero but the arithmetic extent does not reach the next marker/EOF exactly.
-- **H3 — `kind` and `index` in each terrain record encode a gameplay/placement role and a lookup key respectively.** No evidence assigns meaning to either field; only their nonzero-integer value distribution is known (Section 4). Confirming observation: a privacy-safe correlation of `kind` values against an independently-sourced, already-public taxonomy (e.g. a published SFTOS terrain-type list) that lines up exactly. Refuting observation: `kind` values that vary for terrain names known (from independently published material) to share a role.
-- **H4 — The remaining unscored sections (`GOB:`, `SND:`, `ACL:`, `NPC:`, `SKY:`, `NOD:`, `GEN:`, `GRP:`, `BOX:`, `FIR:`, `CAM:`, `BUG:`) also follow a count+fixed-stride record layout like the five scored ones.** No tracked tool has tested these; the scorer intentionally covers only 5 of 19 literals. Confirming observation: extending `tools/score_pop_section_layout_hypotheses.py`'s probe to these literals and finding an exact nonzero arithmetic fit across all 18 files. Refuting observation: no fixed stride ≤256 bytes fits any nonzero candidate count for a given literal.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- No tracked evidence establishes a header/version field for the file as a whole (only the fixed `70`/`"TER:"` opening word-pair is validated); a whole-file version or size field, if any, is unobserved. Privacy-safe collection: extend the structural scanner to test candidate whole-file header fields against the exact `DATA.POP` byte size already recorded in `analysis/manifests/disc-files.jsonl`, emitting only aggregate pass/fail counts.
-- No tracked evidence decodes any byte of the 14 post-terrain sections not covered by the five scored candidates (`GOB:`, `SND:`, `ACL:`, `NPC:`, `SKY:`, `NOD:`, `GEN:`, `GRP:`, `BOX:`, `FIR:`, `CAM:`, `BUG:`). Privacy-safe collection: run the existing bounded scorer/profiler tooling (`tools/score_pop_section_layout_hypotheses.py`, `tools/profile_pop_candidate_record_shapes.py`) extended to probe these literals, reporting only the same aggregate-only schema already used for the five scored candidates.
-- No tracked evidence cross-references `.POP` terrain `kind`/`index` values against any other decoded format family (e.g. `.COL`, `.VUM`) beyond name-stem matching to `DATA.HOG`. Privacy-safe collection: an aggregate-only cross-family joiner that reports only counts of `kind`/`index` co-occurrence buckets against, say, `.COL` version bytes already surfaced in `asset-fingerprints.json`, with no per-file or per-name rows.
-- No adversarial/malformed-input fuzz corpus results are tracked for the post-terrain hypothesis descriptor beyond the empty-corpus CTest case (`omega_tool_rejects_empty_pop_post_terrain_hypotheses_tree`); a fuzzed/mutated-`.POP` boundary-condition sweep is not present in the ledger. Privacy-safe collection: a synthetic (non-corpus, generated) malformed-`.POP` test-vector suite added to `native/tests/`, reporting only pass/fail/error-code aggregates.
+
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -80,10 +86,13 @@ Each is explicitly unconfirmed. Stated with the privacy-safe observation that wo
 
 ## 8. Codex work order
 
-Ranked, privacy-safe, no semantic speculation:
 
-1. **Highest priority — extend structural hypothesis scoring to the remaining 14 post-terrain literals.** Run/extend `tools/score_pop_section_layout_hypotheses.py` and `tools/profile_pop_candidate_record_shapes.py` against `GOB:`, `SND:`, `ACL:`, `NPC:`, `SKY:`, `NOD:`, `GEN:`, `GRP:`, `BOX:`, `FIR:`, `CAM:`, `BUG:` (the 12 literals besides the already-scored `INL:`/`PNT:`/`DIR:`/`ENV:`/`INV:`, plus confirming `TER:`/`GOB:` need no further scoring since they are already decoded) over the full owned corpus. Report only the same aggregate schema already used (exact-match tuples, nonzero/zero counts) — no per-file rows, no offsets tied to a single input.
-2. Add a synthetic (generator-produced, non-corpus) malformed/truncated/mutated `.POP` test-vector suite under `native/tests/` to close the adversarial-boundary gap noted in Section 7, exercising `PopTerrainIndex`, `DecodePopLevelManifest`, and `InspectPopPostTerrainHypotheses` beyond the empty-input case; assert only pass/fail/error-code, never publish generated vectors that mimic proprietary payload shape.
-3. Add a whole-file header/size self-consistency check (Section 6, first bullet) to `tools/fingerprint_assets.py`'s `scan_pop_files`, reporting only an aggregate pass/fail count across the 18 owned files.
-4. If/when independently published, non-owner-corpus reference material for SFTOS terrain `kind` taxonomies becomes available, run a privacy-safe aggregate correlation against the existing `terrain_kind` histogram (Section 4) to test Hypothesis H3 — publish only bucket-level agreement counts, never per-name rows.
-5. Keep the `.POP` post-terrain remainder explicitly `structural_envelope_only` in all downstream docs/tooling until a section literal clears the semantic bar stated in `analysis/formats/POP.md` ("independent evidence must establish its header/count relationship... disprove marker-shaped payload coincidences... independently connect the consumed fields to placement or visibility behavior") — do not promote H1/H2/H4 to Confirmed on arithmetic fit alone.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

@@ -70,70 +70,25 @@ occurrences, computed without reproducing any individual path, hash, or per-file
 
 ## 5. Hypotheses
 
-Each is explicitly labeled and unconfirmed. None is asserted as fact anywhere else in this
-document.
 
-- **H1 — The single HOG-embedded `.scc` instance is unrelated in content to the six whole-disc
-  `.scc` instances.** The two occurrence scopes are structurally distinct in this corpus (one asset
-  span living inside the HOG-archive tree the fingerprinting scanner walks; six files living at the
-  top level of the disc image outside any HOG), and no tracked source links them.
-  *Confirms if:* a bounded, aggregate-only leading-byte/magic comparison between the one
-  HOG-embedded span and the six whole-disc files reports a shared header signature or size-formula
-  match (reported only as "match count" / "mismatch count", never as reproduced bytes).
-  *Refutes if:* such a comparison finds the HOG-embedded span structurally distinct from the
-  whole-disc set (e.g. different leading bytes, non-comparable size class).
-- **H2 — `.scc` is not a mesh/texture/audio/script game-asset format in the sense of the corpus's
-  `FORMAT_HANDLERS` families.** Its occurrence count (1 HOG-embedded instance across 53,281 scanned
-  asset spans) is far below every registered handler's minimum (`.skas` at 2), and no grammar
-  document or decoder exists for it (§3, rows 1, 3, 5–6).
-  *Confirms if:* a bounded aggregate scan of the HOG-embedded `.scc` span's header reports
-  ASCII/text-dominant content or a non-binary marker shape (comparable to the plain-ASCII
-  observation already published for `.par` in `PAR.md`), consistent with a non-payload auxiliary
-  file rather than a binary asset.
-  *Refutes if:* the scan reports a binary header shape structurally comparable to an existing
-  asset family's documented grammar (e.g. `COL`, `VUM`, `TDX`).
-- **H3 — The six whole-disc `.scc` occurrences share a common internal structure.** Their tight,
-  small size range (80–256 bytes, §4) is consistent with instances of the same small record format
-  repeated across the disc, though the range itself does not prove a shared layout.
-  *Confirms if:* a bounded, aggregate-only header-byte scan across all 6 whole-disc occurrences
-  reports a shared magic or common leading structure (reported as match/mismatch counts only).
-  *Refutes if:* the scan reports divergent leading bytes across the 6 occurrences.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- **No structural scanner has ever been run against `.scc` at either scope.** `tools/fingerprint_assets.py`'s
-  `FORMAT_HANDLERS` dict has no `.scc` entry (§3 row 1), so `asset-fingerprints.json` carries only a
-  bare extension/depth count for the single HOG-embedded instance — zero header, magic, alignment,
-  or text-ratio data. *Privacy-safe collection:* add a bounded, read-only `.scc` handler to
-  `tools/fingerprint_assets.py` (mirroring the existing `fingerprint_par`/`fingerprint_col` handlers)
-  that reports only aggregate leading-byte histograms, size, and printable-ASCII-ratio statistics —
-  never per-file rows — and register it in `FORMAT_HANDLERS`.
-- **No per-archive breakdown exists to identify which of the 273 top-level HOGs contains the
-  single top-level `.scc` member.** `hog-validation.json`'s `archives` list records only
-  `path`/`tag`/`entry_count`/`data_offset` per archive, not a per-archive suffix histogram.
-  *Privacy-safe collection:* extend the HOG validation pass to additionally emit a per-archive
-  extension-count map (aggregate counts only, keyed by the already-tracked top-level HOG path
-  strings that are container names, not novel private paths) so a future dossier revision can
-  state which top-level HOG contains the `.scc` member without exposing any new file-name detail.
-- **No comparison has ever been run between the HOG-embedded `.scc` instance and the whole-disc
-  `.scc` instances** (H1). *Privacy-safe collection:* the same bounded handler from the first row
-  above, applied to both scopes, reporting only an aggregate match/mismatch verdict.
-- **No published grammar document exists.** Unlike `.pop`, `.col`, `.vum`, etc., there is no
-  `analysis/formats/SCC.md` grammar doc (this dossier is deliberately an evidence/status document,
-  not a grammar publication). *Privacy-safe collection:* once §6 row 1's aggregate scan establishes
-  whether the family has any shared, well-formed header, promote the result to a grammar document
-  following the `POP.md`/`PAR.md` template, citing only aggregate/structural constants.
-- **No native descriptor or decoder exists**, so there is no CMake target, no test target, and no
-  adversarial/resource-boundary coverage to note a gap in (§3 rows 5–6) — the gap is total, not
-  partial.
-- **No ledger entry (`E-####`) has ever evaluated a claim about `.scc`.** *Privacy-safe collection:*
-  file a new ledger entry once §6 row 1's scan produces a citable aggregate fact, following the
-  existing claim/evidence/check schema used by neighboring `E-00xx` entries.
-- **No cross-region/cross-edition comparison exists.** All counts in this dossier derive from the
-  single NTSC-U owner disc represented by the tracked manifests. Whether other regions/editions
-  carry the same 1-HOG-embedded/6-whole-disc pattern is unknown. *Privacy-safe collection:* if
-  additional owned discs are ever fingerprinted under the same tracked pipeline, add their `.scc`
-  aggregate counts to this dossier's §2/§4 tables without introducing any new per-file detail.
+
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -151,36 +106,13 @@ partially-tested one.
 
 ## 8. Codex work order
 
-Ranked, privacy-safe, concrete next steps. None presumes a semantic role; each step either builds
-tooling against the owner corpus or verifies an existing aggregate.
 
-1. **Highest priority — add a bounded `.scc` structural handler to `tools/fingerprint_assets.py`**
-   (mirroring the existing `fingerprint_par`/`fingerprint_col` handlers) that reports, as pure
-   aggregates only: a leading-byte histogram (first 4–16 bytes bucketed, never reproduced), the
-   full size distribution, and a printable-ASCII-ratio statistic. Register it in `FORMAT_HANDLERS`
-   and re-run the existing fingerprinting pass so the single HOG-embedded `.scc` span and the six
-   whole-disc `.scc` files are both covered. Publish only the aggregate JSON, following the
-   existing `asset-fingerprints.json` schema.
-2. Using the handler from step 1, run the comparison described in H1/§6 between the one
-   HOG-embedded instance and the six whole-disc instances, reporting only a match/mismatch verdict
-   — this directly confirms or refutes whether the two occurrence scopes share any structural
-   relationship, without exposing any payload or path.
-3. Extend `hog-validation.json`'s archive-validation pass to emit a per-archive extension-count map
-   (§6, second row) so a future revision of this dossier can state which top-level HOG (by its
-   already-tracked container path string) holds the `.scc` member, still without introducing any
-   new private file-name detail.
-4. Once step 1 produces a citable aggregate (shared magic present or absent, ASCII-dominant or
-   binary), file a new `analysis/evidence/ledger.jsonl` entry (`E-00xx`) recording the confirmed
-   aggregate claim, following the existing claim/evidence/check schema.
-5. If step 1 establishes a shared, well-formed header across some or all occurrences, promote the
-   result to an `analysis/formats/SCC.md` grammar document using the `PAR.md`/`POP.md` template
-   (validated scope, observed layout, native contract section left `TODO` until a decoder is
-   actually built) — do not write this document before the aggregate evidence exists.
-6. Only after steps 1–5 produce a confirmed, citable grammar: scope and build a
-   `structural_envelope_only` native descriptor (own bytes, bound sizes, reject malformed input,
-   assign no semantics) under `native/include/omega/asset/`, with a corresponding CMake target and
-   test file, following the pattern already established for `.vpk`'s wrapper-envelope descriptor.
-   Do not attempt a `canonical_decoder` until the envelope stage is proven and reviewed.
-7. Re-run this dossier's §2 occurrence-evidence table whenever `asset-fingerprints.json`,
-   `hog-validation.json`, or `disc-summary.json` are regenerated, to catch drift (e.g., a future
-   corpus addition changing any of the three counts away from 1/1/6).
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

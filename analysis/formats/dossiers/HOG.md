@@ -62,24 +62,25 @@ No semantic interpretation is attached to any of these; they are corpus-wide cou
 
 ## 5. Hypotheses
 
-Explicitly labeled; none are asserted as fact.
 
-- **H1 — `tag` is an archive-identity value rather than a fixed magic.** One example value is
-  published in `analysis/formats/HOG.md`, while the grammar says the field varies. A fixed aggregate
-  distinct-count measurement could test this without publishing values or per-archive rows.
-- **H2 — nested-HOG zero tails reflect an alignment policy rather than payload grammar.** The
-  tracked padding range is `[16, 2032]`, but the whole-disc manifest does not establish a sector
-  size for each parent. Test only explicitly stated modulus candidates and report counts.
-- **H3 — the 6,176:501 zero-padded-to-exact-span ratio for nested HOGs correlates with which top-level container class holds them** (e.g., `DATA.HOG`-family containers tend to be sector-aligned/zero-padded per the `minsk` example bucket, while smaller single-purpose containers like `MAPVUM.HOG` tend to be exact-span). *Confirming/refuting observation:* extend the per-container aggregate breakdown already emitted for the `minsk` example bucket in `asset-fingerprints.json` to every top-level container class disc-wide, and check whether the exact/zero-padded split clusters by container-name pattern — this is an aggregate count grouped by generic container name, already an established practice in the tracked JSON.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- **No published aggregate breakdown of the `tag` field's value distribution.** One example value
-  appears in the tracked format note; no corpus-wide distinct count exists. Publish only the count
-  of distinct values, not min/max values or a raw histogram.
-- **No aggregate correlation between nested-HOG padding size and parent sector geometry.** The padding range `[16, 2032]` is reported corpus-wide but not broken down by alignment modulus. *Privacy-safe collection:* add an aggregate histogram of `padding_bytes mod 2048` (or the disc's actual sector size) to `analysis/formats/asset-fingerprints.json`.
-- **No adversarial/resource-boundary test targeting the *top-level* `HogArchive::Open` path specifically.** The cited test evidence (`native/tests/hog_archive_tests.cpp`) demonstrates an overflowing-range rejection and a synthetic malformed *nested* buffer; tracked evidence does not show an equivalent adversarial case for the top-level `Open()` entry point (e.g., a crafted top-level file with a non-zero trailing byte, an entry count at or beyond `kMaximumEntryCount`, or a name-table length at `kMaximumNameLength`). *Privacy-safe collection:* extend the existing test file with synthetic (non-owner-derived) byte buffers exercising `kMaximumDirectorySize`, `kMaximumEntryCount`, and `kMaximumNameLength` boundaries for both `HogIndex::Open` and `HogArchive::Open`.
-- **No fuzz/property-based test registration is visible in the tracked CMake test list beyond the fixed unit-test file.** *Privacy-safe collection:* a CMake-registered fuzzer or property-based test target seeded only with synthetic buffers (never owner-corpus payloads) covering the header/offset-table invariants already stated in `analysis/formats/HOG.md`.
+
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -95,11 +96,13 @@ Justification:
 
 ## 8. Codex work order
 
-Ranked, concrete, privacy-safe next steps. No semantic speculation about payload roles.
 
-1. **Highest priority — close the top-level adversarial-test gap.** Add synthetic (non-owner-derived) byte-buffer test cases to `native/tests/hog_archive_tests.cpp` for `HogArchive::Open`/`HogIndex::Open` mirroring the existing nested-range malformed-buffer and overflow tests: (a) entry count at/over `kMaximumEntryCount`, (b) directory size at/over `kMaximumDirectorySize`, (c) a name exceeding `kMaximumNameLength`, (d) a top-level file with one nonzero trailing byte after the logical end (must be rejected, unlike the nested-tail case). Register any new test binary target already covered by the existing CMake test entry (no new registration needed if added to the same file).
-2. **Publish an aggregate `tag`-field distribution** by extending `tools/validate_hogs.py` or `tools/fingerprint_assets.py` to emit a count of distinct `tag` values (or a bucketed histogram) across the 273 top-level and 6,677 nested archives into the existing JSON outputs, to test Hypothesis H1 without publishing any per-file tag-to-name mapping.
-3. **Publish an aggregate padding-vs-sector-modulus histogram** for the `nested_hog_padding_bytes_range` observation, to test Hypothesis H2, written as a new aggregate field in `analysis/formats/asset-fingerprints.json` (bucketed counts only, no per-file rows).
-4. **Extend the per-container aggregate breakdown (currently only shown for the `minsk` example bucket) to every top-level container name disc-wide**, to test Hypothesis H3 — an aggregate table keyed by generic container name (e.g., `DATA.HOG`, `MAPVUM.HOG`) with entry/exact-span/zero-padded counts, following the schema already present in `asset-fingerprints.json` for `minsk`.
-5. **Add a CMake-registered fuzz or property-based test target** seeded only with synthetic buffers, asserting the header/offset-table invariants already documented in `analysis/formats/HOG.md` (monotonic offsets from zero, table-boundary containment, all-zero-tail-only for nested spans) hold under randomized malformed input — strengthens the `canonical_decoder` classification's robustness evidence without touching owner payload data.
-6. **Do not attempt payload-format decoding under this work order.** Entry-content interpretation (e.g., what a `.col`/`.vum`/`.tdx` entry inside a HOG means) is out of scope for this dossier and belongs to those families' own dossiers; extending HOG tooling should stop at the container/directory boundary.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

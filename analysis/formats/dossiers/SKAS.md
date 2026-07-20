@@ -61,60 +61,25 @@ only.
 
 ## 5. Hypotheses
 
-Each is explicitly labeled speculative and paired with the privacy-safe aggregate observation
-that would confirm or refute it, using only the owner's already-extracted corpus (no new disc
-access, no payload disclosure).
 
-- **H1 — `.skas` is a per-actor or per-skeleton sidecar text manifest referencing `.ska`/`.skl` assets by name.**
-  Confirm/refute signal: an aggregate check of whether the 67 single-colon lines' *left-of-colon*
-  token lengths and character-class distribution (not values) cluster into a small fixed set of
-  label-shaped strings across both candidates, reported only as counts/lengths, never as text.
-  `analysis/formats/SKAS.md` explicitly states the decoder "deliberately does not split a line at
-  its colon," so no observation currently supports or refutes this.
-- **H2 — The 5 blank lines are section separators dividing the 72-line body into a fixed number of logical sections.**
-  Confirm/refute signal: an aggregate positional-index check (line index only, not content) of
-  where the 5 blank lines fall in each of the 2 candidates — if both candidates' blank-line index
-  sets are identical, that is a citable structural regularity; if they differ, the hypothesis is
-  refuted. No such positional aggregate is currently recorded in any tracked source, so this
-  remains untested.
-- **H3 — `.skas` files are configuration/metadata for the SKA animation pipeline rather than an unrelated system entirely.**
-  Confirm/refute signal: the sample size (2) is too small and the tracked evidence base
-  (`ASSET-RECON.md`) explicitly disclaims any SKA-association. Confirming would require either (a)
-  a larger owner-corpus sample of `.skas` candidates showing a stable count-scaling relationship
-  with `.ska`/`.skl` counts, or (b) an aggregate archive-level co-occurrence count (see §6) showing
-  `.skas` consistently co-resides with a fixed ratio of `.ska`/`.skl` members. The `.skl` family's
-  `BONENOSCALE` profile note in `ASSET-RECON.md` concerns `.skl` only and must not be conflated
-  with `.skas`.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- **No positional/index-level statistics for blank-line or colon-line placement** exist in any
-  tracked source (only counts: 5 blank, 67 single-colon, out of 72 total). Collection: extend
-  `tools/fingerprint_assets.py`'s `fingerprint_skas` handler to additionally record, per candidate,
-  the sorted line-index list of blank lines and of single-colon lines (indices only, never line
-  text), aggregated across the corpus, and re-run against the owner's already-extracted tree —
-  this stays path-free and payload-free.
-- **No left-of-colon / right-of-colon token-shape statistics** (lengths, character classes) exist.
-  Collection: extend the same handler to record aggregate token-length histograms for the substring
-  before the first colon and after it on each single-colon line, without ever retaining or emitting
-  the substrings themselves.
-- **No cross-suffix co-occurrence data** (e.g., whether a given HOG that contains a `.skas` member
-  also contains a specific count of `.ska`/`.skl`/`.skm` members) is recorded. Collection: extend
-  `tools/fingerprint_assets.py`'s HOG-walk to emit an aggregate per-container suffix-count vector
-  specifically keyed to the archives that contain `.skas`, reporting counts only, no member names.
-  The tracked archive name `SKAS.HOG` (already present in `analysis/manifests/disc-files.jsonl`,
-  `GAMEDATA/COMMON/SKAS.HOG`) is a generic container name already published and not a private path,
-  but the members inside any HOG are out of scope to enumerate individually per the clean-room
-  rules — only aggregate counts may be reported.
-- **No adversarial/boundary CTest evidence beyond E-0093's own ledger summary is separately tracked**
-  as an independent artifact — the ledger entry states adversarial coverage (both size boundaries,
-  padding boundaries, printable and line-ending rejection classes, 71/73-line shapes, wrong
-  blank/colon counts, colon-edge opacity, limit boundaries, tighter shared string default, hard-limit
-  rejection, ownership, determinism, zero scratch/depth, allocation failures) but no separate
-  aggregate test-count artifact is cited beyond the ledger's prose. Collection: none required
-  beyond what exists unless independent verification is desired — re-running the registered
-  `omega_skas_text_envelope_decoder_tests` CTest target (`CMakeLists.txt`) against the current tree
-  would reproduce/refresh that evidence.
+
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -145,36 +110,13 @@ corpus-wide verification command the way `.ska` is.
 
 ## 8. Codex work order
 
-Ranked, concrete, privacy-safe. Every item operates on the owner's already-extracted tracked
-corpus or its aggregate scanners/decoders — no new disc access, no payload disclosure, no
-semantic invention.
 
-1. **Highest priority — wire `DecodeSkasTextEnvelope` into `omega_tool asset-metadata-verify-tree`.**
-   Add a `.skas` branch to `native/apps/omega_tool/asset_commands.cpp` mirroring the existing
-   `RecordSkaStructure`/`SkaStructuralStats` pattern for `.ska`: run the decoder across every
-   `.skas` candidate in the owner corpus, and emit only sanitized aggregate counters (accept/reject
-   count, physical/logical byte ranges observed, padding-byte range, blank/colon-line counts) —
-   exactly the shape already used for `.ska`. This closes the one concrete integration gap
-   identified in §7 and gives independent, reproducible corpus-wide confirmation of the two-file
-   envelope claim already in the ledger, at negligible risk since the decoder is already built
-   and tested.
-2. Extend `tools/fingerprint_assets.py`'s `fingerprint_skas` handler to additionally emit, per
-   candidate, the blank-line and single-colon-line *index sets* (positions only) as an aggregate
-   list, to directly test Hypothesis H2 (structural regularity of separator placement) without
-   touching content.
-3. Extend the same handler to emit aggregate token-length/character-class histograms for the
-   substrings on either side of each single-colon line's colon (never the substrings themselves),
-   to gather evidence toward or against Hypothesis H1 (label/value shape) while staying strictly
-   within the "counts, not text" boundary already established for this family.
-4. Add an archive-level co-occurrence aggregate to the HOG-validation pass (`hog-validation.json`
-   generation) that reports, for each container-name bucket already tracked (e.g. the `SKAS.HOG`
-   name already present in `disc-files.jsonl`), the counts of co-resident `.ska`/`.skl`/`.skm`
-   suffixes — counts only, no member enumeration — to gather evidence toward or against
-   Hypothesis H3 without violating the no-per-file-row rule.
-5. Re-run the registered `omega_skas_text_envelope_decoder_tests` CTest target as part of any
-   future full-suite validation pass to keep the E-0093 adversarial-coverage claim continuously
-   verified as the tree changes, rather than treating it as a one-time historical result.
-6. Do **not** attempt to split colon-bearing lines into label/value pairs or to assert any
-   `.ska`/`.skas` relationship until one of the aggregate collections above (items 2–4) produces a
-   citable structural signal; doing so before evidence exists would be exactly the kind of invented
-   semantic the clean-room rules forbid.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

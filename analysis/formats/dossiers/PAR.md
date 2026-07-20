@@ -64,45 +64,25 @@ These are corpus-wide statistics with no semantic interpretation attached.
 
 ## 5. Hypotheses (explicitly labeled — none confirmed)
 
-- **H1 — Version token tracks an authoring-tool or engine build version, not per-asset semantics.**
-  Privacy-safe confirming/refuting observation: a tracked aggregate correlating declared-version
-  token with independent structural metadata already published for other formats that co-occur in
-  the same HOG (e.g. an aggregate cross-tabulation of PAR version token against COL/VUM header
-  version bytes for spans sharing a container), produced without exposing per-file identity.
-- **H2 — The two-bucket span-size range (2,048 / 4,096) reflects two fixed on-disk allocation
-  quanta rather than a continuum.** Privacy-safe confirming/refuting observation: an aggregate
-  histogram (already-aggregate, no per-file rows) of span sizes at intermediate values between
-  2,048 and 4,096 in `asset-fingerprints.json`; if such a histogram were added and showed mass only
-  at the two endpoints, this would confirm a bucketed-allocation hypothesis; a smooth spread would
-  refute it. This dossier does not have that histogram today — it has only the range.
-- **H3 — The body text after the version marker line encodes a further line-oriented grammar
-  (e.g. one logical record per line).** Privacy-safe confirming/refuting observation: an aggregate
-  count of logical-line counts per span (min/max/mean, no content) published alongside the existing
-  `version_comment_first_line` counter; the decoder's IR already tracks "source-order opaque line
-  ranges" (C7) but no tracked source publishes an aggregate over that count today.
+
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- No tracked source publishes a per-bucket or full histogram of span sizes between 2,048 and 4,096
-  — only the range endpoints are recorded. A privacy-safe collection: extend
-  `tools/fingerprint_assets.py`'s `fingerprint_par` to call `stats.observe`/`stats.count` on a
-  bucketed span-size histogram (aggregate counts only, no per-file identifiers) and re-run against
-  the owner corpus.
-- No tracked source publishes logical line-count statistics for the body after the marker line (see
-  H3). A privacy-safe collection: add an aggregate-only line-count observation to `fingerprint_par`
-  (e.g. `stats.observe("logical_line_count", n)`), re-run, and publish the resulting min/max/mean
-  into `asset-fingerprints.json`.
-- No tracked source reconciles the PAR.HOG `entry_count: 870` against the 679 fingerprinted `.par`
-  spans (§4). A privacy-safe collection: an aggregate breakdown of PAR.HOG member-suffix counts
-  (suffix → count, no names) analogous to what `hog-validation.json` already does at the top level,
-  applied specifically to `GAMEDATA/COMMON/PAR.HOG`'s member list.
-- No tracked source runs the native `DecodeParTextEnvelope` decoder against the owner asset corpus
-  (only generated fixtures per E-0092). A privacy-safe collection: run the existing
-  `omega_par_text_envelope_tests` binary's decode path (or a small aggregate-reporting CLI wrapper)
-  over the real PAR spans and publish only pass/fail/error-code aggregate counts — no payload bytes,
-  no per-file rows — into a new or extended JSON aggregate file.
-- No tracked source documents an adversarial/resource-boundary sweep of the decoder against
-  malformed real-world inputs at scale (E-0092 states tests "use generated text only"; see §7).
+
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -134,22 +114,13 @@ These are corpus-wide statistics with no semantic interpretation attached.
 
 ## 8. Codex work order (ranked, privacy-safe)
 
-1. **Highest priority:** Run the existing, already-built `DecodeParTextEnvelope` decoder (via
-   `omega_par_text_envelope_tests` or a thin aggregate-reporting CLI extension) against the real
-   owner PAR corpus (all 679 tracked spans) and record only aggregate pass/fail/typed-error-code
-   counts — no payload bytes, no per-file identifiers — closing the "generated fixtures only" gap
-   noted in E-0092 and §7.
-2. Extend `tools/fingerprint_assets.py::fingerprint_par` to emit a bucketed span-size histogram and
-   a logical-line-count aggregate (min/max/mean), re-run over the owner corpus, and publish the
-   result into `analysis/formats/asset-fingerprints.json`; this would let H2 and H3 be confirmed or
-   refuted without adding any per-file detail.
-3. Produce an aggregate member-suffix breakdown specifically for the `GAMEDATA/COMMON/PAR.HOG`
-   container (suffix → count only, mirroring the existing top-level `hog-validation.json`
-   methodology) to reconcile the 870-entry vs. 679-fingerprint discrepancy noted in §4.
-4. Keep publication status distinct from validation scope: the implementation is on main, while a
-   fresh owner-corpus pass remains unclaimed. Record such a pass separately if it is run.
-5. Only after 1–4 are exhausted: if a future tracked source (e.g. a decompiled retail parser for the
-   consumer of `.par`) surfaces genuine grammar beyond the version-marker line, extend
-   `ParTextEnvelopeIR`/`DecodeParTextEnvelope` accordingly — but do not speculate ahead of that
-   evidence; the current nonclaims boundary (no key/value grammar, no field/path/particle semantics)
-   must hold until such a tracked source exists.
+
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

@@ -19,9 +19,9 @@ naming hint, not a decoded semantic, and is treated below as a Hypothesis only.
 | Whole-disc file histogram | 0 | `analysis/manifests/disc-summary.json` / `analysis/manifests/disc-files.jsonl` (no `.lpd` key present) |
 
 The recursive and top-level counts are identical (862 = 862), consistent with `.lpd` members
-occurring only inside HOG containers and not at additional nesting levels beyond what the top-level
-scan already captures. The 0 whole-disc count confirms `.lpd` never appears as a bare filesystem
-entry outside a HOG — it is exclusively an in-archive asset suffix.
+occurring only as direct HOG members in the current tracked inventory. That inventory contains no
+whole-disc `.lpd` filesystem entry; this establishes no universal placement rule for other
+releases or corpora.
 
 ## 3. Confirmed facts
 
@@ -71,64 +71,25 @@ published grammar constants only.
 
 ## 5. Hypotheses
 
-Each is explicitly unconfirmed. No hypothesis here is treated as fact anywhere else in this
-document.
 
-- **H1 — "Dialogue/lip" role.** `ASSET-RECON.md` prose speculates the LPD family is
-  "dialogue lip/pose curves" based on (a) the per-track counted-envelope shape and (b) the 852/862
-  VAG basename adjacency. *Confirms/refutes with:* a privacy-safe structural cross-check that
-  aligns each LPD track's entry count against its companion VAG's decoded PCM sample/frame count
-  (aggregate ratio statistics only, no payload) — a stable numeric relationship (e.g., entry count
-  tracking audio duration) would support H1; no correlation across the 852-pair aggregate would
-  refute it.
-- **H2 — 21 tracks correspond to a fixed facial/bone rig dimension.** The fixed count of 21
-  per-file tracks (identical across all 862 files) suggests a fixed output cardinality (e.g., a
-  rig with 21 channels) rather than a variable list. *Confirms/refutes with:* checking whether any
-  companion format (SKL/SKA skeleton data already in the tracked corpus) exposes a bone/joint count
-  of 21 in its own aggregate; a match in the tracked SKL/SKA aggregates would support H2, a
-  mismatch or absence of any 21-valued field would weaken it.
-- **H3 — Four-byte entries are a single scalar (float32 or fixed-point), not a struct.** The IR
-  currently stores entries as opaque 4-byte arrays; no field-splitting has been attempted.
-  *Confirms/refutes with:* an aggregate-only statistical scan (value-range histogram, IEEE-754
-  validity ratio) over all decoded entries across the 862-file corpus — a high proportion of
-  entries that parse as plausible finite float32 values in a narrow, non-degenerate range would
-  support a float32-scalar hypothesis; a bimodal or ASCII-like byte distribution would refute it.
-- **H4 — The single "exact" file (zero tail) is a truncated/minimal or otherwise distinguished
-  case rather than a representative example.** *Confirms/refutes with:* an aggregate check of
-  whether that file's total entry count (sum of the 21 counts) is an outlier (e.g., near-zero or
-  near-maximum) relative to the corpus distribution — reported as an aggregate percentile only, no
-  filename or path.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-- No published per-track entry-count distribution (min/mean/max per track index, 0–20) exists in
-  any tracked source. `analysis/formats/LPD.md` and `ASSET-RECON.md` report only the aggregate
-  formula and overall size/tail statistics, not a per-track breakdown. *Privacy-safe collection:*
-  extend `tools/fingerprint_assets.py`'s LPD handler to emit, per track index 0–20, aggregate
-  min/mean/max/zero-count entry counts across the 862-file corpus into
-  `analysis/formats/asset-fingerprints.json` — no payload bytes, counts only.
-- No aggregate statistical profile (byte-value histogram, float32-validity ratio, integer-range
-  check) of the opaque 4-byte entries exists in tracked sources — the decoder deliberately treats
-  them as opaque, and no separate research pass has profiled them. *Privacy-safe collection:* a new
-  read-only aggregate-scanner pass (following the existing `fingerprint_assets.py` model of
-  emitting only counts/ratios, never payload bytes) that reports, corpus-wide, what fraction of
-  4-byte entries are valid finite IEEE-754 float32 vs. small non-negative integers vs. neither.
-- No cross-reference has been run correlating LPD track/entry counts against the corresponding
-  paired VAG's decoded audio duration (frame count from the VAG decoder, ledger E-0090). This would
-  test H1 without touching any payload content. *Privacy-safe collection:* an aggregate-only join
-  (basename match already established at 852/862) producing only a scatter of (LPD total entry
-  count, VAG frame count) pairs summarized as a correlation coefficient — no filenames, no bytes.
-- No adversarial/fuzzing test-gap audit result is recorded for the LPD decoder beyond what E-0091
-  self-reports (synthetic malformed/truncated/hostile-count cases). No independent verification run
-  (e.g., a fresh CTest execution log, or a coverage report) is present in the tracked evidence for
-  this specific decoder beyond the ledger's self-description. *Privacy-safe collection:* run
-  `ctest -R omega_lpd_envelope_decoder_tests` and `ctest` full-suite locally and record pass/fail
-  counts plus any new coverage gaps (e.g., simultaneous multi-track overflow, non-zero-tail
-  rejection at exactly 1,933 bytes) as a new ledger entry — all synthetic, no owner-corpus access
-  needed.
-- Publication is confirmed by current repository history: the LPD implementation landed on main at
-  commit `9e8bdde`. E-0091's pending language is a historical validation boundary, not current merge
-  status. A fresh owner-corpus verification remains a separate, unclaimed result.
+
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -156,28 +117,13 @@ relationship, so it is not a semantic "canonical_decoder" for the asset's meanin
 
 ## 8. Codex work order
 
-Ranked, privacy-safe, concrete next steps. None require reading private inputs beyond running the
-existing read-only aggregate scanner against the owner corpus (already the established, permitted
-pattern for `tools/fingerprint_assets.py`).
 
-1. **Run a metadata-only owner-corpus verification if needed.** Publication is already confirmed;
-   report only aggregate accept/reject and typed-error counts.
-2. **Extend `tools/fingerprint_assets.py`'s LPD handler to emit per-track (0–20) aggregate entry-count
-   statistics** (min/mean/max/zero-count) into `asset-fingerprints.json`, closing the "Missing
-   observations" gap on per-track distribution without touching payload bytes.
-3. **Add an aggregate-only 4-byte-entry value-profile pass** (float32-validity ratio, integer-range
-   check, byte-histogram) run read-only over the owner corpus, emitting only corpus-wide ratios to
-   a new or extended JSON aggregate — directly tests Hypothesis H3 (scalar type) without exposing
-   any entry value.
-4. **Run an aggregate-only LPD/VAG basename-paired correlation** (entry-count sum vs. paired VAG
-   frame count, from the already-existing VAG decoder in `native/src/retail/`), reporting only a
-   correlation coefficient across the 852 paired basenames — tests Hypothesis H1 without any
-   filename, path, or payload leaving the aggregate boundary.
-5. **Run the existing test suite and record a fresh pass/fail count** (`ctest -R
-   omega_lpd_envelope_decoder_tests`, then the full suite) and append the result as a new ledger
-   entry, to give this dossier's "Decoder/tooling status" section a currently-dated confirmation
-   rather than relying solely on E-0091's self-report.
-6. **Do not** attempt to assign track roles, timing units, or pose/animation semantics to the LPD
-   IR until an item 3 or 4 result produces a citable aggregate signal; absent that, keep the
-   decoder's non-claims in `LPD.md` unchanged — inventing semantics here is an explicit regression
-   per project rules.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.

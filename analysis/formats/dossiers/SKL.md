@@ -14,13 +14,16 @@ loadout slot, etc.) by any tracked source.
 
 | Scope | Count | Source |
 | --- | ---: | --- |
-| Recursive, inside nested HOGs | 1,261 | `analysis/formats/asset-fingerprints.json` → `scan.extensions[".skl"]` and `formats.skl.count` |
+| Mixed structural-fingerprinter candidates (direct depth −1 plus recursive HOG members) | 1,261 | `analysis/formats/asset-fingerprints.json` → `scan.extensions[".skl"]` and `formats.skl.count`; `tools/fingerprint_assets.py` (`scan_disc`) |
+| Recursive HOG-member occurrences at all archive depths | 1,259 | Mixed total minus the 2 directly scanned filesystem entries; `tools/fingerprint_assets.py` (`scan_disc`) |
 | Top-level HOG member suffix | 636 | `analysis/formats/hog-validation.json` → `entry_extensions[".skl"]` |
-| Whole-disc (loose files outside any HOG) | 2 | `analysis/manifests/disc-summary.json` → `extensions[".skl"]` |
+| Whole-disc filesystem entries, also scanned directly at depth −1 because `.skl` is handled | 2 | `analysis/manifests/disc-summary.json` → `extensions[".skl"]`; `tools/fingerprint_assets.py` (`scan_disc`) |
 
-Note the recursive count (1,261) and the top-level-HOG count (636) are drawn from two different
-tallies in the pipeline (all nested-HOG members vs. top-level-archive-only members) and are not
-expected to match; both are reproduced here exactly as the tracked JSON reports them.
+The 1,261 total is deliberately mixed: `scan_disc` recursively scans HOG members and then directly
+scans handled filesystem entries at depth −1. Subtracting the two direct `.skl` candidates yields
+1,259 recursive HOG members. Against the 636 direct top-level HOG members, that leaves 623 members
+at deeper HOG depth. Structural facts over 1,261 candidates include the two direct files and must
+not be labeled HOG-only.
 
 ## 3. Confirmed facts
 
@@ -49,7 +52,7 @@ Each row is mechanically citable from a named tracked file.
 
 No semantic interpretation attached — pure counts from the tracked aggregates.
 
-- Recursive-scan extension histogram places `.skl` at 1,261 occurrences among the full scanned
+- Mixed-candidate extension histogram places `.skl` at 1,261 occurrences among the full scanned
   extension set (`.tdx` 15,248; `.vag` 8,665; `.col` 7,036; `.vum` 7,036; `.skm` 4,219; `.lpd`
   862; `.par` 679; `.ska` 213; `.vpk` 85; `.so` 139; `.skf` 26; `.skel` 4; `.skas` 2; etc.).
   Source: `analysis/formats/asset-fingerprints.json` → `scan.extensions`.
@@ -71,69 +74,25 @@ No semantic interpretation attached — pure counts from the tracked aggregates.
 
 ## 5. Hypotheses
 
-Explicitly labeled; each includes the privacy-safe observation that would confirm or refute it.
 
-- **H1 — "skeleton/loadout reference list" describes an indirection table, not raw skeleton
-  data.** The `ASSET-RECON.md` prose (C7/C8) already frames `.skl` as a reference list rather
-  than a transform hierarchy, but no tracked source states what the list is a reference *to*
-  beyond the record-3 `.SKEL`-suffixed token. Confirm/refute: extend `fingerprint_assets.py` (or
-  a successor aggregate-only tool) to report, in the aggregate JSON only, how many of the 1,261
-  files' record-3 token collides with a corresponding `.skm`/`.ska`/`.skel`-family basename
-  observed elsewhere in the same HOG — as a count, never as a per-file path list.
-- **H2 — The 49 non-`BONENOSCALE` first-line labels form a small closed enumeration (e.g. a
-  handful of alternate profile names), not 49 distinct one-off values.** Confirm/refute: add an
-  aggregate-only histogram of distinct first-line values (label + count, no file identity) to
-  the fingerprint JSON; if the 49 collapse into few distinct strings, that supports a bounded
-  enum; if they are 49 distinct strings, H2 is refuted.
-- **H3 — Record indices 1, 2, 4+ (the non-marker, non-profile lines) name bones/joints in a
-  fixed or level-specific skeleton.** No tracked source assigns semantic meaning to these
-  tokens; the native decoder explicitly disclaims doing so (C9). Confirm/refute: an aggregate
-  cross-tabulation of record-index-vs-token-string frequency (counts only, no file paths) that
-  shows a small repeating vocabulary across files would support a bone-name hypothesis; high
-  per-file uniqueness at every non-marker index would refute it.
-- **H4 — The 636 vs. 1,261 count discrepancy (top-level-HOG members vs. recursive scan) is
-  explained entirely by nested-HOG-only `.skl` members (i.e., most `.skl` files live inside
-  second-level HOGs, not as direct top-level HOG members).** Confirm/refute: add an aggregate
-  depth breakdown for `.skl` specifically (depth 0 vs. depth 1, mirroring the existing
-  `scan.depth` histogram) to the fingerprint JSON; if depth-1 count ≈ 1,261 − 636, H4 is
-  confirmed.
-- **H5 — The 176–2,048-byte span range and 1–1,878-byte padding range correlate with per-level
-  record count (larger record counts → larger allocated span, e.g. fixed power-of-two or
-  16/32-byte-quantized bucket sizes).** Confirm/refute: add an aggregate-only scatter/histogram
-  of `(record_count, span_bytes)` pairs (counts only) to the fingerprint JSON; a small number of
-  distinct span "buckets" correlated with line-count ranges would support quantized allocation;
-  a continuous spread would refute it.
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
+
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## 6. Missing observations
 
-What tracked evidence does not exist, and the privacy-safe collection that would produce it.
 
-- No tracked source reports the distinct *set* of non-`BONENOSCALE` first-line profile labels
-  (only the count, 49). **Collection:** an aggregate-only frequency table (label string → count)
-  emitted into the fingerprint JSON — labels are short ASCII tokens already exposed as format
-  grammar, not private payload identity, so this stays within the aggregate-only rule as long as
-  no file path/hash is attached to a row.
-- No tracked source reports which HOG *families* (by generic container name, e.g. `SKL.HOG` vs.
-  a nested nested-HOG) contribute the 636 top-level vs. 1,261 recursive counts. **Collection:**
-  extend the existing per-archive tally in `hog-validation.json`'s style (already grouped by
-  generic container name, not per-owner-file) to add a `.skl`-specific nested-vs-top-level
-  breakdown.
-- No tracked source establishes any cross-format linkage between a `.skl` file's record-3
-  `.SKEL`-suffixed token and any other tracked family (`.skm`, `.ska`, `.skel`, `.skf`).
-  **Collection:** an aggregate-only "token resolves within same container" boolean/count,
-  computed and reported as a single corpus-wide percentage, never as a resolved path.
-- No tracked source reports whether the 18 CR-only files cluster in specific top-level archives
-  or are spread evenly. **Collection:** an aggregate count of CR-only occurrences bucketed by
-  generic archive-name pattern (e.g. `SKL.HOG` vs. other container names already public in
-  `HOG.md`), not by individual disc path.
-- No adversarial fuzz/mutation-count metric (e.g. how many of a corpus of synthetic malformed
-  inputs the decoder correctly rejects) has been run against the owner corpus itself — the
-  existing adversarial coverage (C13) is entirely synthetic/hand-built, not corpus-driven.
-  **Collection:** run the existing `InspectSklContainer` decoder against all 1,261 tracked
-  `.skl` spans from the owner's private extraction (locally, never publishing payload) and
-  report only the aggregate accept/reject count and, for any rejects, the `DecodeErrorCode`
-  histogram — this validates the decoder's C10 grammar against real data without exporting
-  content.
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
@@ -163,29 +122,13 @@ What tracked evidence does not exist, and the privacy-safe collection that would
 
 ## 8. Codex work order
 
-Ranked, privacy-safe, concrete. No menu-role or semantic speculation.
 
-1. **(Highest priority) Corpus-validate the existing decoder.** Run `InspectSklContainer` over
-   all 1,261 tracked `.skl` spans in the owner's private extraction (locally; never publish
-   payload bytes) and report only: accept/reject counts, and for any rejects, the
-   `DecodeErrorCode` histogram plus which specific grammar rule (record-count bound, line-length
-   bound, marker-position rule, etc.) fired. This is the fastest way to discover whether C10's
-   grammar (derived from 1,261 aggregate observations already) is complete, or whether real data
-   exercises a path the synthetic test suite (C13) does not cover.
-2. Extend `tools/fingerprint_assets.py`'s `fingerprint_skl` to emit the H2 first-line-label
-   frequency table (label string → count, no file identity) into `asset-fingerprints.json`, to
-   turn H2 into a Confirmed/Aggregate-only fact.
-3. Extend the same tool to add a `.skl`-specific depth-0-vs-depth-1 breakdown (mirroring
-   `scan.depth`) to resolve H4 (the 636-vs-1,261 discrepancy).
-4. Add an aggregate `(record_count, span_bytes)` pair histogram to test H5's quantized-allocation
-   hypothesis, reusing the existing `Aggregate.observe` pattern already in `fingerprint_assets.py`.
-5. If step 1 and step 2 both hold cleanly (decoder never rejects real data; first-line labels
-   collapse into a small enum), promote the "skeleton/loadout reference list" framing from
-   Section 1 to a corpus-attested claim in a follow-up `ASSET-RECON.md` revision and log a new
-   ledger entry citing the corpus-validation run — do not add semantic names for individual
-   record tokens (bone names, loadout slots) without a mechanically citable source establishing
-   them; that remains out of scope for this family per the clean-room rules.
-6. Only after 1–5: investigate H1/H3 (cross-format token resolution to `.skm`/`.ska`/`.skel`)
-   via the aggregate-only "token resolves within same container" percentage described in
-   Section 6 — this is lower priority because it requires new cross-format aggregate tooling
-   rather than extending the existing single-format scanner.
+1. Preserve the established facts, aggregates, decoder classification, and nonclaims above.
+2. Before implementing or running any new owner-corpus measurement, land a separate reviewed
+   contract that freezes its public schema, hard bounds, typed failures, deterministic behavior,
+   synthetic privacy tests, and fixed minimum cohort threshold.
+3. Permit only fixed anonymous corpus-wide totals for cohorts meeting that threshold.
+4. Collapse every smaller cohort to one typed suppression result; do not publish a partial result.
+5. Reject any contract or output containing raw values, signatures, payloads, owner-derived strings,
+   paths, file, container, or archive names, suffix-derived labels, per-file, per-container, or
+   per-archive rows, or cross-tabulations keyed by raw fields.
