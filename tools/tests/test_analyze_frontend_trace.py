@@ -198,7 +198,6 @@ class FrontendTraceAnalyzerTests(unittest.TestCase):
             report["event_class_counts"]["transition"] = 1
             report["site_events"][1]["count"] = 1
             report["transition_ordinals"] = [{"frame_delta": 0, "ordinal": 0}]
-            report["frame_count"] = 17
 
         identical_previous = analyzer.summarize_trace_document(identical)["actions"][0]
         self.assertEqual(identical_previous["transition_row_count_delta"], 0)
@@ -216,6 +215,16 @@ class FrontendTraceAnalyzerTests(unittest.TestCase):
         self.assertEqual(
             analyzer._first_transition_divergence_frame(later_idle, earlier_action), 8
         )
+
+    def test_different_scenario_frame_spans_fail_closed(self) -> None:
+        document = valid_document()
+        for report in scenario_reports(document, "previous"):
+            report["frame_count"] = 17
+
+        with self.assertRaisesRegex(
+            analyzer.FrontendTraceAnalysisError, "scenario frame spans differ"
+        ):
+            analyzer.summarize_trace_document(document)
 
     def test_source_schema_drift_and_output_overflow_fail_closed(self) -> None:
         drift_cases = (

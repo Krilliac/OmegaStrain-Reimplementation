@@ -96,6 +96,7 @@ def summarize_trace_document(document: object) -> dict[str, object]:
     validated = validator.validate_trace_document(document)
     reports = cast(list[dict[str, object]], validated["reports"])
     idle_report = reports[0]
+    idle_frame_count = cast(int, idle_report["frame_count"])
     idle_events = _counts(idle_report, "event_class_counts")
     idle_resources = _counts(idle_report, "resource_class_totals")
     idle_shape = _absolute_transition_shape(idle_report)
@@ -103,6 +104,8 @@ def summarize_trace_document(document: object) -> dict[str, object]:
     actions: list[dict[str, object]] = []
     for scenario_index, scenario in enumerate(ACTION_SCENARIOS, start=1):
         report = reports[scenario_index * len(_EXPECTED_SOURCE_TRIALS)]
+        if report["frame_count"] != idle_frame_count:
+            raise FrontendTraceAnalysisError("scenario frame spans differ")
         action_shape = _absolute_transition_shape(report)
         actions.append(
             {
