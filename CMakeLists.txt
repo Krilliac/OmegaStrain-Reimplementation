@@ -50,6 +50,7 @@ target_include_directories(omega_core
 target_compile_features(omega_core PUBLIC cxx_std_23)
 
 add_library(omega_persistence STATIC
+    native/src/persistence/native_save_path.cpp
     native/src/persistence/save_database.cpp
 )
 target_include_directories(omega_persistence PUBLIC native/include)
@@ -477,6 +478,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_save_database_tests COMMAND omega_save_database_tests)
     set_tests_properties(omega_save_database_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_native_save_path_tests
+        native/tests/native_save_path_tests.cpp
+    )
+    target_link_libraries(omega_native_save_path_tests PRIVATE omega_persistence)
+    if(MSVC)
+        target_compile_options(omega_native_save_path_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_native_save_path_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_native_save_path_tests COMMAND omega_native_save_path_tests)
+    set_tests_properties(omega_native_save_path_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_profile_catalog_tests
         native/tests/profile_catalog_tests.cpp
