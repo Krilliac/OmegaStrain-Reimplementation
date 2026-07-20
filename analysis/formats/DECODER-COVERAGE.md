@@ -70,7 +70,7 @@ unless separately demonstrated, independent of the classification below.
 | `.skel` | aggregate scanner only | Raw suffix count only | none |
 | `.skf` | aggregate scanner only | Raw suffix count only | none |
 | `.sub` | aggregate scanner only | Raw suffix count only | none |
-| `.txt` | aggregate scanner only | Raw suffix count in both archive inventories; also listed in `measure_frontend_hog_topology.py`'s `APPROVED_EXTENSION_CATEGORIES` as category `text` (topology label only) | Topology-label coverage only, via `test_measure_frontend_hog_topology.py` |
+| `.txt` | aggregate scanner only | Raw suffix count in the recursive `asset-fingerprints.json` inventory (3 spans), but no `.txt` key in top-level `hog-validation.json` `entry_extensions`; `disc-summary.json` separately records 8 whole-disc occurrences. Also listed in `measure_frontend_hog_topology.py`'s `APPROVED_EXTENSION_CATEGORIES` as category `text` (topology label only) | Topology-label coverage only, via `test_measure_frontend_hog_topology.py` |
 | `.tbl` | unknown | Zero occurrences in `asset-fingerprints.json` or `hog-validation.json`'s in-archive inventories; appears only in `measure_frontend_hog_topology.py`'s `APPROVED_EXTENSION_CATEGORIES` (category `table`) and as one whole-disc, outside-any-HOG occurrence in `analysis/manifests/disc-summary.json` | none |
 | `.PF` (`.pf`) | unknown (hard-rule mandated) | Zero occurrences in either in-archive inventory; exactly 3 whole-disc occurrences in `analysis/manifests/disc-summary.json`, outside any HOG archive | none |
 | `.TM2` (`.tm2`) | unknown (hard-rule mandated) | Zero occurrences in either in-archive inventory; exactly 16 whole-disc occurrences in `analysis/manifests/disc-summary.json`, outside any HOG archive | none |
