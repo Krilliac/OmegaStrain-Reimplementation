@@ -242,6 +242,19 @@ class VumReadTraceValidatorTests(unittest.TestCase):
                     document_with_read(EXPECTED_SIZE - width, width), EXPECTED_SIZE
                 )
 
+    def test_fail_closed_runtime_lifecycle_reasons_are_valid(self) -> None:
+        for failure_reason in ("unexpected_savestate_reload", "vm_reset_started"):
+            with self.subTest(failure_reason=failure_reason):
+                document = empty_document()
+                document.update(
+                    status="failed",
+                    stop_reason="failure",
+                    failure_reason=failure_reason,
+                    selected_copy_count=0,
+                    frame_count=0,
+                )
+                validator.validate_trace_document(document, EXPECTED_SIZE)
+
     def test_malformed_lifecycle_combinations_are_rejected(self) -> None:
         cases: list[tuple[str, dict[str, Any]]] = []
         for status, stop_reason in (
