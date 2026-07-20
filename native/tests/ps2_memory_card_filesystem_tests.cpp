@@ -6,11 +6,46 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <expected>
 #include <iostream>
+#include <limits>
+#include <new>
 #include <span>
 #include <string_view>
 #include <vector>
+
+namespace ps2_filesystem_test_allocation {
+inline constexpr std::size_t kDisabled =
+    std::numeric_limits<std::size_t>::max();
+std::size_t allocations_before_failure = kDisabled;
+
+void Arm(const std::size_t allocations_to_allow) noexcept {
+  allocations_before_failure = allocations_to_allow;
+}
+
+void Disarm() noexcept { allocations_before_failure = kDisabled; }
+} // namespace ps2_filesystem_test_allocation
+
+void *operator new(const std::size_t size) {
+  if (ps2_filesystem_test_allocation::allocations_before_failure !=
+      ps2_filesystem_test_allocation::kDisabled) {
+    if (ps2_filesystem_test_allocation::allocations_before_failure == 0U) {
+      ps2_filesystem_test_allocation::Disarm();
+      throw std::bad_alloc{};
+    }
+    --ps2_filesystem_test_allocation::allocations_before_failure;
+  }
+  if (void *const memory = std::malloc(size == 0U ? 1U : size))
+    return memory;
+  throw std::bad_alloc{};
+}
+
+void operator delete(void *const memory) noexcept { std::free(memory); }
+
+void operator delete(void *const memory, const std::size_t) noexcept {
+  std::free(memory);
+}
 
 namespace {
 using namespace std::string_view_literals;
@@ -88,7 +123,8 @@ void SetFat(std::vector<std::byte> &card, const std::uint32_t relative_cluster,
 void WriteEntry(std::vector<std::byte> &card, const std::size_t offset,
                 const std::uint16_t mode, const std::uint32_t length,
                 const std::uint32_t first_cluster,
-                const std::uint32_t attributes, const std::string_view name) {
+                const std::uint32_t attributes, const std::string_view name,
+                const std::uint32_t directory_entry = 0U) {
   std::fill_n(card.begin() + static_cast<std::ptrdiff_t>(offset), 512U,
               std::byte{0});
   WriteU16(card, offset, mode);
@@ -96,6 +132,7 @@ void WriteEntry(std::vector<std::byte> &card, const std::size_t offset,
   std::copy(kCreated.begin(), kCreated.end(),
             card.begin() + static_cast<std::ptrdiff_t>(offset + 8U));
   WriteU32(card, offset + 0x10U, first_cluster);
+  WriteU32(card, offset + 0x14U, directory_entry);
   std::copy(kModified.begin(), kModified.end(),
             card.begin() + static_cast<std::ptrdiff_t>(offset + 0x18U));
   WriteU32(card, offset + 0x20U, attributes);
@@ -147,14 +184,14 @@ void WriteEntry(std::vector<std::byte> &card, const std::size_t offset,
 
   const auto save_0 = RelativeClusterOffset(2U);
   const auto save_1 = RelativeClusterOffset(3U);
-  WriteEntry(card, save_0, kDirectoryMode, 0U, 0U, 0U, ".");
+  WriteEntry(card, save_0, kDirectoryMode, 0U, 0U, 0U, ".", 2U);
   WriteEntry(card, save_0 + 512U, kDirectoryMode, 0U, 0U, 0U, "..");
   WriteEntry(card, save_1, kFileMode, 1300U, 4U, 0xAABBCCDDU, "icon.sys");
   WriteEntry(card, save_1 + 512U, kFileMode, 0U, kEndOfChain, 0x0BADF00DU,
              "empty.bin");
 
   for (std::size_t index = 0U; index < 1300U; ++index) {
-    const auto cluster = 4U + index / kClusterBytes;
+    const auto cluster = static_cast<std::uint32_t>(4U + index / kClusterBytes);
     const auto in_cluster = index % kClusterBytes;
     card[RelativeClusterOffset(cluster) + in_cluster] =
         static_cast<std::byte>((index * 29U + 7U) & 0xFFU);
@@ -206,6 +243,19 @@ void CheckHappyPath() {
               raw_save->files[0].bytes == ExpectedPayload(),
           "the same bounded reader accepts canonical 528-byte raw pages");
   }
+
+  auto zero_padded = card;
+  std::fill(zero_padded.begin() + 0x54, zero_padded.begin() + 0xD0,
+            std::byte{0});
+  std::fill(zero_padded.begin() + static_cast<std::ptrdiff_t>(
+                                      AbsoluteClusterOffset(8U) + 32U * 4U),
+            zero_padded.begin() +
+                static_cast<std::ptrdiff_t>(AbsoluteClusterOffset(9U)),
+            std::byte{0});
+  const auto zero_padded_save =
+      omega::compat::ReadPs2MemoryCardSaveDirectory(zero_padded, kSaveName);
+  Check(zero_padded_save && zero_padded_save->files.size() == 2U,
+        "zero-filled unused IFC slots and indirect FAT tails are accepted");
 }
 
 void CheckSelectionFailures() {
@@ -235,6 +285,13 @@ void CheckAllocationAndChainFailures() {
   const auto card = MakeSyntheticCard();
 
   auto malformed = card;
+  WriteU32(malformed, AbsoluteClusterOffset(8U), 1U);
+  CheckError(
+      omega::compat::ReadPs2MemoryCardSaveDirectory(malformed, kSaveName),
+      Ps2MemoryCardReadErrorCode::InvalidAllocationTable,
+      "a FAT metadata pointer in reserved erase block zero is rejected");
+
+  malformed = card;
   WriteU32(malformed, AbsoluteClusterOffset(8U), kAllocationOffset);
   CheckError(
       omega::compat::ReadPs2MemoryCardSaveDirectory(malformed, kSaveName),
@@ -247,6 +304,13 @@ void CheckAllocationAndChainFailures() {
       omega::compat::ReadPs2MemoryCardSaveDirectory(malformed, kSaveName),
       Ps2MemoryCardReadErrorCode::InvalidAllocationTable,
       "a shared FAT metadata cluster is rejected");
+
+  malformed = card;
+  SetFat(malformed, 2U, kAllocatedBit | 2U);
+  CheckError(
+      omega::compat::ReadPs2MemoryCardSaveDirectory(malformed, kSaveName),
+      Ps2MemoryCardReadErrorCode::ClusterChainLoop,
+      "a selected directory cluster-chain loop is rejected");
 
   malformed = card;
   SetFat(malformed, 4U, kAllocatedBit | 4U);
@@ -290,11 +354,36 @@ void CheckAllocationAndChainFailures() {
       omega::compat::ReadPs2MemoryCardSaveDirectory(malformed, kSaveName),
       Ps2MemoryCardReadErrorCode::SharedCluster,
       "the selected directory cannot reuse a root-directory cluster");
+
+  malformed = card;
+  WriteU32(malformed, RelativeClusterOffset(3U) + 4U, 0xFFFFFFFFU);
+  auto wide_limits = omega::compat::Ps2MemoryCardReadLimits{};
+  wide_limits.maximum_file_bytes = std::numeric_limits<std::size_t>::max();
+  wide_limits.maximum_total_file_bytes =
+      std::numeric_limits<std::size_t>::max();
+  CheckError(omega::compat::ReadPs2MemoryCardSaveDirectory(malformed, kSaveName,
+                                                           wide_limits),
+             Ps2MemoryCardReadErrorCode::InvalidClusterChain,
+             "an impossible file chain count is rejected before allocation");
 }
 
 void CheckDirectoryAndLimitFailures() {
   const auto card = MakeSyntheticCard();
   auto malformed = card;
+  WriteU32(malformed, RelativeClusterOffset(2U) + 0x14U, 1U);
+  CheckError(
+      omega::compat::ReadPs2MemoryCardSaveDirectory(malformed, kSaveName),
+      Ps2MemoryCardReadErrorCode::InvalidDirectory,
+      "the selected dot entry must backlink to its root directory entry");
+
+  malformed = card;
+  WriteU32(malformed, RelativeClusterOffset(0U) + 0x14U, 1U);
+  CheckError(
+      omega::compat::ReadPs2MemoryCardSaveDirectory(malformed, kSaveName),
+      Ps2MemoryCardReadErrorCode::InvalidDirectory,
+      "the root dot entry must retain its canonical backlink");
+
+  malformed = card;
   std::fill_n(malformed.begin() + static_cast<std::ptrdiff_t>(
                                       RelativeClusterOffset(3U) + 0x40U),
               32U, std::byte{'A'});
@@ -331,6 +420,24 @@ void CheckDirectoryAndLimitFailures() {
       Ps2MemoryCardReadErrorCode::LimitExceeded,
       "the live-file count limit is enforced");
 }
+
+void CheckAllocationFailures() {
+  const auto card = MakeSyntheticCard();
+
+  ps2_filesystem_test_allocation::Arm(0U);
+  const auto conversion_failure =
+      omega::compat::ReadPs2MemoryCardSaveDirectory(card, kSaveName);
+  ps2_filesystem_test_allocation::Disarm();
+  CheckError(conversion_failure, Ps2MemoryCardReadErrorCode::AllocationFailed,
+             "reader maps image conversion allocation failure");
+
+  ps2_filesystem_test_allocation::Arm(1U);
+  const auto reader_failure =
+      omega::compat::ReadPs2MemoryCardSaveDirectory(card, kSaveName);
+  ps2_filesystem_test_allocation::Disarm();
+  CheckError(reader_failure, Ps2MemoryCardReadErrorCode::AllocationFailed,
+             "reader catches its internal allocation failure");
+}
 } // namespace
 
 int main() {
@@ -338,5 +445,6 @@ int main() {
   CheckSelectionFailures();
   CheckAllocationAndChainFailures();
   CheckDirectoryAndLimitFailures();
+  CheckAllocationFailures();
   return failures == 0 ? 0 : 1;
 }

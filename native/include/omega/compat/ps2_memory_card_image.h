@@ -29,6 +29,7 @@ enum class Ps2MemoryCardImageErrorCode : std::uint8_t {
   UnsupportedSuperblockVersion,
   UnsupportedGeometry,
   InvalidGeometryBounds,
+  AllocationFailed,
 };
 
 struct Ps2MemoryCardImageError {

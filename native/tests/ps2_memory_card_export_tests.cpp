@@ -6,11 +6,46 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <expected>
 #include <iostream>
+#include <limits>
+#include <new>
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace ps2_export_test_allocation {
+inline constexpr std::size_t kDisabled =
+    std::numeric_limits<std::size_t>::max();
+std::size_t allocations_before_failure = kDisabled;
+
+void Arm(const std::size_t allocations_to_allow) noexcept {
+  allocations_before_failure = allocations_to_allow;
+}
+
+void Disarm() noexcept { allocations_before_failure = kDisabled; }
+} // namespace ps2_export_test_allocation
+
+void *operator new(const std::size_t size) {
+  if (ps2_export_test_allocation::allocations_before_failure !=
+      ps2_export_test_allocation::kDisabled) {
+    if (ps2_export_test_allocation::allocations_before_failure == 0U) {
+      ps2_export_test_allocation::Disarm();
+      throw std::bad_alloc{};
+    }
+    --ps2_export_test_allocation::allocations_before_failure;
+  }
+  if (void *const memory = std::malloc(size == 0U ? 1U : size))
+    return memory;
+  throw std::bad_alloc{};
+}
+
+void operator delete(void *const memory) noexcept { std::free(memory); }
+
+void operator delete(void *const memory, const std::size_t) noexcept {
+  std::free(memory);
+}
 
 namespace {
 using omega::compat::Ps2MemoryCardWriteError;
@@ -34,6 +69,16 @@ void CheckError(const std::expected<T, Ps2MemoryCardWriteError> &result,
                 const Ps2MemoryCardWriteErrorCode code,
                 const std::string_view message) {
   Check(!result && result.error().code == code, message);
+}
+
+[[nodiscard]] std::uint16_t ReadU16(const std::vector<std::byte> &bytes,
+                                    const std::size_t offset) {
+  return static_cast<std::uint16_t>(
+      static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bytes[offset])) |
+      static_cast<std::uint16_t>(
+          static_cast<std::uint16_t>(
+              std::to_integer<std::uint8_t>(bytes[offset + 1U]))
+          << 8U));
 }
 
 [[nodiscard]] std::uint32_t ReadU32(const std::vector<std::byte> &bytes,
@@ -125,6 +170,9 @@ void CheckLogicalAndRawRoundTrip() {
           ReadU32(*logical, 9U * kClusterBytes + 16U) == 0x80000005U &&
           ReadU32(*logical, 9U * kClusterBytes + 20U) == 0xFFFFFFFFU,
       "root, save-directory, and first file chains use deterministic clusters");
+  const auto root_offset = 41U * kClusterBytes;
+  Check(ReadU16(*logical, root_offset + 512U) == 0xA426U,
+        "the generated root parent entry uses the canonical 0xA426 mode");
   const auto save_directory_offset = (41U + 2U) * kClusterBytes;
   Check(ReadU32(*logical, save_directory_offset + 0x10U) == 0U &&
             ReadU32(*logical, save_directory_offset + 0x14U) == 2U,
@@ -249,11 +297,21 @@ void CheckLimitsAndCapacity() {
       Ps2MemoryCardWriteErrorCode::CardCapacityExceeded,
       "filesystem metadata and payload clusters must fit the standard card");
 }
+
+void CheckAllocationFailure() {
+  const auto directory = MakeDirectory();
+  ps2_export_test_allocation::Arm(0U);
+  const auto result = omega::compat::CreatePs2MemoryCardLogicalImage(directory);
+  ps2_export_test_allocation::Disarm();
+  CheckError(result, Ps2MemoryCardWriteErrorCode::AllocationFailed,
+             "export reports allocation failure without throwing");
+}
 } // namespace
 
 int main() {
   CheckLogicalAndRawRoundTrip();
   CheckInputValidation();
   CheckLimitsAndCapacity();
+  CheckAllocationFailure();
   return failures == 0 ? 0 : 1;
 }

@@ -17,6 +17,7 @@ enum class Ps2MemoryCardWriteErrorCode : std::uint8_t {
   LimitExceeded,
   CardCapacityExceeded,
   EncodingFailed,
+  AllocationFailed,
 };
 
 struct Ps2MemoryCardWriteError {

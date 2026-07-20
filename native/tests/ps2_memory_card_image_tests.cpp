@@ -4,11 +4,46 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <expected>
 #include <iostream>
+#include <limits>
+#include <new>
 #include <span>
 #include <string_view>
 #include <vector>
+
+namespace ps2_image_test_allocation {
+inline constexpr std::size_t kDisabled =
+    std::numeric_limits<std::size_t>::max();
+std::size_t allocations_before_failure = kDisabled;
+
+void Arm(const std::size_t allocations_to_allow) noexcept {
+  allocations_before_failure = allocations_to_allow;
+}
+
+void Disarm() noexcept { allocations_before_failure = kDisabled; }
+} // namespace ps2_image_test_allocation
+
+void *operator new(const std::size_t size) {
+  if (ps2_image_test_allocation::allocations_before_failure !=
+      ps2_image_test_allocation::kDisabled) {
+    if (ps2_image_test_allocation::allocations_before_failure == 0U) {
+      ps2_image_test_allocation::Disarm();
+      throw std::bad_alloc{};
+    }
+    --ps2_image_test_allocation::allocations_before_failure;
+  }
+  if (void *const memory = std::malloc(size == 0U ? 1U : size))
+    return memory;
+  throw std::bad_alloc{};
+}
+
+void operator delete(void *const memory) noexcept { std::free(memory); }
+
+void operator delete(void *const memory, const std::size_t) noexcept {
+  std::free(memory);
+}
 
 namespace {
 using omega::compat::Ps2MemoryCardImageError;
@@ -175,10 +210,20 @@ void CheckRecognitionAndBounds() {
              Ps2MemoryCardImageErrorCode::InvalidGeometryBounds,
              "a nonzero root-directory cluster is rejected");
   malformed = logical;
+  WriteU32(malformed, 0x40U, 0U);
+  CheckError(omega::compat::InspectPs2MemoryCardImage(malformed),
+             Ps2MemoryCardImageErrorCode::InvalidGeometryBounds,
+             "a backup block before the allocation extent is rejected");
+  malformed = logical;
   WriteU32(malformed, 0x40U, 1024U);
   CheckError(omega::compat::InspectPs2MemoryCardImage(malformed),
              Ps2MemoryCardImageErrorCode::InvalidGeometryBounds,
              "an out-of-card backup block is rejected");
+  malformed = logical;
+  WriteU32(malformed, 0x50U, 1U);
+  CheckError(omega::compat::InspectPs2MemoryCardImage(malformed),
+             Ps2MemoryCardImageErrorCode::InvalidGeometryBounds,
+             "metadata in reserved erase block zero is rejected");
   malformed = logical;
   WriteU32(malformed, 0x50U, 41U);
   CheckError(
@@ -190,6 +235,10 @@ void CheckRecognitionAndBounds() {
   CheckError(omega::compat::InspectPs2MemoryCardImage(malformed),
              Ps2MemoryCardImageErrorCode::InvalidGeometryBounds,
              "an unexpected extra indirect-FAT pointer is rejected");
+  malformed = logical;
+  std::fill(malformed.begin() + 0x54, malformed.begin() + 0xD0, std::byte{0});
+  Check(omega::compat::InspectPs2MemoryCardImage(malformed).has_value(),
+        "zero-filled unused superblock IFC slots are accepted");
   malformed = logical;
   WriteU32(malformed, 0xD0U, 1024U);
   CheckError(omega::compat::InspectPs2MemoryCardImage(malformed),
@@ -245,6 +294,24 @@ void CheckCanonicalConversion() {
   Check(recanonicalized && *recanonicalized == *raw,
         "raw input is re-encoded with canonical ECC and spare bytes");
 }
+
+void CheckAllocationFailures() {
+  const auto logical = MakeLogicalCard();
+
+  ps2_image_test_allocation::Arm(0U);
+  const auto logical_failure =
+      omega::compat::ConvertPs2MemoryCardImageToLogical(logical);
+  ps2_image_test_allocation::Disarm();
+  CheckError(logical_failure, Ps2MemoryCardImageErrorCode::AllocationFailed,
+             "logical conversion reports allocation failure without throwing");
+
+  ps2_image_test_allocation::Arm(1U);
+  const auto raw_failure =
+      omega::compat::ConvertPs2MemoryCardImageToRaw(logical);
+  ps2_image_test_allocation::Disarm();
+  CheckError(raw_failure, Ps2MemoryCardImageErrorCode::AllocationFailed,
+             "raw conversion reports its output allocation failure");
+}
 } // namespace
 
 int main() {
@@ -252,5 +319,6 @@ int main() {
   static_assert(omega::compat::kPs2MemoryCardRawImageBytes == 8'650'752U);
   CheckRecognitionAndBounds();
   CheckCanonicalConversion();
+  CheckAllocationFailures();
   return failures == 0 ? 0 : 1;
 }

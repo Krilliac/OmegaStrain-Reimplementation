@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <span>
 #include <string_view>
 
@@ -77,13 +78,6 @@ constexpr std::uint32_t kUnusedCluster =
 [[nodiscard]] Ps2MemoryCardImageError
 Error(const Ps2MemoryCardImageErrorCode code, const std::size_t offset) {
   return Ps2MemoryCardImageError{code, offset};
-}
-
-[[nodiscard]] bool RangesOverlap(const std::uint64_t first_begin,
-                                 const std::uint64_t first_end,
-                                 const std::uint64_t second_begin,
-                                 const std::uint64_t second_end) {
-  return first_begin < second_end && second_begin < first_end;
 }
 
 [[nodiscard]] bool HasOddParity(std::uint8_t value) {
@@ -221,15 +215,12 @@ InspectPs2MemoryCardImage(const std::span<const std::byte> image) {
               kBackupBlock1Offset));
   }
 
-  const auto allocation_begin = static_cast<std::uint64_t>(allocation_offset);
   const auto backup_1_begin =
       static_cast<std::uint64_t>(backup_block_1) * clusters_per_block;
   const auto backup_2_begin =
       static_cast<std::uint64_t>(backup_block_2) * clusters_per_block;
-  if (RangesOverlap(allocation_begin, absolute_allocation_end, backup_1_begin,
-                    backup_1_begin + clusters_per_block) ||
-      RangesOverlap(allocation_begin, absolute_allocation_end, backup_2_begin,
-                    backup_2_begin + clusters_per_block)) {
+  if (backup_1_begin < absolute_allocation_end ||
+      backup_2_begin < absolute_allocation_end) {
     return std::unexpected(
         Error(Ps2MemoryCardImageErrorCode::InvalidGeometryBounds,
               kBackupBlock1Offset));
@@ -246,13 +237,13 @@ InspectPs2MemoryCardImage(const std::span<const std::byte> image) {
   for (std::size_t index = 0; index < kIfcListEntries; ++index) {
     const auto pointer = ReadU32(superblock, kIfcListOffset + index * 4U);
     if (index < ifc_cluster_count) {
-      if (pointer == kUnusedCluster || pointer == 0U ||
+      if (pointer < clusters_per_block || pointer == kUnusedCluster ||
           pointer >= allocation_offset) {
         return std::unexpected(
             Error(Ps2MemoryCardImageErrorCode::InvalidGeometryBounds,
                   kIfcListOffset + index * 4U));
       }
-    } else if (pointer != kUnusedCluster) {
+    } else if (pointer != 0U && pointer != kUnusedCluster) {
       return std::unexpected(
           Error(Ps2MemoryCardImageErrorCode::InvalidGeometryBounds,
                 kIfcListOffset + index * 4U));
@@ -309,50 +300,60 @@ InspectPs2MemoryCardImage(const std::span<const std::byte> image) {
 
 std::expected<std::vector<std::byte>, Ps2MemoryCardImageError>
 ConvertPs2MemoryCardImageToLogical(const std::span<const std::byte> image) {
-  const auto descriptor = InspectPs2MemoryCardImage(image);
-  if (!descriptor)
-    return std::unexpected(descriptor.error());
+  try {
+    const auto descriptor = InspectPs2MemoryCardImage(image);
+    if (!descriptor)
+      return std::unexpected(descriptor.error());
 
-  if (descriptor->layout == Ps2MemoryCardImageLayout::Logical512)
-    return std::vector<std::byte>(image.begin(), image.end());
+    if (descriptor->layout == Ps2MemoryCardImageLayout::Logical512)
+      return std::vector<std::byte>(image.begin(), image.end());
 
-  std::vector<std::byte> logical(kPs2MemoryCardLogicalImageBytes);
-  for (std::size_t page = 0; page < kPs2MemoryCardPageCount; ++page) {
-    const auto source_offset = page * kPs2MemoryCardRawPageBytes;
-    const auto target_offset = page * kPs2MemoryCardLogicalPageBytes;
-    std::copy_n(image.begin() + static_cast<std::ptrdiff_t>(source_offset),
-                kPs2MemoryCardLogicalPageBytes,
-                logical.begin() + static_cast<std::ptrdiff_t>(target_offset));
+    std::vector<std::byte> logical(kPs2MemoryCardLogicalImageBytes);
+    for (std::size_t page = 0; page < kPs2MemoryCardPageCount; ++page) {
+      const auto source_offset = page * kPs2MemoryCardRawPageBytes;
+      const auto target_offset = page * kPs2MemoryCardLogicalPageBytes;
+      std::copy_n(image.begin() + static_cast<std::ptrdiff_t>(source_offset),
+                  kPs2MemoryCardLogicalPageBytes,
+                  logical.begin() + static_cast<std::ptrdiff_t>(target_offset));
+    }
+    return logical;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(
+        Error(Ps2MemoryCardImageErrorCode::AllocationFailed, 0U));
   }
-  return logical;
 }
 
 std::expected<std::vector<std::byte>, Ps2MemoryCardImageError>
 ConvertPs2MemoryCardImageToRaw(const std::span<const std::byte> image) {
-  auto logical = ConvertPs2MemoryCardImageToLogical(image);
-  if (!logical)
-    return std::unexpected(logical.error());
+  try {
+    auto logical = ConvertPs2MemoryCardImageToLogical(image);
+    if (!logical)
+      return std::unexpected(logical.error());
 
-  std::vector<std::byte> raw(kPs2MemoryCardRawImageBytes, std::byte{0});
-  for (std::size_t page = 0; page < kPs2MemoryCardPageCount; ++page) {
-    const auto source_offset = page * kPs2MemoryCardLogicalPageBytes;
-    const auto target_offset = page * kPs2MemoryCardRawPageBytes;
-    std::copy_n(logical->begin() + static_cast<std::ptrdiff_t>(source_offset),
-                kPs2MemoryCardLogicalPageBytes,
-                raw.begin() + static_cast<std::ptrdiff_t>(target_offset));
+    std::vector<std::byte> raw(kPs2MemoryCardRawImageBytes, std::byte{0});
+    for (std::size_t page = 0; page < kPs2MemoryCardPageCount; ++page) {
+      const auto source_offset = page * kPs2MemoryCardLogicalPageBytes;
+      const auto target_offset = page * kPs2MemoryCardRawPageBytes;
+      std::copy_n(logical->begin() + static_cast<std::ptrdiff_t>(source_offset),
+                  kPs2MemoryCardLogicalPageBytes,
+                  raw.begin() + static_cast<std::ptrdiff_t>(target_offset));
 
-    for (std::size_t quarter = 0; quarter < 4U; ++quarter) {
-      const auto quarter_offset = source_offset + quarter * 128U;
-      const auto quarter_bytes = std::span<const std::byte, 128U>(
-          logical->data() + quarter_offset, 128U);
-      const auto ecc = CalculatePageQuarterEcc(quarter_bytes);
-      const auto ecc_offset =
-          target_offset + kPs2MemoryCardLogicalPageBytes + quarter * 3U;
-      std::copy(ecc.begin(), ecc.end(),
-                raw.begin() + static_cast<std::ptrdiff_t>(ecc_offset));
+      for (std::size_t quarter = 0; quarter < 4U; ++quarter) {
+        const auto quarter_offset = source_offset + quarter * 128U;
+        const auto quarter_bytes = std::span<const std::byte, 128U>(
+            logical->data() + quarter_offset, 128U);
+        const auto ecc = CalculatePageQuarterEcc(quarter_bytes);
+        const auto ecc_offset =
+            target_offset + kPs2MemoryCardLogicalPageBytes + quarter * 3U;
+        std::copy(ecc.begin(), ecc.end(),
+                  raw.begin() + static_cast<std::ptrdiff_t>(ecc_offset));
+      }
     }
+    return raw;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(
+        Error(Ps2MemoryCardImageErrorCode::AllocationFailed, 0U));
   }
-  return raw;
 }
 
 } // namespace omega::compat

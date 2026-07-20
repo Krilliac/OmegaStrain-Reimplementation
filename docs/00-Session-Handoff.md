@@ -1212,13 +1212,18 @@ shipping dependencies or execution mechanisms.
     fixed 8 MiB PS2 cards with either 512-byte logical pages or 528-byte raw pages, validates the
     versioned superblock and fixed geometry, and canonicalizes raw ECC/spare data. A bounded reader
     follows IFC/FAT chains for one explicitly selected top-level directory and returns its immediate
-    regular files as ordered owned opaque bytes while rejecting loops, shared clusters, nested live
-    directories, malformed entries, ambiguity, and configured limits. A deterministic exporter
+    regular files as ordered owned opaque bytes while rejecting loops, cluster reuse among the
+    traversed root, selected-directory, and selected-file chains, nested live directories, malformed
+    entries, ambiguity, and configured limits. A deterministic exporter
     constructs a new logical or raw card with fresh superblock, allocation tables, directory entries,
     cluster chains, and ECC; it never patches an existing card. Synthetic fixtures cover envelope,
     filesystem, error, capacity, determinism, and logical/raw round-trip contracts. No owner save,
     retail payload, private input, PCSX2 session, emulator state, or D-drive input was used, and no
-    Omega Strain payload semantics are claimed.
+    Omega Strain payload semantics are claimed. Adversarial hardening accepts both standard unused
+    IFC padding encodings while rejecting active metadata in erase block zero and backup blocks before
+    the allocation extent, validates root and selected-directory backlinks, emits root-parent mode
+    `0xA426`, and maps allocation failures to typed results. Warning-free focused Debug and Release
+    builds, their direct tests and focused CTest 3/3, plus the full Debug build and CTest 40/40 passed.
 
 ## Disc observations
 

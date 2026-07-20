@@ -24,6 +24,7 @@ enum class Ps2MemoryCardReadErrorCode : std::uint8_t {
   LimitExceeded,
   SaveDirectoryNotFound,
   AmbiguousSaveDirectory,
+  AllocationFailed,
 };
 
 struct Ps2MemoryCardReadError {
@@ -69,6 +70,9 @@ struct Ps2MemoryCardReadLimits {
 // card. This is a structural compatibility reader: file payloads are returned
 // unchanged and are never interpreted as an Omega Strain save format.
 // Immediate regular files are supported; nested live directories fail closed.
+// Shared-cluster detection covers the traversed root chain, selected directory
+// chain, and selected live-file chains; unselected directory subtrees are not
+// walked or claimed by this bounded operation.
 [[nodiscard]] std::expected<Ps2MemoryCardSaveDirectory, Ps2MemoryCardReadError>
 ReadPs2MemoryCardSaveDirectory(std::span<const std::byte> image,
                                std::string_view top_level_name,

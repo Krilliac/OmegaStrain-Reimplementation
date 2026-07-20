@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <expected>
 #include <limits>
+#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -23,6 +24,7 @@ constexpr std::size_t kFatEntriesPerCluster = 256U;
 constexpr std::size_t kIfcEntriesPerCluster = 256U;
 constexpr std::size_t kIfcListOffset = 0x50U;
 constexpr std::size_t kIfcListEntries = 32U;
+constexpr std::uint32_t kClustersPerEraseBlock = 8U;
 constexpr std::uint32_t kEndOfChain = std::numeric_limits<std::uint32_t>::max();
 constexpr std::uint32_t kAllocatedBit = 0x80000000U;
 constexpr std::uint32_t kClusterIndexMask = 0x7FFFFFFFU;
@@ -77,6 +79,7 @@ struct DecodedEntry {
   std::uint16_t mode{};
   std::uint32_t length{};
   std::uint32_t first_cluster{};
+  std::uint32_t directory_entry{};
   std::uint32_t attributes{};
   Ps2MemoryCardTimestamp created;
   Ps2MemoryCardTimestamp modified;
@@ -131,6 +134,7 @@ public:
     }
 
     const DecodedEntry *selected = nullptr;
+    std::size_t selected_index = 0U;
     for (std::size_t index = 2U; index < root_entries->size(); ++index) {
       const auto &entry = (*root_entries)[index];
       if (!entry.exists)
@@ -153,6 +157,7 @@ public:
                   entry.logical_offset));
       }
       selected = &entry;
+      selected_index = index;
     }
     if (selected == nullptr) {
       return std::unexpected(
@@ -163,7 +168,7 @@ public:
                                       limits_.maximum_save_entries);
     if (!save_entries)
       return std::unexpected(save_entries.error());
-    if (!HasDotEntries(*save_entries, false)) {
+    if (!HasDotEntries(*save_entries, false, selected_index)) {
       return std::unexpected(Error(Ps2MemoryCardReadErrorCode::InvalidDirectory,
                                    save_entries->front().logical_offset));
     }
@@ -263,7 +268,7 @@ private:
       const auto ifc_pointer_offset = kIfcListOffset + ifc_index * 4U;
       const auto ifc_cluster_number =
           ReadU32(std::span<const std::byte>(logical_), ifc_pointer_offset);
-      if (ifc_cluster_number == 0U ||
+      if (ifc_cluster_number < kClustersPerEraseBlock ||
           ifc_cluster_number >= descriptor_.allocation_offset ||
           metadata_clusters[ifc_cluster_number]) {
         return std::unexpected(
@@ -282,14 +287,14 @@ private:
             entry_index * 4U;
         const auto fat_cluster_number = ReadU32(*ifc_cluster, entry_index * 4U);
         if (fat_clusters_read >= fat_cluster_count) {
-          if (fat_cluster_number != kEndOfChain) {
+          if (fat_cluster_number != 0U && fat_cluster_number != kEndOfChain) {
             return std::unexpected(
                 Error(Ps2MemoryCardReadErrorCode::InvalidAllocationTable,
                       pointer_offset));
           }
           continue;
         }
-        if (fat_cluster_number == 0U ||
+        if (fat_cluster_number < kClustersPerEraseBlock ||
             fat_cluster_number >= descriptor_.allocation_offset ||
             metadata_clusters[fat_cluster_number]) {
           return std::unexpected(
@@ -323,6 +328,10 @@ private:
   ReadExactChain(const std::uint32_t first_cluster,
                  const std::size_t cluster_count,
                  const std::size_t entry_offset) {
+    if (cluster_count > descriptor_.allocation_end) {
+      return std::unexpected(
+          Error(Ps2MemoryCardReadErrorCode::InvalidClusterChain, entry_offset));
+    }
     if (cluster_count == 0U) {
       if (first_cluster == kEndOfChain)
         return std::vector<std::uint32_t>{};
@@ -378,6 +387,7 @@ private:
         .mode = ReadU16(bytes, 0U),
         .length = ReadU32(bytes, 4U),
         .first_cluster = ReadU32(bytes, 0x10U),
+        .directory_entry = ReadU32(bytes, 0x14U),
         .attributes = ReadU32(bytes, 0x20U),
         .logical_offset = static_cast<std::size_t>(logical_offset),
     };
@@ -473,8 +483,9 @@ private:
     return entries;
   }
 
-  [[nodiscard]] bool HasDotEntries(const std::vector<DecodedEntry> &entries,
-                                   const bool root) const {
+  [[nodiscard]] bool
+  HasDotEntries(const std::vector<DecodedEntry> &entries, const bool root,
+                const std::size_t expected_parent_entry = 0U) const {
     if (entries.size() < 2U)
       return false;
     const auto &dot = entries[0];
@@ -483,12 +494,15 @@ private:
         !dot_dot.exists || !dot_dot.is_directory || dot_dot.name != "..") {
       return false;
     }
-    if (dot_dot.length != 0U || dot_dot.first_cluster != 0U)
+    if (dot_dot.length != 0U || dot_dot.first_cluster != 0U ||
+        dot_dot.directory_entry != 0U)
       return false;
     if (root) {
-      return dot.length == entries.size() && dot.first_cluster == 0U;
+      return dot.length == entries.size() && dot.first_cluster == 0U &&
+             dot.directory_entry == 0U;
     }
-    return dot.length == 0U && dot.first_cluster == 0U;
+    return dot.length == 0U && dot.first_cluster == 0U &&
+           dot.directory_entry == expected_parent_entry;
   }
 
   [[nodiscard]] std::expected<std::vector<std::byte>, Ps2MemoryCardReadError>
@@ -545,24 +559,32 @@ std::expected<Ps2MemoryCardSaveDirectory, Ps2MemoryCardReadError>
 ReadPs2MemoryCardSaveDirectory(const std::span<const std::byte> image,
                                const std::string_view top_level_name,
                                const Ps2MemoryCardReadLimits &limits) {
-  if (!IsLegalSelectionName(top_level_name)) {
+  try {
+    if (!IsLegalSelectionName(top_level_name)) {
+      return std::unexpected(
+          Error(Ps2MemoryCardReadErrorCode::InvalidSelectionName, 0U));
+    }
+
+    const auto descriptor = InspectPs2MemoryCardImage(image);
+    if (!descriptor) {
+      return std::unexpected(Error(Ps2MemoryCardReadErrorCode::ImageRejected,
+                                   descriptor.error().offset));
+    }
+    auto logical = ConvertPs2MemoryCardImageToLogical(image);
+    if (!logical) {
+      const auto code =
+          logical.error().code == Ps2MemoryCardImageErrorCode::AllocationFailed
+              ? Ps2MemoryCardReadErrorCode::AllocationFailed
+              : Ps2MemoryCardReadErrorCode::ImageRejected;
+      return std::unexpected(Error(code, logical.error().offset));
+    }
+
+    CardReader reader(std::move(*logical), *descriptor, limits);
+    return reader.Read(top_level_name);
+  } catch (const std::bad_alloc &) {
     return std::unexpected(
-        Error(Ps2MemoryCardReadErrorCode::InvalidSelectionName, 0U));
+        Error(Ps2MemoryCardReadErrorCode::AllocationFailed, 0U));
   }
-
-  const auto descriptor = InspectPs2MemoryCardImage(image);
-  if (!descriptor) {
-    return std::unexpected(Error(Ps2MemoryCardReadErrorCode::ImageRejected,
-                                 descriptor.error().offset));
-  }
-  auto logical = ConvertPs2MemoryCardImageToLogical(image);
-  if (!logical) {
-    return std::unexpected(Error(Ps2MemoryCardReadErrorCode::ImageRejected,
-                                 logical.error().offset));
-  }
-
-  CardReader reader(std::move(*logical), *descriptor, limits);
-  return reader.Read(top_level_name);
 }
 
 } // namespace omega::compat

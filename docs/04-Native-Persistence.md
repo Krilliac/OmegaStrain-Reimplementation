@@ -219,6 +219,10 @@ only from a build that contains those slices.
 
 The separate synthetic compatibility suites cover strict logical/raw envelope recognition,
 geometry and superblock rejection, canonical ECC conversion, bounded IFC/FAT and directory-chain
-walking, loops/shared clusters, ordered opaque file recovery, deterministic fresh-card creation,
+walking, loops and cluster reuse within the traversed root, selected-directory, and selected-file
+chains, ordered opaque file recovery, deterministic fresh-card creation,
 input/limit/capacity rejection, and logical/raw read-after-write round trips. They do not decode an
 Omega Strain payload or validate a generated image against owner data or a live PCSX2 session.
+Focused warning-free MSVC Debug and Release builds passed with CTest 3/3 and direct execution of all
+three compatibility tests. The complete warning-free Debug integration build and CTest 40/40 also
+passed; a complete Release integration build was not run for this hardening slice.

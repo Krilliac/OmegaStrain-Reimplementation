@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <expected>
 #include <limits>
+#include <new>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -33,6 +34,7 @@ constexpr std::uint16_t kModeFile = 0x0010U;
 constexpr std::uint16_t kModeDirectory = 0x0020U;
 constexpr std::uint16_t kModeExists = 0x8000U;
 constexpr std::uint16_t kCanonicalDirectoryMode = 0x8427U;
+constexpr std::uint16_t kCanonicalRootParentMode = 0xA426U;
 
 [[nodiscard]] Ps2MemoryCardWriteError
 Error(const Ps2MemoryCardWriteErrorCode code,
@@ -261,112 +263,129 @@ ValidateInput(const Ps2MemoryCardSaveDirectory &directory,
 std::expected<std::vector<std::byte>, Ps2MemoryCardWriteError>
 CreatePs2MemoryCardLogicalImage(const Ps2MemoryCardSaveDirectory &directory,
                                 const Ps2MemoryCardWriteLimits &limits) {
-  const auto required_clusters = ValidateInput(directory, limits);
-  if (!required_clusters)
-    return std::unexpected(required_clusters.error());
+  try {
+    const auto required_clusters = ValidateInput(directory, limits);
+    if (!required_clusters)
+      return std::unexpected(required_clusters.error());
 
-  std::vector<std::byte> image(kPs2MemoryCardLogicalImageBytes,
-                               std::byte{0xFF});
-  auto image_span = std::span<std::byte>(image);
-  WriteSuperblock(image_span);
-  WriteAllocationTables(image_span);
+    std::vector<std::byte> image(kPs2MemoryCardLogicalImageBytes,
+                                 std::byte{0xFF});
+    auto image_span = std::span<std::byte>(image);
+    WriteSuperblock(image_span);
+    WriteAllocationTables(image_span);
 
-  std::uint32_t next_cluster = 0U;
-  auto root_chain = AllocateChain(next_cluster, 2U);
-  const auto save_entry_count = directory.files.size() + 2U;
-  const auto save_cluster_count =
-      CeilingDivide(save_entry_count, kEntriesPerCluster);
-  auto save_chain = AllocateChain(next_cluster, save_cluster_count);
-  std::vector<std::vector<std::uint32_t>> file_chains;
-  file_chains.reserve(directory.files.size());
-  for (const auto &file : directory.files) {
-    const auto cluster_count = CeilingDivide(file.bytes.size(), kClusterBytes);
-    file_chains.push_back(AllocateChain(next_cluster, cluster_count));
-  }
-  if (next_cluster != *required_clusters) {
-    return std::unexpected(Error(Ps2MemoryCardWriteErrorCode::EncodingFailed));
-  }
-
-  LinkChain(image_span, root_chain);
-  LinkChain(image_span, save_chain);
-  for (const auto &chain : file_chains)
-    LinkChain(image_span, chain);
-
-  for (const auto cluster : root_chain) {
-    auto bytes =
-        image_span.subspan(RelativeClusterOffset(cluster), kClusterBytes);
-    std::fill(bytes.begin(), bytes.end(), std::byte{0});
-  }
-  for (const auto cluster : save_chain) {
-    auto bytes =
-        image_span.subspan(RelativeClusterOffset(cluster), kClusterBytes);
-    std::fill(bytes.begin(), bytes.end(), std::byte{0});
-  }
-
-  const auto empty_timestamp = Ps2MemoryCardTimestamp{};
-  const auto root_offset = RelativeClusterOffset(root_chain.front());
-  WriteDirectoryEntry(image_span, root_offset, kCanonicalDirectoryMode, 3U, 0U,
-                      0U, 0U, empty_timestamp, empty_timestamp, ".");
-  WriteDirectoryEntry(image_span, root_offset + kDirectoryEntryBytes,
-                      kCanonicalDirectoryMode, 0U, 0U, 0U, 0U, empty_timestamp,
-                      empty_timestamp, "..");
-  const auto root_save_offset = RelativeClusterOffset(root_chain[1]);
-  WriteDirectoryEntry(image_span, root_save_offset, directory.mode,
-                      static_cast<std::uint32_t>(save_entry_count),
-                      save_chain.front(), 0U, directory.attributes,
-                      directory.created, directory.modified, directory.name);
-
-  const auto save_offset = RelativeClusterOffset(save_chain.front());
-  WriteDirectoryEntry(image_span, save_offset, kCanonicalDirectoryMode, 0U, 0U,
-                      2U, 0U, empty_timestamp, empty_timestamp, ".");
-  WriteDirectoryEntry(image_span, save_offset + kDirectoryEntryBytes,
-                      kCanonicalDirectoryMode, 0U, 0U, 0U, 0U, empty_timestamp,
-                      empty_timestamp, "..");
-
-  for (std::size_t index = 0U; index < directory.files.size(); ++index) {
-    const auto entry_index = index + 2U;
-    const auto directory_cluster = save_chain[entry_index / kEntriesPerCluster];
-    const auto entry_offset =
-        RelativeClusterOffset(directory_cluster) +
-        (entry_index % kEntriesPerCluster) * kDirectoryEntryBytes;
-    const auto first_cluster =
-        file_chains[index].empty() ? kEndOfChain : file_chains[index].front();
-    const auto &file = directory.files[index];
-    WriteDirectoryEntry(image_span, entry_offset, file.mode,
-                        static_cast<std::uint32_t>(file.bytes.size()),
-                        first_cluster, 0U, file.attributes, file.created,
-                        file.modified, file.name);
-
-    std::size_t source_offset = 0U;
-    for (const auto cluster : file_chains[index]) {
-      const auto to_copy =
-          std::min(kClusterBytes, file.bytes.size() - source_offset);
-      std::copy_n(
-          file.bytes.begin() + static_cast<std::ptrdiff_t>(source_offset),
-          to_copy,
-          image.begin() +
-              static_cast<std::ptrdiff_t>(RelativeClusterOffset(cluster)));
-      source_offset += to_copy;
+    std::uint32_t next_cluster = 0U;
+    auto root_chain = AllocateChain(next_cluster, 2U);
+    const auto save_entry_count = directory.files.size() + 2U;
+    const auto save_cluster_count =
+        CeilingDivide(save_entry_count, kEntriesPerCluster);
+    auto save_chain = AllocateChain(next_cluster, save_cluster_count);
+    std::vector<std::vector<std::uint32_t>> file_chains;
+    file_chains.reserve(directory.files.size());
+    for (const auto &file : directory.files) {
+      const auto cluster_count =
+          CeilingDivide(file.bytes.size(), kClusterBytes);
+      file_chains.push_back(AllocateChain(next_cluster, cluster_count));
     }
-    if (source_offset != file.bytes.size()) {
+    if (next_cluster != *required_clusters) {
       return std::unexpected(
-          Error(Ps2MemoryCardWriteErrorCode::EncodingFailed, index));
+          Error(Ps2MemoryCardWriteErrorCode::EncodingFailed));
     }
+
+    LinkChain(image_span, root_chain);
+    LinkChain(image_span, save_chain);
+    for (const auto &chain : file_chains)
+      LinkChain(image_span, chain);
+
+    for (const auto cluster : root_chain) {
+      auto bytes =
+          image_span.subspan(RelativeClusterOffset(cluster), kClusterBytes);
+      std::fill(bytes.begin(), bytes.end(), std::byte{0});
+    }
+    for (const auto cluster : save_chain) {
+      auto bytes =
+          image_span.subspan(RelativeClusterOffset(cluster), kClusterBytes);
+      std::fill(bytes.begin(), bytes.end(), std::byte{0});
+    }
+
+    const auto empty_timestamp = Ps2MemoryCardTimestamp{};
+    const auto root_offset = RelativeClusterOffset(root_chain.front());
+    WriteDirectoryEntry(image_span, root_offset, kCanonicalDirectoryMode, 3U,
+                        0U, 0U, 0U, empty_timestamp, empty_timestamp, ".");
+    WriteDirectoryEntry(image_span, root_offset + kDirectoryEntryBytes,
+                        kCanonicalRootParentMode, 0U, 0U, 0U, 0U,
+                        empty_timestamp, empty_timestamp, "..");
+    const auto root_save_offset = RelativeClusterOffset(root_chain[1]);
+    WriteDirectoryEntry(image_span, root_save_offset, directory.mode,
+                        static_cast<std::uint32_t>(save_entry_count),
+                        save_chain.front(), 0U, directory.attributes,
+                        directory.created, directory.modified, directory.name);
+
+    const auto save_offset = RelativeClusterOffset(save_chain.front());
+    WriteDirectoryEntry(image_span, save_offset, kCanonicalDirectoryMode, 0U,
+                        0U, 2U, 0U, empty_timestamp, empty_timestamp, ".");
+    WriteDirectoryEntry(image_span, save_offset + kDirectoryEntryBytes,
+                        kCanonicalDirectoryMode, 0U, 0U, 0U, 0U,
+                        empty_timestamp, empty_timestamp, "..");
+
+    for (std::size_t index = 0U; index < directory.files.size(); ++index) {
+      const auto entry_index = index + 2U;
+      const auto directory_cluster =
+          save_chain[entry_index / kEntriesPerCluster];
+      const auto entry_offset =
+          RelativeClusterOffset(directory_cluster) +
+          (entry_index % kEntriesPerCluster) * kDirectoryEntryBytes;
+      const auto first_cluster =
+          file_chains[index].empty() ? kEndOfChain : file_chains[index].front();
+      const auto &file = directory.files[index];
+      WriteDirectoryEntry(image_span, entry_offset, file.mode,
+                          static_cast<std::uint32_t>(file.bytes.size()),
+                          first_cluster, 0U, file.attributes, file.created,
+                          file.modified, file.name);
+
+      std::size_t source_offset = 0U;
+      for (const auto cluster : file_chains[index]) {
+        const auto to_copy =
+            std::min(kClusterBytes, file.bytes.size() - source_offset);
+        std::copy_n(
+            file.bytes.begin() + static_cast<std::ptrdiff_t>(source_offset),
+            to_copy,
+            image.begin() +
+                static_cast<std::ptrdiff_t>(RelativeClusterOffset(cluster)));
+        source_offset += to_copy;
+      }
+      if (source_offset != file.bytes.size()) {
+        return std::unexpected(
+            Error(Ps2MemoryCardWriteErrorCode::EncodingFailed, index));
+      }
+    }
+    return image;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(
+        Error(Ps2MemoryCardWriteErrorCode::AllocationFailed));
   }
-  return image;
 }
 
 std::expected<std::vector<std::byte>, Ps2MemoryCardWriteError>
 CreatePs2MemoryCardRawImage(const Ps2MemoryCardSaveDirectory &directory,
                             const Ps2MemoryCardWriteLimits &limits) {
-  auto logical = CreatePs2MemoryCardLogicalImage(directory, limits);
-  if (!logical)
-    return std::unexpected(logical.error());
-  auto raw = ConvertPs2MemoryCardImageToRaw(*logical);
-  if (!raw) {
-    return std::unexpected(Error(Ps2MemoryCardWriteErrorCode::EncodingFailed));
+  try {
+    auto logical = CreatePs2MemoryCardLogicalImage(directory, limits);
+    if (!logical)
+      return std::unexpected(logical.error());
+    auto raw = ConvertPs2MemoryCardImageToRaw(*logical);
+    if (!raw) {
+      const auto code =
+          raw.error().code == Ps2MemoryCardImageErrorCode::AllocationFailed
+              ? Ps2MemoryCardWriteErrorCode::AllocationFailed
+              : Ps2MemoryCardWriteErrorCode::EncodingFailed;
+      return std::unexpected(Error(code));
+    }
+    return std::move(*raw);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(
+        Error(Ps2MemoryCardWriteErrorCode::AllocationFailed));
   }
-  return std::move(*raw);
 }
 
 } // namespace omega::compat
