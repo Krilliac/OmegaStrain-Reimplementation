@@ -607,8 +607,9 @@ draw list and reverse release order. A generated direct-24 one-block texture pro
 direct asset and D3D12 app smokes, focused asset CTest, default/GPU/restored CTest at 31/35/31,
 20/20 repeated D3D12 app smokes, runtime-off direct/focused asset checks with 27 registrations, the
 165-file dependency gate, all 209 tooling tests, and Python compile-all. The staged public-tree gate
-checked 252 indexed text blobs; commit, DCO, publication, and exact-main validation remain pending.
-The bridge
+checked 252 indexed text blobs. The merged commit carries its matching DCO sign-off; PR #38
+published E-0077 as exact `main` commit `2a9182e560a504125a5b8278a7202fcad7220c44`, and exact-main
+run `29710089254` passed all three jobs. The bridge
 does not assign display texels, channel or alpha semantics, palette or nibble interpretation,
 swizzle or mip behavior, UVs, materials, cells, placement, visibility, geometry, retail rendering,
 gameplay, streaming, eviction, GPU pinning, asynchronous upload, or emulator equivalence; source
@@ -639,9 +640,10 @@ Packed32/indexed policy, nibble/palette behavior, or material/UV/geometry semant
 to OmegaApp, GPU upload, renderer selection, AssetService, or the E-0077 preview. Serialized local
 validation passed focused/full MSVC, the direct unit plus 100/100 repeated runs, focused and
 32/36/32 CTest, runtime-off direct/focused checks with 28 registrations, dependency 168, tooling
-209, and Python compile-all. The staged public-tree gate checked 255 indexed text blobs; commit, DCO,
-publication, and exact-main validation remain pending; no private or owner files, D-drive content,
-disc image, executable,
+209, and Python compile-all. The staged public-tree gate checked 255 indexed text blobs. The merged
+commit carries its matching DCO sign-off; PR #39 published E-0078 as exact `main` commit
+`47378588471d9271a43dfaeb56f3138c01137e1f`, and exact-main run `29710670162` passed all three
+jobs. No private or owner files, D-drive content, disc image, executable,
 emulator, or PCSX2 input was used.
 
 ## Windows portable delivery boundary
@@ -708,12 +710,36 @@ unchanged after each launch. Local emulation of the exact PowerShell body extrac
 workflow YAML passed against both the freshly regenerated local package and retained E-0079 main
 artifact. Full Release CTest passed 33/33, the 168-file dependency gate and all 209 tooling tests
 passed, Python compile-all passed, and the staged public-tree gate checked 258 indexed text blobs.
-This confirms only the static workflow definition and local emulation; exact-main execution
-remains pending. Even a hosted pass demonstrates only artifact transfer, integrity, extraction,
-package-relative launch, exact process behavior, and non-mutation on that runner image. The
-zero-frame path returns before application/platform creation, so E-0080 does not validate a window,
-menu interaction, GPU, audio, owner data, arbitrary clean or physical machines, Windows client
-editions, other Windows Server releases, or other runner images.
+PR #41 merged E-0080 as exact `main` commit
+`4868e1118bcd32c6713a7f4be57dd243d40996ed`. Exact-main push run `29714679947` completed all five
+jobs successfully. Consumer job `88266108572` downloaded retained artifact ID `8450186290`; GitHub
+verified that artifact envelope's SHA-256 as
+`aea3f4869d17874305bf6027bce370d884ddcaed35e3e9d7a4bc2217aa6baac2`, while the strict
+sidecar/recompute check verified the retained inner package ZIP SHA-256 as
+`c06ce722572c5edbb0c34ce6b3fc985bcadd4e24ebda0cc07dff59df65ccfe5d`. The job emitted
+`fresh-VM portable consumer: OK (artifact, checksum, tree, launch, immutability)`. This hosted result
+demonstrates only same-run artifact transfer, integrity, extraction, package-relative launch, exact
+process behavior, and non-mutation on that runner image. Its zero-frame path returns before
+application/platform creation, so E-0080 does not validate a window, menu interaction, GPU, audio,
+owner data, arbitrary clean or physical machines, Windows client editions, other Windows Server
+releases, or other runner images. Both digests identify retained E-0080 artifact `8450186290`; they
+are not hashes for every later package build.
+
+E-0081 is a separate local visible-interface smoke over a separately identified current portable
+package, not an expansion of E-0080's hosted zero-frame contract. The sidecar matched the package
+ZIP, all eight extracted regular files matched their ZIP members, and the absolute extracted
+launcher started without arguments from an unrelated empty working directory under an isolated
+profile. No owner data, level, or configuration argument was supplied. The exact
+`OpenOmega - native runtime` title appeared and a temporary operator-visible screenshot contained
+only the project-generated no-content OPEN OMEGA diagnostic menu. Its ignored PNG was deleted after
+display and is not retained or committed. Native Escape closed the visible run,
+and a second same-package exit oracle returned zero. Direct process evidence contained two stdout lines,
+exactly three INFO-only stderr records, and zero warning, error, or fatal stderr records. The
+unrelated working directory remained empty. GPU drivers wrote only shader-cache files inside the
+isolated profile, so profile immutability is intentionally unclaimed. No proprietary input, retail
+asset, retail executable, emulator, PCSX2 input, or D-drive filesystem input was accessed. This result does
+not establish a pixel-golden contract, retail-menu fidelity, owner-data behavior, controller or
+audio coverage, portability to another host or Windows release, or PCSX2 equivalence.
 
 ## Level texture inventory and loading
 
