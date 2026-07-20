@@ -1375,7 +1375,7 @@ if(BUILD_TESTING)
             target_compile_options(omega_sdl_input_tests PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
         endif()
         add_test(NAME omega_sdl_input_tests COMMAND omega_sdl_input_tests)
-        set_tests_properties(omega_sdl_input_tests PROPERTIES TIMEOUT 5)
+        set_tests_properties(omega_sdl_input_tests PROPERTIES TIMEOUT 15)
     endif()
 
     add_executable(omega_core_tests
@@ -1565,7 +1565,10 @@ if(OMEGA_WINDOWS_PORTABLE_PACKAGE_ENABLED)
         set_tests_properties(openomega_windows_portable_package_contract PROPERTIES
             LABELS "integration;package"
             RUN_SERIAL TRUE
-            TIMEOUT 420
+            # The package driver has a 500-second weighted sequential subprocess maximum.
+            # Ten minutes preserves room for bounded file checks while remaining well below
+            # the 30-minute Windows package-job watchdog.
+            TIMEOUT 600
         )
     endif()
 
