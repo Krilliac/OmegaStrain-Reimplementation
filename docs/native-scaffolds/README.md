@@ -7,9 +7,10 @@ An opaque whole-input `logical_extent` would also imply that a boundary was vali
 evidence establishes one, while predeclared types and entry points freeze ownership and API choices
 before the evidence establishes what the implementation should represent.
 
-The checklist distills the useful part of Claude commit `a2fdf3d` (preserved in this branch's
-history as `238aa87`). Its thirteen evidence-pending header declarations were intentionally removed
-during integration because they duplicated the dossiers and predeclared unproven APIs.
+The checklist distills the useful part of the Claude-authored scaffold submission retained in PR
+#64 at commit `2421adfbe2c710a8fb64d85046075b461e2b8690`. Its thirteen evidence-pending header
+declarations were intentionally removed during integration because they duplicated the dossiers and
+predeclared unproven APIs.
 
 ## Promotion gate
 

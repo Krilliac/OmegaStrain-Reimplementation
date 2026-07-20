@@ -7,6 +7,13 @@ Each milestone ends with an executable regression, not only a research note.
 Status: complete for the current NTSC-U research baseline.
 
 - Current PCSX2 source build, isolated BIOS/disc data root, known game hash, boot log.
+- E-0099 records runnable-tool and configuration-initialization readiness for a separately maintained
+  custom PCSX2 observation stack based on that pinned source. Its VUM, front-end, and coordinated
+  lifecycle commits compile in both a one-job MSVC RelWithDebInfo `PCSX2` core target and a true
+  Release `pcsx2-qt` target. The linked Release executable has a recorded SHA-256, release-only
+  dependency chain, embedded producer namespaces, and isolated version/configuration startup probes.
+  This establishes no producer capture, owner-input access, sanitized report, or behavioral
+  observation.
 - Proprietary-data ignore gate and clean-room method.
 - Evidence ledger, native CMake build, unit-test executable, and corpus-safe tooling.
 - Accepted pure-native ADR: no MIPS interpretation, recompilation, or translated retail code.

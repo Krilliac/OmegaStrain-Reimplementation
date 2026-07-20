@@ -1387,14 +1387,19 @@ shipping dependencies or execution mechanisms.
    separately evidenced Omega Strain payload mapper over the now-bounded standard card codecs;
    never make a PS2 memory-card device, guest RAM, or emulator savestate part of the shipping
    runtime.
-2. Use the accepted deterministic VUM trace only as a structural baseline. Collect additional
-   bounded pairs through controlled comparisons that change one research condition at a time,
-   require strict validation and byte-identical repeats, and compare only sanitized relative
+2. Treat E-0099 as runnable-tool and configuration-initialization readiness only. Before any new
+   observation, prepare a fresh neutral-menu savestate under the enforced modes and run the private
+   producer's synthetic contract and security checks outside every OpenOmega worktree. Then collect
+   the first ten-run `omega-frontend-trace-v1` matrix with private sites and inputs, accept only
+   validator-approved canonical output, and keep all parts, configuration, and raw observations
+   private. Use the accepted deterministic VUM trace only as a separate structural baseline. Collect
+   additional bounded pairs through controlled comparisons that change one research condition at a
+   time, require strict validation and byte-identical repeats, and compare only sanitized relative
    ranges and counts. Keep sites anonymous and bounds private. Promote no relationship without
-   cross-capture stability plus independent corroboration, and infer no geometry, topology,
-   vertex, material, packet, draw, placement, visibility, or gameplay semantics from the current
-   header-only aggregate rows or the absence of VIF1 chunks. A zero VIF1 count does not rule out
-   copied buffers or consumption outside the bounded observation window.
+   cross-capture stability plus independent corroboration, and infer no geometry, topology, vertex,
+   material, packet, draw, placement, visibility, or gameplay semantics from the current header-only
+   aggregate rows or the absence of VIF1 chunks. A zero VIF1 count does not rule out copied buffers
+   or consumption outside the bounded observation window.
 3. Use E-0041's ineligible partition only to prioritize controlled observations of retail name
    lookup and MTRL-record consumption. Test one-pass extension removal, basename/stem/suffix, or
    other alias behavior as separate bounded experiments because E-0041 excludes them. Do not connect
@@ -1488,7 +1493,7 @@ Remaining limitations (deliberately unclaimed):
 - The 47 dossiers retain tracked evidence and explicit nonclaims. The contract test freezes family
   coverage, authoritative status partitions, required evidence sections, resolving links,
   Windows-safe names, tracked catalog sources, and banned privacy constructs.
-- Claude provenance is retained through commits `6c0e7e8` and `238aa87`; the useful scaffold
+- Claude provenance is retained through PR #64 commits `6c0e7e8` and `2421adf`; the useful scaffold
   checklist was consolidated into `docs/native-scaffolds/README.md`, while thirteen uncompiled,
   premature C++ declarations were removed.
 
@@ -1513,3 +1518,28 @@ behavioral parity.
 
 Still unclaimed: a private metadata-only native owner-corpus acceptance run, retail opcode/type/event
 semantics, runtime consumption, or behavioral parity.
+
+## Private PCSX2 producer readiness (E-0099, 2026-07-20)
+
+- A separately maintained local branch based on official PCSX2
+  `86d76bbf590566d9ea74d381eeff3acd9856503a` composes the bounded VUM producer
+  `13df8ef7cf5dd6e29ba6b7b757c6f5a0cc6521d3`, front-end producer
+  `78ea3c8dae99b4e18857046f9042d0601331198a`, and coordinated lifecycle
+  `d17a521ca03e4de1f063f704142540da5aaaa343`.
+- The combined source prepares both producers before arming, commits them without intervening guest
+  execution, aborts both on failure, accepts only the initial configured savestate load, and fails
+  closed on a second load or confirmed VM reset. Independent read-only source/API audits approved
+  the exact combined tree.
+- An isolated one-job Ninja Multi-Config/MSVC RelWithDebInfo `PCSX2` core target completed with exit
+  0 and compiled both Omega producer translation units. A separate true Release `pcsx2-qt` target
+  completed with exit 0. The resulting executable has SHA-256
+  `2D3EAC421BDD1E6C09C8454F574D4AF32AD41F4E51BF87AA254CDAFB93BEA870`; import inspection confirms
+  `kddockwidgets-qt6.dll` and release Qt dependencies with no debug-CRT chain, and linked-image
+  inspection confirms the producer environment keys and namespaces are embedded.
+- From an isolated external data root, `-version` reports `v2.7.485-3-gd17a521ca` before its
+  intentional exit 1, while `-datapath -testconfig` exits 0. These checks establish runnable-tool
+  and configuration-initialization readiness only; they do not arm or run either producer.
+- The custom source, build tree, executable, configuration, and all prospective BIOS, disc,
+  savestate, private site, fragment, capture, and report data remain outside OpenOmega version
+  control. No BIOS, disc, savestate, private observer site, owner input, producer capture, or public
+  report was accessed, generated, or validated in E-0099.
