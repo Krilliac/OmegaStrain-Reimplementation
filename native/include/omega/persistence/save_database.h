@@ -60,7 +60,9 @@ struct SaveDatabaseLimits {
 struct SaveDatabaseConfig {
   // Must be a nonempty absolute directory. Open creates it when absent. The
   // final directory, lock leaf, and both database leaves must not be symlinks
-  // or Windows reparse points.
+  // or Windows reparse points. The directory is private application state;
+  // hostile concurrent namespace mutation by the same OS account is outside
+  // this service's containment boundary.
   std::filesystem::path directory;
   SaveDatabaseLimits limits;
 };
@@ -135,8 +137,9 @@ struct SaveRecordInfo {
 
 // Non-hot-reloadable, dependency-free native persistence service. OmegaApp is
 // the intended sole owner. It uses two complete checksummed snapshots; every
-// commit writes and flushes the inactive slot before publishing the new
-// in-memory generation, so a torn write leaves the prior slot recoverable.
+// commit writes and flushes a private same-directory file, atomically replaces
+// the inactive slot, and only then publishes the new in-memory generation, so
+// a torn write leaves the prior slot recoverable.
 // Compatibility adapters translate PS2 save containers at this boundary and
 // never become database backends.
 //
@@ -176,9 +179,11 @@ public:
   List(std::string_view prefix = {}) const;
 
   // [owning persistence/game thread] Validates and applies the entire batch to
-  // a private copy, durably writes the inactive snapshot, read-verifies it,
-  // then publishes atomically. Empty batches and duplicate keys are rejected.
-  // Success returns the new database generation.
+  // a private copy, durably writes a private temporary, then atomically
+  // replaces the inactive snapshot. Empty batches and duplicate keys are
+  // rejected. Success returns the new database generation. An indeterminate
+  // OS-level publication failure poisons the instance; callers must destroy and
+  // reopen it before any further read, list, or commit.
   [[nodiscard]] std::expected<std::uint64_t, SaveDatabaseError>
   Commit(std::span<const SaveMutation> mutations);
 

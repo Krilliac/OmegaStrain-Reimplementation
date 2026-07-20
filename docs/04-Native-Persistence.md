@@ -68,24 +68,41 @@ from exceeding 4,096 records/mutations, 255 key bytes, 16 MiB per value, 128 MiB
 
 ## Commit and recovery
 
-At open, both slots are decoded independently. An unsupported version fails closed even when the
-other slot is readable, preventing an older executable from silently rolling a newer database back.
-Equal-generation slots must contain identical records. Otherwise the newest complete valid
-generation wins; one corrupt or torn newer slot falls back to the prior complete generation. If no
-slot is valid, open fails instead of manufacturing an empty database. A new directory receives two
-checksummed generation-zero snapshots.
+At open, both slots are decoded independently through no-follow handles anchored to the owned
+database directory. An integrity-valid unsupported version fails closed even when the other slot is
+readable, preventing an older executable from silently rolling a newer database back. Transient I/O,
+limit, unexpected-file-type, and hard-link identity failures also fail closed; only a definitely torn
+or checksum-corrupt slot may fall back to its complete sibling. Equal-generation slots must contain
+identical records. Otherwise the newest complete valid generation wins. If no slot is valid, open
+fails instead of manufacturing an empty database. A missing slot is accepted only beside an empty
+generation-zero survivor, where it is rebuilt before open succeeds; a missing slot in any established
+database fails closed instead of risking rollback. A new directory synchronizes every newly created
+path component through its previously existing ancestor, then publishes each generation-zero slot
+through a flushed private same-directory temporary and atomic replacement. A crash before the first
+replacement leaves both official slots missing and initialization safely retryable; a crash afterward
+leaves at least one complete slot.
 
 For a commit, the service:
 
 1. copies the current ordered record map;
 2. validates and applies the complete mutation batch to that copy;
 3. encodes the next generation;
-4. writes and flushes the inactive slot;
-5. reopens, decodes, and compares that slot with the candidate; and
-6. only then publishes the new active slot and in-memory generation.
+4. creates, writes, and flushes a private same-directory temporary;
+5. atomically replaces the inactive slot and synchronizes the directory entry; and
+6. performs only non-allocating swaps to publish the new in-memory generation.
 
 The previously active complete slot is never modified by that commit. A torn inactive write
-therefore cannot expose a partial new generation.
+therefore cannot expose a partial new generation, and a hard-linked inactive name cannot truncate
+another file. If the OS reports failure after replacement but before directory synchronization can
+be confirmed—or if the replacement call itself has an indeterminate outcome—the service returns an
+I/O error and poisons that instance; the caller must destroy and reopen it to reconcile the only
+authoritative state from disk.
+
+The database directory is private application state and must not be concurrently mutated by hostile
+code running as the same OS account. Newly created POSIX roots are owner-only, and existing POSIX
+roots with group/other write permission are rejected. No-follow handles, single-link validation,
+private unpredictable temporary names, and atomic replacement protect against accidental or stale
+namespace hazards; they are not a same-account sandbox boundary.
 
 ## PS2 compatibility boundary
 

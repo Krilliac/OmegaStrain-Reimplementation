@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <string>
@@ -71,6 +72,12 @@ void CheckErrorCode(const std::expected<T, SaveDatabaseError> &result,
   return result;
 }
 
+[[nodiscard]] std::string ReadTextFile(const std::filesystem::path &path) {
+  std::ifstream input(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(input),
+          std::istreambuf_iterator<char>()};
+}
+
 class TempDirectory final {
 public:
   explicit TempDirectory(const std::string_view label) {
@@ -127,6 +134,80 @@ private:
   return file.good();
 }
 
+constexpr std::size_t kSyntheticHeaderBytes = 64U;
+constexpr std::size_t kSyntheticVersionOffset = 8U;
+constexpr std::size_t kSyntheticGenerationOffset = 24U;
+constexpr std::size_t kSyntheticHeaderCrcOffset = 52U;
+
+[[nodiscard]] std::uint8_t ByteValue(const std::byte value) noexcept {
+  return std::to_integer<std::uint8_t>(value);
+}
+
+void StoreU32(std::span<std::byte> bytes, const std::size_t offset,
+              const std::uint32_t value) noexcept {
+  for (std::size_t index = 0U; index < 4U; ++index) {
+    bytes[offset + index] =
+        static_cast<std::byte>((value >> (index * 8U)) & 0xFFU);
+  }
+}
+
+void StoreU64(std::span<std::byte> bytes, const std::size_t offset,
+              const std::uint64_t value) noexcept {
+  for (std::size_t index = 0U; index < 8U; ++index) {
+    bytes[offset + index] =
+        static_cast<std::byte>((value >> (index * 8U)) & 0xFFU);
+  }
+}
+
+[[nodiscard]] std::uint32_t
+Crc32(const std::span<const std::byte> bytes) noexcept {
+  std::uint32_t crc = 0xFFFFFFFFU;
+  for (const std::byte value : bytes) {
+    crc ^= ByteValue(value);
+    for (std::uint32_t bit = 0U; bit < 8U; ++bit)
+      crc = (crc >> 1U) ^ (0xEDB88320U & (0U - (crc & 1U)));
+  }
+  return crc ^ 0xFFFFFFFFU;
+}
+
+[[nodiscard]] bool
+RewriteSnapshotHeader(const std::filesystem::path &path,
+                      const std::optional<std::uint32_t> format_version,
+                      const std::optional<std::uint64_t> generation) {
+  std::ifstream input(path, std::ios::binary | std::ios::ate);
+  if (!input)
+    return false;
+  const std::streamoff file_bytes = input.tellg();
+  if (file_bytes < static_cast<std::streamoff>(kSyntheticHeaderBytes))
+    return false;
+  std::vector<std::byte> bytes(static_cast<std::size_t>(file_bytes));
+  input.seekg(0);
+  input.read(reinterpret_cast<char *>(bytes.data()),
+             static_cast<std::streamsize>(bytes.size()));
+  if (input.gcount() != static_cast<std::streamsize>(bytes.size()) ||
+      input.bad()) {
+    return false;
+  }
+  input.close();
+
+  if (format_version)
+    StoreU32(bytes, kSyntheticVersionOffset, *format_version);
+  if (generation)
+    StoreU64(bytes, kSyntheticGenerationOffset, *generation);
+  StoreU32(bytes, kSyntheticHeaderCrcOffset, 0U);
+  StoreU32(
+      bytes, kSyntheticHeaderCrcOffset,
+      Crc32(std::span<const std::byte>(bytes).first(kSyntheticHeaderBytes)));
+
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  if (!output)
+    return false;
+  output.write(reinterpret_cast<const char *>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+  output.flush();
+  return output.good();
+}
+
 void CheckCodeNames() {
   constexpr std::array expected{
       "invalid-configuration"sv,
@@ -152,9 +233,10 @@ void CheckCodeNames() {
 }
 
 void CheckConfigurationValidation() {
-  CheckErrorCode(SaveDatabase::Open({.directory = "relative/save-root"}),
-                 SaveDatabaseErrorCode::InvalidConfiguration,
-                 "a relative database directory is rejected");
+  CheckErrorCode(
+      SaveDatabase::Open({.directory = "relative/save-root", .limits = {}}),
+      SaveDatabaseErrorCode::InvalidConfiguration,
+      "a relative database directory is rejected");
 
   TempDirectory tree("configuration");
   SaveDatabaseLimits limits;
@@ -204,6 +286,13 @@ void CheckConfigurationValidation() {
 void CheckFreshDatabaseAndTransactions() {
   TempDirectory tree("transactions");
   const auto database_root = tree.path() / "native";
+  std::filesystem::create_directories(database_root);
+  const auto interrupted_temporary =
+      database_root / "openomega-save-a.oodb.tmp-synthetic-interrupted";
+  {
+    std::ofstream interrupted_genesis(interrupted_temporary, std::ios::binary);
+    interrupted_genesis << "synthetic interrupted first initialization";
+  }
   auto opened = SaveDatabase::Open(Config(database_root));
   Check(opened.has_value(), "a fresh native save database opens");
   if (!opened)
@@ -219,8 +308,11 @@ void CheckFreshDatabaseAndTransactions() {
                 database_root /
                 std::string(omega::persistence::kSaveDatabaseLockFileName)) &&
             std::filesystem::file_size(SlotA(database_root)) == 64U &&
-            std::filesystem::file_size(SlotB(database_root)) == 64U,
-        "fresh startup materializes two fixed checksummed genesis slots");
+            std::filesystem::file_size(SlotB(database_root)) == 64U &&
+            std::filesystem::is_regular_file(interrupted_temporary) &&
+            std::filesystem::file_size(interrupted_temporary) > 0U,
+        "fresh startup ignores an unpublished private temporary and "
+        "materializes two fixed checksummed genesis slots");
 
   auto absent = database->Read("profiles/alpha/campaign/slot-0");
   Check(absent && !*absent, "a valid absent record returns an empty optional");
@@ -363,6 +455,58 @@ void CheckFreshDatabaseAndTransactions() {
   }
 }
 
+void CheckRevisionTokenAbaProtection() {
+  TempDirectory tree("revision-aba");
+  auto opened = SaveDatabase::Open(Config(tree.path() / "database"));
+  Check(opened.has_value(), "the revision-ABA fixture database opens");
+  if (!opened)
+    return;
+
+  constexpr std::string_view key = "profiles/aba/campaign/slot-0";
+  std::array initial{
+      SaveMutation::Put(std::string(key), 1U, Bytes("initial")),
+  };
+  Check(opened->Commit(initial).has_value(),
+        "the revision-ABA fixture creates its initial record");
+  auto record = opened->Read(key);
+  Check(record && *record && (*record)->revision == 1U,
+        "the initial record receives generation one as its revision token");
+  if (!record || !*record)
+    return;
+  const std::uint64_t stale_revision = (*record)->revision;
+
+  std::array erase{
+      SaveMutation::Erase(std::string(key),
+                          SaveWriteCondition::ExactRevision(stale_revision)),
+  };
+  Check(opened->Commit(erase).has_value(),
+        "the revision-ABA fixture erases the initial incarnation");
+  std::array recreate{
+      SaveMutation::Put(std::string(key), 1U, Bytes("replacement"),
+                        SaveWriteCondition::MustBeAbsent()),
+  };
+  Check(opened->Commit(recreate).has_value(),
+        "the revision-ABA fixture recreates the record");
+  record = opened->Read(key);
+  Check(record && *record && (*record)->revision == 3U &&
+            Text((*record)->value) == "replacement",
+        "delete and recreate assigns the later database generation token");
+
+  std::array stale_update{
+      SaveMutation::Put(std::string(key), 1U, Bytes("stale overwrite"),
+                        SaveWriteCondition::ExactRevision(stale_revision)),
+  };
+  CheckErrorCode(opened->Commit(stale_update),
+                 SaveDatabaseErrorCode::PreconditionFailed,
+                 "a stale pre-delete revision cannot overwrite the recreated "
+                 "record");
+  record = opened->Read(key);
+  Check(record && *record && (*record)->revision == 3U &&
+            Text((*record)->value) == "replacement" &&
+            opened->generation() == 3U,
+        "a rejected stale revision preserves the replacement record");
+}
+
 void CheckExclusiveOwnership() {
   TempDirectory tree("exclusive-ownership");
   const auto root = tree.path() / "database";
@@ -382,6 +526,131 @@ void CheckExclusiveOwnership() {
   }
   Check(SaveDatabase::Open(Config(root)).has_value(),
         "destroying the owner releases the database lock");
+}
+
+void CheckAtomicPublicationAndNamespaceSafety() {
+  TempDirectory tree("namespace-safety");
+  std::error_code error;
+
+  const auto hardlink_root = tree.path() / "hardlinked-slots";
+  auto opened = SaveDatabase::Open(Config(hardlink_root));
+  Check(opened.has_value(), "the hard-link fixture database opens");
+  opened = std::unexpected(SaveDatabaseError{});
+  std::filesystem::remove(SlotB(hardlink_root), error);
+  Check(!error, "the redundant slot is removed for the hard-link fixture");
+  error.clear();
+  std::filesystem::create_hard_link(SlotA(hardlink_root), SlotB(hardlink_root),
+                                    error);
+  Check(!error, "the two snapshot names are hard-linked synthetically");
+  if (!error) {
+    CheckErrorCode(SaveDatabase::Open(Config(hardlink_root)),
+                   SaveDatabaseErrorCode::IoFailure,
+                   "hard-linked snapshot identities fail closed");
+    std::filesystem::remove(SlotB(hardlink_root), error);
+    Check(!error, "the synthetic snapshot hard link is removed");
+    Check(SaveDatabase::Open(Config(hardlink_root)).has_value(),
+          "the independent remaining snapshot reopens after hard-link repair");
+  }
+
+  const auto atomic_root = tree.path() / "atomic-replacement";
+  opened = SaveDatabase::Open(Config(atomic_root));
+  Check(opened.has_value(), "the atomic replacement fixture database opens");
+  if (opened) {
+    const auto sentinel = tree.path() / "external-sentinel.bin";
+    {
+      std::ofstream output(sentinel, std::ios::binary);
+      output << "external-sentinel-must-not-change";
+    }
+    error.clear();
+    std::filesystem::remove(SlotB(atomic_root), error);
+    Check(!error, "the inactive slot is removed for atomic replacement");
+    error.clear();
+    std::filesystem::create_hard_link(sentinel, SlotB(atomic_root), error);
+    Check(!error, "the inactive name is hard-linked to an external sentinel");
+    std::array mutation{
+        SaveMutation::Put("profiles/atomic/slot-0", 1U, Bytes("committed")),
+    };
+    Check(!error && opened->Commit(mutation).has_value(),
+          "a commit atomically replaces a hostile inactive hard link");
+    error.clear();
+    const bool still_equivalent =
+        std::filesystem::equivalent(sentinel, SlotB(atomic_root), error);
+    Check(!error && !still_equivalent &&
+              ReadTextFile(sentinel) == "external-sentinel-must-not-change",
+          "atomic publication never truncates the hard-link target");
+  }
+  opened = std::unexpected(SaveDatabaseError{});
+  auto reopened = SaveDatabase::Open(Config(atomic_root));
+  Check(reopened && reopened->generation() == 1U,
+        "the atomically replaced snapshot reopens at generation one");
+  reopened = std::unexpected(SaveDatabaseError{});
+
+  const auto io_root = tree.path() / "io-failure";
+  opened = SaveDatabase::Open(Config(io_root));
+  Check(opened.has_value(), "the I/O failure fixture database opens");
+  if (opened) {
+    std::array first{
+        SaveMutation::Put("profiles/io/slot-0", 1U, Bytes("one")),
+    };
+    std::array second{
+        SaveMutation::Put("profiles/io/slot-0", 1U, Bytes("two"),
+                          SaveWriteCondition::ExactRevision(1U)),
+    };
+    Check(opened->Commit(first) && opened->Commit(second),
+          "the I/O failure fixture reaches generation two");
+  }
+  opened = std::unexpected(SaveDatabaseError{});
+  const auto older_slot_backup = tree.path() / "io-slot-b-backup.oodb";
+  error.clear();
+  std::filesystem::rename(SlotB(io_root), older_slot_backup, error);
+  Check(!error, "the older slot is hidden for a synthetic I/O failure");
+  error.clear();
+  std::filesystem::create_directory(SlotB(io_root), error);
+  Check(!error, "a directory creates a synthetic non-corruption slot error");
+  CheckErrorCode(SaveDatabase::Open(Config(io_root)),
+                 SaveDatabaseErrorCode::IoFailure,
+                 "a slot I/O error cannot silently fall back to its sibling");
+  error.clear();
+  std::filesystem::remove(SlotB(io_root), error);
+  Check(!error, "the synthetic I/O obstruction is removed");
+  error.clear();
+  std::filesystem::rename(older_slot_backup, SlotB(io_root), error);
+  Check(!error, "the unobstructed older slot is restored byte-for-byte");
+  reopened = SaveDatabase::Open(Config(io_root));
+  Check(reopened && reopened->generation() == 2U,
+        "removing the transient obstruction recovers the acknowledged newest "
+        "generation");
+  reopened = std::unexpected(SaveDatabaseError{});
+
+  const auto anchor_root = tree.path() / "anchored-directory";
+  const auto moved_root = tree.path() / "anchored-directory-moved";
+  opened = SaveDatabase::Open(Config(anchor_root));
+  Check(opened.has_value(), "the directory-anchor fixture database opens");
+  if (opened) {
+    error.clear();
+    std::filesystem::rename(anchor_root, moved_root, error);
+    std::array mutation{
+        SaveMutation::Put("profiles/anchor/slot-0", 1U, Bytes("anchored")),
+    };
+    if (error) {
+      Check(opened->Commit(mutation).has_value(),
+            "a pinned directory that rejects rename remains writable");
+    } else {
+      std::filesystem::create_directories(anchor_root, error);
+      Check(!error, "a replacement pathname is created after directory rename");
+      Check(opened->Commit(mutation).has_value(),
+            "an anchored descriptor commits into the original directory");
+      Check(!std::filesystem::exists(SlotA(anchor_root)) &&
+                !std::filesystem::exists(SlotB(anchor_root)),
+            "the live owner never writes through the replacement pathname");
+    }
+  }
+  opened = std::unexpected(SaveDatabaseError{});
+  const auto persisted_root =
+      std::filesystem::exists(moved_root) ? moved_root : anchor_root;
+  reopened = SaveDatabase::Open(Config(persisted_root));
+  Check(reopened && reopened->generation() == 1U,
+        "the directory-anchored commit reopens from its stable identity");
 }
 
 void CheckLimits() {
@@ -443,6 +712,49 @@ void CheckLimits() {
   }
 }
 
+void CheckMissingSnapshotRecoveryPolicy() {
+  TempDirectory tree("missing-snapshot-policy");
+  std::error_code error;
+
+  const auto genesis_root = tree.path() / "interrupted-genesis";
+  auto opened = SaveDatabase::Open(Config(genesis_root));
+  Check(opened.has_value(), "the interrupted-genesis fixture database opens");
+  opened = std::unexpected(SaveDatabaseError{});
+  std::filesystem::remove(SlotB(genesis_root), error);
+  Check(!error, "one generation-zero slot is removed synthetically");
+  auto recovered = SaveDatabase::Open(Config(genesis_root));
+  Check(recovered && recovered->generation() == 0U &&
+            recovered->record_count() == 0U &&
+            std::filesystem::is_regular_file(SlotA(genesis_root)) &&
+            std::filesystem::is_regular_file(SlotB(genesis_root)),
+        "a lone empty genesis slot safely reconstructs its redundant sibling");
+  recovered = std::unexpected(SaveDatabaseError{});
+
+  const auto established_root = tree.path() / "established";
+  opened = SaveDatabase::Open(Config(established_root));
+  Check(opened.has_value(), "the established missing-slot fixture opens");
+  if (!opened)
+    return;
+  std::array first{
+      SaveMutation::Put("profiles/missing/slot-0", 1U, Bytes("one")),
+  };
+  std::array second{
+      SaveMutation::Put("profiles/missing/slot-0", 1U, Bytes("two"),
+                        SaveWriteCondition::ExactRevision(1U)),
+  };
+  Check(opened->Commit(first) && opened->Commit(second) &&
+            opened->generation() == 2U,
+        "the established missing-slot fixture reaches generation two");
+  opened = std::unexpected(SaveDatabaseError{});
+  error.clear();
+  std::filesystem::remove(SlotA(established_root), error);
+  Check(!error, "the acknowledged newest snapshot is removed synthetically");
+  CheckErrorCode(
+      SaveDatabase::Open(Config(established_root)),
+      SaveDatabaseErrorCode::CorruptSnapshot,
+      "a missing established snapshot fails closed instead of rolling back");
+}
+
 void CheckCrashRecovery() {
   TempDirectory tree("recovery");
   const auto root = tree.path() / "database";
@@ -482,8 +794,8 @@ void CheckCrashRecovery() {
                         SaveWriteCondition::ExactRevision(1U)),
   };
   Check(recovered->Commit(replacement) && recovered->generation() == 2U,
-        "the recovered database overwrites and read-verifies the damaged "
-        "inactive slot");
+        "the recovered database atomically replaces the damaged inactive "
+        "slot");
   recovered = std::unexpected(SaveDatabaseError{});
   auto verified = SaveDatabase::Open(Config(root));
   Check(verified.has_value(), "the post-recovery database reopens");
@@ -504,19 +816,85 @@ void CheckCrashRecovery() {
                  "creating an empty database");
 }
 
-void CheckUnsupportedFormatFailsClosed() {
-  TempDirectory tree("future-format");
-  const auto root = tree.path() / "database";
-  auto opened = SaveDatabase::Open(Config(root));
+void CheckUnreachableSnapshotStatesAreRejected() {
+  TempDirectory tree("unreachable-snapshots");
+
+  const auto generation_zero_root = tree.path() / "generation-zero";
+  auto opened = SaveDatabase::Open(Config(generation_zero_root));
+  Check(opened.has_value(), "the generation-zero fixture database opens");
+  if (!opened)
+    return;
+  std::array initial{
+      SaveMutation::Put("profiles/unreachable/slot-0", 1U, Bytes("one")),
+  };
+  Check(opened->Commit(initial).has_value(),
+        "the generation-zero fixture commits one reachable record");
+  opened = std::unexpected(SaveDatabaseError{});
+  Check(RewriteSnapshotHeader(SlotB(generation_zero_root), std::nullopt, 0U),
+        "the nonempty snapshot is rewritten as checksum-valid generation zero");
+  auto recovered = SaveDatabase::Open(Config(generation_zero_root));
+  Check(recovered && recovered->generation() == 0U &&
+            recovered->record_count() == 0U,
+        "a nonempty generation-zero snapshot is rejected in favor of the "
+        "reachable empty sibling");
+  recovered = std::unexpected(SaveDatabaseError{});
+
+  const auto future_revision_root = tree.path() / "future-revision";
+  opened = SaveDatabase::Open(Config(future_revision_root));
+  Check(opened.has_value(), "the future-revision fixture database opens");
+  if (!opened)
+    return;
+  Check(opened->Commit(initial).has_value(),
+        "the future-revision fixture commits generation one");
+  std::array update{
+      SaveMutation::Put("profiles/unreachable/slot-0", 1U, Bytes("two"),
+                        SaveWriteCondition::ExactRevision(1U)),
+  };
+  Check(opened->Commit(update).has_value(),
+        "the future-revision fixture commits generation two");
+  opened = std::unexpected(SaveDatabaseError{});
+  Check(RewriteSnapshotHeader(SlotA(future_revision_root), std::nullopt, 1U),
+        "the generation-two snapshot is rewritten with a checksum-valid "
+        "generation-one header");
+  recovered = SaveDatabase::Open(Config(future_revision_root));
+  Check(recovered && recovered->generation() == 1U,
+        "a record revision newer than its snapshot generation is rejected in "
+        "favor of the reachable sibling");
+  if (recovered) {
+    const auto record = recovered->Read("profiles/unreachable/slot-0");
+    Check(record && *record && (*record)->revision == 1U &&
+              Text((*record)->value) == "one",
+          "the reachable sibling retains the prior record revision and bytes");
+  }
+}
+
+void CheckVersionIntegrityAndUnsupportedFormat() {
+  TempDirectory tree("format-version");
+
+  const auto corrupt_root = tree.path() / "corrupt-version";
+  auto opened = SaveDatabase::Open(Config(corrupt_root));
+  Check(opened.has_value(), "the corrupt-version fixture database opens");
+  opened = std::unexpected(SaveDatabaseError{});
+  Check(OverwriteByte(SlotB(corrupt_root), kSyntheticVersionOffset, 2U),
+        "the inactive snapshot version is corrupted without repairing its "
+        "header checksum");
+  auto recovered = SaveDatabase::Open(Config(corrupt_root));
+  Check(recovered && recovered->generation() == 0U &&
+            recovered->record_count() == 0U,
+        "an unchecked corrupt version field falls back to the valid sibling");
+  recovered = std::unexpected(SaveDatabaseError{});
+
+  const auto future_root = tree.path() / "future-version";
+  opened = SaveDatabase::Open(Config(future_root));
   Check(opened.has_value(), "the future-format fixture database opens");
   opened = std::unexpected(SaveDatabaseError{});
-  Check(
-      OverwriteByte(SlotB(root), 8U, 2U),
-      "the inactive snapshot version is changed to a synthetic future version");
-  CheckErrorCode(SaveDatabase::Open(Config(root)),
+  Check(RewriteSnapshotHeader(SlotB(future_root), 2U, std::nullopt),
+        "the inactive snapshot becomes a checksum-valid synthetic future "
+        "version");
+  CheckErrorCode(SaveDatabase::Open(Config(future_root)),
                  SaveDatabaseErrorCode::UnsupportedFormat,
-                 "an unsupported slot fails closed instead of rolling back "
-                 "through another slot");
+                 "an integrity-valid unsupported slot fails closed instead of "
+                 "rolling back through another slot");
 }
 } // namespace
 
@@ -524,9 +902,13 @@ int main() {
   CheckCodeNames();
   CheckConfigurationValidation();
   CheckFreshDatabaseAndTransactions();
+  CheckRevisionTokenAbaProtection();
   CheckExclusiveOwnership();
+  CheckAtomicPublicationAndNamespaceSafety();
   CheckLimits();
+  CheckMissingSnapshotRecoveryPolicy();
   CheckCrashRecovery();
-  CheckUnsupportedFormatFailsClosed();
+  CheckUnreachableSnapshotStatesAreRejected();
+  CheckVersionIntegrityAndUnsupportedFormat();
   return failures == 0 ? 0 : 1;
 }

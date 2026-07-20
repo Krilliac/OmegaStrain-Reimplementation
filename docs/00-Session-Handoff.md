@@ -1136,12 +1136,16 @@ shipping dependencies or execution mechanisms.
     closed. An operating-system-held lock rejects a second live owner as `busy`. Two complete
     checksummed little-endian A/B snapshots hold canonical sorted key/value records with explicit
     schema versions and revisions. A commit validates one optimistic batch against a private copy,
-    durably writes and flushes the inactive slot, decodes and compares it, and only then publishes
-    the new generation. Strict configurable and hard record/key/value/logical/file limits guard every
-    decoded extent and allocation. Synthetic tests cover fresh genesis, put/update/delete,
-    deterministic prefix listing, malformed keys/conditions, preconditions, atomic rejection,
-    limits, moves, exclusive ownership, reopen, torn-newest fallback, post-recovery commit, both-slot
-    corruption, and future-version fail-closed behavior. The focused test passed 20 consecutive runs;
+    writes and flushes a private same-directory temporary, atomically replaces the inactive slot,
+    synchronizes the directory entry, and then performs only non-allocating in-memory publication.
+    Strict configurable and hard record/key/value/logical/file limits guard every decoded extent and
+    allocation. Synthetic tests cover fresh and interrupted genesis, put/update/delete,
+    deterministic prefix listing, malformed keys/conditions, preconditions, revision ABA rejection,
+    atomic rejection, limits, moves, exclusive ownership, anchored/no-follow namespace handling,
+    hard-link containment, missing-established-slot rejection, torn-newest fallback, post-recovery
+    commit, both-slot corruption, integrity-checked future versions, and fail-closed transient I/O.
+    The focused Debug and Release tests each passed 20 consecutive runs; a strict Linux compile and
+    direct filesystem test also passed.
     the complete runtime-disabled Debug build was warning-free and its 29/29 CTest suite passed.
     Full runtime-enabled Debug and Release builds were warning-free; their 33/33 and 34/34 CTest
     suites passed, including the Release portable-package contract. The 171-file dependency scan,

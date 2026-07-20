@@ -236,11 +236,15 @@ E-0083 implements the standalone `omega_persistence` foundation described in
 `docs/04-Native-Persistence.md`. `SaveDatabase` is movable but noncopyable and holds one exclusive
 operating-system lock for its complete live lifetime. Its API is externally serialized on one
 persistence/game thread and returns only owned copies. It uses two complete checksummed snapshots;
-each optimistic batch writes, flushes, decodes, and compares the inactive generation before the
-service changes its active state. The format and decoder have explicit configurable plus hard
-bounds, canonical key grammar, per-record schema/revision values, reserved-field checks, sorted-key
-checks, CRC-32 protection, and fail-closed future-version handling. The service is not yet composed
-into `OmegaApp`, and it assigns no profile, campaign, checkpoint, retail-payload, PS2 filesystem,
+each optimistic batch writes and flushes a private temporary, atomically replaces the inactive
+generation, synchronizes its directory entry, and performs only non-allocating state publication
+afterward. Directory identity is retained for the lock and all slot I/O; opened leaves are
+no-follow, multi-link snapshots are rejected, and only definite checksum/torn corruption may fall
+back. A missing established slot, transient I/O, unsupported version, or indeterminate replacement
+fails closed. The format and decoder have explicit configurable plus hard bounds, canonical key
+grammar, generation-unique record revisions, reserved-field checks, sorted-key checks, CRC-32
+protection, and integrity-checked future-version handling. The service is not yet composed into
+`OmegaApp`, and it assigns no profile, campaign, checkpoint, retail-payload, PS2 filesystem,
 memory-card-device, guest-memory, or emulator-savestate semantics.
 
 VUM has a bounded semantic adapter that returns owned source-order names plus one-to-three dense
