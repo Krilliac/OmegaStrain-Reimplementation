@@ -300,3 +300,30 @@ This service does not perform VUM-name or material lookup, alias resolution, mat
 mesh/draw binding, display-pixel expansion, GPU upload, placement, visibility, or rendering. The
 fixed aggregate report contains no paths, names, hashes, offsets, payloads, per-level rows,
 identities, bindings, messages, or exception text.
+
+## Packed24 transfer diagnostic projection
+
+E-0078 introduces a renderer-neutral diagnostic utility over already-owned `TextureStorageIR`; it
+does not change TDX decoding. The accepted shape is deliberately narrow: one nonzero top-level
+rectangle with known `Packed24` sample encoding, exactly one block, exactly one plane, no palette,
+one nonzero matching plane rectangle with known `Packed24` transfer-element encoding, and exactly
+three source byte slots per rectangle element. Multi-block, multi-plane, palette-bearing, unknown,
+or other known encodings fail closed rather than selecting or inferring a purpose.
+
+The project diagnostic copies each consecutive group of three source byte slots into slots zero,
+one, and two of a four-slot owned output group and writes the constant `0xff` into slot three. The
+rectangle controls only deterministic output dimensions and cardinality. This is not a display
+decoder: it establishes no channel names, row origin or row order, texel swizzle, color space,
+premultiplication, alpha meaning or scaling, display-ready correctness, block/plane/mip/slice/frame
+purpose, Packed32 or indexed expansion, nibble order, or palette permutation. No app, GPU upload,
+renderer, AssetService, or E-0077 selection path consumes this utility in E-0078.
+
+Source and output byte arithmetic are checked independently before cardinality and independent
+synthetic 48 MiB/64 MiB limits. A generated 16x16 seed-`0x21` shape maps 768 source bytes to 1,024
+owned output bytes with FNV-1a-64 `0x4abb645f50f5a325`; seed `0x61` maps to
+`0x36590f25eee3ab25`. These are project diagnostic oracles only. Serialized local validation passed
+focused/full MSVC, the direct unit plus 100/100 repeated runs, focused and 32/36/32 CTest,
+runtime-off direct/focused checks with 28 registrations, dependency 168, tooling 209, and Python
+compile-all. The staged public-tree gate checked 255 indexed text blobs; commit, DCO, publication,
+and exact-main validation remain pending. No
+private or owner files, D-drive content, disc image, executable, emulator, or PCSX2 input was used.
