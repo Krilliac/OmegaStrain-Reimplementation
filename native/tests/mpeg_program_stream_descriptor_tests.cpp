@@ -298,6 +298,57 @@ void RunZeroLengthVideoChecks()
         "MPEG-PS reports packet-aligned input without inventing a program-end marker");
 }
 
+void RunTrailingZeroPaddingChecks()
+{
+    const CanonicalFixture canonical = BuildCanonical();
+    constexpr std::array<std::size_t, 3> accepted_sizes{{1U, 2'044U, 2'047U}};
+    for (const std::size_t padding_bytes : accepted_sizes)
+    {
+        auto padded = canonical.bytes;
+        padded.insert(padded.end(), padding_bytes, std::byte{0});
+        const auto result = omega::media::InspectMpegProgramStream(padded);
+        Check(result && result->packets.size() == 10U && result->has_program_end,
+            "MPEG-PS accepts a bounded zero optical-sector remainder after program end");
+        if (result)
+        {
+            const auto& padding = result->packets.back();
+            Check(padding.kind == MpegProgramStreamPacketKind::TrailingZeroPadding &&
+                      padding.payload_class == MpegProgramStreamPayloadClass::None &&
+                      padding.stream_id == 0U && padding.packet_offset == canonical.bytes.size() &&
+                      padding.packet_bytes == padding_bytes &&
+                      padding.payload_offset == canonical.bytes.size() &&
+                      padding.payload_bytes == padding_bytes,
+                "MPEG-PS describes terminal zero fill as a distinct exact extent");
+        }
+    }
+
+    auto nonzero = canonical.bytes;
+    nonzero.insert(nonzero.end(), 8U, std::byte{0});
+    nonzero[canonical.bytes.size() + 3U] = std::byte{1};
+    CheckError(omega::media::InspectMpegProgramStream(nonzero), DecodeErrorCode::Malformed,
+        "MPEG-PS rejects a nonzero byte in terminal optical-sector fill");
+
+    auto oversized = canonical.bytes;
+    oversized.insert(oversized.end(), 2'048U, std::byte{0});
+    CheckError(omega::media::InspectMpegProgramStream(oversized), DecodeErrorCode::LimitExceeded,
+        "MPEG-PS rejects a full sector of bytes after program end");
+
+    auto no_end = BuildPackOnly();
+    no_end.insert(no_end.end(), 4U, std::byte{0});
+    CheckError(omega::media::InspectMpegProgramStream(no_end), DecodeErrorCode::Malformed,
+        "MPEG-PS rejects zero fill without a preceding program end");
+
+    auto duplicate_end = canonical.bytes;
+    AppendStartCode(duplicate_end, 0xB9);
+    CheckError(omega::media::InspectMpegProgramStream(duplicate_end), DecodeErrorCode::Malformed,
+        "MPEG-PS rejects a second program end as terminal padding");
+
+    auto packet_after_end = canonical.bytes;
+    AppendPackHeader(packet_after_end);
+    CheckError(omega::media::InspectMpegProgramStream(packet_after_end),
+        DecodeErrorCode::Malformed, "MPEG-PS rejects a systems packet after program end");
+}
+
 void RunTruncationChecks()
 {
     const CanonicalFixture canonical = BuildCanonical();
@@ -446,10 +497,6 @@ void RunMalformedChecks()
     CheckError(omega::media::InspectMpegProgramStream(zero_length_audio),
         DecodeErrorCode::Malformed, "MPEG-PS limits a zero PES length to video stream IDs");
 
-    auto bytes_after_end = canonical.bytes;
-    AppendByte(bytes_after_end, 0);
-    CheckError(omega::media::InspectMpegProgramStream(bytes_after_end), DecodeErrorCode::Malformed,
-        "MPEG-PS rejects trailing bytes after the program end code");
 }
 
 void RunBudgetChecks()
@@ -507,11 +554,13 @@ int main()
 {
     static_assert(omega::media::kMpegProgramStreamMaximumInputBytes == 512ULL * 1024ULL * 1024ULL);
     static_assert(omega::media::kMpegProgramStreamMaximumPacketDescriptors == 262'144U);
+    static_assert(omega::media::kMpegProgramStreamMaximumTrailingZeroPaddingBytes == 2'047U);
     static_assert(omega::media::DefaultMpegProgramStreamDecodeLimits().maximum_input_bytes ==
                   omega::media::kMpegProgramStreamMaximumInputBytes);
 
     RunCanonicalChecks();
     RunZeroLengthVideoChecks();
+    RunTrailingZeroPaddingChecks();
     RunTruncationChecks();
     RunMalformedChecks();
     RunBudgetChecks();

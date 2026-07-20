@@ -392,11 +392,6 @@ struct ScanSummary
     const std::uint8_t stream_id = ReadU8(bytes, offset + 3U);
     if (stream_id == kProgramEndStreamId)
     {
-        if (bytes.size() - offset != 4U)
-        {
-            return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-                "MPEG-PS bytes follow the program end code", offset + 4U));
-        }
         return MpegProgramStreamPacketDescriptor{
             .kind = MpegProgramStreamPacketKind::ProgramEnd,
             .payload_class = MpegProgramStreamPayloadClass::None,
@@ -417,6 +412,35 @@ struct ScanSummary
     return ParseLengthDelimitedPacket(bytes, offset, stream_id);
 }
 
+[[nodiscard]] asset::DecodeResult<MpegProgramStreamPacketDescriptor> ParseTrailingZeroPadding(
+    const std::span<const std::byte> bytes, const std::uint64_t offset)
+{
+    const std::uint64_t padding_bytes = bytes.size() - offset;
+    if (padding_bytes == 0U || padding_bytes > kMpegProgramStreamMaximumTrailingZeroPaddingBytes)
+    {
+        return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
+            "MPEG-PS trailing zero padding exceeds the fixed optical-sector remainder limit",
+            offset + kMpegProgramStreamMaximumTrailingZeroPaddingBytes));
+    }
+    for (std::uint64_t index = offset; index < bytes.size(); ++index)
+    {
+        if (ReadU8(bytes, index) != 0U)
+        {
+            return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                "MPEG-PS trailing padding byte is nonzero", index));
+        }
+    }
+    return MpegProgramStreamPacketDescriptor{
+        .kind = MpegProgramStreamPacketKind::TrailingZeroPadding,
+        .payload_class = MpegProgramStreamPayloadClass::None,
+        .stream_id = 0U,
+        .packet_offset = offset,
+        .packet_bytes = padding_bytes,
+        .payload_offset = offset,
+        .payload_bytes = padding_bytes,
+    };
+}
+
 [[nodiscard]] asset::DecodeResult<ScanSummary> ScanProgramStream(
     const std::span<const std::byte> bytes, const std::uint64_t maximum_packets,
     MpegProgramStreamPacketDescriptor* const output)
@@ -425,7 +449,8 @@ struct ScanSummary
     std::uint64_t offset = 0;
     while (offset < bytes.size())
     {
-        auto packet = ParsePacket(bytes, offset);
+        auto packet = summary.has_program_end ? ParseTrailingZeroPadding(bytes, offset)
+                                              : ParsePacket(bytes, offset);
         if (!packet)
             return std::unexpected(packet.error());
         if (summary.packet_count >= maximum_packets)

@@ -14,6 +14,9 @@ namespace omega::media
 // encoded by MPEG systems syntax. Explicit caller limits may tighten but cannot raise them.
 inline constexpr std::uint64_t kMpegProgramStreamMaximumInputBytes = 512ULL * 1024ULL * 1024ULL;
 inline constexpr std::uint64_t kMpegProgramStreamMaximumPacketDescriptors = 1ULL << 18U;
+// At most one optical-sector remainder may follow the four-byte program_end code. A full 2,048-byte
+// sector is never padding because the end code itself occupies four bytes in the terminal sector.
+inline constexpr std::uint64_t kMpegProgramStreamMaximumTrailingZeroPaddingBytes = 2047U;
 
 [[nodiscard]] constexpr asset::DecodeLimits DefaultMpegProgramStreamDecodeLimits() noexcept
 {
@@ -31,6 +34,7 @@ enum class MpegProgramStreamPacketKind : std::uint8_t
     Pes,
     Padding,
     OpaqueLengthDelimited,
+    TrailingZeroPadding,
 };
 
 enum class MpegProgramStreamPayloadClass : std::uint8_t
@@ -42,9 +46,11 @@ enum class MpegProgramStreamPayloadClass : std::uint8_t
     Other,
 };
 
-// One MPEG-2 Program Stream packet boundary. Every offset is relative to the inspected input. The
-// descriptor owns no payload and retains no pointer into the borrowed source. Payload classification
-// follows only the standardized stream-id ranges; it does not identify a codec.
+// One MPEG-2 Program Stream physical extent. TrailingZeroPadding is the sole non-packet extent: it
+// has stream_id zero and describes 1..2047 zero bytes immediately after exactly one program_end
+// through EOF. Every offset is relative to the inspected input. The descriptor owns no payload and
+// retains no pointer into the borrowed source. Payload classification follows only the standardized
+// stream-id ranges; it does not identify a codec.
 struct MpegProgramStreamPacketDescriptor
 {
     MpegProgramStreamPacketKind kind = MpegProgramStreamPacketKind::OpaqueLengthDelimited;

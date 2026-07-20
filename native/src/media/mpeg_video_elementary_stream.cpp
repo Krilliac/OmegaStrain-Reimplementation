@@ -129,6 +129,8 @@ struct DescriptorValidation
         return require_fixed_kind(kProgramStreamMapStreamId, MpegProgramStreamPayloadClass::None);
     case MpegProgramStreamPacketKind::ProgramEnd:
         return require_fixed_kind(kProgramEndStreamId, MpegProgramStreamPayloadClass::None);
+    case MpegProgramStreamPacketKind::TrailingZeroPadding:
+        return require_fixed_kind(0U, MpegProgramStreamPayloadClass::None);
     case MpegProgramStreamPacketKind::Padding:
         return require_fixed_kind(kPaddingStreamId, MpegProgramStreamPayloadClass::None);
     case MpegProgramStreamPacketKind::Pes:
@@ -270,12 +272,37 @@ struct DescriptorValidation
             break;
         case MpegProgramStreamPacketKind::ProgramEnd:
             ++program_end_packets;
-            if (packet.packet_bytes != 4U || index + 1U != descriptor.packets.size())
+            if (packet.packet_bytes != 4U ||
+                (index + 1U != descriptor.packets.size() &&
+                    (index + 2U != descriptor.packets.size() ||
+                        descriptor.packets[index + 1U].kind !=
+                            MpegProgramStreamPacketKind::TrailingZeroPadding)))
             {
                 return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
                                              "MPEG video ES descriptor program end is "
-                                             "not the final four-byte packet",
+                                             "not terminal before optional zero padding",
                                              packet.packet_offset));
+            }
+            break;
+        case MpegProgramStreamPacketKind::TrailingZeroPadding:
+            if (index == 0U || index + 1U != descriptor.packets.size() ||
+                descriptor.packets[index - 1U].kind != MpegProgramStreamPacketKind::ProgramEnd ||
+                program_end_packets != 1U ||
+                packet.packet_bytes > kMpegProgramStreamMaximumTrailingZeroPaddingBytes ||
+                packet.payload_offset != packet.packet_offset ||
+                packet.payload_bytes != packet.packet_bytes)
+            {
+                return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
+                    "MPEG video ES trailing zero padding metadata is inconsistent",
+                    packet.packet_offset));
+            }
+            for (std::uint64_t offset = packet.packet_offset; offset < packet_end; ++offset)
+            {
+                if (source[static_cast<std::size_t>(offset)] != std::byte{0})
+                {
+                    return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
+                        "MPEG video ES trailing padding byte is nonzero", offset));
+                }
             }
             break;
         default:

@@ -19,6 +19,7 @@ namespace
 using omega::asset::DecodeErrorCode;
 using omega::media::H262SequenceHeaderFacts;
 using omega::media::MpegProgramStreamDescriptor;
+using omega::media::MpegProgramStreamPacketKind;
 using omega::media::MpegProgramStreamPayloadClass;
 using omega::media::MpegVideoElementaryStreamPlan;
 using omega::media::MpegVideoElementaryStreamView;
@@ -317,6 +318,58 @@ void RunDescriptorAdversarialChecks()
                    *descriptor),
                DecodeErrorCode::InvalidReference, "MPEG video ES",
                "video planning rejects a descriptor against a shorter source span");
+}
+
+void RunTrailingZeroPaddingDescriptorChecks()
+{
+    CanonicalProgram program = BuildCanonicalProgram();
+    program.bytes.insert(program.bytes.end(), 2'047U, std::byte{0});
+    auto descriptor = Describe(program.bytes);
+    if (!descriptor)
+        return;
+
+    const auto plan =
+        omega::media::BuildMpegVideoElementaryStreamPlan(program.bytes, *descriptor);
+    Check(plan && plan->payloads.size() == 2U && plan->total_payload_bytes == 5U,
+        "video planning ignores a validated terminal zero-padding extent");
+    Check(descriptor->packets.size() >= 2U &&
+              descriptor->packets[descriptor->packets.size() - 2U].kind ==
+                  MpegProgramStreamPacketKind::ProgramEnd &&
+              descriptor->packets.back().kind ==
+                  MpegProgramStreamPacketKind::TrailingZeroPadding,
+        "video planning fixture contains program end followed by distinct zero padding");
+
+    auto dirty_source = program.bytes;
+    dirty_source.back() = std::byte{1};
+    CheckError(omega::media::BuildMpegVideoElementaryStreamPlan(dirty_source, *descriptor),
+        DecodeErrorCode::InvalidReference, "MPEG video ES",
+        "video planning revalidates every terminal padding byte against source");
+
+    auto mismatched_extent = *descriptor;
+    --mismatched_extent.packets.back().payload_bytes;
+    CheckError(omega::media::BuildMpegVideoElementaryStreamPlan(program.bytes, mismatched_extent),
+        DecodeErrorCode::InvalidReference, "MPEG video ES",
+        "video planning rejects terminal padding whose payload does not cover its extent");
+
+    auto oversized_source = program.bytes;
+    oversized_source.push_back(std::byte{0});
+    auto oversized_descriptor = *descriptor;
+    ++oversized_descriptor.physical_byte_count;
+    ++oversized_descriptor.packets.back().packet_bytes;
+    ++oversized_descriptor.packets.back().payload_bytes;
+    CheckError(omega::media::BuildMpegVideoElementaryStreamPlan(
+                   oversized_source, oversized_descriptor),
+        DecodeErrorCode::InvalidReference, "MPEG video ES",
+        "video planning rejects a tampered 2048-byte terminal padding extent");
+
+    auto no_program_end = *descriptor;
+    auto& former_end = no_program_end.packets[no_program_end.packets.size() - 2U];
+    former_end.kind = MpegProgramStreamPacketKind::ProgramStreamMap;
+    former_end.stream_id = 0xBCU;
+    no_program_end.has_program_end = false;
+    CheckError(omega::media::BuildMpegVideoElementaryStreamPlan(program.bytes, no_program_end),
+        DecodeErrorCode::InvalidReference, "MPEG video ES",
+        "video planning rejects terminal padding without exactly one program end");
 }
 
 void RunPlanBudgetAndBorrowChecks()
@@ -701,6 +754,7 @@ int main()
     RunPlanAndIteratorChecks();
     RunSelectionChecks();
     RunDescriptorAdversarialChecks();
+    RunTrailingZeroPaddingDescriptorChecks();
     RunPlanBudgetAndBorrowChecks();
     RunH262CanonicalAndRepeatChecks();
     RunH262AdversarialChecks();
