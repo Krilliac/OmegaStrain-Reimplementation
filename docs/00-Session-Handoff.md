@@ -1128,6 +1128,30 @@ shipping dependencies or execution mechanisms.
     used; no private or owner file, proprietary input, D-drive content, disc image, retail executable,
     emulator, or PCSX2 input was accessed.
 
+69. E-0083 pivots save ownership to an OpenOmega-native persistence foundation instead of PS2 RAM,
+    a memory-card device, or emulator savestates. The independent `omega_persistence` target exposes
+    one movable, noncopyable `SaveDatabase` intended for sole composition-root ownership and
+    externally serialized persistence/game-thread use. Its public surface is platform-neutral and
+    the dependency gate permits only self-includes; bidirectional cross-layer and PCSX2 edges fail
+    closed. An operating-system-held lock rejects a second live owner as `busy`. Two complete
+    checksummed little-endian A/B snapshots hold canonical sorted key/value records with explicit
+    schema versions and revisions. A commit validates one optimistic batch against a private copy,
+    durably writes and flushes the inactive slot, decodes and compares it, and only then publishes
+    the new generation. Strict configurable and hard record/key/value/logical/file limits guard every
+    decoded extent and allocation. Synthetic tests cover fresh genesis, put/update/delete,
+    deterministic prefix listing, malformed keys/conditions, preconditions, atomic rejection,
+    limits, moves, exclusive ownership, reopen, torn-newest fallback, post-recovery commit, both-slot
+    corruption, and future-version fail-closed behavior. The focused test passed 20 consecutive runs;
+    the complete runtime-disabled Debug build was warning-free and its 29/29 CTest suite passed.
+    Full runtime-enabled Debug and Release builds were warning-free; their 33/33 and 34/34 CTest
+    suites passed, including the Release portable-package contract. The 171-file dependency scan,
+    all 212 tooling tests, Python compile-all, and the staged public-tree gate over 262 indexed text
+    blobs passed. App/profile/menu integration,
+    typed game schemas, and PS2 import/export codecs are intentionally not claimed by this slice.
+    Only public source and generated fixtures were used; no private or owner file, proprietary input,
+    D-drive content, disc image, save, memory-card image, savestate, executable, emulator, or PCSX2
+    input was accessed.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2
@@ -1148,7 +1172,13 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Use the accepted deterministic VUM trace only as a structural baseline. Collect additional
+1. Compose the native save database into `OmegaApp` under the existing captured per-user root,
+   define a typed project-owned profile repository, and drive profile enumeration from the native
+   main menu. Preserve process/package isolation by redirecting persistence in tests. Implement PS2
+   compatibility as bounded stateless import/export codecs over owned bytes, with standard container
+   structure and Omega Strain payload semantics treated as separate evidence. Never make a PS2
+   memory-card device, guest RAM, or emulator savestate part of the shipping runtime.
+2. Use the accepted deterministic VUM trace only as a structural baseline. Collect additional
    bounded pairs through controlled comparisons that change one research condition at a time,
    require strict validation and byte-identical repeats, and compare only sanitized relative
    ranges and counts. Keep sites anonymous and bounds private. Promote no relationship without
@@ -1156,7 +1186,7 @@ shipping dependencies or execution mechanisms.
    vertex, material, packet, draw, placement, visibility, or gameplay semantics from the current
    header-only aggregate rows or the absence of VIF1 chunks. A zero VIF1 count does not rule out
    copied buffers or consumption outside the bounded observation window.
-2. Use E-0041's ineligible partition only to prioritize controlled observations of retail name
+3. Use E-0041's ineligible partition only to prioritize controlled observations of retail name
    lookup and MTRL-record consumption. Test one-pass extension removal, basename/stem/suffix, or
    other alias behavior as separate bounded experiments because E-0041 excludes them. Do not connect
    `MaterialCatalogIR` to `LevelTextureStore` until lookup behavior and material consumption are
@@ -1170,15 +1200,15 @@ shipping dependencies or execution mechanisms.
    still references only the existing project-generated diagnostic texture. It does not connect an
    asset, decoded texture storage, catalog name, material record, locator, cell, or mesh to a draw
    command.
-3. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
+4. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
    independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.
-4. Continue POP beyond the now-native guarded hypothesis envelope only through independent evidence.
+5. Continue POP beyond the now-native guarded hypothesis envelope only through independent evidence.
    Test record-internal invariants and controlled behavioral consumption before promoting any literal
    to a boundary or any observed word/stride to count or record semantics; independently connect
    consumed fields to placement or visibility behavior. Passive-descriptor acceptance is a
    conformity check, not semantic corroboration.
-5. Capture PS Rewired network behavior separately before designing any replacement service.
+6. Capture PS Rewired network behavior separately before designing any replacement service.
 
 ## Installed research tools
 

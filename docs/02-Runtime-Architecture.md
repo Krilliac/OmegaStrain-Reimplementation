@@ -212,9 +212,16 @@ renderer/audio/platform -> core
 Platform backends and retail decoders are leaves. Core and simulation never include PCSX2,
 Windows, GPU API, or proprietary-format implementation headers.
 
+`omega_persistence` is a separate bottom-level native service layer. It may use host filesystem
+APIs in its private implementation, but its public headers are platform-neutral and it cannot
+include runtime, content, retail-format, simulation, gameplay, app, SDL, or PCSX2 headers. The app
+may own it directly; no lower layer depends upward on it.
+
 The initial native build targets express the same direction:
 
 - `omega_core`: HOG indexing, VFS, and generic bounded infrastructure;
+- `omega_persistence`: the project-owned transactional save database, with no emulator or retail
+  format dependency;
 - `omega_assets`: canonical owned IR values and decode contracts;
 - `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
 - `omega_retail_formats`: stateless POP/COL/VUM/TDX/SKM/SKL/SKA adapters that may depend on the
@@ -224,6 +231,17 @@ The initial native build targets express the same direction:
 - `omega_runtime`: launch/configuration services and renderer-neutral diagnostic scene values
   consumed by the composition root and SDL host; and
 - `omega_sdl_backend`: the non-hot-reloadable SDL platform, audio, input translation, and GPU leaf.
+
+E-0083 implements the standalone `omega_persistence` foundation described in
+`docs/04-Native-Persistence.md`. `SaveDatabase` is movable but noncopyable and holds one exclusive
+operating-system lock for its complete live lifetime. Its API is externally serialized on one
+persistence/game thread and returns only owned copies. It uses two complete checksummed snapshots;
+each optimistic batch writes, flushes, decodes, and compares the inactive generation before the
+service changes its active state. The format and decoder have explicit configurable plus hard
+bounds, canonical key grammar, per-record schema/revision values, reserved-field checks, sorted-key
+checks, CRC-32 protection, and fail-closed future-version handling. The service is not yet composed
+into `OmegaApp`, and it assigns no profile, campaign, checkpoint, retail-payload, PS2 filesystem,
+memory-card-device, guest-memory, or emulator-savestate semantics.
 
 VUM has a bounded semantic adapter that returns owned source-order names plus one-to-three dense
 name indices per material. A separate retail-only passive descriptor preserves only the three

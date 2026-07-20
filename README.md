@@ -45,6 +45,14 @@ retail instruction blocks, or PS2 execution layer.
   gamepad controls when that device disconnects, and promotes the next available device. A
   deterministic headless virtual-gamepad test covers that hotplug boundary; selecting only one
   primary gamepad is a synthetic host-shell policy, not a claim about retail behavior.
+- The standalone `omega_persistence` foundation implements OpenOmega-owned native saves instead of
+  PS2 RAM, memory-card-device, or emulator-savestate state. Its versioned little-endian key/value
+  database uses two complete checksummed snapshots, inactive-slot durable write plus readback,
+  strict allocation and file bounds, per-record schema/revision values, atomic optimistic batches,
+  and an operating-system-held exclusive lifetime lock. Synthetic tests cover reopen, torn-newest
+  fallback, post-recovery commit, both-slot corruption, future-version rejection, and competing
+  owners. App/profile/menu wiring and bounded PS2 import/export codecs remain separate next slices;
+  owner saves and exported card images stay outside version control.
 - The native content service resolves all 5,351 manifest cells across all 18 levels into 5,351
   owned spatial meshes with zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices,
   1,239,980 triangles/references, and 2,137 normalized empty meshes.
