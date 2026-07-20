@@ -1,5 +1,6 @@
 #include "omega/retail/par_text_envelope_decoder.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -72,8 +73,15 @@ void Check(const bool condition, const std::string_view message)
 void CheckError(const DecodeResult& result, const omega::asset::DecodeErrorCode code,
                 const std::string_view message)
 {
-    Check(!result && result.error().code == code && result.error().message.find("PAR") == 0,
-          message);
+    if (result)
+    {
+        Check(false, message);
+        return;
+    }
+    Check(result.error().code == code && result.error().message.find("PAR") == 0, message);
+    Check(result.error().message.find('/') == std::string::npos &&
+              result.error().message.find('\\') == std::string::npos,
+          "PAR errors contain no filesystem path");
 }
 
 [[nodiscard]] std::string MakeLogical(const std::string_view version = "1.300000",
@@ -190,6 +198,14 @@ int main()
     const auto repeated = omega::retail::DecodeParTextEnvelope(physical);
     Check(decoded && repeated && *decoded == *repeated,
           "PAR decoding is deterministic for identical input");
+
+    std::vector<std::byte> unaligned_storage(physical.size() + 1U, std::byte{0xA5});
+    std::copy(physical.begin(), physical.end(), unaligned_storage.begin() + 1);
+    const auto unaligned = omega::retail::DecodeParTextEnvelope(
+        std::span<const std::byte>(unaligned_storage.data() + 1, physical.size()));
+    Check(decoded && unaligned && *unaligned == *decoded,
+          "PAR accepts an unaligned backing slice because the format has no "
+          "address-alignment rule");
 
     const auto owned = [&]() {
         const std::string transient_logical = MakeLogical("2.100000", {}, "A;B=C\r\nraw");

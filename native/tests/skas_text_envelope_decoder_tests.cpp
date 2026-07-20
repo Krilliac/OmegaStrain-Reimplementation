@@ -72,13 +72,24 @@ void Check(const bool condition, const std::string_view message)
 
 void CheckError(const DecodeResult &result, const omega::asset::DecodeErrorCode code, const std::string_view message)
 {
-    Check(!result && result.error().code == code && result.error().message.starts_with("SKAS"), message);
+    if (result)
+    {
+        Check(false, message);
+        return;
+    }
+    Check(result.error().code == code && result.error().message.starts_with("SKAS"), message);
+    Check(result.error().message.find('/') == std::string::npos &&
+              result.error().message.find('\\') == std::string::npos,
+          "SKAS errors contain no filesystem path");
 }
 
 void CheckErrorAt(const DecodeResult &result, const omega::asset::DecodeErrorCode code, const std::uint64_t byte_offset,
                   const std::string_view message)
 {
-    Check(!result && result.error().code == code && result.error().byte_offset == byte_offset, message);
+    CheckError(result, code, message);
+    if (!result)
+        Check(result.error().byte_offset == byte_offset,
+              "SKAS error reports the expected byte offset");
 }
 
 [[nodiscard]] std::string MakeLogical(const std::size_t logical_bytes, const std::size_t nonblank_lines = 67,
@@ -191,6 +202,14 @@ int main()
 
     const auto repeated = omega::retail::DecodeSkasTextEnvelope(physical);
     Check(decoded && repeated && *decoded == *repeated, "SKAS stateless repeated decode is deterministic");
+
+    std::vector<std::byte> unaligned_storage(physical.size() + 1U, std::byte{0xA5});
+    std::copy(physical.begin(), physical.end(), unaligned_storage.begin() + 1);
+    const auto unaligned = omega::retail::DecodeSkasTextEnvelope(
+        std::span<const std::byte>(unaligned_storage.data() + 1, physical.size()));
+    Check(decoded && unaligned && *unaligned == *decoded,
+          "SKAS accepts an unaligned backing slice because the format has no "
+          "address-alignment rule");
 
     const auto owned = [&]() {
         auto transient = MakePhysical(logical, 2);

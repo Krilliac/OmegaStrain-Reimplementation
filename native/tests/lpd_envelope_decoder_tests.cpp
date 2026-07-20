@@ -9,6 +9,7 @@
 #include <limits>
 #include <new>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -16,29 +17,33 @@
 namespace
 {
 constexpr std::size_t kAllocationInjectionDisabled = std::numeric_limits<std::size_t>::max();
-std::size_t allocations_before_failure = kAllocationInjectionDisabled;
+std::size_t allocation_size_to_fail = kAllocationInjectionDisabled;
+std::size_t matching_allocations_before_failure = 0;
 
-void ArmAllocationFailure(const std::size_t successful_allocations) noexcept
+void ArmAllocationFailure(const std::size_t allocation_size,
+                          const std::size_t successful_matching_allocations = 0) noexcept
 {
-    allocations_before_failure = successful_allocations;
+    allocation_size_to_fail = allocation_size;
+    matching_allocations_before_failure = successful_matching_allocations;
 }
 
 void DisarmAllocationFailure() noexcept
 {
-    allocations_before_failure = kAllocationInjectionDisabled;
+    allocation_size_to_fail = kAllocationInjectionDisabled;
+    matching_allocations_before_failure = 0;
 }
 } // namespace
 
 void* operator new(const std::size_t size)
 {
-    if (allocations_before_failure != kAllocationInjectionDisabled)
+    if (size == allocation_size_to_fail)
     {
-        if (allocations_before_failure == 0)
+        if (matching_allocations_before_failure == 0)
         {
             DisarmAllocationFailure();
             throw std::bad_alloc{};
         }
-        --allocations_before_failure;
+        --matching_allocations_before_failure;
     }
     if (void* allocation = std::malloc(size == 0 ? 1U : size))
         return allocation;
@@ -109,15 +114,26 @@ template <typename Result>
 void CheckError(const Result& result, const omega::asset::DecodeErrorCode code,
                 const std::string_view message)
 {
-    Check(!result && result.error().code == code, message);
+    if (result)
+    {
+        Check(false, message);
+        return;
+    }
+    Check(result.error().code == code, message);
+    Check(!result.error().message.empty(), "LPD errors own a fixed nonempty diagnostic");
+    Check(result.error().message.find('/') == std::string::npos &&
+              result.error().message.find('\\') == std::string::npos,
+          "LPD errors contain no filesystem path");
 }
 
 template <typename Result>
 void CheckErrorAt(const Result& result, const omega::asset::DecodeErrorCode code,
                   const std::uint64_t byte_offset, const std::string_view message)
 {
-    Check(!result && result.error().code == code && result.error().byte_offset == byte_offset,
-          message);
+    CheckError(result, code, message);
+    if (!result)
+        Check(result.error().byte_offset == byte_offset,
+              "LPD error reports the expected byte offset");
 }
 } // namespace
 
@@ -181,6 +197,14 @@ int main()
     const auto repeated = omega::retail::DecodeLpdEnvelope(exact_bytes);
     Check(exact && repeated && *repeated == *exact,
           "LPD stateless repeated decode returns identical canonical data");
+
+    std::vector<std::byte> unaligned_storage(exact_bytes.size() + 1U, std::byte{0xA5});
+    std::copy(exact_bytes.begin(), exact_bytes.end(), unaligned_storage.begin() + 1);
+    const auto unaligned = omega::retail::DecodeLpdEnvelope(
+        std::span<const std::byte>(unaligned_storage.data() + 1, exact_bytes.size()));
+    Check(exact && unaligned && *unaligned == *exact,
+          "LPD accepts an unaligned backing slice because the format has no "
+          "address-alignment rule");
 
     bool accepted_bounded_zero_tails = true;
     const std::array<std::size_t, 6> zero_tail_cases{
@@ -336,17 +360,26 @@ int main()
                omega::asset::DecodeErrorCode::LimitExceeded,
                "LPD enforces its fixed root-track item budget before reading input");
 
-    ArmAllocationFailure(0);
-    const auto first_allocation_failure = omega::retail::DecodeLpdEnvelope(exact_bytes);
-    DisarmAllocationFailure();
-    CheckError(first_allocation_failure, omega::asset::DecodeErrorCode::LimitExceeded,
-               "LPD maps failure of its first explicit output allocation to a typed error");
-
-    ArmAllocationFailure(1);
-    const auto later_allocation_failure = omega::retail::DecodeLpdEnvelope(exact_bytes);
-    DisarmAllocationFailure();
-    CheckError(later_allocation_failure, omega::asset::DecodeErrorCode::LimitExceeded,
-               "LPD maps a later output allocation failure to a typed error");
+    Counts allocation_counts{};
+    allocation_counts[0] = 17U;
+    allocation_counts[1] = 19U;
+    allocation_counts[20] = 23U;
+    const auto allocation_bytes = MakeLpd(allocation_counts);
+    constexpr std::array<std::size_t, 3> owning_allocation_sizes{
+        17U * sizeof(std::array<std::byte, 4>),
+        19U * sizeof(std::array<std::byte, 4>),
+        23U * sizeof(std::array<std::byte, 4>),
+    };
+    for (const std::size_t allocation_size : owning_allocation_sizes)
+    {
+        ArmAllocationFailure(allocation_size);
+        const auto allocation_attempt = omega::retail::DecodeLpdEnvelope(allocation_bytes);
+        DisarmAllocationFailure();
+        CheckError(allocation_attempt, omega::asset::DecodeErrorCode::LimitExceeded,
+                   "LPD maps each explicit owning-storage allocation failure to a typed error");
+    }
+    Check(omega::retail::DecodeLpdEnvelope(allocation_bytes).has_value(),
+          "LPD decode succeeds unchanged after every owning-storage allocation failure");
 
     return failures;
 }
