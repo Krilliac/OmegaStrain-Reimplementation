@@ -1049,8 +1049,10 @@ versioned transactional `SaveDatabase` stores only project-owned native records.
 adds bounded metadata at `profiles/<32-lower-hex-id>/metadata`, lists it before platform startup, and
 never creates or selects a default profile. `OmegaApp` owns the database/catalog lifetime through
 `NativePersistence`; `--probe-only` does not touch persistence and `--frames=0` returns after
-bootstrap. Active-profile/menu actions, campaign schemas, and PS2 save import/export remain in
-progress. No PS2 memory-card device or emulator savestate is part of the shipping-runtime design.
+bootstrap. The bounded standard PS2 memory-card container/filesystem codec is also implemented.
+Active-profile/menu actions, campaign schemas, and the independently evidenced Omega Strain payload
+mapping remain in progress. No PS2 memory-card device or emulator savestate is part of the
+shipping-runtime design.
 
 E-0086 also supplies a synthetic-verified, analysis-only front-end HOG topology scanner. Its
 path-free fixed schema can measure recursive container depth, approved public format/category
