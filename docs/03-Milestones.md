@@ -19,8 +19,8 @@ hypothesis descriptor and fixed-schema native verifier, the canonical level mani
 COL spatial-mesh adapter, shared-budget level-spatial orchestration, a semantic TDX storage adapter,
 a bounded level-scoped texture store and native verifier, and a semantic VUM material-catalog
 adapter plus a retail-only passive render-payload descriptor are implemented. Bounded passive SKM
-and SKL descriptors, a fixed-output retail-only SKA descriptor, and a bounded canonical LPD
-counted-envelope adapter are also implemented; SKAS remains separate aggregate-only evidence.
+and SKL descriptors, a fixed-output retail-only SKA descriptor, bounded canonical LPD and SKAS
+envelope adapters, and a fixed passive VPK wrapper descriptor are also implemented.
 Other scene decoders remain incomplete.
 
 - Native HOG parser validated against all 273 top-level archives and 6,677 nested spans.
@@ -109,10 +109,11 @@ Other scene decoders remain incomplete.
   assigns no geometry, topology, vertex, material, packet, draw, placement, visibility, or gameplay
   semantics.
 - Passive SKM and SKL native descriptors preserve only bounded structural metadata. The passive
-  SKA descriptor implements the aggregate-proven neutral counted-word extent as fixed output while
-  the two-candidate SKAS text envelope remains separate; neither assigns animation semantics. The
-  native corpus verifier accepts 213/213 SKA spans with zero errors: 158 exact, 55 zero-padded, and
-  2,180,832 aggregate logical bytes.
+  SKA descriptor implements the aggregate-proven neutral counted-word extent as fixed output, while
+  the separate bounded SKAS adapter owns only exact structural text and opaque line ranges. Neither
+  assigns animation semantics or a relationship between SKA and SKAS. The native corpus verifier
+  accepts 213/213 SKA spans with zero errors: 158 exact, 55 zero-padded, and 2,180,832 aggregate
+  logical bytes.
 - E-0091 adds an owned LPD counted-envelope IR and stateless two-pass decoder for the fixed
   22-word/21-track structure. It preserves every source-order four-byte entry as opaque bytes,
   accepts exact input or any all-zero tail through the aggregate-proven 1,932-byte maximum, and
@@ -123,6 +124,16 @@ Other scene decoders remain incomplete.
   construction keeps first and later allocation failures inside the typed error boundary. Scratch
   and nesting remain zero, and no track, scalar, timing, interpolation, pose, animation, audio-link,
   or playback semantics are assigned.
+- E-0094 adds a fixed-output, stateless VPK wrapper-envelope decoder over the public aggregate
+  boundary. It requires the exact raw bytes `b" KPV"`, an independent little-endian 2,048 word at
+  `0x08`, physical spans from 1,320,960 through 9,005,056 bytes, and independent divisibility by
+  2,048. Its fixed descriptor preserves the two unassigned four-byte prefix fields in source order
+  and publishes only physical byte count plus derived aligned-block count. One descriptor and its
+  fixed size debit item and output budgets; the complete input debits input. Scratch and nesting
+  remain zero. The remainder and payload are borrowed only during the call and never retained or
+  inspected. The equal values of the observed word and alignment establish no relationship. No
+  codec, ADPCM, sample rate, channels, audio or music role, seek table, streaming, storage geometry,
+  playback, runtime, or emulator semantics are assigned.
 - Bounded POP post-terrain scanning accepts 18/18 level POPs with zero errors and finds 19 aligned
   literal-tag candidates exactly once per file in one shared order, for 342 aggregate hits. The
   literals are not yet decoded section boundaries and assign no placement or visibility semantics.

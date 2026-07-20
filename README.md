@@ -104,6 +104,14 @@ retail instruction blocks, or PS2 execution layer.
   observed six-decimal first-line version tokens, and omits only a validated bounded NUL tail. It
   assigns no key/value, field, path, asset-role, particle, compatibility, rendering, gameplay, or
   emulator-equivalence semantics.
+- E-0094 adds a strict passive VPK wrapper-envelope boundary over the 85 aggregate-fingerprinted
+  spans. It requires raw `b" KPV"`, the independent little-endian word 2,048 at `0x08`, the observed
+  1,320,960-through-9,005,056-byte physical range, and independent 2,048-byte alignment. Its fixed
+  descriptor retains only two source-order opaque four-byte prefix values, physical byte count, and
+  derived aligned-block count; it retains no remaining wrapper or payload byte. The equal numeric
+  values of the observed word and alignment imply no semantic relationship. No codec, ADPCM, rate,
+  channels, audio or music role, seek table, streaming, playback, storage geometry, runtime wiring,
+  or emulator semantics are assigned.
 - E-0087 adds a diagnostic-only Indexed8 candidate projection over one strict canonical storage
   shape: one matching `Packed8` plane, one exact 256-entry palette, and exact index, palette, and
   output cardinality. Callers must explicitly choose identity versus bit-3/4 palette permutation,

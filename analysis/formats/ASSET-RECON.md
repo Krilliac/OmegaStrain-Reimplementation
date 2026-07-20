@@ -33,7 +33,7 @@ the physical end of the span.
 | PAR | 679 | Every file is zero-padded ASCII with a version comment on line one. |
 | COL | 7,036 | Every file starts `COL`, reports a 48-byte header, and is 16-byte aligned. |
 | VUM | 7,036 | Every file starts `VUMS` and is 16-byte aligned. |
-| VPK | 85 | Every file has the custom little-endian `VPK ` FourCC and a 2,048-byte header field. |
+| VPK | 85 | Every span has raw `b" KPV"`, word 2,048 at `0x08`, and 2,048-byte alignment. |
 | POP | 18 | All 18 scanned level terrain sequences parse and land exactly on `GOB:`. |
 
 ## First MINSK scene: confirmed dependency chain
@@ -284,9 +284,15 @@ suffix relations after applying the full counted-block extent. Its canonical sto
 
 ### Wrappers and compression check
 
-All 85 `.VPK` music entries begin with the custom little-endian `VPK ` FourCC, declare 2,048 at
-offset `0x08`, and have 2,048-byte-aligned spans. This proves a sector-oriented wrapper, not its
-codec; streamed PS ADPCM is plausible but remains unconfirmed.
+All 85 `.VPK` spans begin with the exact observed raw signature bytes `b" KPV"` at `0x00`, have
+the little-endian word 2,048 at offset `0x08`, span 1,320,960 through 9,005,056 bytes, and are
+divisible by 2,048. E-0094's strict passive adapter validates only that wrapper envelope, preserves
+bytes `0x04..0x07` and
+`0x0c..0x0f` as source-order opaque values, and retains no remaining wrapper or payload byte. Its
+derived aligned-block count is not a sector or audio-frame claim. The word and alignment are
+independent observations whose equal numeric values establish no semantic relationship. See
+[VPK.md](VPK.md). No codec, ADPCM, rate, channels, asset role, seek table, streaming policy, or
+emulator meaning is assigned.
 
 The scanner checked the first bytes of 46,603 non-HOG asset spans for gzip, ZIP, bzip2, XZ, 7zip,
 LZ4-frame, Zstandard, RNC1/2, LZSS, LZ77, and Yaz0 magic. It found zero. This rules out obvious
@@ -304,7 +310,8 @@ For the first visible MINSK scene, implement in this order:
 5. POP visibility/placement sections needed to assemble and cull cells.
 6. SKM/SKL for characters and weapons.
 7. PAR effects, then VAG audio and LPD lip curves.
-8. VPK music after its payload codec is identified.
+8. Keep VPK payload consumption deferred until its asset role and payload format are independently
+   established.
 
 This ordering deliberately puts scene geometry and textures ahead of actors, effects, and audio.
 The next high-value dynamic pass is to correct the private save-state load, privately select an
