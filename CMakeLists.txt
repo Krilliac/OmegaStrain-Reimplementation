@@ -55,6 +55,13 @@ add_library(omega_persistence STATIC
 target_include_directories(omega_persistence PUBLIC native/include)
 target_compile_features(omega_persistence PUBLIC cxx_std_23)
 
+add_library(omega_profiles STATIC
+    native/src/profiles/profile_catalog.cpp
+)
+target_include_directories(omega_profiles PUBLIC native/include)
+target_link_libraries(omega_profiles PUBLIC omega_persistence)
+target_compile_features(omega_profiles PUBLIC cxx_std_23)
+
 add_library(omega_assets INTERFACE)
 target_include_directories(omega_assets INTERFACE native/include)
 target_compile_features(omega_assets INTERFACE cxx_std_23)
@@ -155,6 +162,25 @@ if(MSVC)
     )
 else()
     target_compile_options(omega_persistence PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+        -Wno-missing-field-initializers
+    )
+endif()
+
+if(MSVC)
+    target_compile_options(omega_profiles PRIVATE
+        /W4
+        /WX
+        /permissive-
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /utf-8
+    )
+else()
+    target_compile_options(omega_profiles PRIVATE
         -Wall
         -Wextra
         -Wpedantic
@@ -451,6 +477,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_save_database_tests COMMAND omega_save_database_tests)
     set_tests_properties(omega_save_database_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_profile_catalog_tests
+        native/tests/profile_catalog_tests.cpp
+    )
+    target_link_libraries(omega_profile_catalog_tests PRIVATE omega_profiles)
+    if(MSVC)
+        target_compile_options(omega_profile_catalog_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_profile_catalog_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_profile_catalog_tests COMMAND omega_profile_catalog_tests)
+    set_tests_properties(omega_profile_catalog_tests PROPERTIES TIMEOUT 10)
 
     if(TARGET openomega)
         add_test(NAME openomega_process_contract
