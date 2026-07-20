@@ -881,6 +881,19 @@ staged public-tree gate checked 252 indexed text blobs; commit, DCO, publication
 validation remain pending, and no retail display,
 material, geometry, gameplay, streaming, or emulator-equivalence semantics are assigned.
 
+E-0078 adds a strict, payload-sensitive Packed24 transfer diagnostic utility without wiring it into
+the app or renderer. One block, one plane, matching nonzero rectangles, no palette, known Packed24
+sample/transfer enums, checked three-slot source and four-slot output sizes, and independent limits
+are required. It copies source slots zero through two and supplies a synthetic `0xff` fourth slot in
+owned output. Generated 16x16 seeds pin the two frozen hashes, all sixteen typed diagnostics,
+validation priority, exact cleanup-independent ownership, and overflow/budget behavior through a
+standalone runtime-off-capable test. Serialized local validation passed focused/full MSVC, the unit
+direct plus 100/100, 32/36/32 CTest, runtime-off focused checks with 28 registrations, dependency
+168, tooling 209, and compile-all. The staged public-tree gate checked 255 indexed text blobs;
+commit, DCO, publication, and exact-main validation remain pending. No channel name,
+display-ready, row-order, swizzle, color-space, alpha, material, geometry, gameplay, GPU, E-0077, or
+emulator-equivalence semantics are assigned, and no private or D-drive inputs were used.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

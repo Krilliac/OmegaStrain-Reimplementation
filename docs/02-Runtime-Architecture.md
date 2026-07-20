@@ -614,6 +614,36 @@ swizzle or mip behavior, UVs, materials, cells, placement, visibility, geometry,
 gameplay, streaming, eviction, GPU pinning, asynchronous upload, or emulator equivalence; source
 payload bytes remain invisible to topology pixels.
 
+E-0078 adds a separate payload-sensitive diagnostic boundary without changing E-0077 or app
+composition. `BuildPacked24TransferDebugImage` is stateless and reentrant on worker threads. It
+borrows `TextureStorageIR` for the call, performs no I/O or shared-state mutation, and returns a
+fully independent `DebugImage`. It accepts only nonzero matching texture/plane rectangles, a known
+`Packed24` top-level sample, exactly one block, exactly one plane, no palette, a known `Packed24`
+transfer element, and exact three-slot source cardinality. Other known encodings are unsupported;
+unknown cast values are invalid. Multi-block and multi-plane storage fails instead of implying
+priority, mip, slice, face, frame, or animation purpose.
+
+Preflight follows the frozen sixteen-code priority: top dimensions, sample validity/support,
+block/plane cardinality, palette absence, plane dimensions, transfer validity/support, rectangle
+match, checked source `area * 3`, checked output `area * 4`, source cardinality, independent 48 MiB
+source and 64 MiB output budgets, then allocation. Output also must fit `size_t`. Allocation maps
+`bad_alloc` and `length_error` to one fixed category. Every error name/message is constexpr,
+category-only, and contains no dimension, payload, offset, identity, or exception text.
+
+For element `n`, source slots `3n + 0..2` are copied without transformation to output slots
+`4n + 0..2`; slot `4n + 3` receives synthetic `0xff`. The rectangle supplies deterministic owned
+output dimensions only. Seeded 16x16 public fixtures produce 1,024 bytes and hashes
+`0x4abb645f50f5a325` and `0x36590f25eee3ab25`. This projection supplies no channel names,
+display-ready claim, row origin/order, swizzle, color space, alpha meaning, premultiplication,
+Packed32/indexed policy, nibble/palette behavior, or material/UV/geometry semantics. It is not wired
+to OmegaApp, GPU upload, renderer selection, AssetService, or the E-0077 preview. Serialized local
+validation passed focused/full MSVC, the direct unit plus 100/100 repeated runs, focused and
+32/36/32 CTest, runtime-off direct/focused checks with 28 registrations, dependency 168, tooling
+209, and Python compile-all. The staged public-tree gate checked 255 indexed text blobs; commit, DCO,
+publication, and exact-main validation remain pending; no private or owner files, D-drive content,
+disc image, executable,
+emulator, or PCSX2 input was used.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

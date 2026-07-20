@@ -804,6 +804,27 @@ retail instruction blocks, or PS2 execution layer.
   display texels, channel or alpha meaning, palettes, nibble order, swizzles, mip levels, UVs,
   materials, cells, placement, visibility, geometry, retail rendering, gameplay, streaming,
   eviction, GPU pinning, asynchronous upload, or emulator equivalence.
+- E-0078 adds `BuildPacked24TransferDebugImage`, a stateless worker-thread diagnostic projection
+  for one strict canonical storage shape: nonzero matching texture/plane rectangles, known
+  `Packed24` sample and transfer-element enums, exactly one block and one plane, no palette, and an
+  exact `width * height * 3` source allocation. Checked source/output arithmetic and independent
+  48 MiB/64 MiB synthetic limits fail closed through sixteen fixed typed errors. Each consecutive
+  three source byte slots is copied into the first three slots of one owned four-slot output group;
+  the fourth slot is the project constant `0xff`. A generated 16x16 fixture maps 768 source bytes
+  to 1,024 owned bytes with FNV-1a-64 `0x4abb645f50f5a325` for seed `0x21` and
+  `0x36590f25eee3ab25` for seed `0x61`. The standalone runtime-off-capable contract freezes every
+  ordinal/name/message, validation priority, independent overflow oracle, exact and one-below
+  budgets, slot mapping, hashes, repeat determinism, and ownership after source mutation and
+  destruction. Serialized local validation passed: focused/full MSVC builds; the direct unit plus
+  100/100 repeated runs; focused CTest; default/GPU/restored CTest at 32/36/32; runtime-off direct
+  and focused checks with 28 registrations; the 168-file dependency gate; all 209 tooling tests;
+  and Python compile-all. The staged public-tree gate checked 255 indexed text blobs; commit, DCO,
+  publication, and exact-main validation remain pending. This slice changes no app,
+  GPU, renderer, AssetService, E-0077, or existing test behavior and uses no private or owner files,
+  D-drive content, disc image, executable, emulator, or PCSX2 input. It assigns no channel names,
+  display-ready meaning, row origin/order, swizzle, color space, alpha semantics, premultiplication,
+  block/plane purpose, Packed32/indexed expansion, palette/nibble policy, material/UV/geometry
+  binding, gameplay behavior, or emulator equivalence.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

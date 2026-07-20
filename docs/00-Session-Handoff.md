@@ -981,6 +981,32 @@ shipping dependencies or execution mechanisms.
     gameplay, streaming, eviction, GPU-pinning, asynchronous-upload, or emulator-equivalence claim
     is made.
 
+63. E-0078 adds `BuildPacked24TransferDebugImage`, a stateless, reentrant worker-thread utility that
+    borrows canonical storage only for one call and returns an independently owned `DebugImage`.
+    Its strict eligibility shape is nonzero matching top-level/plane rectangles, known `Packed24`
+    sample and transfer-element enums, exactly one block, exactly one plane, no palette, and exactly
+    three source slots per rectangle element. Unknown enum values are invalid; other known values
+    are unsupported. Validation priority then checks independent source and output overflow,
+    source cardinality, the 48 MiB source limit, the 64 MiB output limit including `size_t`, and
+    allocation. Sixteen fixed name/message pairs expose no dimensions, payload, offsets, source
+    identity, or exception text. Consecutive source triples become output slots zero through two;
+    output slot three is the synthetic constant `0xff`.
+    Directly constructed public 16x16 fixtures map 768 bytes to 1,024 bytes with hashes
+    `0x4abb645f50f5a325` (seed `0x21`) and `0x36590f25eee3ab25` (seed `0x61`). The standalone test is
+    registered against `omega_runtime`, including runtime-off builds, and freezes all diagnostics,
+    priority, no-allocation overflow oracles, exact/one-below budgets, source-slot mapping, repeat
+    ownership, and survival after source mutation/destruction. Serialized local validation passed
+    focused/full MSVC, the direct unit plus 100/100 repeated runs, focused and 32/36/32 CTest,
+    runtime-off direct/focused checks with 28 registrations, the 168-file dependency gate, all 209
+    tooling tests, and Python compile-all. The staged public-tree gate checked 255 indexed text blobs;
+    commit, DCO, publication, and exact-main validation remain pending. E-0078 changes no app, GPU,
+    renderer, AssetService,
+    E-0077 adapter, or existing test. It assigns no channel names, display-ready correctness, row
+    origin/order, swizzle, color space, alpha semantics, premultiplication, block/plane purpose,
+    Packed32/indexed expansion, palette/nibble policy, material/UV/geometry binding, gameplay, or
+    emulator equivalence. Only public source and generated fixtures were used; no private or owner
+    files, D-drive content, disc image, executable, emulator, or PCSX2 input was accessed.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2
