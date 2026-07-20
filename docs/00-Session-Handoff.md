@@ -1493,9 +1493,11 @@ Remaining limitations (deliberately unclaimed):
 - The 47 dossiers retain tracked evidence and explicit nonclaims. The contract test freezes family
   coverage, authoritative status partitions, required evidence sections, resolving links,
   Windows-safe names, tracked catalog sources, and banned privacy constructs.
-- Claude provenance is retained through PR #64 commits `6c0e7e8` and `2421adf`; the useful scaffold
-  checklist was consolidated into `docs/native-scaffolds/README.md`, while thirteen uncompiled,
-  premature C++ declarations were removed.
+- Claude provenance is retained through PR #64 commits
+  `38b7c0fc856f3c8de0277ce077da3198668ddfc7` and
+  `2421adfbe2c710a8fb64d85046075b461e2b8690`; the useful scaffold checklist was consolidated into
+  `docs/native-scaffolds/README.md`, while thirteen uncompiled, premature C++ declarations were
+  removed.
 
 Still unclaimed: an owner-corpus collector run or output; new format/header/alignment evidence;
 native GUI/FNT/IE/BNK/GUN descriptors; retail consumer semantics; runtime integration; or PCSX2
