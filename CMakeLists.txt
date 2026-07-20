@@ -93,6 +93,7 @@ add_library(omega_retail_formats STATIC
     native/src/retail/col_spatial_mesh_decoder.cpp
     native/src/retail/container_descriptors.cpp
     native/src/retail/lpd_envelope_decoder.cpp
+    native/src/retail/par_text_envelope_decoder.cpp
     native/src/retail/pop_level_manifest_decoder.cpp
     native/src/retail/pop_post_terrain_hypothesis_descriptor.cpp
     native/src/retail/ska_container_descriptor.cpp
@@ -686,6 +687,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_profile_catalog_tests COMMAND omega_profile_catalog_tests)
     set_tests_properties(omega_profile_catalog_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_par_text_envelope_tests
+        native/tests/par_text_envelope_decoder_tests.cpp
+    )
+    target_link_libraries(omega_par_text_envelope_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_par_text_envelope_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_par_text_envelope_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_par_text_envelope_tests COMMAND omega_par_text_envelope_tests)
+    set_tests_properties(omega_par_text_envelope_tests PROPERTIES TIMEOUT 5)
 
     if(TARGET omega_native_persistence)
         add_executable(omega_native_persistence_tests

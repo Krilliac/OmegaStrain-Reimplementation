@@ -1047,6 +1047,13 @@ wired into startup, asset selection, renderer upload, material binding, or menu 
 testable hypothesis plumbing for later independent behavioral comparison, not completion of M3
 texture rendering or evidence for any retail display semantics.
 
+E-0092 supplies the bounded native PAR text-envelope boundary. It owns exact CRLF logical text and
+source-order opaque line ranges, recognizes only the eight exact six-decimal version tokens in the
+public aggregate fingerprint, and discards only validated bounded NUL padding. It performs no
+key/value or semicolon-comment parsing beyond the proven first-line marker and assigns no fields,
+paths, asset roles, particle semantics, compatibility defaults, rendering behavior, gameplay, or
+emulator equivalence. It is not wired into level loading, effects, or the front end.
+
 - Decode and render MINSK geometry, textures, materials, cameras, and static objects.
 - Match coordinate system, transforms, visibility, and representative frames against PCSX2.
 - Load level through a native command-line option independent of the retail argument parser.
