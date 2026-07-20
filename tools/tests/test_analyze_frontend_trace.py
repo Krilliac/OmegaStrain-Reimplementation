@@ -314,6 +314,94 @@ class FrontendTraceAnalyzerTests(unittest.TestCase):
         self.assertNotIn(b"\r", completed.stdout)
         self.assertEqual(completed.stderr, b"")
 
+    def test_isolated_mode_help_succeeds_by_absolute_path_from_unrelated_directory(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as unrelated_directory:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-E",
+                    "-s",
+                    "-S",
+                    "-B",
+                    str(REPOSITORY_ROOT / "tools" / "analyze_frontend_trace.py"),
+                    "--help",
+                ],
+                cwd=unrelated_directory,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=10,
+            )
+
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(
+            completed.stdout.decode("ascii").strip(),
+            "usage: analyze_frontend_trace.py REPORT",
+        )
+        self.assertEqual(completed.stderr, b"")
+
+    def test_isolated_mode_analyzes_fixture_by_absolute_path_from_unrelated_directory(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as unrelated_directory:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-E",
+                    "-s",
+                    "-S",
+                    "-B",
+                    str(REPOSITORY_ROOT / "tools" / "analyze_frontend_trace.py"),
+                    str(FIXTURE_ROOT / "valid.json"),
+                ],
+                cwd=unrelated_directory,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=10,
+            )
+
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout, canonical_bytes(expected_summary()))
+        self.assertEqual(completed.stderr, b"")
+
+    def test_direct_execution_does_not_mask_validator_internal_import_error(
+        self,
+    ) -> None:
+        # When the sibling validator IS importable but raises ModuleNotFoundError
+        # for one of ITS OWN dependencies, that error must surface. The path-based
+        # fallback is reserved for the sibling itself being absent from sys.path.
+        analyzer_source = (
+            REPOSITORY_ROOT / "tools" / "analyze_frontend_trace.py"
+        ).read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            sandbox = Path(directory)
+            (sandbox / "analyze_frontend_trace.py").write_bytes(analyzer_source)
+            (sandbox / "validate_frontend_trace.py").write_text(
+                "import phantom_dependency_xyz\n", encoding="ascii"
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(sandbox / "analyze_frontend_trace.py"),
+                    "--help",
+                ],
+                cwd=directory,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=10,
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(b"phantom_dependency_xyz", completed.stderr)
+        self.assertEqual(completed.stdout, b"")
+
     def test_success_summary_excludes_source_identity_surfaces(self) -> None:
         rendered = analyzer.encode_summary_document(valid_document()).decode("ascii").lower()
         for forbidden in (

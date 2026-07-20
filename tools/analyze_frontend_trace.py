@@ -17,7 +17,42 @@ from typing import cast
 if __package__:
     from . import validate_frontend_trace as validator
 else:  # Direct execution adds tools/ rather than the repository root.
-    import validate_frontend_trace as validator
+    try:
+        import validate_frontend_trace as validator
+    except ModuleNotFoundError as exc:
+        # Isolated mode (python -I, or -P) keeps the script directory off
+        # sys.path, so the sibling module is simply not importable by name. Only
+        # that exact case is handled here: a ModuleNotFoundError naming any other
+        # module -- including one raised from inside a validator that WAS found --
+        # must propagate unchanged rather than be masked by a path-based reload.
+        if exc.name != "validate_frontend_trace":
+            raise
+        import importlib.util
+        import os.path
+
+        _validator_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "validate_frontend_trace.py"
+        )
+        # A package-qualified spec name cannot collide with an unrelated
+        # top-level module already in sys.modules, and the real "tools" package
+        # is never imported on this direct-execution branch.
+        _spec = importlib.util.spec_from_file_location(
+            "tools.validate_frontend_trace", _validator_path
+        )
+        if _spec is None or _spec.loader is None:
+            raise ModuleNotFoundError(
+                f"cannot locate sibling validator at {_validator_path}",
+                name="validate_frontend_trace",
+            ) from exc
+        validator = importlib.util.module_from_spec(_spec)
+        # Register before execution so a self-reference would resolve, and remove
+        # the half-initialized module again if execution fails.
+        sys.modules[_spec.name] = validator
+        try:
+            _spec.loader.exec_module(validator)
+        except BaseException:
+            sys.modules.pop(_spec.name, None)
+            raise
 
 
 SUMMARY_SCHEMA = "omega-frontend-trace-summary-v1"
