@@ -46,6 +46,7 @@ Each row is verifiable by reading the cited tracked file.
 | C8 | The static executable trace establishes a level-loader archive chain (`LOADING.HOG`, `DATA.HOG`, weapon/NPC archives) but names no `.gui`/`.fnt`/`.ie` consumer, no front-end archive load, and no front-end asset parser. | `analysis/elf/argument-loader.md`; `analysis/elf/loader-hints.md` |
 | C9 | The tracked native "front end" (`FrontEndState`/`FrontEndView`, `kFrontEndLabelCells`, "project-font cells") is a project-owned synthetic menu explicitly documented as not a retail input, layout, font, or asset claim. It is not evidence about the retail `.fnt`/`.gui`/`.ie` formats. | `native/apps/openomega/front_end.h` |
 | C10 | The sanitized front-end trace contract (`omega-frontend-trace-v1`) defines an anonymous `resource_class_totals` bucket named `font`; the contract states these carry no names, paths, formats, or bindings and make no claim about retail behavior. The token `font` here is a design placeholder, not `.fnt` evidence. | `docs/05-Frontend-Trace-Contract.md` |
+| C11 | A bounded size-only HOG-member collector now has a frozen path-free schema and generated privacy/resource tests for default `.gui/.fnt/.ie` measurements, with optional allowlisted `.bnk/.gun`. Its implementation is evidence about the collector only; no owner-corpus output is tracked. | `tools/measure_member_structural_fingerprint.py`; `analysis/formats/MEMBER-STRUCTURAL-FINGERPRINT.md` |
 
 ---
 
@@ -65,34 +66,25 @@ Honest arithmetic and cross-counts over tracked aggregates. No semantics.
 
 ## Tier 3 - Hypotheses (unproven)
 
-Each is plausible but unsupported by tracked structural evidence. None may be
-treated as fact or wired into any tool or decoder.
 
-| # | Hypothesis | Confirm / refute with |
-| --- | --- | --- |
-| H1 | `.gui`, `.fnt`, and `.ie` are front-end / menu presentation formats (layout, font, and interface-element data respectively). | Refuted or confirmed only by a privacy-safe aggregate of their internal structure plus a behavioral oracle showing a front-end consumer reads them. No tracked evidence currently bears on it; suffix spelling is not evidence. |
-| H2 | The 3 `.fnt` members reside in a single "fonts" front-end archive. | A per-archive suffix breakdown (not currently produced) mapping the `.fnt` members to an archive. Tracked archive names are merely suggestive (A4); attribution from a name is plausibility, not proof. |
-| H3 | `.gui`/`.fnt`/`.ie` members share a common header or FourCC the way TDX/VAG/COL/VUM do. | Extending a bounded scanner to read the leading words of these members and reporting whether a constant magic/version appears across the corpus. Until then, unknown. |
-| H4 | The nested-HOG `.gui`/`.ie` members (A2) are language- or locale-partitioned front-end content. | A privacy-safe measurement of which container depths and sibling suffix sets they co-occur with; not derivable from current aggregates. |
-| H5 | The anonymous `font` resource class in the trace contract (C10) and any future `.fnt` decode describe the same underlying asset. | A behavioral trace that both passes `omega-frontend-trace-v1` and, separately, a structural `.fnt` aggregate; correlating them is out of scope of any current tracked evidence. |
+No new hypothesis is promoted here. The established evidence above remains the claim ceiling, and
+this dossier authorizes no owner-corpus measurement recipe. Before any future measurement is
+implemented, a separate reviewed contract must predeclare its fixed public schema, fixed minimum
+cohort threshold, bounded execution and typed failures, and project-generated privacy tests.
 
----
+An authorized report may contain only fixed anonymous corpus-wide totals for cohorts meeting that
+threshold. Smaller cohorts must collapse to one typed suppression result. The report must not emit
+raw values, signatures, payloads, owner-derived strings, paths, file, container, or archive names,
+suffix-derived labels, per-file, per-container, or per-archive rows, or cross-tabulations keyed by
+raw fields.
 
 ## Tier 4 - Missing observations
 
-What the tracked tree does not contain, and the privacy-safe collection that
-would produce it. All collection runs against ignored owner input and publishes
-only fixed-schema aggregates, never member names, bytes, offsets, or paths.
 
-| # | Missing observation | Privacy-safe collection that would produce it |
-| --- | --- | --- |
-| M1 | Any structural aggregate of `.gui`/`.fnt`/`.ie` members: size distribution, alignment classes, size buckets, exact/zero-padded/nonzero-tail extent classes. | A bounded aggregate scanner that, like the topology scanner, walks HOG members and records fixed size buckets and alignment classes for these suffixes as their own category, emitting counts only. (This is the Lane B / Lane C direction; the data does not exist yet.) |
-| M2 | Whether these members carry a constant leading magic/version word, and whether any predeclared header position is uniformly zero/nonzero across the corpus. | A bounded scanner reading only a fixed, small header window and reporting per-position zero/nonzero tallies and observed constant-word histograms - never the bytes themselves. |
-| M3 | A per-archive suffix breakdown that would let `.gui`/`.fnt`/`.ie` counts be attributed to specific containers (needed to test H2/H4). | Extending the HOG validation aggregate to emit a per-archive category histogram (counts only, still no member names). |
-| M4 | Any evidence that the retail front end (or its loader) reads a `.gui`/`.fnt`/`.ie` member: which archive is mounted, in what order, and which suffixes are touched. | A static loader trace of the front-end presentation path (the technique already used for the level loader in `analysis/elf/argument-loader.md`), reporting logical path templates and archive order only. |
-| M5 | A behavioral oracle observation that a front-end action consumes one of these resources. | A sanitized `omega-frontend-trace-v1` capture (`docs/05-Frontend-Trace-Contract.md`) with a byte-identical repeat, publishing only anonymous aggregate resource-class touches. |
-
----
+Unresolved structural, semantic, consumer, and validation questions remain missing observations.
+This section deliberately defines no executable collection recipe. Closing any gap requires the
+separately reviewed contract and suppression policy stated above; absent that contract, the gap
+remains UNKNOWN.
 
 ## Lane C gate verdict
 
@@ -125,13 +117,12 @@ Reasoning, mapped to the candidate aggregate dimensions the brief enumerates:
   multiple header words per member across the corpus; nothing tracked does so
   (A5, C4).
 
-**What is missing to reach a YES.** At minimum, a privacy-safe aggregate over the
-`.gui` corpus that establishes a stable envelope - e.g. a constant leading
-magic/version word, or a uniform size/alignment/extent family across the members
-(M1, M2). That measurement does not exist in the tracked tree today. The correct
-next step is the bounded scanner plus this evidence-gap note, not an envelope
-tool. Only after a sanitized `.gui` aggregate establishes a stable envelope
-should a native `GuiEnvelopeIR`/decoder be considered.
+**What is missing to reach a YES.** The safe size-only collector now exists and is synthetically
+verified, but no owner-corpus result is tracked. Even a uniform size family would not establish an
+envelope grammar. A YES requires a sanitized result plus a falsifiable header/envelope observation,
+generated malformed boundaries, and independent consumer evidence (M1, M2). The rejected
+`measure_frontend_gui_envelopes.py` concept is distinct from the implemented size-only fingerprint
+collector. Only after those gates should a native `GuiEnvelopeIR`/decoder be considered.
 
 ---
 

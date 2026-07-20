@@ -170,27 +170,20 @@ Ranked by how directly current tracked evidence motivates the next step — not 
 about retail menu roles. Each entry names the missing evidence and the privacy-safe aggregate
 collection that would produce it.
 
-1. **Per-suffix structural fingerprint for `.gui`.** Tracked evidence: `.gui` already has a raw
-   count in both archive inventories and its own topology category
-   (`tools/measure_frontend_hog_topology.py`'s `APPROVED_EXTENSION_CATEGORIES`), but — unlike
-   `.col`/`.lpd`/`.par`/`.ska`/`.skas`/`.skl`/`.skm`/`.tdx`/`.vag`/`.vpk`/`.vum` — it has no entry
-   in `asset-fingerprints.json`'s per-suffix `formats` block (header-size consistency, span
-   alignment, magic bytes). Missing evidence: whether `.gui` members share a fixed header size or
-   bounded span family the way every other approved suffix already does. Collection: extend
-   `tools/fingerprint_assets.py`'s existing bounded, aggregate-only per-suffix pass to `.gui`,
-   exactly the pattern already proven for the eleven other families in that file.
-2. **Per-suffix structural fingerprint for `.ie`.** Tracked evidence: 79 occurrences in
-   `asset-fingerprints.json`, 23 in the narrower `hog-validation.json` — the largest sample among
-   the suffixes `FRONTEND-TOPOLOGY.md` explicitly calls "menu-adjacent-sounding" and explicitly
-   declines to promote for lack of evidence. Missing evidence: any structural regularity at all.
-   Collection: same `fingerprint_assets.py` extension as (1); 79 members is large enough to test
-   for a fixed-schema family the way `.skas` (2 members) already was.
-3. **Per-suffix structural fingerprint for `.fnt`.** Tracked evidence: only 3 occurrences in
-   either inventory — the smallest sample among the explicitly named menu-adjacent suffixes.
-   Missing evidence: whether even a 3-member sample is internally consistent enough to call a
-   candidate family. Collection: same extension as (1)/(2); ranked below `.gui`/`.ie` purely
-   because n=3 cannot establish a family on its own, only a candidate observation.
-4. **Sibling same-basename pairing once `.gui`/`.fnt`/`.ie` have fingerprints.**
+1. **Run the implemented size-only collector for `.gui/.fnt/.ie`.**
+   `tools/measure_member_structural_fingerprint.py` now has a frozen, bounded, path-free schema
+   documented in `MEMBER-STRUCTURAL-FINGERPRINT.md`, with generated privacy and boundary tests.
+   This confirms only the collector contract. Missing evidence: a reviewed, sanitized owner-corpus
+   result containing count/min/max/distinct/GCD values. Size GCD is a divisor of sizes, never an
+   address-alignment claim.
+2. **Keep the semantic GUI-envelope gate closed.** A size-only result can test uniformity but cannot
+   establish a header, field, valid/invalid grammar, menu role, or native `GuiEnvelopeIR`. Promotion
+   requires a falsifiable grammar, generated malformed boundaries, and independent consumer
+   evidence.
+3. **Optionally measure `.bnk/.gun`.** The same collector accepts these two suffixes only when
+   explicitly requested. They remain `aggregate_scanner_only` until a sanitized owner result is
+   tracked and still gain no audio, weapon, or menu semantics from their names.
+4. **Sibling same-basename pairing only after a structural result warrants it.**
    `FRONTEND-TOPOLOGY.md`'s frozen schema already computes "every unordered pair of approved
    suffixes that shares a normalized sibling basename," but only across the approved vocabulary.
    Missing evidence: whether `.gui`, `.fnt`, or `.ie` members ever co-locate (same basename) with
@@ -199,14 +192,7 @@ collection that would produce it.
    suffix is structurally uniform enough to be worth promoting, reuse the existing pair-key
    machinery in `tools/measure_frontend_hog_topology.py` (Agent B/C's schema-versioned extension,
    not to be duplicated here).
-5. **Per-suffix structural fingerprint for `.bnk` and `.gun`.** Tracked evidence: 77 and 624
-   occurrences respectively (`asset-fingerprints.json`), both large samples, with zero structural
-   evidence beyond the raw count and no menu-adjacent naming caveat recorded anywhere. Missing
-   evidence: whether either is a uniform fixed-schema container at all — `.bnk`'s naming
-   convention alone is not asserted as evidence of a "soundbank" role. Collection: same
-   `fingerprint_assets.py` extension as (1); relevant to future menu-audio research only if a
-   structural family emerges.
-6. **Whether `.tbl` ever occurs inside a HOG archive.** Tracked evidence: `.tbl` is frozen into
+5. **Whether `.tbl` ever occurs inside a HOG archive.** Tracked evidence: `.tbl` is frozen into
    the topology scanner's approved vocabulary and category map, but has never been observed inside
    any archive in either archive-level inventory — only once, outside any archive, in the
    whole-disc tally. Missing evidence: does this suffix ever appear as an actual HOG member.
@@ -214,7 +200,7 @@ collection that would produce it.
    `tools/fingerprint_assets.py` run against a directory tree that happens to contain a `.tbl`
    member (if one exists) would settle this; until then it should be flagged as an untested
    vocabulary slot rather than assumed populated.
-7. **Confirm `.PF`/`.TM2` remain absent from every archive-level inventory.** Tracked evidence:
+6. **Confirm `.PF`/`.TM2` remain absent from every archive-level inventory.** Tracked evidence:
    both are true only at the whole-disc level (`disc-summary.json`, 3 and 16 occurrences
    respectively) and are explicitly named in the campaign's hard rules as families to keep
    `unknown` regardless. Missing evidence: nothing changes this without new tracked in-archive

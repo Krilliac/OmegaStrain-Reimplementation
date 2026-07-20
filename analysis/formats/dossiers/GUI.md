@@ -1,0 +1,60 @@
+# .gui — occurrence-only archive-member dossier
+
+## 1. Identity
+
+The suffix `.gui` is observed as a HOG member but has no dedicated structural aggregate,
+falsifiable grammar, or native decoder. The authoritative coverage matrix therefore classifies it
+`aggregate_scanner_only`. Suffix spelling and population size establish no asset role.
+
+## 2. Occurrence evidence
+
+| Scope | Count | Tracked source |
+| --- | ---: | --- |
+| Recursive HOG inventory | 77 | `analysis/formats/asset-fingerprints.json` |
+| Top-level HOG inventory | 21 | `analysis/formats/hog-validation.json` |
+| Whole-disc inventory | 0 | `analysis/manifests/disc-summary.json` |
+
+## 3. Confirmed facts
+
+- The tracked inventories establish 77 recursive and 21 direct top-level HOG
+  occurrences, with 0 whole-disc files.
+- Subtracting the direct count from the recursive count establishes 56 occurrences reached
+  through nested HOG descent. This is a count relation only; it assigns no role.
+- `analysis/formats/DECODER-COVERAGE.md` classifies `.gui` as
+  `aggregate_scanner_only`: no dedicated native boundary is claimed.
+- The bounded front-end topology scanner schema version 2 maps `.gui` to the public aggregate category `gui`. That label echoes the suffix and assigns no front-end role or payload structure.
+
+## 4. Aggregate-only facts
+
+The available public evidence carries occurrence totals and the derived nested count only. It does
+not publish a size fingerprint, header value, field position, per-container row, or payload byte for
+this suffix. The hardened size-only member collector includes this suffix in its default set. Its implementation and synthetic tests do not become format evidence until a sanitized owner-corpus result is reviewed.
+
+## 5. Hypotheses
+
+- **H1 — one structural family.** Members may share a grammar, or the suffix may group unrelated
+  payloads. A size-only result can test uniformity but cannot by itself prove a parser grammar.
+- **H2 — runtime role.** A consumer may use the members in one or more flows. A tracked static or
+  behavioral consumer observation is required; the suffix name is not evidence.
+
+## 6. Missing observations
+
+- No sanitized owner-corpus size result is tracked for this suffix.
+- No evidence-backed header, field, envelope, or malformed boundary is established.
+- No tracked consumer observation assigns lookup, menu, render, audio, gameplay, or other semantics.
+
+## 7. Decoder/tooling status
+
+**Classification: `aggregate_scanner_only`.**
+
+Generic occurrence counting is not a decoder. An offline or size-only measurement must not be
+promoted to a native descriptor without a falsifiable grammar and generated rejection cases.
+
+## 8. Codex work order
+
+1. Run the hardened collector's supported size-only measurement privately and review only its
+   fixed-schema aggregate.
+2. Preserve size GCD as a divisor of observed sizes, never an address-alignment claim.
+3. Add no raw magic-value histogram, member identity, per-file row, or payload excerpt.
+4. Consider a native boundary only after tracked structure defines valid and malformed cases; then
+   follow `docs/native-scaffolds/README.md`.

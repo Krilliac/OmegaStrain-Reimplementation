@@ -76,6 +76,13 @@ invalid and colliding names, top-level padding, nesting, entry/name/size limits,
 fixed bucket boundaries, deterministic JSON, and identity-free error output.
 No owner input or proprietary byte is required by the tests.
 
+## Related evidence collection
+
+`MEMBER-STRUCTURAL-FINGERPRINT.md` defines a separate size-only collector for default
+`.gui/.fnt/.ie` measurements and optional `.bnk/.gun`. It reuses the proven HOG boundary but does
+not change this topology schema, assign a front-end role, read target payload bytes, or justify an
+envelope decoder. A synthetically verified collector is not an owner-corpus result.
+
 ## Reproduce
 
 Run the synthetic contract:
