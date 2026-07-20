@@ -97,6 +97,7 @@ add_library(omega_retail_formats STATIC
     native/src/retail/pop_level_manifest_decoder.cpp
     native/src/retail/pop_post_terrain_hypothesis_descriptor.cpp
     native/src/retail/ska_container_descriptor.cpp
+    native/src/retail/skas_text_envelope_decoder.cpp
     native/src/retail/skm_container_descriptor.cpp
     native/src/retail/skl_container_descriptor.cpp
     native/src/retail/tdx_texture_storage_decoder.cpp
@@ -584,6 +585,32 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_vag_adpcm_decoder_tests COMMAND omega_vag_adpcm_decoder_tests)
     set_tests_properties(omega_vag_adpcm_decoder_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_skas_text_envelope_decoder_tests
+        native/tests/skas_text_envelope_decoder_tests.cpp
+    )
+    target_link_libraries(omega_skas_text_envelope_decoder_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_skas_text_envelope_decoder_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_skas_text_envelope_decoder_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_skas_text_envelope_decoder_tests
+        COMMAND omega_skas_text_envelope_decoder_tests)
+    set_tests_properties(omega_skas_text_envelope_decoder_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_ps2_memory_card_image_tests
         native/tests/ps2_memory_card_image_tests.cpp

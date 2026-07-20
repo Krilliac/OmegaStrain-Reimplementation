@@ -1278,6 +1278,26 @@ shipping dependencies or execution mechanisms.
     for the one signed commit. The runtime-OFF full MSVC Debug integration tree built with zero
     warnings or errors and full Debug CTest passed 37/37. Rebase and signed commit are complete;
     publication and exact-main validation remain pending.
+76. E-0093 adds the stateless reentrant `DecodeSkasTextEnvelope` retail adapter and canonical owned
+    `SkasTextEnvelopeIR`. It accepts only the aggregate-proven 5,132-5,156-byte physical span,
+    5,129-5,155-byte printable-ASCII/CRLF logical text, one-through-three-byte zero tail, exactly 72
+    final-CRLF-terminated lines, five empty lines, and 67 lines containing exactly one colon. The
+    result retains exact text, source-order opaque line ranges and terminator lengths, and only
+    structural counts; it never splits or interprets labels and values or assigns a relationship to
+    SKA. Its format-scoped default raises only the shared string budget to the fixed 5,155-byte
+    ceiling; explicitly supplied caller input, string, root-plus-72-item, and exact owned-output
+    budgets only tighten fixed ceilings. The flat decoder uses zero dynamic scratch and no nesting
+    edge. Generated adversarial tests cover envelope boundaries, character and line-ending failures,
+    every structural count, exact budgets, ownership, determinism, and both owning-allocation
+    failures. Post-rebase focused MSVC Debug and Release targets built with zero warnings or errors;
+    both direct executables returned zero and focused CTest passed 1/1 in each configuration. The
+    runtime-OFF full MSVC Debug integration tree built with zero warnings or errors and full Debug
+    CTest passed 39/39. Static validation passed Microsoft formatting, the 208-file dependency gate,
+    all 246 tooling tests, Python compile-all, JSON/JSONL parsing, the 313-blob public-tree gate, and
+    diff checks. Rebase, one signed commit, and DCO are complete; publication and exact-main
+    validation remain pending. No private or owner input, proprietary byte, path, filename, D-drive
+    content, disc image, executable, save, savestate, emulator state, or PCSX2 input was accessed or
+    embedded. Semantic interpretation and runtime consumption remain open.
 
 ## Disc observations
 
