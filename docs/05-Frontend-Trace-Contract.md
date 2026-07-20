@@ -94,8 +94,8 @@ stages have these responsibilities:
 The runner must never reuse ordinary debugging facilities while collecting a trace, overwrite an
 existing destination, or publish directly to its final name. Every failure before the no-replace
 rename emits no final report. After the rename succeeds, only nonthrowing cleanup may follow, so the
-runner cannot report failure after the report is already visible. OpenOmega implements only the
-public contract and validator; the producer and runner remain out of tree.
+runner cannot report failure after the report is already visible. OpenOmega implements the public
+contract, validator, and bounded sanitized analyzer; the producer and runner remain out of tree.
 
 The exact combined local source at `d17a521ca03e4de1f063f704142540da5aaaa343` has passed
 independent source/API review, compiled as both a one-job MSVC RelWithDebInfo `PCSX2` core target and
