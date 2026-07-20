@@ -144,10 +144,9 @@ privacy-safe observation that would confirm or refute it.
 
 ## 7. Decoder/tooling status
 
-**Classification: `canonical_decoder`** (offline research tool; explicitly not a native/shipping
-decoder)
+**Classification: `aggregate_scanner_only`** in the authoritative native/tool coverage matrix.
 
-- `tools/inspect_so.py` fully and deterministically recovers the entire `.SO` container grammar —
+- Separately, `tools/inspect_so.py` fully and deterministically recovers the tracked `.SO` container grammar —
   leading code-cell array, literal pool, type table, enum table, global table, and callable table
   — down to named fields for every record kind, reaching exact EOF with 0 parse errors and 0
   trailing bytes across all 118 tracked modules (`analysis/formats/SO.md`, `so-validation.json`,
@@ -163,9 +162,10 @@ decoder)
 - This absence of native integration is a deliberate project stance, not a gap: `SO.md` states
   explicitly that "the shipping reimplementation will never interpret, translate, recompile, or
   dispatch retail `.SO` cells," and frames the format as "an offline research input, not a
-  runtime format." The dossier therefore classifies the *existing* tooling as a canonical
-  (complete, deterministic, zero-error) decoder at the offline-research tier, while confirming
-  there is intentionally no production/native decoder and none is expected.
+  runtime format." The offline parser is important research evidence, but it does not satisfy the
+  repository's native `canonical_decoder` definition and has no focused Python test. The coverage
+  label therefore remains `aggregate_scanner_only`; this does not diminish the separately recorded
+  corpus result.
 - Gap: unlike SKAS (E-0093) and the texture-storage debug adapter (E-0066), there is no dedicated
   adversarial/boundary test suite or ledger entry for `tools/inspect_so.py` — the sole tracked
   validation is one deterministic pass over the real corpus (E-0010). See Section 6.

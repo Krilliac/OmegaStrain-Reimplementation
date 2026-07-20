@@ -73,7 +73,10 @@ Tracked evidence does not currently establish, and privacy-safe collection could
 - **No opaque-field value distribution.** The two 4-byte opaque fields (`0x04..0x07`, `0x0c..0x0f`) have no recorded distinct-value counts or ranges in any tracked doc — needed for H4.
 - **No compression/encoding magic scan specific to VPK payload.** `ASSET-RECON.md`'s compression check is described corpus-wide over "non-HOG asset spans"; it is not clear from tracked text whether `.vpk` (a HOG member) was included. An aggregate hit-count table scoped to VPK spans would resolve H5.
 - **No adversarial/fuzz corpus size documented beyond the native test file's existence.** The test file `native/tests/vpk_wrapper_envelope_decoder_tests.cpp` exists and E-0094's ledger entry claims coverage of specific boundary classes (min/interior/max/below-range/misaligned/over-limit spans, truncated prefixes, signature-byte rejection, endian adversary, opaque-prefix preservation, payload independence, lifetime, determinism, budgets), but this dossier's tracked-source pass did not itself re-enumerate individual test cases; a Codex follow-up could verify the test file's case count matches the ledger's claimed coverage classes (see §8).
-- **Owner-corpus validation is explicitly unclaimed.** E-0094 states "Publication, owner-corpus validation, runtime integration, and exact-main validation remain deliberately unclaimed" — meaning the decoder has not yet been run against the full owner corpus of 85 real `.vpk` members to confirm 85/85 acceptance; only the aggregate fingerprint (which fed the decoder's constants) is on record as covering all 85.
+- **Owner-corpus validation is explicitly unclaimed.** E-0094 predates publication; the decoder is
+  present on current main at commit `4163680`. It has not been run against the full owner corpus of
+  85 real `.vpk` members to confirm 85/85 acceptance; only the aggregate fingerprint that supplied
+  its constants covers all 85.
 
 ## 7. Decoder/tooling status
 

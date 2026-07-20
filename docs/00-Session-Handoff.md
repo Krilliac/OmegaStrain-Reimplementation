@@ -1418,6 +1418,9 @@ shipping dependencies or execution mechanisms.
    consumed fields to placement or visibility behavior. Passive-descriptor acceptance is a
    conformity check, not semantic corroboration.
 6. Capture PS Rewired network behavior separately before designing any replacement service.
+7. Run the synthetically verified size-only HOG-member collector privately for `.gui/.fnt/.ie`,
+   review only its fixed-schema aggregate, and keep the semantic GUI-envelope gate closed unless a
+   separate falsifiable grammar plus consumer evidence emerges.
 
 ## Installed research tools
 
@@ -1457,10 +1460,10 @@ Remaining limitations (deliberately unclaimed):
 
 - **GUI-envelope tool not built.** The tracked tree records only existence and occurrence counts for
   `.gui`/`.fnt`/`.ie` — no member size, byte, header field, or alignment. The audit's Lane C gate
-  verdict is therefore **NO**: there is not enough evidence to freeze a non-misleading fixed
-  aggregate schema, so `measure_frontend_gui_envelopes.py` was intentionally not written. The
-  scanner plus the evidence-gap note is the correct conservative result; the next step is a
-  privacy-safe per-suffix structural fingerprint pass (see the coverage-matrix queue).
+  verdict is therefore **NO**: there is not enough evidence to freeze a non-misleading positional
+  or envelope schema, so `measure_frontend_gui_envelopes.py` was intentionally not written. The
+  semantic envelope tool plus the evidence-gap note is the correct conservative result. A separate
+  size-only fingerprint collector now exists under E-0097, but no owner-corpus result is tracked.
 - No native `GuiEnvelopeIR` or decoder; no retail menu role, lookup, field, layout, state, timing,
   rendering, or audio semantics for `.gui`/`.fnt`/`.ie`; no owner-corpus, behavioral-oracle,
   runtime, packaged-host, or PCSX2-equivalence validation.
@@ -1469,3 +1472,26 @@ Remaining limitations (deliberately unclaimed):
   `native/include/omega/retail/tdx_decoder.h`); the real contracts live in
   `native/include/omega/asset/decode.h` and `tdx_texture_storage_decoder.h`. Worth correcting the
   brief before the next pass.
+
+## Format-dossier and size-fingerprint integration (E-0097, 2026-07-20)
+
+- `analysis/formats/dossiers/catalog.json` deterministically covers all 47 suffixes in the three
+  tracked inventories. It mirrors the authoritative 31-family decoder matrix and keeps 16
+  whole-disc-only families in a separate disposition with no invented decoder or system status.
+- `tools/measure_member_structural_fingerprint.py` and its generated tests implement the frozen
+  size-only contract documented in `analysis/formats/MEMBER-STRUCTURAL-FINGERPRINT.md`: default
+  `.gui/.fnt/.ie`, optional allowlisted `.bnk/.gun`, no target payload reads, identity-free output,
+  fixed local error vocabulary, and bounded traversal, distinct-size, arithmetic, and output state.
+- The collector implementation and tests prove no owner-corpus result. Size GCD is a divisor of
+  sizes, not an address-alignment claim, and size regularity alone does not justify an accept/reject
+  parser or native descriptor.
+- The 47 dossiers retain tracked evidence and explicit nonclaims. The contract test freezes family
+  coverage, authoritative status partitions, required evidence sections, resolving links,
+  Windows-safe names, tracked catalog sources, and banned privacy constructs.
+- Claude provenance is retained through commits `6c0e7e8` and `238aa87`; the useful scaffold
+  checklist was consolidated into `docs/native-scaffolds/README.md`, while thirteen uncompiled,
+  premature C++ declarations were removed.
+
+Still unclaimed: an owner-corpus collector run or output; new format/header/alignment evidence;
+native GUI/FNT/IE/BNK/GUN descriptors; retail consumer semantics; runtime integration; or PCSX2
+behavioral parity.

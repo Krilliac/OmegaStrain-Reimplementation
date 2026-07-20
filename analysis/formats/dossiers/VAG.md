@@ -134,8 +134,9 @@ Confirmed or Rejected.
   (`CMakeLists.txt` ~lines 565-588).
 - Verification evidence (ledger E-0090): warning-free focused MSVC Debug and Release builds; focused
   CTest 1/1 passed in both configurations; warning-free full Debug integration build with CTest
-  41/41 passed. Publication and exact-main validation are noted as pending in that same ledger entry.
-- Adversarial/resource-boundary test gap: per `VAG.md` and E-0090, the decoder's malformed/truncated/
+  41/41 passed. That ledger wording predates publication; the implementation is present on current
+  main at commit `a6d3ee5`. Owner-corpus coverage remains a separate unclaimed result.
+- Owner-corpus coverage gap: per `VAG.md` and E-0090, the decoder's malformed/truncated/
   oversized/limit-boundary coverage is against **project-authored synthetic fixtures**, not against
   the real tracked corpus. There is no tracked evidence of a corpus-wide "would this decoder accept
   every one of the 8,665 real entries" sweep (see Missing observations, item 3) — this is the concrete
@@ -147,27 +148,25 @@ Confirmed or Rejected.
 
 ## 8. Codex work order
 
-Ranked, concrete, privacy-safe next steps. None require D:\ access, disc images, or any private
-input beyond re-running existing tracked tooling against the existing owner corpus location already
-used by the tracked pipeline.
+Ranked, concrete, privacy-safe next steps. Some require an authorized private owner-corpus rerun;
+only fixed aggregate output may be reviewed for publication, with owner paths and bytes remaining
+outside version control.
 
 1. **Highest priority — corpus-coverage sweep.** Extend `tools/fingerprint_assets.py`'s
    `fingerprint_vag` to additionally count, in aggregate only, how many of the 8,665 real corpus
    entries would be accepted vs. rejected by `DecodeVagAdpcm`'s exact acceptance rules (version ∈
    {0,4,0x20}; reserved=0; rate=22050; data-size % 16 == 0; tail ∈ {0} ∪ [16,2032]). Publish the
    resulting aggregate bucket in `asset-fingerprints.json` and note it in `VAG.md`/`ASSET-RECON.md`.
-   This closes the adversarial/resource-boundary gap noted in Section 7 without touching any
+   This closes the owner-corpus coverage gap noted in Section 7 without touching any
    per-file identity.
-2. Extend the same fingerprinter pass to emit aggregate statistics over the 28 "opaque" header bytes
-   (offset `0x14`–`0x2F`): all-zero rate, distinct-byte-pattern count, or a simple entropy bucket —
-   to test Hypothesis H3 without ever publishing per-file byte values.
+2. Do not publish raw opaque-header values or distinct byte patterns. Any future probe must use a
+   predeclared, fixed classification whose output cannot reconstruct source bytes.
 3. Add an aggregate cross-tabulation of VAG zero-tail length against the alignment/stride of its
    enclosing HOG entry (using already-tracked `hog-validation.json` archive metadata) to test
    Hypothesis H4 — publish only bucketed counts (e.g. "N entries with tail length T at container
    stride S"), never per-file rows.
-4. Run the existing registered CTest target (`omega_vag_adpcm_decoder_tests`) as part of the next
-   full-suite build/verification pass and record the pass/fail counts and configuration in a new
-   ledger entry, since E-0090 lists "publication and exact-main validation" as still pending.
+4. Run the existing registered CTest target (`omega_vag_adpcm_decoder_tests`) during the next
+   proportionate native verification pass; do not describe publication itself as pending.
 5. If H1 (LPD/VAG cross-reference) is ever to be pursued, restrict investigation strictly to other
    already-tracked, non-owner sources (published engine documentation, in-repo script/table text) —
    do not attempt to infer the relationship from corpus byte content, and do not encode any lookup

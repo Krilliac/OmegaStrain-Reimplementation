@@ -114,7 +114,7 @@ Each is explicitly labeled speculative and paired with a privacy-safe confirming
 
 ## 7. Decoder/tooling status
 
-**Classification: `structural_envelope_only`**
+**Classification: `passive_descriptor_only`**
 
 Justification:
 - A native decoder exists — `omega::retail::InspectSkmContainer` in
@@ -125,10 +125,9 @@ Justification:
   present.
 - It is explicitly self-documented as producing **no payload semantics**: "The descriptor retains no
   input span and assigns no semantics to chunk payloads or the observed secondary count"
-  (`skm_container_descriptor.h` doc comment). This is exactly the `structural_envelope_only` bar —
-  more than a passive aggregate scanner (it builds a typed, per-chunk region descriptor and enforces
-  hard bounds/overflow checks that can reject malformed input), but strictly less than a canonical
-  decoder (no chunk-payload interpretation, no mesh/vertex/bone output).
+  (`skm_container_descriptor.h` doc comment). The authoritative coverage matrix therefore calls it
+  `passive_descriptor_only`: the typed descriptor validates observed regions and bounds but produces
+  no mesh, vertex, bone, or other canonical asset output.
 - Build/test registration: both the source and a dedicated unit test file are registered in
   `CMakeLists.txt` (lines referencing `native/src/retail/skm_container_descriptor.cpp` and
   `native/tests/skm_container_descriptor_tests.cpp`).
@@ -137,30 +136,23 @@ Justification:
   `DecodeLimits` (`asset::DecodeErrorCode::LimitExceeded`) at three distinct limit thresholds (lines
   ~242–272) — i.e., resource-boundary behavior (oversized input, item-count limit, output-size limit)
   is exercised. This is a genuine adversarial/resource-boundary test, not merely a happy-path test.
-  Truncation, wrong-version, out-of-range chunk/qword/secondary-count, and non-zero-tail malformed
-  cases are implemented as explicit `DecodeErrorCode` branches in the decoder itself
-  (`UnsupportedVariant`, `Truncated`, `Malformed`, `Overflow`); whether every one of those branches has
-  a *dedicated* unit test (as opposed to only the three `LimitExceeded` cases confirmed above) was not
-  fully verified line-by-line in this pass — flagged as an open verification item in §8, not asserted
-  either way.
+  The same test file covers every fixed-header, chunk-table, aligned-header, and payload truncation
+  stage; wrong versions; out-of-range chunk/qword/secondary counts; non-aligned spans; dirty tails;
+  exact and one-below input, item, and output limits; and zero scratch/depth behavior.
 - Tool integration: `native/apps/omega_tool/asset_commands.cpp` calls `InspectSkmContainer` over the
   aggregate corpus and emits pass/fail counts, extent-relation counts (`exact`/`zero_padded_tail`/
   `nonzero_tail`/`exceeds_input`), and semantic-counter aggregates (`SKM chunk count`, `SKM qword
   count`, `SKM logical byte count`) as JSON — an aggregate-scanner consumer layered on top of the
-  structural-envelope decoder, consistent with (not contradicting) the classification above.
+  passive descriptor, consistent with the classification above.
 
 ## 8. Codex work order
 
 Ranked, concrete, privacy-safe. None of these require reading payload bytes, filenames, or per-file
 identifiers beyond what is already public in tracked docs.
 
-1. **(Highest priority) Audit unit-test coverage of `skm_container_descriptor.cpp`'s non-limit error
-   branches.** Confirm (or add) dedicated test cases in
-   `native/tests/skm_container_descriptor_tests.cpp` for: wrong version byte (`UnsupportedVariant`),
-   chunk-count out of [1,61], qword-count out of [4,55], secondary-count out of [1,30], truncated
-   chunk table, truncated aligned header, truncated chunk payload, non-16-byte-aligned physical span,
-   and non-zero trailing bytes when `payload_offset < bytes.size()`. This closes the "adversarial/
-   resource-boundary test gap" note in §7 with certainty rather than an unverified inference.
+1. **Resolved — no listed test gap remains.** The tracked synthetic test file covers the non-limit
+   and limit branches enumerated in §7. Add cases only when the implementation grows a genuinely new
+   boundary.
 2. Extend `tools/fingerprint_assets.py::fingerprint_skm` to emit an aggregate-only, corpus-wide
    frequency histogram of `secondary_count` conditioned on `qword_count` (bucketed counts, not
    per-file rows) to test Hypothesis H1 without publishing any payload bytes or file identities.

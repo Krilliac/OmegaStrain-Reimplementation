@@ -126,10 +126,9 @@ document.
   counts plus any new coverage gaps (e.g., simultaneous multi-track overflow, non-zero-tail
   rejection at exactly 1,933 bytes) as a new ledger entry — all synthetic, no owner-corpus access
   needed.
-- Publication/exact-main validation status: E-0091 states this was "pending" as of that entry; no
-  later ledger entry in the excerpted evidence confirms it landed. *Privacy-safe collection:* check
-  `analysis/evidence/ledger.jsonl` for a follow-up entry (grep for a later E-#### referencing LPD)
-  and `git log`/CI status on the branch that carries E-0091, to confirm merge-to-main state.
+- Publication is confirmed by current repository history: the LPD implementation landed on main at
+  commit `9e8bdde`. E-0091's pending language is a historical validation boundary, not current merge
+  status. A fresh owner-corpus verification remains a separate, unclaimed result.
 
 ## 7. Decoder/tooling status
 
@@ -152,13 +151,8 @@ relationship, so it is not a semantic "canonical_decoder" for the asset's meanin
   earliest-dirty-tail offsets, wrong word count, truncated header/payload prefixes, hostile and
   over-hard-limit counts, unraiseable fixed limits, exact/one-below caller limits, zero
   scratch/depth, and injected allocation failures (first and later).
-- Adversarial/resource-boundary test gap: E-0091 itself notes "publication and exact-main
-  validation remain pending" at the time of that entry, and no tracked evidence in this pass
-  confirms a subsequent merge/validation entry landed. No tracked evidence of fuzzing against the
-  *owner corpus* exists (by design — only synthetic fixtures are permitted); this is a gap only in
-  the sense that no owner-corpus-driven differential/adversarial pass is recorded, which is
-  expected and correct given the clean-room constraint, not a defect to remedy by reading private
-  data.
+- Publication is complete. The remaining evidence gap is an owner-corpus metadata-only validation,
+  not missing synthetic adversarial coverage or uncertain merge state.
 
 ## 8. Codex work order
 
@@ -166,10 +160,8 @@ Ranked, privacy-safe, concrete next steps. None require reading private inputs b
 existing read-only aggregate scanner against the owner corpus (already the established, permitted
 pattern for `tools/fingerprint_assets.py`).
 
-1. **Confirm merge/validation state of E-0091.** Grep `analysis/evidence/ledger.jsonl` for any
-   later entry referencing the LPD decoder, and check the branch/CI status for the "pending"
-   publication and exact-main validation E-0091 flagged. This is the single highest-priority item:
-   it resolves whether the existing decoder is a landed, trusted asset or still in flight.
+1. **Run a metadata-only owner-corpus verification if needed.** Publication is already confirmed;
+   report only aggregate accept/reject and typed-error counts.
 2. **Extend `tools/fingerprint_assets.py`'s LPD handler to emit per-track (0–20) aggregate entry-count
    statistics** (min/mean/max/zero-count) into `asset-fingerprints.json`, closing the "Missing
    observations" gap on per-track distribution without touching payload bytes.

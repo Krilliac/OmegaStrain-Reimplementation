@@ -22,19 +22,21 @@ a regression. See `docs/01-Clean-Room-Method.md` and `analysis/evidence/ledger.j
 - Every observed format family is classified in `analysis/formats/DECODER-COVERAGE.md` with a
   tracked-source citation, plus a ranked next-evidence queue.
 - Ledger entry `E-0095` records this pass.
+- Ledger entry `E-0097` records the later size-only collector contract, corrected 47-dossier
+  catalog, and synthetic/privacy validation; it records no owner-corpus measurement.
 
 ## Queue for Codex
 
 ### 1. Evidence collection to unblock front-end decoding (highest priority)
 
-This is the necessary next structural-evidence step for `.gui`/`.fnt`/`.ie` decoding, and it
-requires the owner corpus that this workstream cannot access. It is not sufficient by itself:
-consumer behavior still needs independent corroboration before field semantics are claimed.
-**Build and run in the Codex workstream, against the private extracted disc, where the schema can
-be validated against real bytes.**
+The bounded size-only collector is now implemented and synthetically verified; see
+`tools/measure_member_structural_fingerprint.py`,
+`analysis/formats/MEMBER-STRUCTURAL-FINGERPRINT.md`, and ledger E-0097. The next step is a private
+owner-corpus run followed by independent review of only the fixed-schema aggregate. That result is
+not yet tracked. Size regularity is not sufficient by itself: consumer behavior and a falsifiable
+grammar still need independent corroboration before fields or a native decoder are proposed.
 
-Spec for a bounded, privacy-safe structural fingerprint collector (a new tool, e.g.
-`tools/measure_member_structural_fingerprint.py`):
+Frozen contract for the bounded, privacy-safe structural fingerprint collector:
 
 - **Input scope:** members inside HOG containers whose name carries a configured suffix; default to
   `.gui`, `.fnt`, `.ie`. Derive each member's payload extent only from the already-proven HOG
@@ -50,14 +52,13 @@ Spec for a bounded, privacy-safe structural fingerprint collector (a new tool, e
 - **Bounds:** bounded reads, checked arithmetic, fail closed; caller limits intersect with fixed
   hard ceilings and may only tighten them.
 - **Tests:** synthetic exact/malformed/truncated/limit/determinism/privacy, before any corpus run.
-- **Gate discipline:** only *after* a corpus run shows a stable, non-misleading structure may
-  positional (zero/nonzero at fixed offsets), equality, or monotonicity dimensions be added, and
-  only then may a native `GuiEnvelopeIR`/decoder be considered. If the real bytes do not support a
-  non-misleading schema, stop at the fingerprint and extend the gap note. A plausible invented
-  decoder is a regression.
+- **Gate discipline:** a size-only result cannot justify an accept/reject parser. Only after a
+  corpus result motivates a falsifiable grammar, generated malformed boundaries, and independent
+  consumer evidence may a native `GuiEnvelopeIR`/decoder be considered. If those gates fail, stop
+  at the fingerprint and extend the gap note. A plausible invented decoder is a regression.
 
-Also fingerprint `.bnk` and `.gun` (aggregate-scanner-only families named in the coverage matrix)
-by the same method if menu-audio/weapon-menu evidence is wanted.
+`.bnk` and `.gun` are optional explicit allowlist choices. Their spelling assigns no audio, weapon,
+or menu role.
 
 ### 2. Adversarial / resource-boundary tests for existing passive adapters
 

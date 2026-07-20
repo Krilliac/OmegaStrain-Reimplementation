@@ -106,13 +106,13 @@ These are corpus-wide statistics with no semantic interpretation attached.
 
 ## 7. Decoder/tooling status
 
-**Classification: `canonical_decoder`**
+**Classification: `structural_envelope_only`**
 
 - Native decoder: `omega::retail::DecodeParTextEnvelope`, declared in
   `native/include/omega/retail/par_text_envelope_decoder.h`, implemented in
-  `native/src/retail/par_text_envelope_decoder.cpp`. It parses the full observed structural
-  envelope (physical bounds, padding, ASCII/CRLF validation, and the eight-token version-marker
-  grammar) into an owned IR type, rather than merely describing or aggregating it.
+  `native/src/retail/par_text_envelope_decoder.cpp`. It parses the observed text envelope
+  (physical bounds, padding, ASCII/CRLF validation, and the eight-token version-marker grammar)
+  into an owned IR while explicitly assigning no key, value, field, path, or particle semantics.
 - Owned IR: `omega::asset::ParTextEnvelopeIR` in `native/include/omega/asset/par_text_envelope_ir.h`.
 - Build/test registration: CMake target `omega_par_text_envelope_tests`
   (`native/tests/par_text_envelope_decoder_tests.cpp`), linked against `omega_retail_formats`,
@@ -123,14 +123,14 @@ These are corpus-wide statistics with no semantic interpretation attached.
   rejection, ASCII boundary cases, malformed/unsupported tokens, padding and physical bounds,
   exact and one-below caller budgets, hard derived text/line maxima, hostile tails, ownership,
   determinism, zero scratch, allocation-failure injection) and passing focused + full CTest runs
-  pre-mainline-rebase.
-- **Adversarial/resource-boundary test gap (explicit, per E-0092):** "Tests use generated text
+  before publication.
+- **Owner-corpus validation gap (explicit, per E-0092):** "Tests use generated text
   only" (also stated verbatim in `analysis/formats/PAR.md` §Nonclaims) — the decoder has not been
-  exercised against the real owner PAR corpus. E-0092 also explicitly states "Owner-corpus
-  validation, runtime integration, publication, and exact-main validation remain unclaimed" and "A
-  final local C++ rebuild was intentionally not run; protected publication CI owns combined
-  LPD-plus-PAR integration." This is a real, tracked gap between "decoder exists and is unit-tested
-  on synthetic fixtures" and "decoder has been run against the actual asset population."
+  exercised against the real owner PAR corpus. Publication is no longer pending: the PAR
+  implementation is present on current main at commit `13db063`. Owner-corpus validation and
+  runtime integration remain unclaimed. This is a real, tracked gap between "decoder exists and is
+  unit-tested on synthetic fixtures" and "decoder has been run against the actual asset
+  population."
 
 ## 8. Codex work order (ranked, privacy-safe)
 
@@ -146,10 +146,8 @@ These are corpus-wide statistics with no semantic interpretation attached.
 3. Produce an aggregate member-suffix breakdown specifically for the `GAMEDATA/COMMON/PAR.HOG`
    container (suffix → count only, mirroring the existing top-level `hog-validation.json`
    methodology) to reconcile the 870-entry vs. 679-fingerprint discrepancy noted in §4.
-4. Confirm (or update) whether `omega_retail_formats` / the mainline rebase referenced by E-0092 as
-   pending ("Final local C++ rebuild was intentionally not run") has since landed, and if so, run
-   the full CTest suite once more and record a fresh ledger entry — this is process verification,
-   not new semantic work, and requires no new private-input access.
+4. Keep publication status distinct from validation scope: the implementation is on main, while a
+   fresh owner-corpus pass remains unclaimed. Record such a pass separately if it is run.
 5. Only after 1–4 are exhausted: if a future tracked source (e.g. a decompiled retail parser for the
    consumer of `.par`) surfaces genuine grammar beyond the version-marker line, extend
    `ParTextEnvelopeIR`/`DecodeParTextEnvelope` accordingly — but do not speculate ahead of that
