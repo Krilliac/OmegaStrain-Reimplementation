@@ -999,6 +999,15 @@ material, geometry, gameplay, or emulator-equivalence semantics. Only public sou
 fixtures were used; no private or owner file, proprietary input, D-drive content, disc image, retail
 executable, emulator, or PCSX2 input was accessed.
 
+E-0090 supplies the first canonical audio decode value without connecting it to the host. One
+bounded reentrant retail adapter converts the complete observed 48-byte VAG envelope and supported
+PS-ADPCM frames into owned 22,050 Hz mono PCM16 plus raw source-frame flags and marker sample
+offsets. It applies no automatic marker, loop, playback, resampling, mixing, streaming, selection,
+or SDL policy. Independent project-generated golden fixtures cover every predictor and arithmetic
+boundary; owner audio and other proprietary bytes are absent. Runtime asset lookup, title-specific
+sound roles/marker behavior, audio-service publication, behavioral comparison, and mixing remain
+in progress.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

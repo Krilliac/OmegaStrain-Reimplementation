@@ -182,6 +182,12 @@ Every declared data length is a multiple of the 16-byte PS ADPCM frame size. Fif
 end exactly after `48 + data_bytes`; 8,612 use 16-2,032 bytes of zero padding. Version values are
 0 (8,497), 4 (166), and `0x20` (2). This is the most immediately reusable non-container decoder.
 
+E-0090 implements that bounded decoder in `omega_retail_formats`. It accepts only this complete
+header/version/rate/tail envelope plus the standard five-predictor, shift-0-through-12 mono frame
+transform, and returns owned PCM16 with raw source-frame flags and marker sample offsets. Playback,
+looping, resampling, mixing, title-specific sound roles, container selection, and LPD association
+remain outside the decoder. See [VAG.md](VAG.md) for the exact transform, limits, and non-claims.
+
 ### LPD dialogue/lip data
 
 Every LPD starts with little-endian word count 22. The remaining 21 header words are per-track

@@ -1238,6 +1238,21 @@ shipping dependencies or execution mechanisms.
     coverage is present; final serialized C++ validation is recorded in E-0089's ledger entry. This
     is project-owned bootstrap UI and makes no retail menu, art, font, input, timing, save-policy,
     behavior, or emulator-equivalence claim. No private or owner input was accessed.
+74. E-0090 adds the stateless reentrant `DecodeVagAdpcm` retail adapter and canonical owned
+    `MonoPcm16IR`. It strictly accepts the path-free aggregate envelope established across all 8,665
+    VAG entries: a 48-byte big-endian `VAGp` header, versions `0`/`4`/`0x20`, reserved zero, 22,050
+    Hz, 16-byte-aligned frame data, and either an exact end or 16-2,032 zero tail bytes. Standard
+    predictor identifiers zero through four, shifts zero through twelve, low-then-high signed
+    nibbles, cross-frame history, rounded prediction, and per-sample PCM16 clamp are decoded with
+    checked integer arithmetic. Every source frame retains its raw flag byte and exact sample offset,
+    but the adapter never stops, repeats, loops, resamples, mixes, selects, streams, or plays audio.
+    Fixed 4 MiB ADPCM and 32 MiB logical-output ceilings compose with `DecodeLimits`; allocation and
+    representation failures remain typed. Complete independent synthetic golden vectors cover all
+    five predictors plus shifts, nibble order/sign, both clamps, cross-frame history, markers,
+    malformed and unsupported inputs, tail shape, exact/one-below budgets, hard limits, ownership,
+    and determinism. No owner audio, proprietary input, D-drive content, executable byte, emulator
+    capture, or retail asset is present in the implementation or tests. Runtime selection, SDL
+    upload, playback/mixing policy, title-specific flag meaning, and retail comparison remain open.
 
 ## Disc observations
 
