@@ -49,13 +49,21 @@ struct SdlGpuHostTestAccess final
 
 struct OmegaAppTestAccess final
 {
+    [[nodiscard]] static std::expected<OmegaApp, std::string> Create(
+        runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
+        runtime::ContentStartupState content, const bool debug_device)
+    {
+        return OmegaApp::CreateWithTextureConfig(std::move(config), settings,
+            std::move(content), nullptr, debug_device, {});
+    }
+
     [[nodiscard]] static std::expected<OmegaApp, std::string> CreateWithTextureConfig(
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
         runtime::ContentStartupState content, const bool debug_device,
         const runtime::RenderTexturePoolConfig texture_config)
     {
         return OmegaApp::CreateWithTextureConfig(std::move(config), settings,
-            std::move(content), debug_device, texture_config);
+            std::move(content), nullptr, debug_device, texture_config);
     }
 
     [[nodiscard]] static bool InstallUnownedDiagnosticDraw(OmegaApp& app)
@@ -1087,8 +1095,8 @@ int main()
     omega::runtime::ContentStartupState invalid_content;
     invalid_content.level_manifest.emplace();
     const SDL_InitFlags sdl_before_invalid_create = SDL_WasInit(0);
-    auto invalid_app = omega::app::OmegaApp::Create(std::move(*invalid_config), settings,
-        std::move(invalid_content), false);
+    auto invalid_app = omega::app::detail::OmegaAppTestAccess::Create(
+        std::move(*invalid_config), settings, std::move(invalid_content), false);
     Check(!invalid_app &&
               invalid_app.error() ==
                   "content startup state: inconsistent-ownership" &&
@@ -1113,8 +1121,8 @@ int main()
             "the generated ownership aggregate classifies as LevelContent");
         if (level_config && level_content)
         {
-            auto level_app = omega::app::OmegaApp::Create(std::move(*level_config), settings,
-                std::move(*level_content), false);
+            auto level_app = omega::app::detail::OmegaAppTestAccess::Create(
+                std::move(*level_config), settings, std::move(*level_content), false);
             Check(level_app.has_value(),
                 "OmegaApp starts with the generated canonical first texture");
             if (level_app)
@@ -1159,8 +1167,8 @@ int main()
             "the generated data-only ownership aggregate classifies as DataMounted");
         if (mounted_config && mounted_content)
         {
-            auto mounted_app = omega::app::OmegaApp::Create(std::move(*mounted_config),
-                settings, std::move(*mounted_content), false);
+            auto mounted_app = omega::app::detail::OmegaAppTestAccess::Create(
+                std::move(*mounted_config), settings, std::move(*mounted_content), false);
             Check(mounted_app.has_value(), "OmegaApp starts from the DataMounted stage");
             if (mounted_app)
             {
@@ -1201,7 +1209,7 @@ int main()
             "the Packed32 ownership aggregate classifies as LevelContent");
         if (fallback_config && fallback_content)
         {
-            auto fallback_app = omega::app::OmegaApp::Create(
+            auto fallback_app = omega::app::detail::OmegaAppTestAccess::Create(
                 std::move(*fallback_config), settings,
                 std::move(*fallback_content), false);
             Check(fallback_app.has_value(),
@@ -1212,8 +1220,8 @@ int main()
         }
     }
 
-    auto app = omega::app::OmegaApp::Create(std::move(*config), settings,
-        omega::runtime::ContentStartupState{}, false);
+    auto app = omega::app::detail::OmegaAppTestAccess::Create(
+        std::move(*config), settings, omega::runtime::ContentStartupState{}, false);
     Check(app.has_value(), "the zero-file OmegaApp fixture starts");
     if (!app)
     {

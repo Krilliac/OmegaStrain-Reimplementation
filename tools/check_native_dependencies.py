@@ -218,6 +218,8 @@ _SDL_EDGES = frozenset({"omega_sdl_backend", "omega_runtime"})
 _APP_EDGES = frozenset(
     {
         "openomega",
+        "omega_persistence",
+        "omega_profiles",
         "omega_sdl_backend",
         "omega_runtime",
         "omega_simulation",

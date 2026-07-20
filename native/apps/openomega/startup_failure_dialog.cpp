@@ -37,6 +37,8 @@ static_assert(kStartupFailureDialogMaximumTextSize + 1U <=
         return "content launch profile";
     case StartupFailureStage::ContentStartup:
         return "content startup";
+    case StartupFailureStage::NativePersistence:
+        return "native persistence";
     }
     return "startup";
 }

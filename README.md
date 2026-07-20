@@ -53,8 +53,9 @@ retail instruction blocks, or PS2 execution layer.
   and an operating-system-held exclusive lifetime lock. Synthetic tests cover reopen, torn-newest
   fallback, missing-established-slot rejection, post-recovery commit, hard-link containment,
   namespace anchoring, both-slot corruption, future-version rejection, and competing owners.
-  App/profile/menu wiring and bounded PS2 import/export codecs remain separate next slices; owner
-  saves and exported card images stay outside version control.
+  The native profile catalog and app-owned startup composition are implemented without an implicit
+  default or active profile; menu actions and bounded PS2 import/export codecs remain separate next
+  slices. Owner saves and exported card images stay outside version control.
 - The native content service resolves all 5,351 manifest cells across all 18 levels into 5,351
   owned spatial meshes with zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices,
   1,239,980 triangles/references, and 2,137 normalized empty meshes.
@@ -1085,6 +1086,16 @@ resources.
 The zero-file `omega_sdl_gpu_texture_smoke` target compiles whenever tests and the SDL backend are
 built, but hardware/display-dependent CTest registration is off by default for headless safety.
 Configure with `-DOMEGA_RUN_GPU_SMOKE_TEST=ON` to register it as a serial GPU integration test.
+
+OpenOmega owns a native persistence database rather than emulating PS2 RAM, memory-card hardware,
+or emulator savestates. Non-probe startup opens the platform-native `OpenOmega/native-save`
+directory and validates a deterministic profile catalog before platform creation; `--frames=0`
+therefore bootstraps persistence, while `--probe-only` never touches it. A fresh database contains
+two checksummed generation-zero snapshots and an empty process-lock file. Profiles use bounded,
+versioned `profiles/<32-lower-hex-id>/metadata` records and no default profile is created or selected.
+Windows uses `%LOCALAPPDATA%/OpenOmega/native-save`, macOS uses
+`$HOME/Library/Application Support/OpenOmega/native-save`, and XDG hosts use
+`$XDG_DATA_HOME/openomega/native-save` or `$HOME/.local/share/openomega/native-save`.
 
 The optional project-owned configuration file uses strict `lower_snake_case` dotted keys and
 `key = value` lines. `--config=PATH` is always authoritative. Without that option, `openomega`

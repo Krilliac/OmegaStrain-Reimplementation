@@ -212,16 +212,19 @@ renderer/audio/platform -> core
 Platform backends and retail decoders are leaves. Core and simulation never include PCSX2,
 Windows, GPU API, or proprietary-format implementation headers.
 
-`omega_persistence` is a separate bottom-level native service layer. It may use host filesystem
-APIs in its private implementation, but its public headers are platform-neutral and it cannot
-include runtime, content, retail-format, simulation, gameplay, app, SDL, or PCSX2 headers. The app
-may own it directly; no lower layer depends upward on it.
+`omega_persistence` and `omega_profiles` are separate bottom-level native service layers. Persistence
+may use host filesystem APIs in its private implementation, but both public interfaces are
+platform-neutral and neither can include runtime, content, retail-format, simulation, gameplay, app,
+SDL, or PCSX2 headers. Profiles may depend only on persistence; the app may own both through its
+composition service, and no lower layer depends upward on it.
 
 The initial native build targets express the same direction:
 
 - `omega_core`: HOG indexing, VFS, and generic bounded infrastructure;
 - `omega_persistence`: the project-owned transactional save database, with no emulator or retail
   format dependency;
+- `omega_profiles`: bounded, versioned profile metadata over `omega_persistence`, with no implicit
+  default or active-profile policy;
 - `omega_assets`: canonical owned IR values and decode contracts;
 - `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
 - `omega_retail_formats`: stateless POP/COL/VUM/TDX/SKM/SKL/SKA adapters that may depend on the
@@ -243,9 +246,16 @@ no-follow, multi-link snapshots are rejected, and only definite checksum/torn co
 back. A missing established slot, transient I/O, unsupported version, or indeterminate replacement
 fails closed. The format and decoder have explicit configurable plus hard bounds, canonical key
 grammar, generation-unique record revisions, reserved-field checks, sorted-key checks, CRC-32
-protection, and integrity-checked future-version handling. The service is not yet composed into
-`OmegaApp`, and it assigns no profile, campaign, checkpoint, retail-payload, PS2 filesystem,
-memory-card-device, guest-memory, or emulator-savestate semantics.
+protection, and integrity-checked future-version handling.
+
+The profile composition slice adds `omega_profiles` and the app-owned `NativePersistence` service.
+`ProfileCatalog` borrows one stable heap-owned database and stores only bounded versioned markers at
+`profiles/<32-lower-hex-id>/metadata`; it deterministically lists identifiers and never creates or
+selects a default. `OmegaApp` solely owns the composed service on the persistence/game thread and
+destroys it last. Non-probe startup resolves the host-native save directory, opens the database, and
+validates all profile markers before platform creation. `--probe-only` returns before persistence;
+`--frames=0` returns after bootstrap. This still assigns no active-profile, campaign, checkpoint,
+retail-payload, PS2 filesystem, memory-card-device, guest-memory, or emulator-savestate semantics.
 
 VUM has a bounded semantic adapter that returns owned source-order names plus one-to-three dense
 name indices per material. A separate retail-only passive descriptor preserves only the three

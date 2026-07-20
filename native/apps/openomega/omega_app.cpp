@@ -19,15 +19,17 @@ namespace omega::app
 {
 std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore config,
     const runtime::RuntimeSettings& settings, runtime::ContentStartupState content,
-    const bool debug_device)
+    NativePersistence native_persistence, const bool debug_device)
 {
     return CreateWithTextureConfig(std::move(config), settings, std::move(content),
+        std::make_unique<NativePersistence>(std::move(native_persistence)),
         debug_device, {});
 }
 
 std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
-    runtime::ContentStartupState content, const bool debug_device,
+    runtime::ContentStartupState content,
+    std::unique_ptr<NativePersistence> native_persistence, const bool debug_device,
     const runtime::RenderTexturePoolConfig texture_config)
 {
     const auto classified_content = runtime::ClassifyContentStartupState(content);
@@ -562,8 +564,9 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
                              std::to_string(jobs->worker_count()) + " workers and " +
                              std::string(audio->driver_name()) + " audio");
 
-    return OmegaApp(std::move(config_owner), std::move(content_owner), std::move(stderr_sink),
-        std::move(ring_sink), std::move(log), std::move(jobs), std::move(assets),
+    return OmegaApp(std::move(native_persistence), std::move(config_owner),
+        std::move(content_owner), std::move(stderr_sink), std::move(ring_sink),
+        std::move(log), std::move(jobs), std::move(assets),
         std::move(frame_scheduler), std::move(input), std::move(simulation),
         debug_locomotion_entity,
         std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
@@ -574,7 +577,8 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
         std::move(diagnostic_asset_topology_draw_list));
 }
 
-OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
+OmegaApp::OmegaApp(std::unique_ptr<NativePersistence> native_persistence,
+    std::unique_ptr<runtime::ConfigStore> config,
     std::unique_ptr<runtime::ContentStartupState> content,
     std::unique_ptr<runtime::StderrLogSink> stderr_sink,
     std::unique_ptr<runtime::RingLogSink> ring_sink,
@@ -598,7 +602,8 @@ OmegaApp::OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
         diagnostic_visible_draw_lists,
     runtime::RenderDrawList diagnostic_controls_draw_list,
     runtime::RenderDrawList diagnostic_asset_topology_draw_list) noexcept
-    : config_(std::move(config)), content_(std::move(content)),
+    : native_persistence_(std::move(native_persistence)),
+      config_(std::move(config)), content_(std::move(content)),
       stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)),
       log_(std::move(log)), jobs_(std::move(jobs)), assets_(std::move(assets)),
       frame_scheduler_(std::move(frame_scheduler)), input_(std::move(input)),

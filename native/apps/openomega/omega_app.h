@@ -1,6 +1,7 @@
 #pragma once
 
 #include "diagnostic_menu.h"
+#include "native_persistence.h"
 #include "run_capture.h"
 #include "sdl_audio_service.h"
 #include "sdl_gpu_host.h"
@@ -42,7 +43,8 @@ public:
     // [game/main thread, startup] Creates services in dependency order and the SDL/GPU host last.
     [[nodiscard]] static std::expected<OmegaApp, std::string> Create(
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
-        runtime::ContentStartupState content, bool debug_device);
+        runtime::ContentStartupState content, NativePersistence native_persistence,
+        bool debug_device);
 
     // [game/main thread, after all worker clients have stopped]
     ~OmegaApp() noexcept;
@@ -73,7 +75,8 @@ private:
     // composition-root API. Production Create always supplies the default pool configuration.
     [[nodiscard]] static std::expected<OmegaApp, std::string> CreateWithTextureConfig(
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
-        runtime::ContentStartupState content, bool debug_device,
+        runtime::ContentStartupState content,
+        std::unique_ptr<NativePersistence> native_persistence, bool debug_device,
         runtime::RenderTexturePoolConfig texture_config);
 
     struct RunLoopResult
@@ -87,7 +90,8 @@ private:
         int frame_limit, runtime::RunCaptureSession* capture_session);
     [[nodiscard]] const runtime::RenderDrawList& CurrentDiagnosticDrawList() const noexcept;
 
-    OmegaApp(std::unique_ptr<runtime::ConfigStore> config,
+    OmegaApp(std::unique_ptr<NativePersistence> native_persistence,
+        std::unique_ptr<runtime::ConfigStore> config,
         std::unique_ptr<runtime::ContentStartupState> content,
         std::unique_ptr<runtime::StderrLogSink> stderr_sink,
         std::unique_ptr<runtime::RingLogSink> ring_sink,
@@ -114,6 +118,7 @@ private:
         runtime::RenderDrawList diagnostic_asset_topology_draw_list) noexcept;
 
     // Declaration order is ownership order; destruction is the required reverse order.
+    std::unique_ptr<NativePersistence> native_persistence_;
     std::unique_ptr<runtime::ConfigStore> config_;
     std::unique_ptr<runtime::ContentStartupState> content_;
     std::unique_ptr<runtime::StderrLogSink> stderr_sink_;

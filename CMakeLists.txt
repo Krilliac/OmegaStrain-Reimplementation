@@ -363,6 +363,31 @@ if(OMEGA_BUILD_RUNTIME)
         target_compile_options(omega_sdl_backend PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
     endif()
 
+    add_library(omega_native_persistence STATIC
+        native/apps/openomega/native_persistence.cpp
+    )
+    target_include_directories(omega_native_persistence PUBLIC native/apps/openomega)
+    target_link_libraries(omega_native_persistence PUBLIC omega_profiles)
+    target_compile_features(omega_native_persistence PUBLIC cxx_std_23)
+    if(MSVC)
+        target_compile_options(omega_native_persistence PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_native_persistence PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+
     add_library(omega_app_host STATIC
         native/apps/openomega/omega_app.cpp
     )
@@ -370,6 +395,7 @@ if(OMEGA_BUILD_RUNTIME)
     target_link_libraries(omega_app_host
         PUBLIC
             omega_app_core
+            omega_native_persistence
             omega_runtime
             omega_simulation
             omega_sdl_backend
@@ -443,12 +469,14 @@ if(BUILD_TESTING)
         file(MAKE_DIRECTORY
             "${profile_root}/local-app-data"
             "${profile_root}/xdg-config-home"
+            "${profile_root}/xdg-data-home"
             "${profile_root}/home"
         )
         set_property(TEST "${test_name}" APPEND PROPERTY ENVIRONMENT
             "OPENOMEGA_TEST_PROFILE_ROOT=${profile_root}"
             "LOCALAPPDATA=${profile_root}/local-app-data"
             "XDG_CONFIG_HOME=${profile_root}/xdg-config-home"
+            "XDG_DATA_HOME=${profile_root}/xdg-data-home"
             "HOME=${profile_root}/home"
             "OPENOMEGA_DISABLE_STARTUP_DIALOG=1"
         )
@@ -528,6 +556,35 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_profile_catalog_tests COMMAND omega_profile_catalog_tests)
     set_tests_properties(omega_profile_catalog_tests PROPERTIES TIMEOUT 10)
+
+    if(TARGET omega_native_persistence)
+        add_executable(omega_native_persistence_tests
+            native/tests/native_persistence_tests.cpp
+        )
+        target_link_libraries(omega_native_persistence_tests
+            PRIVATE omega_native_persistence)
+        if(MSVC)
+            target_compile_options(omega_native_persistence_tests PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_native_persistence_tests PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+        add_test(NAME omega_native_persistence_tests
+            COMMAND omega_native_persistence_tests)
+        set_tests_properties(omega_native_persistence_tests PROPERTIES TIMEOUT 10)
+    endif()
 
     if(TARGET openomega)
         add_test(NAME openomega_process_contract

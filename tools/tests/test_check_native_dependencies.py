@@ -51,6 +51,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             ("native/src/runtime/example.cpp", "omega/content/game_data_service.h"),
             ("native/apps/openomega/sdl_example.cpp", "omega/runtime/render_frame_packet.h"),
             ("native/apps/openomega/example.cpp", "omega/simulation/simulation_world.h"),
+            ("native/apps/openomega/example.cpp", "omega/profiles/profile_catalog.h"),
         )
         for relative_path, include in cases:
             with self.subTest(relative_path=relative_path, include=include):

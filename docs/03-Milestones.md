@@ -1037,10 +1037,13 @@ its payload does not enter the canonical level IR.
 
 ## M6: Campaign coverage
 
-Status: native persistence foundation implemented. The versioned transactional `SaveDatabase`
-stores only project-owned native records; typed profile/campaign schemas, menu integration, and PS2
-save import/export remain in progress. No PS2 memory-card device or emulator savestate is part of
-the shipping-runtime design.
+Status: native persistence foundation and profile-catalog startup composition implemented. The
+versioned transactional `SaveDatabase` stores only project-owned native records. `ProfileCatalog`
+adds bounded metadata at `profiles/<32-lower-hex-id>/metadata`, lists it before platform startup, and
+never creates or selects a default profile. `OmegaApp` owns the database/catalog lifetime through
+`NativePersistence`; `--probe-only` does not touch persistence and `--frames=0` returns after
+bootstrap. Active-profile/menu actions, campaign schemas, and PS2 save import/export remain in
+progress. No PS2 memory-card device or emulator savestate is part of the shipping-runtime design.
 
 - All offline levels and mission variants load and complete.
 - Front end, character/gear progression, saves, difficulty, cinematics, subtitles, and audio.
