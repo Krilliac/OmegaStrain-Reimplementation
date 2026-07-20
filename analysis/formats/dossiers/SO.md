@@ -50,9 +50,10 @@ Each row is mechanically citable from the named tracked file.
 | 16 | Across all 79,845 callable records, the five trailing fields' non-default (`!= 0` and `!= 0xFFFFFFFF`) counts are, in order, `0, 1624, 18, 956, 381` | `analysis/formats/SO.md` ("Imports, definitions, and code entry points") |
 | 17 | Module-to-module schema variance is confirmed and bounded: type count ranges 78–80 per module, enum count ranges 35–40, at most one locally declared type and at most two locally declared enums appear per module, external-only type tables hash to 8 distinct values and external-only enum tables hash to 14 distinct values across the corpus | `analysis/formats/SO.md` ("Shared versus module-local schema") |
 | 18 | Ledger entry E-0010 (confirmed): across 118 retail `.SO` modules the custom little-endian container parser reaches exact EOF, validates 4,950 strictly ordered in-bounds local callable entries, and finds no ELF modules; evidence cites `analysis/formats/SO.md`, `analysis/formats/so-validation.json`, `tools/inspect_so.py`; reproduction command is `python -B tools/inspect_so.py private/extracted-disc --json analysis/formats/so-validation.json` | `analysis/evidence/ledger.jsonl` (E-0010) |
-| 19 | `.SO` has no native decoder, descriptor, or CMake/CTest registration anywhere in the tracked native tree: `native/include/omega/retail/*.h` and `native/src/**/*.cpp` contain no SO/script-VM decoder, and `CMakeLists.txt` lists compiled sources/tests only for `container_descriptors`, `pop_post_terrain_hypothesis_descriptor`, `ska/skm/skl_container_descriptor`, and `vum_render_payload_descriptor` — none reference `inspect_so.py` or any `.SO`-specific type | `CMakeLists.txt`; direct listing of `native/include/omega/retail/`, `native/src/retail/` |
-| 20 | The only native-tree references to `.SO`/`.so` are as a generic filler filename in two generic container tests — `native/tests/hog_archive_tests.cpp` (`"B.SO"` used to test generic HOG entry lookup) and `native/tests/virtual_file_system_tests.cpp` (`"TEST.SO"` / `"GAMEDATA/MINSK/SCRIPTS/TEST.SO"` used to test generic case-insensitive VFS path lookup and byte-limited reads) — neither test asserts anything about `.SO` internal structure | `native/tests/hog_archive_tests.cpp`; `native/tests/virtual_file_system_tests.cpp` |
+| 19 | The native `InspectSoModule` entry point now validates the tracked little-endian framing through exact EOF and returns a move-only `SoModuleDescriptor` containing section ranges, counts, neutral raw-field summaries, and structural regularity booleans. It retains no code-cell value, string content, or payload byte and assigns no opcode, stack, type, event, or gameplay semantics | `native/include/omega/retail/so_module_descriptor.h`; `native/src/retail/so_module_descriptor.cpp` |
+| 20 | The SO descriptor and its focused synthetic test have explicit CMake source, executable, and CTest registration. Generated cases cover exact and malformed framing, every truncated prefix, unaligned input, hostile counts, caller-tightened and fixed safety ceilings, deterministic ownership and moves, zero-length absent LP values, comprehensive item accounting, and each of the four owned-summary allocation failures | `CMakeLists.txt`; `native/tests/so_module_descriptor_tests.cpp` |
 | 21 | 19 top-level `SCRIPTS.HOG` archives are present in the tracked HOG archive listing, with a combined `entry_count` of 119 across them | `analysis/formats/hog-validation.json` (`archives`, filtered to `path` containing `SCRIPTS.HOG`) |
+| 22 | Ledger entry E-0098 records the native passive SO descriptor, its generated adversarial tests, fixed synthetic safety ceilings, typed allocation failures, and explicit prohibition on runtime script execution; private native owner-corpus acceptance and behavioral semantics remain unclaimed | `analysis/evidence/ledger.jsonl` (E-0098) |
 
 ## 4. Aggregate-only facts
 
@@ -88,7 +89,7 @@ remains UNKNOWN.
 
 ## 7. Decoder/tooling status
 
-**Classification: `aggregate_scanner_only`** in the authoritative native/tool coverage matrix.
+**Classification: `passive_descriptor_only`** in the authoritative native/tool coverage matrix.
 
 - Separately, `tools/inspect_so.py` fully and deterministically recovers the tracked `.SO` container grammar —
   leading code-cell array, literal pool, type table, enum table, global table, and callable table
@@ -96,23 +97,17 @@ remains UNKNOWN.
   trailing bytes across all 118 tracked modules (`analysis/formats/SO.md`, `so-validation.json`,
   ledger E-0010). This is materially deeper than a boundary-only (`structural_envelope_only`)
   parse: it recovers named type/enum/global/callable records, not merely span/table extents.
-- This decoder is **Python-only and standalone** — it is not one of the `FORMAT_HANDLERS` entries
-  in `tools/fingerprint_assets.py` (that aggregate scanner has no `.so` handler at all), and it has
-  **no native counterpart**: no header/source pair exists under `native/include/omega/retail/` or
-  `native/src/retail/`, and `CMakeLists.txt` registers no compiled source, descriptor, or CTest
-  target for `.SO`. The only native-tree mentions of `.SO`/`.so` are generic filler filenames in
-  two unrelated container tests (`hog_archive_tests.cpp`, `virtual_file_system_tests.cpp`) that
-  exercise generic HOG/VFS lookup, not `.SO`-specific decoding.
-- This absence of native integration is a deliberate project stance, not a gap: `SO.md` states
-  explicitly that "the shipping reimplementation will never interpret, translate, recompile, or
-  dispatch retail `.SO` cells," and frames the format as "an offline research input, not a
-  runtime format." The offline parser is important research evidence, but it does not satisfy the
-  repository's native `canonical_decoder` definition and has no focused Python test. The coverage
-  label therefore remains `aggregate_scanner_only`; this does not diminish the separately recorded
-  corpus result.
-- Gap: unlike SKAS (E-0093) and the texture-storage debug adapter (E-0066), there is no dedicated
-  adversarial/boundary test suite or ledger entry for `tools/inspect_so.py` — the sole tracked
-  validation is one deterministic pass over the real corpus (E-0010). See Section 6.
+- `InspectSoModule` is a native, stateless, reentrant passive descriptor over the recovered grammar.
+  It owns only bounded structural summaries and never retains LP strings, code-cell values, or
+  opaque payload bytes. Its fixed 512 KiB input limit is a project-owned synthetic decoder safety
+  ceiling, not a wire-format or owner-corpus maximum; the maximum LP content accepted by default is
+  derived only from that policy ceiling and the minimum framing required around one literal.
+- The native descriptor deliberately does not become canonical script IR and is not linked into
+  startup, content loading, simulation, or `ScriptService`. The shipping reimplementation still
+  never interprets, translates, recompiles, dispatches, or executes retail `.SO` cells.
+- The independent Python inspector and E-0010 corpus result remain the aggregate grammar evidence.
+  The native implementation uses only generated fixtures in its public tests; a separate private,
+  metadata-only owner-corpus verification of native acceptance has not yet been run or claimed.
 
 ## 8. Codex work order
 

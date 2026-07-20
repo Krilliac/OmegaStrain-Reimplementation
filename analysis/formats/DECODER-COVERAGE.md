@@ -56,7 +56,7 @@ unless separately demonstrated, independent of the classification below.
 | `.ska` | passive descriptor only | `InspectSkaContainer` → `SkaContainerDescriptor` (`native/include/omega/retail/ska_container_descriptor.h`, `native/src/retail/ska_container_descriptor.cpp`) | `native/tests/ska_container_descriptor_tests.cpp` (`omega_core_tests`, `CMakeLists.txt:1402`) |
 | `.skl` | passive descriptor only | `InspectSklContainer` → `SklContainerDescriptor` (`native/include/omega/retail/skl_container_descriptor.h`, `native/src/retail/skl_container_descriptor.cpp`) | `native/tests/skl_container_descriptor_tests.cpp` (`omega_core_tests`, `CMakeLists.txt:1404`) |
 | `.skm` | passive descriptor only | `InspectSkmContainer` → `SkmContainerDescriptor` (`native/include/omega/retail/skm_container_descriptor.h`, `native/src/retail/skm_container_descriptor.cpp`) | `native/tests/skm_container_descriptor_tests.cpp` (`omega_core_tests`, `CMakeLists.txt:1403`) |
-| `.so` | aggregate scanner only | `tools/inspect_so.py` (custom little-endian VM-module structural grammar; output `analysis/formats/so-validation.json`); no native header under `native/include/omega/retail/` targets `.so` | none (Python-only; `tools/inspect_so.py` has no `tools/tests/test_inspect_so.py` found in this pass) |
+| `.so` | passive descriptor only | `InspectSoModule` -> `SoModuleDescriptor` validates the tracked little-endian structural grammar through exact EOF while retaining bounded section ranges, counts, and neutral record summaries but no code cells, strings, or payload bytes (`native/include/omega/retail/so_module_descriptor.h`, `native/src/retail/so_module_descriptor.cpp`) | `native/tests/so_module_descriptor_tests.cpp` (own executable `omega_so_module_descriptor_tests`, registered in `CMakeLists.txt`) |
 | `.gui` | aggregate scanner only | Raw suffix count in `asset-fingerprints.json` (`scan.extensions[".gui"]`) and in `hog-validation.json` (`entry_extensions[".gui"]`); `tools/measure_frontend_hog_topology.py` currently maps `.gui` → category `gui` in `APPROVED_EXTENSION_CATEGORIES` (schema_version 2, observed in the tracked file at read time) — this is a container-topology label, not a structural field schema | `tools/tests/test_measure_frontend_hog_topology.py` covers the topology label only, not a `.gui` payload schema |
 | `.fnt` | aggregate scanner only | Raw suffix count only, in both `asset-fingerprints.json` and `hog-validation.json`; `analysis/formats/FRONTEND-TOPOLOGY.md` explicitly documents it as deliberately left out of the approved vocabulary ("menu-adjacent-sounding suffixes such as `.fnt` and `.ie` deliberately remain in the `other` bucket") | none |
 | `.ie` | aggregate scanner only | Same as `.fnt` — raw count only, explicitly named as excluded in `FRONTEND-TOPOLOGY.md` | none |
@@ -75,17 +75,16 @@ unless separately demonstrated, independent of the classification below.
 | `.PF` (`.pf`) | unknown (hard-rule mandated) | Zero occurrences in either in-archive inventory; exactly 3 whole-disc occurrences in `analysis/manifests/disc-summary.json`, outside any HOG archive | none |
 | `.TM2` (`.tm2`) | unknown (hard-rule mandated) | Zero occurrences in either in-archive inventory; exactly 16 whole-disc occurrences in `analysis/manifests/disc-summary.json`, outside any HOG archive | none |
 
-Totals observed in this pass: **6 canonical decoder**, **4 structural envelope only**, **3 passive
-descriptor only**, **15 aggregate scanner only**, **3 unknown** — 31 families.
+Totals observed in this pass: **6 canonical decoder**, **4 structural envelope only**, **4 passive
+descriptor only**, **14 aggregate scanner only**, **3 unknown** — 31 families.
 
 ## 2. CMake / test registration cross-check
 
 Every native header listed above as canonical/envelope/descriptor has a matching `.cpp` under
-`native/src/retail/` (or `native/src/archive/`, `native/src/asset/`) listed in `CMakeLists.txt`'s
-source list (lines 40-41, 93-108), and a matching focused test file that is registered as either
-its own `add_executable`/`add_test` pair or a member of `omega_core_tests`
-(`CMakeLists.txt:1381-1409`). **No missing CMake registration was found** for any of the 13
-retail-format headers or `hog_archive`/`pop_terrain_index`/`container_descriptors`.
+`native/src/retail/` (or `native/src/archive/`, `native/src/asset/`) in `CMakeLists.txt`, plus a
+matching focused test registered either through its own executable/CTest pair or as part of
+`omega_core_tests`. **No missing CMake registration was found** for any of the 14 retail-format
+headers or `hog_archive`/`pop_terrain_index`/`container_descriptors`.
 
 ## 3. Mixed-layer families and mechanical inconsistencies (not fixed)
 

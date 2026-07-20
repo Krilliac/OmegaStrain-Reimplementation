@@ -25,6 +25,7 @@ EXPECTED_MATRIX = {
     ".ska": "passive_descriptor_only",
     ".skl": "passive_descriptor_only",
     ".skm": "passive_descriptor_only",
+    ".so": "passive_descriptor_only",
     ".bin": "aggregate_scanner_only",
     ".bnk": "aggregate_scanner_only",
     ".bon": "aggregate_scanner_only",
@@ -37,7 +38,6 @@ EXPECTED_MATRIX = {
     ".scc": "aggregate_scanner_only",
     ".skel": "aggregate_scanner_only",
     ".skf": "aggregate_scanner_only",
-    ".so": "aggregate_scanner_only",
     ".sub": "aggregate_scanner_only",
     ".txt": "aggregate_scanner_only",
     ".pf": "unknown",
@@ -67,8 +67,8 @@ EXPECTED_WHOLE_DISC = {
 EXPECTED_PARTITIONS = {
     "canonical_decoder": 6,
     "structural_envelope_only": 4,
-    "passive_descriptor_only": 3,
-    "aggregate_scanner_only": 15,
+    "passive_descriptor_only": 4,
+    "aggregate_scanner_only": 14,
     "unknown": 3,
     "whole_disc_disposition": 16,
 }

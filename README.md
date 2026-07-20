@@ -114,6 +114,13 @@ retail instruction blocks, or PS2 execution layer.
   values of the observed word and alignment imply no semantic relationship. No codec, ADPCM, rate,
   channels, audio or music role, seek table, streaming, playback, storage geometry, runtime wiring,
   or emulator semantics are assigned.
+- E-0098 adds a bounded passive SO module descriptor over the already tracked custom little-endian
+  grammar. It retains section ranges, counts, neutral record summaries, and structural regularity
+  results but no LP string, code-cell value, or opaque payload byte. Its 512 KiB input ceiling is a
+  synthetic decoder safety policy, not an owner-corpus or wire-format limit. The descriptor is
+  analysis-only and is never consumed by content, simulation, `ScriptService`, or the shipping
+  runtime; retail script cells are never interpreted, translated, recompiled, dispatched, or
+  executed.
 - E-0087 adds a diagnostic-only Indexed8 candidate projection over one strict canonical storage
   shape: one matching `Packed8` plane, one exact 256-entry palette, and exact index, palette, and
   output cardinality. Callers must explicitly choose identity versus bit-3/4 palette permutation,

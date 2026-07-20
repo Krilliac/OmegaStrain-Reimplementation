@@ -469,7 +469,10 @@ void RunSummaryBufferChecks()
               std::distance(moved.begin(), moved.end()) == 0 && destination == expected,
         "SO summary-buffer move assignment releases old storage and preserves equality");
 
-    destination = std::move(destination);
+    // Exercise the explicit self-move guard through an alias so GCC does not
+    // reject this intentional regression case under -Werror=self-move.
+    Buffer* const destination_alias = &destination;
+    destination = std::move(*destination_alias);
     Check(destination == expected && empty == Buffer{},
         "SO summary-buffer self move and empty equality remain safe");
 }
@@ -794,14 +797,15 @@ void RunLimitChecks()
     Check(kSoMaximumLpValueContentBytes == 524'251U &&
               DefaultSoDecodeLimits().maximum_string_bytes == kSoMaximumLpValueContentBytes &&
               InspectSoModule(fixed_ceiling).has_value(),
-        "SO default limits accept the format-derived maximum LP content at the input ceiling");
+        "SO default limits accept the policy-derived maximum LP content at the synthetic "
+        "input ceiling");
     limits = DefaultSoDecodeLimits();
     limits.maximum_string_bytes = kSoMaximumLpValueContentBytes - 1U;
     CheckError(InspectSoModule(fixed_ceiling, limits), DecodeErrorCode::LimitExceeded,
         "SO caller can tighten the fixed per-value content ceiling by one byte");
     limits.maximum_string_bytes = std::numeric_limits<std::uint32_t>::max();
     Check(InspectSoModule(fixed_ceiling, limits).has_value(),
-        "SO clamps a wider caller string budget to the unraiseable format ceiling");
+        "SO clamps a wider caller string budget to the unraiseable decoder safety ceiling");
     fixed_ceiling.push_back(std::byte{0});
     CheckError(InspectSoModule(fixed_ceiling, limits), DecodeErrorCode::LimitExceeded,
         "SO rejects one byte above the fixed input ceiling before parsing");

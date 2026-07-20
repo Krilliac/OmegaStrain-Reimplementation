@@ -109,16 +109,18 @@ class SoOwnedSummaryBuffer
     Summary empty_sentinel_{};
 };
 
+// Project-owned synthetic decoder safety ceiling. It is neither an owner-corpus maximum nor a
+// limit encoded by the wire format.
 inline constexpr std::uint64_t kSoMaximumModuleBytes = 1ULL << 19U;
 // A complete module containing one literal still needs 37 bytes for the two-word code header, the
 // literal/table counts, its length word and NUL, and the remaining empty table headers. The aligned
-// exact-ceiling fixture therefore proves this is the largest possible LP-value content in a
-// kSoMaximumModuleBytes input, independent of any owner corpus observation.
+// exact-ceiling fixture therefore proves this is the largest LP-value content admitted by the
+// synthetic kSoMaximumModuleBytes policy, not by the wire format's u32 length field.
 inline constexpr std::uint32_t kSoMaximumLpValueContentBytes =
     static_cast<std::uint32_t>(kSoMaximumModuleBytes - 37U);
 
 // Preserve the shared defaults but widen this decoder's default per-value budget to its fixed,
-// format-derived ceiling. Explicit caller limits may tighten it; InspectSoModule always clamps a
+// policy-derived ceiling. Explicit caller limits may tighten it; InspectSoModule always clamps a
 // larger caller value back to kSoMaximumLpValueContentBytes.
 [[nodiscard]] constexpr asset::DecodeLimits DefaultSoDecodeLimits() noexcept
 {
@@ -269,9 +271,9 @@ struct SoModuleDescriptor
 // bytes only, excluding the serialized NUL and alignment padding. maximum_items charges the module
 // root, every code cell and literal, every top-level type/enum/global/callable record, and every
 // nested member/value/initializer/parameter cell. The flat inspector uses no dynamic scratch and no
-// nesting edges. Fixed format ceilings cannot be raised; caller limits can only tighten them. This
-// is NOT a runtime, interpreter, recompiler, or dispatcher and never executes, translates, emulates,
-// or assigns opcode meaning to a code cell.
+// nesting edges. Fixed decoder safety ceilings cannot be raised; caller limits can only tighten
+// them. This is NOT a runtime, interpreter, recompiler, or dispatcher and never executes,
+// translates, emulates, or assigns opcode meaning to a code cell.
 [[nodiscard]] SoDecodeResult<SoModuleDescriptor> InspectSoModule(std::span<const std::byte> bytes,
     asset::DecodeLimits limits = DefaultSoDecodeLimits());
 } // namespace omega::retail
