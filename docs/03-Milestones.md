@@ -1098,11 +1098,15 @@ never creates or selects a default profile. `OmegaApp` owns the database/catalog
 `NativePersistence`; `--probe-only` does not touch persistence and `--frames=0` returns after
 bootstrap. The bounded standard PS2 memory-card container/filesystem codec is also implemented.
 E-0089 adds a bounded project-generated Main/Profiles/Controls/AssetTopology shell that snapshots
-existing profile summaries once, displays at most three fixed labels, and performs no profile
-creation or selection. Only its DiagnosticPlay state advances simulation. Active-profile policy,
-profile mutation UI, campaign schemas, and the independently evidenced Omega Strain payload mapping
-remain in progress. No PS2 memory-card device or emulator savestate is part of the shipping-runtime
-design, and the synthetic shell is not a retail-fidelity claim.
+existing profile summaries once and displays at most three fixed labels. E-0095 extends that shell
+with explicit, session-only active-profile selection: the startup snapshot copies the matching
+fixed-size IDs, the pure reducer emits a typed first/second/third-slot command, and `OmegaApp`
+resolves and owns the selected ID on its game thread. Selection never mutates the profile catalog,
+writes the database, or creates/selects an implicit default. Only DiagnosticPlay advances
+simulation. Persistent active-profile policy, profile mutation UI, campaign schemas, and the
+independently evidenced Omega Strain payload mapping remain in progress. No PS2 memory-card device
+or emulator savestate is part of the shipping-runtime design, and the synthetic shell is not a
+retail-fidelity claim.
 
 E-0086 also supplies a synthetic-verified, analysis-only front-end HOG topology scanner. Its
 path-free fixed schema can measure recursive container depth, approved public format/category

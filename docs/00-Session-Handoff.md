@@ -1323,6 +1323,42 @@ shipping dependencies or execution mechanisms.
     tree built with zero warnings or errors, and full Debug CTest passed 40/40. Rebase, one signed
     commit, and DCO are complete; publication, owner-corpus validation, runtime integration, and
     exact-main validation remain deliberately unclaimed.
+78. E-0095 adds explicit session-only active-profile selection to the synthetic native Profiles
+    screen without moving persistence ownership. `NativePersistence` remains the sole
+    `SaveDatabase`, `ProfileCatalog`, and sorted-summary owner. Before SDL startup,
+    `MakeFrontEndStartupModel` copies the first three displayed fixed labels and their immutable
+    `ProfileId` values into one owned fixed model. The pure `ReduceFrontEnd` function consumes only
+    state, logical press edges, and a bounded visible-slot count, then returns owned state plus a
+    typed First/Second/Third `SetActiveProfile` command. Previous/next clamp within displayed slots;
+    primary wins over simultaneous navigation and publishes the pre-navigation slot. Empty-profile
+    or stale out-of-range selection publishes no command, empty navigation is inert, and primary
+    retains the established return-to-Main transition. `OmegaApp` revalidates a command against the
+    immutable model on its game thread and copies the ID into an optional app-session value. It
+    performs no catalog or
+    database read/write, creates no profile or default, and defines no persistent active-profile
+    policy. The one Profiles texture, one base list, and three marker lists are all built at startup;
+    frame-time state only selects fixed draw data and performs no enumeration, allocation,
+    rasterization, upload, or I/O. Teardown clears the marker lists before releasing their existing
+    texture. Capture bytes remain unchanged: production supplies replay the same bounded startup
+    count, replay derives and publishes the same typed command from captured input, and terminal
+    frames complete before reduction and cannot select a profile. Synthetic tests cover copied-ID
+    lifetime, invalid states and slots, counts zero through
+    three plus adversarial counts, every edge combination, primary priority, exact marker lists,
+    app-thread selection, unchanged catalog population, capture/replay parity, and terminal
+    precedence. The exhaustive reducer checks cover 3,145,728 mode/row/count/edge combinations and
+    245,760 valid-mode/row plus byte-slot/count/edge combinations. On exact `main` commit
+    `d4be840837e08fe701be914cefd1c6e367d542e1`, the `openomega` executable and three focused MSVC
+    Debug test targets built with zero warnings or errors. Focused CTest passed 2/2, the direct
+    SDL/GPU app smoke passed with dummy audio, and the manual capture/replay CLI smoke passed. The
+    two changed Profiles rasters were independently rechecked from exact 36,864-byte RGBA dumps
+    using a separate Python FNV-1a implementation, SHA-256, and four-color histograms; the temporary
+    dumps and test instrumentation were removed. Static validation passed the 211-file
+    native-dependency gate, all 249 tooling tests,
+    Python compile-all, diff checks, and the public-tree gate over 318 indexed text blobs. No
+    private or owner data, D-drive content, proprietary
+    input, disc image, executable, save, memory-card image, savestate, emulator, PCSX2 runtime, or
+    network input was accessed. No full integration build, Release build, commit, push, or
+    retail-fidelity validation is claimed.
 
 ## Disc observations
 
@@ -1344,11 +1380,12 @@ shipping dependencies or execution mechanisms.
 
 ## Next focused pass
 
-1. Compose the native save database into `OmegaApp` under the existing captured per-user root,
-   define a typed project-owned profile repository, and drive profile enumeration from the native
-   main menu. Preserve process/package isolation by redirecting persistence in tests. Build the
-   separately evidenced Omega Strain payload mapper over the now-bounded standard card codecs; never
-   make a PS2 memory-card device, guest RAM, or emulator savestate part of the shipping runtime.
+1. Define the next profile-owned campaign/checkpoint schema only from independently corroborated
+   evidence, and decide any persistent active-profile policy separately from E-0095's session-only
+   selection. Preserve process/package isolation by redirecting persistence in tests. Build the
+   separately evidenced Omega Strain payload mapper over the now-bounded standard card codecs;
+   never make a PS2 memory-card device, guest RAM, or emulator savestate part of the shipping
+   runtime.
 2. Use the accepted deterministic VUM trace only as a structural baseline. Collect additional
    bounded pairs through controlled comparisons that change one research condition at a time,
    require strict validation and byte-identical repeats, and compare only sanitized relative

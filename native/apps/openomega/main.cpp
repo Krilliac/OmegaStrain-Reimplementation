@@ -253,7 +253,8 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     omega::app::RunCaptureOutcome&& outcome,
     const omega::app::RunResult capture_result,
     const omega::runtime::FrameSchedulerState capture_before,
-    const omega::runtime::FrameSchedulerState capture_after)
+    const omega::runtime::FrameSchedulerState capture_after,
+    const std::uint8_t front_end_visible_profile_slots)
 {
     auto traces = std::move(outcome).TakeTracePair();
     if (!traces)
@@ -273,6 +274,7 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     config.enable_debug_locomotion = std::ranges::includes(
         traces->input_trace().actions(), debug_locomotion_actions);
     config.initial_front_end_state = omega::app::InitialFrontEndState();
+    config.front_end_visible_profile_slots = front_end_visible_profile_slots;
     auto created = omega::app::RunReplaySession::Create(std::move(*traces), config);
     if (!created)
     {
@@ -476,8 +478,10 @@ int main(const int argc, char** argv)
         PrintNativePersistenceError(native_persistence.error());
         return EXIT_FAILURE;
     }
-    std::cout << "OpenOmega native persistence: profiles="
-              << native_persistence->startup_profiles().size() << '\n';
+    const std::size_t startup_profile_count = native_persistence->startup_profiles().size();
+    const std::uint8_t front_end_visible_profile_slots = static_cast<std::uint8_t>(
+        std::min(startup_profile_count, omega::app::kFrontEndVisibleProfiles));
+    std::cout << "OpenOmega native persistence: profiles=" << startup_profile_count << '\n';
 
     if (options->frame_limit == 0)
     {
@@ -548,7 +552,7 @@ int main(const int argc, char** argv)
             return EXIT_FAILURE;
         }
         if (!ReplayFreshCapture(std::move(*capture), capture_result,
-                capture_before, capture_after))
+                capture_before, capture_after, front_end_visible_profile_slots))
         {
             return EXIT_FAILURE;
         }

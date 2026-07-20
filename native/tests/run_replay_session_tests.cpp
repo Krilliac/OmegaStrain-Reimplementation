@@ -70,6 +70,9 @@ using std::chrono::milliseconds;
 using std::chrono::nanoseconds;
 using omega::app::FrontEndMode;
 using omega::app::FrontEndMainRow;
+using omega::app::FrontEndCommand;
+using omega::app::FrontEndCommandType;
+using omega::app::FrontEndProfileSlot;
 using omega::app::FrontEndState;
 using omega::app::RunReplayError;
 using omega::app::RunReplayErrorCode;
@@ -408,6 +411,7 @@ void CheckContractAndTaxonomy()
     static_assert(noexcept(
         std::declval<const RunReplayFrame&>().terminal_input()));
     static_assert(noexcept(std::declval<const RunReplayFrame&>().frame_plan()));
+    static_assert(noexcept(std::declval<const RunReplayFrame&>().front_end_command()));
 
     using CreateResult = decltype(RunReplaySession::Create(
         std::declval<RunCaptureTracePair&&>(), RunReplaySessionConfig{}));
@@ -436,6 +440,7 @@ void CheckContractAndTaxonomy()
     static_assert(default_config.maximum_entities == 65'536U);
     static_assert(!default_config.enable_debug_locomotion);
     static_assert(!default_config.initial_front_end_state);
+    static_assert(default_config.front_end_visible_profile_slots == 0U);
     static_assert(static_cast<int>(
                       RunReplayErrorCode::SimulationRepresentationExhausted) == 7);
     static_assert(static_cast<int>(
@@ -1049,9 +1054,11 @@ void CheckFrontEndModalGate()
         FrontEndState{.mode = FrontEndMode::Profiles,
             .selected_main_row = FrontEndMainRow::Profiles},
         FrontEndState{.mode = FrontEndMode::Profiles,
-            .selected_main_row = FrontEndMainRow::Profiles},
+            .selected_main_row = FrontEndMainRow::Profiles,
+            .selected_profile_slot = FrontEndProfileSlot::Second},
         FrontEndState{.mode = FrontEndMode::Profiles,
-            .selected_main_row = FrontEndMainRow::Profiles},
+            .selected_main_row = FrontEndMainRow::Profiles,
+            .selected_profile_slot = FrontEndProfileSlot::Second},
         FrontEndState{.mode = FrontEndMode::Main,
             .selected_main_row = FrontEndMainRow::Profiles},
         FrontEndState{.mode = FrontEndMode::Main,
@@ -1072,6 +1079,7 @@ void CheckFrontEndModalGate()
     modal_config.enable_debug_locomotion = true;
     modal_config.initial_front_end_state =
         omega::app::InitialFrontEndState();
+    modal_config.front_end_visible_profile_slots = 3U;
     auto modal_created = RunReplaySession::Create(std::move(modal_pair), modal_config);
     RunReplaySession modal =
         TakeSession(modal_created, "the main-menu modal replay is created");
@@ -1093,6 +1101,13 @@ void CheckFrontEndModalGate()
                   plan->interpolation_alpha == 0.0 && !plan->clamped_delta &&
                   !plan->dropped_time &&
                   modal.front_end_state() == expected_modal_states[index] &&
+                  frame->front_end_command() ==
+                      (index == 7U
+                           ? FrontEndCommand{
+                                 .type = FrontEndCommandType::SetActiveProfile,
+                                 .profile_slot = FrontEndProfileSlot::Second,
+                             }
+                           : FrontEndCommand{}) &&
                   modal.scheduler_state() == modal_scheduler_origin &&
                   SameSimulation(modal.simulation_state(), modal_world_origin) &&
                   modal.debug_locomotion_position() == modal_position_origin,
@@ -1328,9 +1343,11 @@ void CheckFrontEndModalGate()
     RunReplaySessionConfig terminal_config = ValidConfig();
     terminal_config.enable_debug_locomotion = true;
     terminal_config.initial_front_end_state = FrontEndState{
-        .mode = FrontEndMode::AssetTopology,
-        .selected_main_row = FrontEndMainRow::AssetTopology,
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::Second,
     };
+    terminal_config.front_end_visible_profile_slots = 3U;
     auto terminal_created =
         RunReplaySession::Create(std::move(terminal_pair), terminal_config);
     RunReplaySession terminal =
@@ -1343,6 +1360,7 @@ void CheckFrontEndModalGate()
     Check(terminal_frame && terminal_frame->terminal_input() &&
               terminal_frame->input().WasPressed(
                   omega::app::kFrontEndPrimaryAction) &&
+              terminal_frame->front_end_command() == FrontEndCommand{} &&
               !terminal_frame->elapsed() && !terminal_frame->frame_plan() &&
               terminal.front_end_state() == terminal_menu_before &&
               terminal.scheduler_state() == terminal_scheduler_before &&
@@ -1350,7 +1368,7 @@ void CheckFrontEndModalGate()
               terminal.debug_locomotion_position() == terminal_position_before &&
               terminal.state() == RunReplaySessionState::Complete &&
               terminal.remaining_frames() == 0U,
-        "terminal resolution precedes the reducer and cannot return from the asset-topology state or mutate any simulation owner");
+        "terminal resolution precedes the reducer and cannot select the highlighted profile or mutate any simulation owner");
 }
 
 void CheckMoveLifecycle()

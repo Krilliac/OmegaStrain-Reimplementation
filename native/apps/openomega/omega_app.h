@@ -65,6 +65,9 @@ public:
     [[nodiscard]] std::string_view audio_driver_name() const noexcept;
     [[nodiscard]] int audio_sample_rate() const noexcept;
     [[nodiscard]] int audio_channel_count() const noexcept;
+    // [game/main thread; no concurrent use] Owned session value selected from
+    // the immutable startup model. Null means no explicit selection has occurred.
+    [[nodiscard]] std::optional<profiles::ProfileId> active_profile_id() const noexcept;
 
 private:
     friend struct detail::OmegaAppTestAccess;
@@ -88,6 +91,9 @@ private:
 
     [[nodiscard]] RunLoopResult RunLoop(
         int frame_limit, runtime::RunCaptureSession* capture_session);
+    // [game/main thread; no concurrent use] Resolves only bounded startup slots
+    // and copies their immutable ID. It performs no catalog or database access.
+    void ApplyFrontEndCommand(FrontEndCommand command) noexcept;
     [[nodiscard]] const runtime::RenderDrawList& CurrentFrontEndDrawList() const noexcept;
 
     OmegaApp(std::unique_ptr<NativePersistence> native_persistence,
@@ -116,6 +122,8 @@ private:
         std::array<runtime::RenderDrawList, kFrontEndMainRowCount>
             front_end_main_draw_lists,
         runtime::RenderDrawList front_end_profiles_draw_list,
+        std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>
+            front_end_profile_selection_draw_lists,
         runtime::RenderDrawList diagnostic_controls_draw_list,
         runtime::RenderDrawList diagnostic_asset_topology_draw_list,
         runtime::ContentStartupStage content_stage,
@@ -152,6 +160,8 @@ private:
     std::array<runtime::RenderDrawList, kFrontEndMainRowCount>
         front_end_main_draw_lists_;
     runtime::RenderDrawList front_end_profiles_draw_list_;
+    std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>
+        front_end_profile_selection_draw_lists_;
     runtime::RenderDrawList diagnostic_controls_draw_list_;
     runtime::RenderDrawList diagnostic_asset_topology_draw_list_;
     // Immutable bounded snapshot and content classification captured before SDL startup.
@@ -159,5 +169,8 @@ private:
     FrontEndStartupModel front_end_startup_model_{};
     // Project-owned app-layer state. It has no renderer, database, or retail-data lifetime.
     FrontEndState front_end_state_;
+    // Explicit session policy only. This owned value is never persisted and no
+    // profile is selected implicitly at startup.
+    std::optional<profiles::ProfileId> active_profile_id_;
 };
 } // namespace omega::app

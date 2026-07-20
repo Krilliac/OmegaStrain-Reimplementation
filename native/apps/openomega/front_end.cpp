@@ -377,7 +377,12 @@ std::expected<FrontEndStartupModel, FrontEndModelError> MakeFrontEndStartupModel
             static_cast<std::uint8_t>(std::min<std::size_t>(summaries.size(), kFrontEndVisibleProfiles)),
     };
     for (std::size_t index = 0U; index < model.visible_profiles; ++index)
-        model.profiles[index] = ProjectLabel(summaries[index].metadata.display_name);
+    {
+        model.profiles[index] = FrontEndProfile{
+            .id = summaries[index].id,
+            .label = ProjectLabel(summaries[index].metadata.display_name),
+        };
+    }
     return model;
 }
 
@@ -434,23 +439,27 @@ runtime::DebugImage BuildProjectFrontEndProfilesImage(const FrontEndStartupModel
         const std::size_t visible = std::min<std::size_t>(profiles.visible_profiles, kFrontEndVisibleProfiles);
         for (std::size_t index = 0U; index < visible; ++index)
         {
-            DrawLabel(image, profiles.profiles[index], 16U, label_rows[index]);
-            if (profiles.profiles[index].truncated)
+            DrawLabel(image, profiles.profiles[index].label, 16U, label_rows[index]);
+            if (profiles.profiles[index].label.truncated)
                 DrawLabel(image, ">", 113U, label_rows[index]);
         }
     }
 
     FillRectangle(image, 8U, 59U, 120U, 68U, kSlateColor);
-    if (profiles.total_profiles > profiles.visible_profiles)
+    if (profiles.visible_profiles == 0U || profiles.total_profiles == 0U)
+    {
+        DrawLabel(image, "F1/ENTER RETURN", 12U, 61U);
+    }
+    else if (profiles.total_profiles > profiles.visible_profiles)
     {
         DrawLabel(image, "+", 12U, 61U);
         DrawUnsigned(image, static_cast<std::uint16_t>(profiles.total_profiles - profiles.visible_profiles), 16U, 61U);
         DrawLabel(image, " MORE", 32U, 61U);
-        DrawLabel(image, "RETURN", 88U, 61U);
+        DrawLabel(image, "SELECT", 88U, 61U);
     }
     else
     {
-        DrawLabel(image, "F1/ENTER RETURN", 12U, 61U);
+        DrawLabel(image, "F1/ENTER SELECT", 12U, 61U);
     }
     return image;
 }

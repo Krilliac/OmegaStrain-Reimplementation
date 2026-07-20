@@ -17,10 +17,14 @@
 namespace
 {
 using omega::app::FrontEndInputEdges;
+using omega::app::FrontEndCommand;
+using omega::app::FrontEndCommandType;
 using omega::app::FrontEndLabel;
 using omega::app::FrontEndMainRow;
 using omega::app::FrontEndMode;
 using omega::app::FrontEndModelError;
+using omega::app::FrontEndProfileSlot;
+using omega::app::FrontEndReduction;
 using omega::app::FrontEndStartupModel;
 using omega::app::FrontEndState;
 using omega::profiles::ProfileId;
@@ -80,20 +84,48 @@ void Check(const bool condition, const std::string_view message)
 
 // Independent table-style oracle. It deliberately does not call a production
 // validity helper or use production navigation arithmetic.
-[[nodiscard]] constexpr FrontEndState ReferenceUpdate(FrontEndState state, const FrontEndInputEdges input) noexcept
+[[nodiscard]] constexpr FrontEndReduction ReferenceReduce(
+    FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots) noexcept
 {
     const auto mode_byte = static_cast<std::uint8_t>(state.mode);
     const auto row_byte = static_cast<std::uint8_t>(state.selected_main_row);
-    if (mode_byte > 4U || row_byte > 3U)
+    const auto profile_slot_byte = static_cast<std::uint8_t>(state.selected_profile_slot);
+    if (mode_byte > 4U || row_byte > 3U || profile_slot_byte > 2U)
     {
-        return FrontEndState{
-            .mode = FrontEndMode::Main,
-            .selected_main_row = FrontEndMainRow::StartDiagnostic,
-        };
+        return FrontEndReduction{.state = omega::app::InitialFrontEndState()};
     }
+
+    const std::uint8_t selectable_profiles = visible_profile_slots > 3U ? 3U : visible_profile_slots;
+    const bool profile_slot_is_selectable =
+        state.mode != FrontEndMode::Profiles || profile_slot_byte < selectable_profiles;
+    if (!profile_slot_is_selectable)
+        state.selected_profile_slot = FrontEndProfileSlot::First;
 
     if (input.primary_pressed)
     {
+        if (state.mode == FrontEndMode::Profiles)
+        {
+            if (!profile_slot_is_selectable)
+            {
+                return FrontEndReduction{.state = FrontEndState{
+                                             .mode = FrontEndMode::Main,
+                                             .selected_main_row = FrontEndMainRow::Profiles,
+                                             .selected_profile_slot = FrontEndProfileSlot::First,
+                                         }};
+            }
+            return FrontEndReduction{
+                .state = FrontEndState{
+                    .mode = FrontEndMode::Main,
+                    .selected_main_row = FrontEndMainRow::Profiles,
+                    .selected_profile_slot = FrontEndProfileSlot::First,
+                },
+                .command = FrontEndCommand{
+                    .type = FrontEndCommandType::SetActiveProfile,
+                    .profile_slot = state.selected_profile_slot,
+                },
+            };
+        }
+
         constexpr std::array entered_modes{
             FrontEndMode::DiagnosticPlay,
             FrontEndMode::Profiles,
@@ -101,7 +133,10 @@ void Check(const bool condition, const std::string_view message)
             FrontEndMode::AssetTopology,
         };
         if (state.mode == FrontEndMode::Main)
+        {
             state.mode = entered_modes[row_byte];
+            state.selected_profile_slot = FrontEndProfileSlot::First;
+        }
         else
         {
             constexpr std::array returned_rows{
@@ -113,14 +148,41 @@ void Check(const bool condition, const std::string_view message)
             };
             state.mode = FrontEndMode::Main;
             state.selected_main_row = returned_rows[mode_byte];
+            state.selected_profile_slot = FrontEndProfileSlot::First;
         }
-        return state;
+        return FrontEndReduction{.state = state};
     }
 
-    if (state.mode != FrontEndMode::Main || input.previous_pressed == input.next_pressed)
+    if (input.previous_pressed == input.next_pressed)
     {
-        return state;
+        return FrontEndReduction{.state = state};
     }
+
+    if (state.mode == FrontEndMode::Profiles)
+    {
+        if (selectable_profiles == 0U)
+            return FrontEndReduction{.state = state};
+        constexpr std::array previous_slots{
+            FrontEndProfileSlot::First,
+            FrontEndProfileSlot::First,
+            FrontEndProfileSlot::Second,
+        };
+        constexpr std::array next_slots{
+            FrontEndProfileSlot::Second,
+            FrontEndProfileSlot::Third,
+            FrontEndProfileSlot::Third,
+        };
+        const std::size_t slot = static_cast<std::size_t>(state.selected_profile_slot);
+        if (input.previous_pressed)
+            state.selected_profile_slot = previous_slots[slot];
+        else if (slot + 1U < selectable_profiles)
+            state.selected_profile_slot = next_slots[slot];
+        return FrontEndReduction{.state = state};
+    }
+
+    if (state.mode != FrontEndMode::Main)
+        return FrontEndReduction{.state = state};
+
     if (input.previous_pressed)
     {
         constexpr std::array previous_rows{
@@ -141,7 +203,7 @@ void Check(const bool condition, const std::string_view message)
         };
         state.selected_main_row = next_rows[row_byte];
     }
-    return state;
+    return FrontEndReduction{.state = state};
 }
 
 [[nodiscard]] std::uint64_t Fnv1a64(const std::span<const std::byte> bytes) noexcept
@@ -217,9 +279,13 @@ void CheckModelContract()
     };
     const auto projected = omega::app::MakeFrontEndStartupModel(summaries);
     Check(projected && projected->total_profiles == 4U && projected->visible_profiles == 3U &&
-              LabelText(projected->profiles[0]) == "ALPHA Z9-._/?" && LabelText(projected->profiles[1]) == "JOS? ?" &&
-              LabelText(projected->profiles[2]) == "ABCDEFGHIJKLMNOPQRSTUVWX" && !projected->profiles[0].truncated &&
-              !projected->profiles[1].truncated && !projected->profiles[2].truncated &&
+              projected->profiles[0].id == summaries[0].id && projected->profiles[1].id == summaries[1].id &&
+              projected->profiles[2].id == summaries[2].id &&
+              LabelText(projected->profiles[0].label) == "ALPHA Z9-._/?" &&
+              LabelText(projected->profiles[1].label) == "JOS? ?" &&
+              LabelText(projected->profiles[2].label) == "ABCDEFGHIJKLMNOPQRSTUVWX" &&
+              !projected->profiles[0].label.truncated && !projected->profiles[1].label.truncated &&
+              !projected->profiles[2].label.truncated &&
               summaries[0].metadata.display_name == original_names[0] &&
               summaries[1].metadata.display_name == original_names[1] &&
               summaries[2].metadata.display_name == original_names[2] &&
@@ -231,10 +297,13 @@ void CheckModelContract()
         const FrontEndStartupModel owned = *projected;
         summaries[0].metadata.display_name.assign("MUTATED");
         summaries.clear();
-        Check(LabelText(owned.profiles[0]) == "ALPHA Z9-._/?" && owned.total_profiles == 4U &&
-                  owned.visible_profiles == 3U,
-              "the startup model owns fixed cells after source strings and "
-              "summaries are destroyed");
+        Check(LabelText(owned.profiles[0].label) == "ALPHA Z9-._/?" &&
+                  owned.profiles[0].id == ProfileId::FromBytes(
+                                               {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+                                                0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U}) &&
+                  owned.total_profiles == 4U && owned.visible_profiles == 3U,
+              "the startup model owns fixed IDs and cells after source strings "
+              "and summaries are destroyed");
     }
 
     std::vector<ProfileSummary> malformed;
@@ -244,19 +313,20 @@ void CheckModelContract()
     malformed.push_back(Summary(3U, std::string{"D"} + "\xe2" + "X"));
     const auto malformed_result = omega::app::MakeFrontEndStartupModel(malformed);
     Check(malformed_result &&
-              LabelText(malformed_result->profiles[0]) == "A?B" &&
-              LabelText(malformed_result->profiles[1]) == "C??" &&
-              LabelText(malformed_result->profiles[2]) == "D?X" &&
-              !malformed_result->profiles[0].truncated &&
-              !malformed_result->profiles[1].truncated &&
-              !malformed_result->profiles[2].truncated,
+              LabelText(malformed_result->profiles[0].label) == "A?B" &&
+              LabelText(malformed_result->profiles[1].label) == "C??" &&
+              LabelText(malformed_result->profiles[2].label) == "D?X" &&
+              !malformed_result->profiles[0].label.truncated &&
+              !malformed_result->profiles[1].label.truncated &&
+              !malformed_result->profiles[2].label.truncated,
         "standalone continuation, incomplete scalar, and invalid continuation sequences fail closed one consumed byte at a time");
 
     std::vector<ProfileSummary> truncation;
     truncation.push_back(Summary(1U, "ABCDEFGHIJKLMNOPQRSTUVWXY"));
     const auto truncated = omega::app::MakeFrontEndStartupModel(truncation);
-    Check(truncated && truncated->profiles[0].length == 24U &&
-              LabelText(truncated->profiles[0]) == "ABCDEFGHIJKLMNOPQRSTUVWX" && truncated->profiles[0].truncated,
+    Check(truncated && truncated->profiles[0].label.length == 24U &&
+              LabelText(truncated->profiles[0].label) == "ABCDEFGHIJKLMNOPQRSTUVWX" &&
+              truncated->profiles[0].label.truncated,
           "a 25-scalar name truncates to 24 complete fixed cells and marks the "
           "projection");
 
@@ -292,7 +362,7 @@ void CheckReducerAndViewContract()
     static_assert(omega::app::kFrontEndPreviousAction == 2U);
     static_assert(omega::app::kFrontEndNextAction == 3U);
     static_assert(omega::app::kFrontEndMainRowCount == 4U);
-    static_assert(noexcept(omega::app::UpdateFrontEnd({}, {})));
+    static_assert(noexcept(omega::app::ReduceFrontEnd({}, {}, 0U)));
     static_assert(noexcept(omega::app::FrontEndAllowsSimulation({})));
     static_assert(noexcept(omega::app::BuildFrontEndView(
         std::declval<FrontEndState>(), ContentStartupStage::NoContent,
@@ -302,17 +372,20 @@ void CheckReducerAndViewContract()
                   FrontEndState{
                       .mode = FrontEndMode::Main,
                       .selected_main_row = FrontEndMainRow::StartDiagnostic,
+                      .selected_profile_slot = FrontEndProfileSlot::First,
                   } &&
               FrontEndState{} ==
                   FrontEndState{
                       .mode = FrontEndMode::DiagnosticPlay,
                       .selected_main_row = FrontEndMainRow::StartDiagnostic,
+                      .selected_profile_slot = FrontEndProfileSlot::First,
                   },
           "explicit startup opens Main while the default remains legacy "
           "DiagnosticPlay");
 
     bool exhaustive_matches = true;
     bool exhaustive_gate_matches = true;
+    constexpr std::array<std::uint8_t, 6U> profile_counts{0U, 1U, 2U, 3U, 4U, 0xffU};
     for (std::uint32_t mode = 0U; mode <= 0xffU; ++mode)
     {
         for (std::uint32_t row = 0U; row <= 0xffU; ++row)
@@ -324,24 +397,130 @@ void CheckReducerAndViewContract()
             const bool oracle_allows = mode == 2U && row <= 3U;
             exhaustive_gate_matches =
                 exhaustive_gate_matches && omega::app::FrontEndAllowsSimulation(state) == oracle_allows;
-            for (std::uint8_t mask = 0U; mask < 8U; ++mask)
+            for (const std::uint8_t profile_count : profile_counts)
             {
-                exhaustive_matches = exhaustive_matches && omega::app::UpdateFrontEnd(state, InputFromMask(mask)) ==
-                                                               ReferenceUpdate(state, InputFromMask(mask));
+                for (std::uint8_t mask = 0U; mask < 8U; ++mask)
+                {
+                    exhaustive_matches = exhaustive_matches &&
+                                         omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count) ==
+                                             ReferenceReduce(state, InputFromMask(mask), profile_count);
+                }
             }
         }
     }
-    Check(exhaustive_matches, "all 524288 state/edge combinations match the "
-                              "independent reducer oracle");
+    Check(exhaustive_matches, "all 3145728 mode/row/count/edge combinations match "
+                              "the independent reducer oracle");
     Check(exhaustive_gate_matches, "all 65536 byte-representable states allow "
                                    "simulation only in valid DiagnosticPlay");
+
+    bool exhaustive_slot_matches = true;
+    bool exhaustive_slot_gate_matches = true;
+    for (std::uint32_t mode = 0U; mode <= 4U; ++mode)
+    {
+        for (std::uint32_t row = 0U; row <= 3U; ++row)
+        {
+            for (std::uint32_t profile_slot = 0U; profile_slot <= 0xffU; ++profile_slot)
+            {
+                const FrontEndState state{
+                    .mode = static_cast<FrontEndMode>(mode),
+                    .selected_main_row = static_cast<FrontEndMainRow>(row),
+                    .selected_profile_slot = static_cast<FrontEndProfileSlot>(profile_slot),
+                };
+                const bool oracle_allows = mode == 2U && profile_slot <= 2U;
+                exhaustive_slot_gate_matches = exhaustive_slot_gate_matches &&
+                                               omega::app::FrontEndAllowsSimulation(state) == oracle_allows;
+                for (const std::uint8_t profile_count : profile_counts)
+                {
+                    for (std::uint8_t mask = 0U; mask < 8U; ++mask)
+                    {
+                        exhaustive_slot_matches = exhaustive_slot_matches &&
+                                                  omega::app::ReduceFrontEnd(
+                                                      state, InputFromMask(mask), profile_count) ==
+                                                      ReferenceReduce(state, InputFromMask(mask), profile_count);
+                    }
+                }
+            }
+        }
+    }
+    Check(exhaustive_slot_matches,
+          "all 245760 valid-mode/row and byte-slot/count/edge combinations match the independent oracle");
+    Check(exhaustive_slot_gate_matches,
+          "every byte-representable profile slot gates simulation only when the complete state is valid");
+
+    const FrontEndState profiles_second{
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::Second,
+    };
+    Check(omega::app::ReduceFrontEnd(
+              profiles_second,
+              FrontEndInputEdges{.primary_pressed = true, .previous_pressed = true, .next_pressed = true}, 3U) ==
+              FrontEndReduction{
+                  .state = FrontEndState{
+                      .mode = FrontEndMode::Main,
+                      .selected_main_row = FrontEndMainRow::Profiles,
+                      .selected_profile_slot = FrontEndProfileSlot::First,
+                  },
+                  .command = FrontEndCommand{
+                      .type = FrontEndCommandType::SetActiveProfile,
+                      .profile_slot = FrontEndProfileSlot::Second,
+                  },
+              },
+          "profile activation has priority over simultaneous navigation and publishes the pre-navigation slot");
+
+    bool empty_is_fail_closed = true;
+    const FrontEndState empty_profiles{
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+    for (std::uint8_t mask = 0U; mask < 8U; ++mask)
+    {
+        const FrontEndReduction reduced =
+            omega::app::ReduceFrontEnd(empty_profiles, InputFromMask(mask), 0U);
+        const FrontEndState expected_state = (mask & 1U) != 0U
+                                                 ? FrontEndState{
+                                                       .mode = FrontEndMode::Main,
+                                                       .selected_main_row = FrontEndMainRow::Profiles,
+                                                       .selected_profile_slot = FrontEndProfileSlot::First,
+                                                   }
+                                                 : empty_profiles;
+        empty_is_fail_closed = empty_is_fail_closed && reduced.state == expected_state &&
+                               reduced.command == FrontEndCommand{};
+    }
+    Check(empty_is_fail_closed,
+          "all empty-profile action combinations publish no command; navigation is inert and primary only returns");
+
+    Check(omega::app::ReduceFrontEnd(
+              FrontEndState{
+                  .mode = FrontEndMode::Profiles,
+                  .selected_main_row = FrontEndMainRow::Profiles,
+                  .selected_profile_slot = FrontEndProfileSlot::Third,
+              },
+              FrontEndInputEdges{.next_pressed = true}, 0xffU)
+                  .state.selected_profile_slot == FrontEndProfileSlot::Third,
+          "an adversarial count above three cannot navigate beyond the third displayed slot");
+
+    Check(omega::app::ReduceFrontEnd(
+              FrontEndState{
+                  .mode = FrontEndMode::Profiles,
+                  .selected_main_row = FrontEndMainRow::Profiles,
+                  .selected_profile_slot = FrontEndProfileSlot::Third,
+              },
+              FrontEndInputEdges{.primary_pressed = true}, 1U) ==
+              FrontEndReduction{.state = FrontEndState{
+                                    .mode = FrontEndMode::Main,
+                                    .selected_main_row = FrontEndMainRow::Profiles,
+                                    .selected_profile_slot = FrontEndProfileSlot::First,
+                                }},
+          "a stale highlighted slot outside the current count returns safely without selecting a different profile");
 
     FrontEndStartupModel model{
         .total_profiles = 4U,
         .visible_profiles = 3U,
     };
-    model.profiles[0].cells[0] = 'A';
-    model.profiles[0].length = 1U;
+    model.profiles[0].label.cells[0] = 'A';
+    model.profiles[0].label.length = 1U;
     const auto valid_view = omega::app::BuildFrontEndView(
         FrontEndState{
             .mode = FrontEndMode::Profiles,
@@ -352,13 +531,14 @@ void CheckReducerAndViewContract()
               omega::app::FrontEndView{
                   .mode = FrontEndMode::Profiles,
                   .selected_main_row = FrontEndMainRow::Profiles,
+                  .selected_profile_slot = FrontEndProfileSlot::First,
                   .content_stage = ContentStartupStage::LevelContent,
                   .profiles = model,
               },
           "the view copies valid state, content classification, and the complete "
           "fixed model");
-    model.profiles[0].cells[0] = 'Z';
-    Check(valid_view.profiles.profiles[0].cells[0] == 'A', "a front-end view owns its model copy");
+    model.profiles[0].label.cells[0] = 'Z';
+    Check(valid_view.profiles.profiles[0].label.cells[0] == 'A', "a front-end view owns its model copy");
 
     const auto invalid_view = omega::app::BuildFrontEndView(
         FrontEndState{
@@ -382,10 +562,10 @@ void CheckRasterContract()
     constexpr std::array<std::string_view, 3U> labels{"ALPHA", "JOS?", "ABCDEFGHIJKLMNOPQRSTUVWX"};
     for (std::size_t index = 0U; index < labels.size(); ++index)
     {
-        profiles.profiles[index].length = static_cast<std::uint8_t>(labels[index].size());
-        std::ranges::copy(labels[index], profiles.profiles[index].cells.begin());
+        profiles.profiles[index].label.length = static_cast<std::uint8_t>(labels[index].size());
+        std::ranges::copy(labels[index], profiles.profiles[index].label.cells.begin());
     }
-    profiles.profiles[2].truncated = true;
+    profiles.profiles[2].label.truncated = true;
 
     const DebugImage main_none = omega::app::BuildProjectFrontEndMainImage(ContentStartupStage::NoContent, 0U);
     const DebugImage main_data = omega::app::BuildProjectFrontEndMainImage(ContentStartupStage::DataMounted, 3U);
@@ -442,7 +622,7 @@ void CheckRasterContract()
         0x50cbdb38858d5d32ULL,
         0xdd47380e14da12f2ULL,
         0xea15c2933b6cfffdULL,
-        0xae6d97e36021ea16ULL,
+        0xe26182d60b0bd82dULL,
         0x37f823d27a4cb3ceULL,
         0xcfa7cc57696aae0aULL,
     };

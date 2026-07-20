@@ -111,6 +111,8 @@ struct OmegaAppTestAccess final
         for (runtime::RenderDrawList& draw_list : app.front_end_main_draw_lists_)
             draw_list = *created;
         app.front_end_profiles_draw_list_ = *created;
+        for (runtime::RenderDrawList& draw_list : app.front_end_profile_selection_draw_lists_)
+            draw_list = *created;
         app.diagnostic_controls_draw_list_ = *created;
         app.diagnostic_asset_topology_draw_list_ = *created;
         return true;
@@ -122,6 +124,8 @@ struct OmegaAppTestAccess final
         for (runtime::RenderDrawList& draw_list : app.front_end_main_draw_lists_)
             draw_list = {};
         app.front_end_profiles_draw_list_ = {};
+        for (runtime::RenderDrawList& draw_list : app.front_end_profile_selection_draw_lists_)
+            draw_list = {};
         app.diagnostic_controls_draw_list_ = {};
         app.diagnostic_asset_topology_draw_list_ = {};
     }
@@ -201,6 +205,13 @@ struct OmegaAppTestAccess final
         return app.front_end_profiles_draw_list_;
     }
 
+    [[nodiscard]] static const std::array<runtime::RenderDrawList,
+        kFrontEndVisibleProfiles>& FrontEndProfileSelectionDrawLists(
+        const OmegaApp& app) noexcept
+    {
+        return app.front_end_profile_selection_draw_lists_;
+    }
+
     [[nodiscard]] static const runtime::RenderDrawList& DiagnosticControlsDrawList(
         const OmegaApp& app) noexcept
     {
@@ -235,6 +246,12 @@ struct OmegaAppTestAccess final
         const OmegaApp& app) noexcept
     {
         return app.front_end_startup_model_;
+    }
+
+    [[nodiscard]] static std::optional<profiles::ProfileId> ActiveProfile(
+        const OmegaApp& app) noexcept
+    {
+        return app.active_profile_id_;
     }
 
     [[nodiscard]] static std::optional<std::size_t> ProfileCatalogCount(
@@ -1301,6 +1318,129 @@ int main()
                       omega::app::detail::OmegaAppTestAccess::ProfileCatalogCount(
                           *profile_app) == std::optional<std::size_t>{4U},
                 "OmegaApp owns the bounded profile snapshot and performs no implicit profile creation");
+            if (expected_model && profile_app)
+            {
+                const auto selected_id = omega::profiles::ProfileId::Parse(
+                    "00000000000000000000000000000002");
+                const auto run_plain_profile_frame = [&profile_app]() {
+                    auto run = profile_app->Run(1);
+                    return run && run->rendered_frames == 1 &&
+                           !run->quit_requested;
+                };
+                bool entered_profiles = PushKey(SDL_SCANCODE_DOWN, true) &&
+                                        run_plain_profile_frame() &&
+                                        PushKey(SDL_SCANCODE_DOWN, false) &&
+                                        run_plain_profile_frame() &&
+                                        PushKey(SDL_SCANCODE_F1, true) &&
+                                        run_plain_profile_frame() &&
+                                        PushKey(SDL_SCANCODE_F1, false) &&
+                                        run_plain_profile_frame() &&
+                                        PushKey(SDL_SCANCODE_DOWN, true) &&
+                                        run_plain_profile_frame() &&
+                                        PushKey(SDL_SCANCODE_DOWN, false) &&
+                                        run_plain_profile_frame();
+                const omega::app::FrontEndState highlighted_second{
+                    .mode = omega::app::FrontEndMode::Profiles,
+                    .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+                    .selected_profile_slot = omega::app::FrontEndProfileSlot::Second,
+                };
+                const auto profile_selection_lists =
+                    omega::app::detail::OmegaAppTestAccess::FrontEndProfileSelectionDrawLists(
+                        *profile_app);
+                Check(entered_profiles && selected_id &&
+                          expected_model->profiles[1].id == selected_id &&
+                          !omega::app::detail::OmegaAppTestAccess::ActiveProfile(
+                              *profile_app) &&
+                          omega::app::detail::OmegaAppTestAccess::FrontEnd(
+                              *profile_app) == highlighted_second &&
+                          DrawListsEqual(
+                              omega::app::detail::OmegaAppTestAccess::CurrentFrontEndDrawList(
+                                  *profile_app),
+                              profile_selection_lists[1]),
+                    "profile navigation highlights only the second bounded startup slot without implicit selection");
+
+                const auto scheduler_before_terminal =
+                    omega::app::detail::OmegaAppTestAccess::SchedulerSnapshot(
+                        *profile_app);
+                const auto simulation_before_terminal =
+                    omega::app::detail::OmegaAppTestAccess::SimulationSnapshot(
+                        *profile_app);
+                const auto gpu_before_terminal =
+                    omega::app::detail::OmegaAppTestAccess::GpuSnapshot(*profile_app);
+                Check(PushKey(SDL_SCANCODE_F1, true) && PushQuit(),
+                    "profile selection and host-terminal events enter together");
+                auto terminal_selection = profile_app->RunWithCapture(1);
+                Check(terminal_selection &&
+                          terminal_selection->completion() ==
+                              omega::app::RunCaptureCompletion::QuitRequested &&
+                          terminal_selection->terminal_input() &&
+                          terminal_selection->terminal_input()->host_quit_requested &&
+                          !terminal_selection->terminal_input()->logical_quit_pressed &&
+                          omega::app::detail::OmegaAppTestAccess::FrontEnd(
+                              *profile_app) == highlighted_second &&
+                          !omega::app::detail::OmegaAppTestAccess::ActiveProfile(
+                              *profile_app) &&
+                          omega::app::detail::OmegaAppTestAccess::SchedulerSnapshot(
+                              *profile_app) == scheduler_before_terminal &&
+                          SameSimulationState(
+                              omega::app::detail::OmegaAppTestAccess::SimulationSnapshot(
+                                  *profile_app),
+                              simulation_before_terminal) &&
+                          omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
+                              *profile_app) == gpu_before_terminal,
+                    "terminal resolution captures but never applies a simultaneous profile-selection action");
+
+                Check(PushKey(SDL_SCANCODE_F1, false) &&
+                          run_plain_profile_frame() &&
+                          PushKey(SDL_SCANCODE_F1, true),
+                    "the terminal profile action releases before a fresh explicit selection");
+                auto selected = profile_app->RunWithCapture(1);
+                const omega::app::FrontEndState returned_profiles_row{
+                    .mode = omega::app::FrontEndMode::Main,
+                    .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+                    .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+                };
+                Check(selected && selected_id &&
+                          selected->completion() ==
+                              omega::app::RunCaptureCompletion::FrameLimitReached &&
+                          omega::app::detail::OmegaAppTestAccess::ActiveProfile(
+                              *profile_app) == selected_id &&
+                          omega::app::detail::OmegaAppTestAccess::FrontEnd(
+                              *profile_app) == returned_profiles_row &&
+                          omega::app::detail::OmegaAppTestAccess::ProfileCatalogCount(
+                              *profile_app) == std::optional<std::size_t>{4U},
+                    "a fresh primary edge copies the highlighted existing ID into session state without catalog mutation");
+
+                auto replay_traces = selected
+                                         ? std::move(*selected).TakeTracePair()
+                                         : std::nullopt;
+                omega::app::RunReplaySessionConfig replay_config{};
+                replay_config.scheduler = settings.frame;
+                replay_config.maximum_entities = 1U;
+                replay_config.initial_front_end_state = highlighted_second;
+                replay_config.front_end_visible_profile_slots = 3U;
+                bool replay_matches = false;
+                if (replay_traces)
+                {
+                    auto replay = omega::app::RunReplaySession::Create(
+                        std::move(*replay_traces), replay_config);
+                    if (replay)
+                    {
+                        auto replayed_frame = replay->Next();
+                        replay_matches = replayed_frame &&
+                                         replayed_frame->front_end_command() ==
+                                             omega::app::FrontEndCommand{
+                                                 .type = omega::app::FrontEndCommandType::SetActiveProfile,
+                                                 .profile_slot = omega::app::FrontEndProfileSlot::Second,
+                                             } &&
+                                         replay->front_end_state() == returned_profiles_row;
+                    }
+                }
+                Check(replay_matches,
+                    "the unchanged capture schema deterministically replays the same bounded selection command");
+                Check(PushKey(SDL_SCANCODE_F1, false) && run_plain_profile_frame(),
+                    "the explicit profile-selection key releases before app teardown");
+            }
         }
     }
 
@@ -1423,6 +1563,9 @@ int main()
         OmegaAppTestAccess::DiagnosticControlsDrawList(*app);
     const omega::runtime::RenderDrawList initial_profiles_draw_list =
         OmegaAppTestAccess::FrontEndProfilesDrawList(*app);
+    const std::array<omega::runtime::RenderDrawList,
+        omega::app::kFrontEndVisibleProfiles> initial_profile_selection_draw_lists =
+        OmegaAppTestAccess::FrontEndProfileSelectionDrawLists(*app);
     const omega::runtime::RenderDrawList initial_asset_topology_draw_list =
         OmegaAppTestAccess::DiagnosticAssetTopologyDrawList(*app);
     constexpr omega::runtime::RenderSourceRectQ16 kFullMenuSource{
@@ -1448,6 +1591,12 @@ int main()
         .top = 9103U,
         .right = 59392U,
         .bottom = 14563U,
+    };
+    constexpr omega::runtime::RenderSourceRectQ16 kProfileSelectionSource{
+        .left = 0U,
+        .top = 0U,
+        .right = 512U,
+        .bottom = 512U,
     };
     constexpr std::array kMenuSelectionTargets{
         omega::runtime::RenderTargetRectQ16{
@@ -1550,6 +1699,28 @@ int main()
             profiles_card.fit_mode == omega::runtime::RenderTextureFitMode::Stretch &&
             profiles_card.filter_mode == omega::runtime::RenderTextureFilterMode::Nearest;
     }
+    bool profile_selection_lists_are_exact = profiles_list_is_exact;
+    for (std::size_t slot = 0U;
+         profile_selection_lists_are_exact && slot < initial_profile_selection_draw_lists.size(); ++slot)
+    {
+        const auto commands = initial_profile_selection_draw_lists[slot].commands();
+        profile_selection_lists_are_exact = commands.size() == profiles_commands.size() + 1U;
+        for (std::size_t index = 0U;
+             profile_selection_lists_are_exact && index < profiles_commands.size(); ++index)
+        {
+            profile_selection_lists_are_exact = commands[index] == profiles_commands[index];
+        }
+        if (profile_selection_lists_are_exact)
+        {
+            const auto& marker = commands[profiles_commands.size()];
+            profile_selection_lists_are_exact =
+                marker.texture == front_end_profiles_texture &&
+                marker.source == kProfileSelectionSource &&
+                marker.destination == kMenuSelectionTargets[slot] &&
+                marker.fit_mode == omega::runtime::RenderTextureFitMode::Stretch &&
+                marker.filter_mode == omega::runtime::RenderTextureFilterMode::Nearest;
+        }
+    }
     const auto asset_topology_commands = initial_asset_topology_draw_list.commands();
     bool asset_topology_list_is_exact =
         asset_topology_commands.size() == hidden_commands.size() + 1U;
@@ -1602,7 +1773,8 @@ int main()
               OmegaAppTestAccess::FrontEnd(*app) ==
                   omega::app::InitialFrontEndState() &&
               hidden_list_is_exact && visible_lists_are_exact &&
-              profiles_list_is_exact && controls_list_is_exact &&
+              profiles_list_is_exact && profile_selection_lists_are_exact &&
+              controls_list_is_exact &&
               asset_topology_list_is_exact &&
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   initial_visible_draw_lists[0]),
