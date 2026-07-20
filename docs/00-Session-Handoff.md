@@ -1495,3 +1495,21 @@ Remaining limitations (deliberately unclaimed):
 Still unclaimed: an owner-corpus collector run or output; new format/header/alignment evidence;
 native GUI/FNT/IE/BNK/GUN descriptors; retail consumer semantics; runtime integration; or PCSX2
 behavioral parity.
+
+## Passive SO module descriptor (E-0098, 2026-07-20)
+
+- `InspectSoModule` now validates the already tracked custom little-endian SO framing through exact
+  EOF and returns a move-only owned descriptor with section ranges, counts, neutral record summaries,
+  and structural regularity results. It retains no LP string, code-cell value, or opaque payload.
+- The fixed 512 KiB input ceiling is a synthetic decoder safety policy, not a wire-format or
+  owner-corpus maximum. Caller input, item, output, and string budgets may only tighten it; dynamic
+  scratch and nesting are zero.
+- Generated tests cover exact and malformed framing, every truncation boundary, hostile counts,
+  exact/one-below resource limits, unaligned input, deterministic ownership and moves, zero-length
+  absent LP values, all four owned allocation failures, and typed path-free errors.
+- The descriptor is offline evidence scaffolding only. It is not canonical script IR, is not
+  composed into content, simulation, or `ScriptService`, and never interprets, translates,
+  recompiles, dispatches, or executes retail script cells.
+
+Still unclaimed: a private metadata-only native owner-corpus acceptance run, retail opcode/type/event
+semantics, runtime consumption, or behavioral parity.

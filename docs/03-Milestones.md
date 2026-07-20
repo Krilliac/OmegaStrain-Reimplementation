@@ -20,7 +20,8 @@ COL spatial-mesh adapter, shared-budget level-spatial orchestration, a semantic 
 a bounded level-scoped texture store and native verifier, and a semantic VUM material-catalog
 adapter plus a retail-only passive render-payload descriptor are implemented. Bounded passive SKM
 and SKL descriptors, a fixed-output retail-only SKA descriptor, bounded canonical LPD and SKAS
-envelope adapters, and a fixed passive VPK wrapper descriptor are also implemented.
+envelope adapters, a fixed passive VPK wrapper descriptor, and an analysis-only passive SO module
+descriptor are also implemented.
 Other scene decoders remain incomplete.
 
 - Native HOG parser validated against all 273 top-level archives and 6,677 nested spans.
@@ -134,6 +135,13 @@ Other scene decoders remain incomplete.
   inspected. The equal values of the observed word and alignment establish no relationship. No
   codec, ADPCM, sample rate, channels, audio or music role, seek table, streaming, storage geometry,
   playback, runtime, or emulator semantics are assigned.
+- E-0098 adds a stateless passive SO module descriptor over the recovered custom little-endian
+  framing. It owns bounded section ranges, counts, neutral type/enum/global/callable summaries, and
+  structural regularity results while retaining no string content, code-cell value, or opaque
+  payload byte. The fixed 512 KiB input ceiling is a synthetic decoder safety policy and callers may
+  only tighten input, item, output, and string budgets. The descriptor is not canonical script IR,
+  is not composed into content or simulation, and never executes, interprets, translates,
+  recompiles, or dispatches retail cells.
 - Bounded POP post-terrain scanning accepts 18/18 level POPs with zero errors and finds 19 aligned
   literal-tag candidates exactly once per file in one shared order, for 342 aggregate hits. The
   literals are not yet decoded section boundaries and assign no placement or visibility semantics.

@@ -24,6 +24,9 @@ a regression. See `docs/01-Clean-Room-Method.md` and `analysis/evidence/ledger.j
 - Ledger entry `E-0095` records this pass.
 - Ledger entry `E-0097` records the later size-only collector contract, corrected 47-dossier
   catalog, and synthetic/privacy validation; it records no owner-corpus measurement.
+- Ledger entry `E-0098` promotes `.so` from aggregate-scanner-only to a native passive descriptor.
+  The descriptor is analysis-only, uses generated fixtures, retains no strings or code cells, and
+  does not authorize retail script execution or runtime integration.
 
 ## Queue for Codex
 

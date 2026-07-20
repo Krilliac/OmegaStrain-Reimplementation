@@ -317,6 +317,16 @@ and the decoder performs no I/O or payload inspection. It assigns no codec, ADPC
 channels, asset role, seek table, streaming, playback, storage geometry, runtime, or emulator
 semantics.
 
+SO has a separate passive, analysis-only `SoModuleDescriptor`. `InspectSoModule` validates the
+tracked custom little-endian framing through exact EOF and owns bounded section ranges, counts,
+neutral record summaries, and structural-regularity results. It retains no LP string content, code
+cell value, or opaque payload byte. The 512 KiB module ceiling is a project-owned synthetic decoder
+safety policy rather than an owner-corpus or wire-format limit; caller input, item, output, and
+string budgets may only tighten it. The flat inspector uses no dynamic scratch or nesting edge, and
+all four owned summary buffers allocate at final size inside a typed, allocation-free error
+boundary. It is not canonical script IR, is not composed into `ScriptService`, content loading, or
+simulation, and never interprets, translates, recompiles, dispatches, or executes retail cells.
+
 E-0087 adds one optional runtime-side diagnostic after canonical TDX storage exists, without
 changing the decoder or the dependency direction. `BuildTdxIndexed8CandidateDebugImage` is a
 stateless, reentrant worker-thread utility that accepts only one Indexed8 block, one matching

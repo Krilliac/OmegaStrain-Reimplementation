@@ -48,15 +48,16 @@ disc placement alone does not establish a decoder class, system role, or out-of-
 | `.skas` | [SKAS.md](SKAS.md) |
 | `.vpk` | [VPK.md](VPK.md) |
 
-### passive_descriptor_only (3)
+### passive_descriptor_only (4)
 
 | Suffix | Dossier |
 | --- | --- |
 | `.ska` | [SKA.md](SKA.md) |
 | `.skl` | [SKL.md](SKL.md) |
 | `.skm` | [SKM.md](SKM.md) |
+| `.so` | [SO.md](SO.md) |
 
-### aggregate_scanner_only (15)
+### aggregate_scanner_only (14)
 
 | Suffix | Dossier |
 | --- | --- |
@@ -72,7 +73,6 @@ disc placement alone does not establish a decoder class, system role, or out-of-
 | `.scc` | [SCC.md](SCC.md) |
 | `.skel` | [SKEL.md](SKEL.md) |
 | `.skf` | [SKF.md](SKF.md) |
-| `.so` | [SO.md](SO.md) |
 | `.sub` | [SUB.md](SUB.md) |
 | `.txt` | [TXT.md](TXT.md) |
 
