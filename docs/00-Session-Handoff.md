@@ -1298,6 +1298,31 @@ shipping dependencies or execution mechanisms.
     validation remain pending. No private or owner input, proprietary byte, path, filename, D-drive
     content, disc image, executable, save, savestate, emulator state, or PCSX2 input was accessed or
     embedded. Semantic interpretation and runtime consumption remain open.
+77. E-0094 adds a stateless reentrant passive VPK wrapper-envelope decoder over the tracked
+    aggregate evidence only. It strictly accepts raw prefix bytes `b" KPV"`, the independent
+    little-endian word 2,048 at `0x08`, physical spans from 1,320,960 through 9,005,056 bytes, and
+    independent 2,048-byte physical alignment. Its trivially copyable fixed descriptor retains the
+    source-order opaque bytes at `0x04..0x07` and `0x0c..0x0f`, physical byte count, and derived
+    aligned-block count. The observed word and alignment remain separate facts whose equal values
+    prove no header-size, block-size, or alignment-declaration relationship. One fixed item and
+    `sizeof(VpkWrapperEnvelopeDescriptor)` logical bytes are charged after the complete input;
+    caller limits may only tighten the fixed ceilings. Scratch, strings, and nesting are zero. The
+    borrowed remainder and payload are uninspected and never retained. Generated fixtures cover
+    size and alignment boundaries, raw-signature direction, every signature byte, the observed
+    word, opaque-field preservation, payload independence, ownership, determinism, typed path-free
+    errors, exact and one-below caller budgets, unraiseable hard limits, and zero-resource budgets.
+    No codec, ADPCM, rate, channels, audio or music role, seek table, streaming, playback, storage
+    geometry, runtime, or emulator semantics are assigned. Only tracked aggregate evidence and
+    project-generated fixtures were used; no private or owner file, proprietary input, D-drive
+    content, disc image, executable, save, memory-card image, savestate, emulator, or PCSX2 runtime
+    input was accessed. Post-rebase static validation passed Microsoft 4-space Allman formatting,
+    the 211-file dependency gate, all 246 tooling tests, Python compile-all, JSON and JSONL parsing,
+    diff checks, and the public-tree gate over 317 staged indexed text blobs. The focused MSVC Debug
+    and Release targets built with zero warnings or errors; both direct executables returned zero,
+    and focused CTest passed 1/1 in each configuration. The runtime-OFF full MSVC Debug integration
+    tree built with zero warnings or errors, and full Debug CTest passed 40/40. Rebase, one signed
+    commit, and DCO are complete; publication, owner-corpus validation, runtime integration, and
+    exact-main validation remain deliberately unclaimed.
 
 ## Disc observations
 

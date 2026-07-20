@@ -73,6 +73,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             ("native/src/runtime/example.cpp", "omega/simulation/simulation_world.h"),
             ("native/src/runtime/example.cpp", "omega/retail/pop_level_manifest_decoder.h"),
             ("native/src/runtime/example.cpp", "omega/retail/vag_adpcm_decoder.h"),
+            ("native/src/runtime/example.cpp", "omega/retail/vpk_wrapper_envelope_decoder.h"),
             ("native/apps/openomega/sdl_example.cpp", "omega/simulation/simulation_world.h"),
             ("native/apps/openomega/example.cpp", "omega/retail/pop_level_manifest_decoder.h"),
         )

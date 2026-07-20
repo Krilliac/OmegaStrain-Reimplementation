@@ -229,8 +229,8 @@ The initial native build targets express the same direction:
   bytes, with no dependency on persistence, retail payloads, PCSX2, or emulator state;
 - `omega_assets`: canonical owned IR values and decode contracts;
 - `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
-- `omega_retail_formats`: stateless POP/COL/VUM/TDX/VAG/LPD/SKM/SKL/SKA adapters that may depend on
-  the first two targets;
+- `omega_retail_formats`: stateless POP/COL/VUM/TDX/VAG/LPD/VPK/SKM/SKL/SKA/SKAS adapters that may
+  depend on the first two targets;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
   orchestration;
 - `omega_runtime`: launch/configuration services and renderer-neutral diagnostic scene values
@@ -304,6 +304,19 @@ constructed inside the typed allocation-error boundary. The adapter has no I/O, 
 service, app, audio, animation, or playback responsibility and assigns no track, scalar, timing,
 interpolation, pose, or VAG relationship.
 
+VPK has a separate passive fixed-output wrapper-envelope decoder. `DecodeVpkWrapperEnvelope`
+borrows one complete span, validates the exact raw signature `b" KPV"`, the independent
+little-endian word 2,048 at `0x08`, the observed 1,320,960-through-9,005,056-byte physical range,
+and independent divisibility by 2,048. It returns only two source-order opaque four-byte prefix
+values, physical byte count, and derived aligned-block count. The observed word and physical
+alignment are deliberately separate constants; their equal numeric values do not establish a
+header size, block size, or alignment declaration. The fixed input, one-item, and
+`sizeof(VpkWrapperEnvelopeDescriptor)` output ceilings cannot be raised by caller limits. Scratch,
+strings, and nesting are zero. No input span, remaining wrapper byte, or payload byte is retained,
+and the decoder performs no I/O or payload inspection. It assigns no codec, ADPCM, sample rate,
+channels, asset role, seek table, streaming, playback, storage geometry, runtime, or emulator
+semantics.
+
 E-0087 adds one optional runtime-side diagnostic after canonical TDX storage exists, without
 changing the decoder or the dependency direction. `BuildTdxIndexed8CandidateDebugImage` is a
 stateless, reentrant worker-thread utility that accepts only one Indexed8 block, one matching
@@ -319,7 +332,9 @@ SKA has a separate retail-only passive descriptor rather than canonical animatio
 output contains only the observed version/count words and the computed 112-byte-prefix
 counted-word extent, classified as exact or followed by zero padding. It retains no input span and
 assigns no payload, animation, timing, channel, transform, compression, or bone semantics. SKAS
-remains a separate two-candidate text-evidence family with no native descriptor.
+has a separate bounded canonical structural-text envelope that owns exact text and opaque line
+ranges without assigning labels, values, animation, skeleton, actor, gameplay, or a relationship
+to SKA.
 
 POP has a separate retail-only passive post-terrain hypothesis descriptor in
 `omega_retail_formats`. It reuses the validated terrain-prefix parser, requires the established
