@@ -17,55 +17,48 @@ from typing import cast
 if __package__:
     from . import validate_frontend_trace as validator
 else:  # Direct execution adds tools/ rather than the repository root.
-    try:
-        import validate_frontend_trace as validator
-    except ModuleNotFoundError as exc:
-        # Isolated mode (python -I, or -P) keeps the script directory off
-        # sys.path, so the sibling module is simply not importable by name. Only
-        # that exact case is handled here: a ModuleNotFoundError naming any other
-        # module -- including one raised from inside a validator that WAS found --
-        # must propagate unchanged rather than be masked by a path-based reload.
-        if exc.name != "validate_frontend_trace":
-            raise
-        import importlib.util
-        import os.path
+    import importlib.util
+    import os.path
 
-        _validator_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "validate_frontend_trace.py"
-        )
-        # Reuse the canonical package module only when it came from this exact
-        # sibling. Never overwrite an unrelated module that already occupies
-        # the name: direct execution can coexist with callers that imported a
-        # different ``tools`` package earlier in the process.
-        _validator_module_name = "tools.validate_frontend_trace"
-        _existing_validator = sys.modules.get(_validator_module_name)
-        if _existing_validator is not None:
-            _existing_path = getattr(_existing_validator, "__file__", None)
-            if _existing_path is None or os.path.normcase(
-                os.path.abspath(_existing_path)
-            ) != os.path.normcase(_validator_path):
-                raise ImportError(
-                    f"module name {_validator_module_name!r} is already occupied"
-                ) from exc
-            validator = _existing_validator
-        else:
-            _spec = importlib.util.spec_from_file_location(
-                _validator_module_name, _validator_path
+    # Always load the adjacent validator by path. In particular, ``-P`` keeps
+    # PYTHONPATH active while omitting the script directory from sys.path, so a
+    # name import here could otherwise select an unrelated external module.
+    _validator_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "validate_frontend_trace.py"
+    )
+    # Reuse the canonical package module only when it came from this exact
+    # sibling. Never overwrite an unrelated module that already occupies the
+    # name: direct execution can coexist with callers that imported a different
+    # ``tools`` package earlier in the process.
+    _validator_module_name = "tools.validate_frontend_trace"
+    _existing_validator = sys.modules.get(_validator_module_name)
+    if _existing_validator is not None:
+        _existing_path = getattr(_existing_validator, "__file__", None)
+        if _existing_path is None or os.path.normcase(
+            os.path.abspath(_existing_path)
+        ) != os.path.normcase(_validator_path):
+            raise ImportError(
+                f"module name {_validator_module_name!r} is already occupied"
             )
-            if _spec is None or _spec.loader is None:
-                raise ModuleNotFoundError(
-                    f"cannot locate sibling validator at {_validator_path}",
-                    name="validate_frontend_trace",
-                ) from exc
-            validator = importlib.util.module_from_spec(_spec)
-            # Register before execution so a self-reference would resolve, and
-            # remove the half-initialized module again if execution fails.
-            sys.modules[_spec.name] = validator
-            try:
-                _spec.loader.exec_module(validator)
-            except BaseException:
-                sys.modules.pop(_spec.name, None)
-                raise
+        validator = _existing_validator
+    else:
+        _spec = importlib.util.spec_from_file_location(
+            _validator_module_name, _validator_path
+        )
+        if _spec is None or _spec.loader is None:
+            raise ModuleNotFoundError(
+                f"cannot locate sibling validator at {_validator_path}",
+                name="validate_frontend_trace",
+            )
+        validator = importlib.util.module_from_spec(_spec)
+        # Register before execution so a self-reference would resolve, and
+        # remove the half-initialized module again if execution fails.
+        sys.modules[_spec.name] = validator
+        try:
+            _spec.loader.exec_module(validator)
+        except BaseException:
+            sys.modules.pop(_spec.name, None)
+            raise
 
 
 SUMMARY_SCHEMA = "omega-frontend-trace-summary-v1"

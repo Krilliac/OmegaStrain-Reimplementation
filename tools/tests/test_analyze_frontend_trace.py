@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -359,6 +360,35 @@ class FrontendTraceAnalyzerTests(unittest.TestCase):
                     str(FIXTURE_ROOT / "valid.json"),
                 ],
                 cwd=unrelated_directory,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=10,
+            )
+
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout, canonical_bytes(expected_summary()))
+        self.assertEqual(completed.stderr, b"")
+
+    def test_safe_path_mode_ignores_hostile_pythonpath_validator(self) -> None:
+        with tempfile.TemporaryDirectory() as unrelated_directory:
+            hostile_directory = Path(unrelated_directory) / "hostile"
+            hostile_directory.mkdir()
+            (hostile_directory / "validate_frontend_trace.py").write_text(
+                "raise RuntimeError('hostile validator was imported')\n",
+                encoding="ascii",
+            )
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(hostile_directory)
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-P",
+                    str(REPOSITORY_ROOT / "tools" / "analyze_frontend_trace.py"),
+                    str(FIXTURE_ROOT / "valid.json"),
+                ],
+                cwd=unrelated_directory,
+                env=environment,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=False,
