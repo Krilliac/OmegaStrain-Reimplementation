@@ -1393,3 +1393,41 @@ shipping dependencies or execution mechanisms.
 - Never commit anything under `private/`, `runtime/`, `third_party/`, or `downloads/`.
 - Publish no firmware, executable, archive, asset, save-state, or decrypted proprietary data.
 - Keep claims tied to hashes, logs, captures, and reproducible scripts.
+
+## Front-end asset reconnaissance (branch `claude/frontend-asset-decoding`, 2026-07-20)
+
+Verified outcomes (Python and documentation only; no C++ decoder added). Ledger entry E-0095.
+
+- **`.gui` topology promotion (schema_version 2).** `tools/measure_frontend_hog_topology.py`
+  now promotes only the `.gui` member suffix out of `other` into its own frozen public aggregate
+  category `gui`; `.fnt` and `.ie` deliberately stay in `other`. The `gui` label echoes the suffix
+  only and asserts no menu role, layout, lookup, timing, or render semantics. Output remains
+  fixed-schema aggregate, deterministic, and path-free; caller `DecodeLimits` may only tighten fixed
+  hard ceilings. Focused tests 14/14; full Python tooling discovery 251/251; native-dependency gate
+  211; public-tree gate, compile-all, JSONL parse, and `git diff --check` all pass.
+- **Front-end evidence audit** — `analysis/formats/FRONTEND-EVIDENCE-AUDIT.md`. A four-tier table
+  (confirmed / aggregate-only / hypothesis / missing) for `.gui`/`.fnt`/`.ie` and front-end
+  containers, derived only from tracked files. Key confirmed facts: these are HOG member suffixes,
+  not standalone disc files; recursive occurrence counts 77/3/79 and top-level 21/3/23; no format
+  handler, ledger entry, or loader trace assigns them any semantics.
+- **Decoder-coverage matrix** — `analysis/formats/DECODER-COVERAGE.md`. Every observed format family
+  classified (canonical decoder / structural envelope only / passive descriptor only / aggregate
+  scanner only / unknown) with a tracked-source citation, CMake/test registration cross-checked, and
+  a ranked privacy-safe next-evidence queue. `.PF`, `.TM2`, and `.tbl` are kept explicitly unknown.
+
+Remaining limitations (deliberately unclaimed):
+
+- **GUI-envelope tool not built.** The tracked tree records only existence and occurrence counts for
+  `.gui`/`.fnt`/`.ie` — no member size, byte, header field, or alignment. The audit's Lane C gate
+  verdict is therefore **NO**: there is not enough evidence to freeze a non-misleading fixed
+  aggregate schema, so `measure_frontend_gui_envelopes.py` was intentionally not written. The
+  scanner plus the evidence-gap note is the correct conservative result; the next step is a
+  privacy-safe per-suffix structural fingerprint pass (see the coverage-matrix queue).
+- No native `GuiEnvelopeIR` or decoder; no retail menu role, lookup, field, layout, state, timing,
+  rendering, or audio semantics for `.gui`/`.fnt`/`.ie`; no owner-corpus, behavioral-oracle,
+  runtime, packaged-host, or PCSX2-equivalence validation.
+- The AI brief's hot-file list cites three headers that do not exist in the tree
+  (`native/include/omega/asset/decode_result.h`, `decode_test_hooks.h`,
+  `native/include/omega/retail/tdx_decoder.h`); the real contracts live in
+  `native/include/omega/asset/decode.h` and `tdx_texture_storage_decoder.h`. Worth correcting the
+  brief before the next pass.

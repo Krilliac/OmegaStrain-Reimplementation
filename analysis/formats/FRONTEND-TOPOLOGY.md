@@ -18,14 +18,15 @@ event, timing, control flow, or retail behavior.
 
 ## Aggregate contract
 
-The schema-version-1 document contains:
+The schema-version-2 document contains:
 
 - totals for root and nested archive occurrences, member occurrences, approved
   and other members, and same-basename groups/pairs;
-- fixed counts for the approved public suffixes `.col`, `.hog`, `.pop`, `.ska`,
-  `.skas`, `.skl`, `.skm`, `.so`, `.tbl`, `.tdx`, `.txt`, `.vag`, and `.vum`;
-- fixed category counts for animation, audio, collision, container, material,
-  mesh, scene, script, skeleton, table, text, and texture;
+- fixed counts for the approved public suffixes `.col`, `.gui`, `.hog`, `.pop`,
+  `.ska`, `.skas`, `.skl`, `.skm`, `.so`, `.tbl`, `.tdx`, `.txt`, `.vag`, and
+  `.vum`;
+- fixed category counts for animation, audio, collision, container, gui,
+  material, mesh, scene, script, skeleton, table, text, and texture;
 - archive-depth counts for depths zero through sixteen;
 - exact-root, exact-nested, and zero-padded-nested HOG extent families;
 - seven fixed member-size buckets, both overall and per approved category plus
@@ -36,6 +37,21 @@ The schema-version-1 document contains:
 Top-level HOGs must end at their logical extent. Nested HOG members may either
 end exactly or contain only zero padding after the logical extent. A nonzero
 tail is malformed.
+
+### Schema history
+
+- Schema version 1: the initial frozen vocabulary. `.gui` members collapsed
+  into the `other` count.
+- Schema version 2: `.gui` was promoted out of `other` into the frozen public
+  vocabulary as its own suffix count and its own `gui` category. This adds the
+  `.gui` extension count, the `gui` category count, the `gui` per-category
+  extent buckets, and every unordered pair key that combines `.gui` with an
+  approved sibling suffix (for example `.gui+.tdx`). The `gui` label echoes the
+  suffix only; it asserts no menu role, layout, lookup rule, render binding, or
+  other retail semantics. No other suffix was promoted: menu-adjacent-sounding
+  suffixes such as `.fnt` and `.ie` deliberately remain in the `other` bucket
+  because the tracked evidence does not justify freezing them into the public
+  vocabulary.
 
 ## Limits and failure behavior
 
