@@ -56,6 +56,16 @@ retail instruction blocks, or PS2 execution layer.
   The native profile catalog and app-owned startup composition are implemented without an implicit
   default or active profile; menu actions and bounded PS2 import/export codecs remain separate next
   slices. Owner saves and exported card images stay outside version control.
+- E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
+  or recursively discovers HOG files below one supplied directory, then follows only normalized
+  `.hog` members through the established span parser. Its fixed schema reports approved public
+  extension/category counts, archive-depth and exact/zero-padded extent distributions, fixed
+  member-size buckets, and sibling same-basename extension-pair totals. Unknown suffixes collapse
+  to `other`; no input path, member name, hash, offset, payload byte, raw suffix, identifier,
+  per-archive row, or exception message is emitted. Strict configurable plus hard count, depth,
+  directory, name, file-size, and cumulative-span caps fail closed. The slice uses only synthetic
+  exact, padded, malformed, and limit fixtures and makes no front-end role, lookup, layout, state,
+  binding, rendering, audio, or retail-behavior claim.
 - The native content service resolves all 5,351 manifest cells across all 18 levels into 5,351
   owned spatial meshes with zero errors: 20,203 canonical nodes, 93,356 leaves, 889,640 vertices,
   1,239,980 triangles/references, and 2,137 normalized empty meshes.

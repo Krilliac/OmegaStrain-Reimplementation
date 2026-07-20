@@ -1052,6 +1052,13 @@ never creates or selects a default profile. `OmegaApp` owns the database/catalog
 bootstrap. Active-profile/menu actions, campaign schemas, and PS2 save import/export remain in
 progress. No PS2 memory-card device or emulator savestate is part of the shipping-runtime design.
 
+E-0086 also supplies a synthetic-verified, analysis-only front-end HOG topology scanner. Its
+path-free fixed schema can measure recursive container depth, approved public format/category
+populations, exact/zero-padded extents, bounded member-size buckets, and sibling same-basename
+extension pairs without exporting identities. This is discovery scaffolding only: no retail input
+was scanned for the public E-0086 claim, and it does not implement or infer menu state, UI layout,
+asset lookup/binding, rendering, audio, or behavior.
+
 - All offline levels and mission variants load and complete.
 - Front end, character/gear progression, saves, difficulty, cinematics, subtitles, and audio.
 - Compatibility database for known retail-data variants.
