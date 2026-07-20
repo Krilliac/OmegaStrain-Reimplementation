@@ -54,6 +54,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             ("native/apps/openomega/sdl_example.cpp", "omega/runtime/render_frame_packet.h"),
             ("native/apps/openomega/example.cpp", "omega/simulation/simulation_world.h"),
             ("native/apps/openomega/example.cpp", "omega/profiles/profile_catalog.h"),
+            ("native/apps/openomega/example.cpp", "omega/media/nv12_to_rgba8.h"),
         )
         for relative_path, include in cases:
             with self.subTest(relative_path=relative_path, include=include):
@@ -239,6 +240,19 @@ class NativeDependencyGateTests(unittest.TestCase):
                 checked, errors = self.check_source(
                     relative_path,
                     '#include "omega/gameplay/debug_locomotion.h"\n',
+                )
+                self.assertEqual(checked, 1)
+                self.assertEqual(errors, [])
+
+    def test_openomega_movie_presentation_may_depend_on_media(self) -> None:
+        for relative_path in (
+            "native/apps/openomega/opening_movie_player.h",
+            "native/apps/openomega/opening_movie_player.cpp",
+        ):
+            with self.subTest(relative_path=relative_path):
+                checked, errors = self.check_source(
+                    relative_path,
+                    '#include "omega/media/nv12_to_rgba8.h"\n',
                 )
                 self.assertEqual(checked, 1)
                 self.assertEqual(errors, [])
