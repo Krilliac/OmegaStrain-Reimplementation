@@ -450,7 +450,7 @@ struct PendingH262Header
     std::optional<H262SequenceExtension> extension;
 };
 
-[[nodiscard]] asset::DecodeResult<H262BaseHeader> ParseH262BaseHeader(ElementaryByteCursor cursor)
+[[nodiscard]] asset::DecodeResult<H262BaseHeader> ParseH262BaseHeader(ElementaryByteCursor& cursor)
 {
     auto fixed = ReadFixed<8>(cursor, "H.262 sequence header is truncated");
     if (!fixed)
@@ -487,23 +487,31 @@ struct PendingH262Header
                                      cursor.logical_offset() - 2U));
     }
 
-    const std::uint64_t matrix_bytes =
-        (((*fixed)[7] & 0x02U) != 0 ? 64U : 0U) + (((*fixed)[7] & 0x01U) != 0 ? 64U : 0U);
-    for (std::uint64_t index = 0; index < matrix_bytes; ++index)
+    const bool load_intra_matrix = ((*fixed)[7] & 0x02U) != 0;
+    bool load_non_intra_matrix = ((*fixed)[7] & 0x01U) != 0;
+    if (load_intra_matrix)
     {
-        std::uint8_t ignored = 0;
-        if (!cursor.Read(ignored))
-        {
-            return std::unexpected(Error(asset::DecodeErrorCode::Truncated,
-                                         "H.262 sequence-header quantizer matrix is truncated",
-                                         cursor.logical_offset()));
-        }
+        // The load_intra flag ends the first 63 bits of the fixed prefix. The first matrix bit is
+        // the final bit already present in fixed[7], so the following 64 bytes contain the remaining
+        // 511 matrix bits and then the load_non_intra flag in their final least-significant bit.
+        auto intra_tail = ReadFixed<64>(
+            cursor, "H.262 sequence-header intra quantizer matrix is truncated");
+        if (!intra_tail)
+            return std::unexpected(intra_tail.error());
+        load_non_intra_matrix = ((*intra_tail)[63] & 0x01U) != 0;
+    }
+    if (load_non_intra_matrix)
+    {
+        auto non_intra = ReadFixed<64>(
+            cursor, "H.262 sequence-header non-intra quantizer matrix is truncated");
+        if (!non_intra)
+            return std::unexpected(non_intra.error());
     }
     return header;
 }
 
 [[nodiscard]] asset::DecodeResult<H262SequenceExtension> ParseH262SequenceExtension(
-    ElementaryByteCursor cursor)
+    ElementaryByteCursor& cursor)
 {
     auto fixed = ReadFixed<6>(cursor, "H.262 sequence extension is truncated");
     if (!fixed)
@@ -921,6 +929,8 @@ asset::DecodeResult<H262SequenceHeaderFacts> InspectH262SequenceHeaderFacts(
             if (!base)
                 return std::unexpected(base.error());
             pending = PendingH262Header{.base = *base};
+            window = 0U;
+            byte_count = 0U;
         }
         else if (window == kExtensionStartCode)
         {
@@ -952,6 +962,8 @@ asset::DecodeResult<H262SequenceHeaderFacts> InspectH262SequenceHeaderFacts(
             if (!extension)
                 return std::unexpected(extension.error());
             pending->extension = *extension;
+            window = 0U;
+            byte_count = 0U;
         }
     }
 

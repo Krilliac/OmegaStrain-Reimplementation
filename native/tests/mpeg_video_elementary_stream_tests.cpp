@@ -668,6 +668,51 @@ void RunH262AdversarialChecks()
                    "H.262", "H.262 rejects a truncated declared quantizer matrix");
     });
 
+    std::vector<std::uint8_t> intra_first_bit_one;
+    AppendSequenceHeader(intra_first_bit_one, 720, 480, 3, 4, true);
+    intra_first_bit_one.back() =
+        static_cast<std::uint8_t>(intra_first_bit_one.back() | 0x01U);
+    intra_first_bit_one.insert(intra_first_bit_one.end(), 64U, 0U);
+    AppendSequenceExtension(intra_first_bit_one, 0x48);
+    WithH262View({intra_first_bit_one}, [](const std::vector<std::byte>&,
+                                           const MpegVideoElementaryStreamPlan&,
+                                           const MpegVideoElementaryStreamView& view) {
+        const auto facts = omega::media::InspectH262SequenceHeaderFacts(view);
+        Check(facts && facts->width == 720 && facts->height == 480 &&
+                  facts->profile_and_level_indication == 0x48,
+              "H.262 treats fixed-prefix bit zero as the first intra-matrix bit when loaded");
+    });
+
+    std::vector<std::uint8_t> truncated_non_intra;
+    AppendSequenceHeader(truncated_non_intra, 720, 480, 3, 4, true);
+    truncated_non_intra.insert(truncated_non_intra.end(), 64U, 0U);
+    truncated_non_intra.back() =
+        static_cast<std::uint8_t>(truncated_non_intra.back() | 0x01U);
+    truncated_non_intra.insert(truncated_non_intra.end(), 63U, 0U);
+    WithH262View({truncated_non_intra}, [](const std::vector<std::byte>&,
+                                           const MpegVideoElementaryStreamPlan&,
+                                           const MpegVideoElementaryStreamView& view) {
+        CheckError(omega::media::InspectH262SequenceHeaderFacts(view), DecodeErrorCode::Truncated,
+                   "H.262", "H.262 reads load_non_intra after the optional intra matrix");
+    });
+
+    std::vector<std::uint8_t> embedded_matrix_start_code;
+    AppendSequenceHeader(embedded_matrix_start_code, 720, 480, 3, 4, true);
+    const std::size_t matrix_tail_offset = embedded_matrix_start_code.size();
+    embedded_matrix_start_code.insert(embedded_matrix_start_code.end(), 64U, 0U);
+    embedded_matrix_start_code[matrix_tail_offset + 10U] = 0U;
+    embedded_matrix_start_code[matrix_tail_offset + 11U] = 0U;
+    embedded_matrix_start_code[matrix_tail_offset + 12U] = 1U;
+    embedded_matrix_start_code[matrix_tail_offset + 13U] = 0xB3U;
+    AppendSequenceExtension(embedded_matrix_start_code, 0x48);
+    WithH262View({embedded_matrix_start_code}, [](const std::vector<std::byte>&,
+                                                  const MpegVideoElementaryStreamPlan&,
+                                                  const MpegVideoElementaryStreamView& view) {
+        const auto facts = omega::media::InspectH262SequenceHeaderFacts(view);
+        Check(facts && facts->sequence_header_count == 1U,
+              "H.262 scanner skips parsed matrix bodies instead of finding nested start codes");
+    });
+
     std::vector<std::uint8_t> extension_first;
     AppendSequenceExtension(extension_first, 0x48);
     WithH262View({extension_first},
