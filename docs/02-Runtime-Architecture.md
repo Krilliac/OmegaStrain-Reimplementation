@@ -538,6 +538,43 @@ inspection-error oracle was explicitly skipped because MSVC maps the
 available invalid and overlong candidates to not-found. Commit, DCO, publication, and exact-main
 validation remain unclaimed.
 
+E-0076 adds startup-failure presentation as an app-private, stateless adapter rather than a service
+or component. `StartupFailureDialogRequest` borrows a stage, category, and detail only for the
+duration of a call. `BuildStartupFailureDialogText` projects them with bounded local stack storage
+into an owned 640-byte result, and `TryShowStartupFailureDialog` is a main-thread, blocking,
+best-effort boundary that
+calls `SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "OpenOmega startup error", body, nullptr)`.
+It performs no SDL initialization, shutdown, metadata, or window work and owns no global state;
+suppression reads SDL's cached environment view. The returned Presented, Suppressed, or Unavailable
+outcome does not alter process control flow.
+
+Main invokes the adapter only after writing and flushing an existing fatal stderr diagnostic, and
+only for default-profile capture or runtime-config load (`runtime-configuration`), runtime-settings
+resolution (`runtime-settings`), E-0074 content-profile resolution (its typed code name), and E-0072
+content startup (its projected category or `inconsistent-error`). Runtime configuration, runtime
+settings, content launch profile, and content startup use fixed stage labels; an invalid stage
+projects to `startup`. The exact body begins `OpenOmega could not reach the main menu.`, includes
+Stage, Code, and Detail lines, and ends with a fixed configuration/game-data/arguments prompt with
+no trailing newline. Parse/help, app creation, SDL/GPU/audio setup, loop, capture, and replay errors
+remain console-only.
+
+Category and detail projection is nonallocating and retains no source view. Printable bytes
+`0x21..0x7e` survive, space/tab/CR/LF runs collapse to one trimmed space, and NUL, controls, DEL,
+and high bytes become `?`. Limits apply after projection: category is at most 48 bytes, detail at
+most 384, and overflow replaces the final three bytes with `...`; empty results use `unknown` and
+`No additional detail is available.`. The complete text is ASCII, NUL-terminated, and at most 616
+bytes. Only exact `OPENOMEGA_DISABLE_STARTUP_DIALOG=1` suppresses the dialog; invalid policy values
+fail closed as suppressed. CMake supplies that environment value to existing synthetic process and
+capture tests. The dedicated unit source exercises text and policy projection and calls the dialog
+boundary only when presentation is suppressed, including a check that SDL remains uninitialized.
+Serialized local validation passed: focused and full MSVC builds; the direct dialog unit and exact
+process contract; CTest 31/35/31; runtime-off direct and focused `omega_core_tests` with 27
+registrations and no dialog target; the 163-file dependency gate; all 209 tooling tests; Python
+compile-all; and the staged public-tree gate checked 250 indexed text blobs. Interactive dialog
+smoke, commit, DCO, publication, and exact-main validation remain unclaimed. No private or owner
+files, D-drive content, disc image, executable,
+emulator, or PCSX2 input was used.
+
 ## Level texture inventory and loading
 
 `LevelTextureStore::Open` applies one cumulative operation budget across all canonical explicit

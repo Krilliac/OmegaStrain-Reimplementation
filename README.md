@@ -757,6 +757,26 @@ retail instruction blocks, or PS2 execution layer.
   the non-missing inspection-error oracle was explicitly skipped
   because MSVC maps the available invalid and overlong candidates to not-found. Commit, DCO,
   publication, and exact-main validation remain unclaimed.
+- E-0076 adds one app-private, stateless startup-failure dialog adapter for the already-fatal
+  pre-SDL runtime-configuration, runtime-settings, content-launch-profile, and content-startup
+  paths. Main preserves each exact stderr line and exit code, flushes stderr, then best-effort calls
+  `SDL_ShowSimpleMessageBox` with title `OpenOmega startup error`, no parent, and a fixed projected
+  body. The adapter neither initializes nor quits SDL, retains no borrowed input, and owns no
+  global state; suppression reads SDL's cached environment view. Category and detail fields are
+  sanitized with bounded local stack storage into an owned 640-byte result, with 48-byte and
+  384-byte limits; empty fields use fixed fallbacks and overflow ends in `...`. Only exact
+  `OPENOMEGA_DISABLE_STARTUP_DIALOG=1` suppresses presentation, and invalid policy values fail
+  closed as suppressed. CMake supplies that suppression to the existing synthetic process and
+  capture contracts, while the dedicated unit contract exercises only suppressed presentation and
+  verifies that SDL remains uninitialized. Parse/help, app creation, SDL/GPU/audio setup, the run
+  loop, capture, and replay failures remain console-only. Serialized local validation passed:
+  focused and full MSVC builds; the direct dialog unit and exact process contract; CTest 31/35/31;
+  runtime-off direct and focused `omega_core_tests` with 27 registrations and no dialog target; the
+  163-file dependency gate; all 209 tooling tests; Python compile-all; and the staged public-tree
+  gate checked 250 indexed text blobs. Interactive dialog smoke, commit, DCO, publication, and
+  exact-main validation remain unclaimed. No private or
+  owner files, D-drive content, disc image, executable,
+  emulator, or PCSX2 input was used.
 - The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
   source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
   Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs

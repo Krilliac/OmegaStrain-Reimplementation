@@ -923,6 +923,31 @@ shipping dependencies or execution mechanisms.
     invalid and overlong candidates to not-found. Commit, DCO, publication, and exact-main
     validation remain unclaimed.
 
+61. E-0076 adds an app-private, stateless startup-failure presentation boundary before SDL
+    initialization. Only failures from default-profile capture or runtime-config load,
+    runtime-settings resolution, E-0074 content-profile resolution, and E-0072 content startup are
+    projected. Existing stderr bytes and exit codes remain unchanged; main flushes stderr before a
+    best-effort, parentless `SDL_ShowSimpleMessageBox` call using the fixed title
+    `OpenOmega startup error`. The adapter performs no SDL initialization or shutdown, owns no
+    global state, and retains no borrowed text; suppression reads SDL's cached environment view.
+    Its owned 640-byte result holds the fixed message plus bounded 48-byte category and 384-byte
+    detail projections built with bounded local stack storage. Printable ASCII is preserved,
+    whitespace collapses and trims, other bytes become `?`, overflow receives `...`, and empty
+    fields receive fixed fallbacks. Unknown stages fail closed to the label `startup`. Only exact
+    `OPENOMEGA_DISABLE_STARTUP_DIALOG=1` suppresses presentation; invalid policy enum values are
+    also suppressed. CMake injects suppression into the synthetic process and capture contracts,
+    and the dedicated unit source calls the presentation function only under suppressed or invalid
+    policy while checking that SDL remains uninitialized. Parse/help, app creation, SDL/GPU/audio,
+    loop, capture, and replay errors remain console-only. Serialized local validation passed:
+    focused and full MSVC builds; the direct dialog unit and exact process contract; CTest 31/35/31;
+    runtime-off direct and focused `omega_core_tests` with 27 registrations and no dialog target;
+    the 163-file dependency gate; all 209 tooling tests; Python compile-all; and the staged
+    public-tree gate checked 250 indexed text blobs. Interactive manual smoke, commit, DCO,
+    publication, and exact-main validation remain unclaimed.
+    Implementation
+    used only public project source and generated literals; no private or owner files, D-drive
+    content, disc image, executable, emulator, or PCSX2 input was used.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2

@@ -1,5 +1,6 @@
 #include "omega_app.h"
 #include "run_replay_session.h"
+#include "startup_failure_dialog.h"
 
 #include "omega/runtime/content_startup.h"
 #include "omega/runtime/content_startup_diagnostic.h"
@@ -77,12 +78,42 @@ CaptureDefaultRuntimeConfigPath()
     }
 }
 
+void PresentStartupFailureDialogAfterStderr(
+    const omega::app::StartupFailureStage stage,
+    const std::string_view category,
+    const std::string_view detail)
+{
+    std::cerr.flush();
+    const auto policy = omega::app::ReadStartupFailureDialogPolicyFromEnvironment();
+    static_cast<void>(omega::app::TryShowStartupFailureDialog(
+        {.stage = stage, .category = category, .detail = detail}, policy));
+}
+
+void PrintRuntimeConfigurationError(const std::string_view detail)
+{
+    std::cerr << detail << '\n';
+    PresentStartupFailureDialogAfterStderr(
+        omega::app::StartupFailureStage::RuntimeConfiguration,
+        "runtime-configuration", detail);
+}
+
+void PrintRuntimeSettingsError(const std::string_view detail)
+{
+    std::cerr << "runtime configuration: " << detail << '\n';
+    PresentStartupFailureDialogAfterStderr(
+        omega::app::StartupFailureStage::RuntimeSettings,
+        "runtime-settings", detail);
+}
+
 void PrintContentLaunchProfileError(
     const omega::runtime::ContentLaunchProfileError& error)
 {
-    std::cerr << "content launch profile ["
-              << omega::runtime::ContentLaunchProfileErrorCodeName(error.code)
-              << "]: " << error.message << '\n';
+    const std::string_view category =
+        omega::runtime::ContentLaunchProfileErrorCodeName(error.code);
+    std::cerr << "content launch profile [" << category << "]: " << error.message << '\n';
+    PresentStartupFailureDialogAfterStderr(
+        omega::app::StartupFailureStage::ContentLaunchProfile,
+        category, error.message);
 }
 
 void PrintContentError(const omega::runtime::ContentStartupError& error)
@@ -90,13 +121,21 @@ void PrintContentError(const omega::runtime::ContentStartupError& error)
     const auto diagnostic = omega::runtime::DescribeContentStartupError(error);
     if (!diagnostic)
     {
-        std::cerr << "content startup [inconsistent-error]: "
-                     "content startup error representation is inconsistent\n";
+        constexpr std::string_view category = "inconsistent-error";
+        constexpr std::string_view detail =
+            "content startup error representation is inconsistent";
+        std::cerr << "content startup [" << category << "]: " << detail << '\n';
+        PresentStartupFailureDialogAfterStderr(
+            omega::app::StartupFailureStage::ContentStartup,
+            category, detail);
         return;
     }
 
     std::cerr << "content startup [" << diagnostic->category << "]: "
               << diagnostic->message << '\n';
+    PresentStartupFailureDialogAfterStderr(
+        omega::app::StartupFailureStage::ContentStartup,
+        diagnostic->category, diagnostic->message);
 }
 
 void PrintRunCaptureDiagnostics(const omega::app::RunCaptureOutcome& outcome)
@@ -309,7 +348,7 @@ int main(const int argc, char** argv)
         auto discovered_profile_path = CaptureDefaultRuntimeConfigPath();
         if (!discovered_profile_path)
         {
-            std::cerr << discovered_profile_path.error() << '\n';
+            PrintRuntimeConfigurationError(discovered_profile_path.error());
             return EXIT_FAILURE;
         }
         default_profile_path = std::move(*discovered_profile_path);
@@ -320,13 +359,13 @@ int main(const int argc, char** argv)
                       : omega::runtime::LoadRuntimeConfig(*options, default_profile_path);
     if (!config)
     {
-        std::cerr << config.error() << '\n';
+        PrintRuntimeConfigurationError(config.error());
         return EXIT_FAILURE;
     }
     auto settings = omega::runtime::ResolveRuntimeSettings(*config);
     if (!settings)
     {
-        std::cerr << "runtime configuration: " << settings.error() << '\n';
+        PrintRuntimeSettingsError(settings.error());
         return EXIT_FAILURE;
     }
 
