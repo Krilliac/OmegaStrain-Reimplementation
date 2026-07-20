@@ -15,6 +15,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -48,6 +49,15 @@ struct SdlGpuHostTestAccess final
 
 struct OmegaAppTestAccess final
 {
+    [[nodiscard]] static std::expected<OmegaApp, std::string> CreateWithTextureConfig(
+        runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
+        runtime::ContentStartupState content, const bool debug_device,
+        const runtime::RenderTexturePoolConfig texture_config)
+    {
+        return OmegaApp::CreateWithTextureConfig(std::move(config), settings,
+            std::move(content), debug_device, texture_config);
+    }
+
     [[nodiscard]] static bool InstallUnownedDiagnosticDraw(OmegaApp& app)
     {
         constexpr runtime::RenderTextureHandle unowned_texture{
@@ -109,6 +119,13 @@ struct OmegaAppTestAccess final
         return app.assets_->Snapshot();
     }
 
+    [[nodiscard]] static std::vector<runtime::LogRecord> LogSnapshot(
+        const OmegaApp& app)
+    {
+        return app.ring_sink_ ? app.ring_sink_->Snapshot()
+                              : std::vector<runtime::LogRecord>{};
+    }
+
     [[nodiscard]] static runtime::RenderTextureHandle DiagnosticTexture(
         const OmegaApp& app) noexcept
     {
@@ -131,6 +148,12 @@ struct OmegaAppTestAccess final
         const OmegaApp& app) noexcept
     {
         return app.diagnostic_asset_topology_texture_;
+    }
+
+    [[nodiscard]] static runtime::RenderTextureHandle DiagnosticAssetTransferTexture(
+        const OmegaApp& app) noexcept
+    {
+        return app.diagnostic_asset_transfer_texture_;
     }
 
     [[nodiscard]] static const runtime::RenderDrawList& DiagnosticHiddenDrawList(
@@ -422,25 +445,28 @@ void WriteFixtureU32(std::vector<std::byte>& bytes, const std::size_t offset,
             static_cast<std::byte>((value >> shift) & 0xFFU);
 }
 
-[[nodiscard]] std::vector<std::byte> MakeFixtureDirect24Tdx()
+[[nodiscard]] std::vector<std::byte> MakeFixtureDirectTdx(
+    const std::uint16_t bits_per_pixel, const std::uint16_t header_format,
+    const std::uint32_t transfer_code, const std::uint32_t bytes_per_pixel)
 {
     constexpr std::uint16_t width = 16U;
     constexpr std::uint16_t height = 16U;
     constexpr std::uint32_t descriptor_bytes = 128U;
     constexpr std::uint32_t primary_base = 0x20U;
     constexpr std::uint32_t primary_start = primary_base + descriptor_bytes;
-    constexpr std::uint32_t payload_bytes = width * height * 3U;
-    constexpr std::uint32_t stride = primary_start + payload_bytes;
+    const std::uint32_t payload_bytes = width * height * bytes_per_pixel;
+    const std::uint32_t stride = primary_start + payload_bytes;
 
     std::vector<std::byte> bytes(64U, std::byte{0});
     WriteFixtureU16(bytes, 0x00U, 5U);
     WriteFixtureU16(bytes, 0x02U, 0U);
     WriteFixtureU16(bytes, 0x04U, width);
     WriteFixtureU16(bytes, 0x06U, height);
-    WriteFixtureU16(bytes, 0x08U, 24U);
-    WriteFixtureU16(bytes, 0x0AU, 0x01U);
+    WriteFixtureU16(bytes, 0x08U, bits_per_pixel);
+    WriteFixtureU16(bytes, 0x0AU, header_format);
     WriteFixtureU16(bytes, 0x0CU, 1U);
-    WriteFixtureU16(bytes, 0x0EU, 3U);
+    WriteFixtureU16(bytes, 0x0EU,
+        static_cast<std::uint16_t>(payload_bytes / 256U));
     WriteFixtureU16(bytes, 0x22U, 1U);
     WriteFixtureU16(bytes, 0x24U, 1U);
     WriteFixtureU16(bytes, 0x26U, 0U);
@@ -453,7 +479,7 @@ void WriteFixtureU32(std::vector<std::byte>& bytes, const std::size_t offset,
     WriteFixtureU32(block, 0x1CU, primary_base);
     WriteFixtureU32(block, 0x00U, 0x20U);
     constexpr std::size_t object = primary_base + 0x20U;
-    WriteFixtureU32(block, object + 0x04U, 0x01U << 24U);
+    WriteFixtureU32(block, object + 0x04U, transfer_code << 24U);
     WriteFixtureU32(block, object + 0x20U, width);
     WriteFixtureU32(block, object + 0x24U, height);
     WriteFixtureU32(block, object + 0x40U, payload_bytes / 4U);
@@ -508,10 +534,17 @@ void WriteFixtureU32(std::vector<std::byte>& bytes, const std::size_t offset,
         std::span(reinterpret_cast<const std::byte*>(text.data()), text.size()));
 }
 
+enum class GeneratedTextureKind
+{
+    Packed24,
+    Packed32,
+};
+
 class GeneratedLevelContentTree final
 {
 public:
-    GeneratedLevelContentTree()
+    explicit GeneratedLevelContentTree(
+        const GeneratedTextureKind texture_kind = GeneratedTextureKind::Packed24)
     {
         static std::atomic<std::uint64_t> next{0U};
         const auto stamp = static_cast<std::uint64_t>(
@@ -521,7 +554,10 @@ public:
                     std::to_string(next.fetch_add(1U)));
         std::error_code error;
         std::filesystem::create_directories(root_ / "GAMEDATA" / "TEST", error);
-        const std::vector<std::byte> texture = MakeFixtureDirect24Tdx();
+        const std::vector<std::byte> texture =
+            texture_kind == GeneratedTextureKind::Packed24
+            ? MakeFixtureDirectTdx(24U, 0x01U, 0x01U, 3U)
+            : MakeFixtureDirectTdx(32U, 0x00U, 0x00U, 4U);
         const std::vector<std::byte> hog = MakeFixtureHog("A_READY.TDX", texture);
         ready_ = !error &&
                  WriteFixtureText(root_ / "SYSTEM.CNF",
@@ -612,24 +648,27 @@ void CheckLevelContentPresentation(omega::app::OmegaApp& app)
 {
     using omega::app::detail::OmegaAppTestAccess;
     constexpr std::uint64_t kLevelContentPresentationLogicalBytes =
-        2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 2ULL + 32ULL * 32ULL * 4ULL;
+        2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 2ULL +
+        32ULL * 32ULL * 4ULL + 16ULL * 16ULL * 4ULL;
     const auto assets = OmegaAppTestAccess::AssetSnapshot(app);
     const omega::app::GpuHostSnapshot initial_gpu =
         OmegaAppTestAccess::GpuSnapshot(app);
     Check(assets && IsAggregateEmpty(*assets, 64U),
         "LevelContent consumes and releases canonical texture zero before SDL upload");
-    Check(initial_gpu.successful_uploads == 4U &&
+    Check(initial_gpu.successful_uploads == 5U &&
               initial_gpu.successful_upload_logical_bytes ==
                   kLevelContentPresentationLogicalBytes &&
               initial_gpu.successful_releases == 0U &&
               initial_gpu.textures.reserved_slots == 0U &&
-              initial_gpu.textures.resident_slots == 4U &&
+              initial_gpu.textures.resident_slots == 5U &&
               initial_gpu.textures.resident_logical_bytes ==
                   kLevelContentPresentationLogicalBytes,
-        "the 2x2 base, two 128x72 cards, and 32x32 topology own exactly 77,840 bytes");
+        "the base, two cards, topology, and strict 16x16 transfer diagnostic own exactly 78,864 bytes");
 
     const auto topology_texture =
         OmegaAppTestAccess::DiagnosticAssetTopologyTexture(app);
+    const auto transfer_texture =
+        OmegaAppTestAccess::DiagnosticAssetTransferTexture(app);
     const auto topology_commands =
         OmegaAppTestAccess::DiagnosticAssetTopologyDrawList(app).commands();
     constexpr omega::runtime::RenderSourceRectQ16 full_source{
@@ -644,20 +683,30 @@ void CheckLevelContentPresentation(omega::app::OmegaApp& app)
         .right = omega::runtime::kNormalizedRenderExtent,
         .bottom = omega::runtime::kNormalizedRenderExtent,
     };
-    constexpr omega::runtime::RenderTargetRectQ16 card_target{
-        .left = 2048U, .top = 2048U, .right = 26624U, .bottom = 15872U};
-    Check(topology_commands.size() == 2U &&
+    constexpr omega::runtime::RenderTargetRectQ16 topology_target{
+        .left = 2048U, .top = 2048U, .right = 13824U, .bottom = 15872U};
+    constexpr omega::runtime::RenderTargetRectQ16 transfer_target{
+        .left = 14848U, .top = 2048U, .right = 26624U, .bottom = 15872U};
+    Check(topology_texture.valid() && transfer_texture.valid() &&
+              topology_commands.size() == 3U &&
               topology_commands[0].texture == OmegaAppTestAccess::DiagnosticTexture(app) &&
               topology_commands[0].source == full_source &&
               topology_commands[0].destination == full_target &&
               topology_commands[1].texture == topology_texture &&
               topology_commands[1].source == full_source &&
-              topology_commands[1].destination == card_target &&
+              topology_commands[1].destination == topology_target &&
               topology_commands[1].fit_mode ==
                   omega::runtime::RenderTextureFitMode::Contain &&
               topology_commands[1].filter_mode ==
+                  omega::runtime::RenderTextureFilterMode::Nearest &&
+              topology_commands[2].texture == transfer_texture &&
+              topology_commands[2].source == full_source &&
+              topology_commands[2].destination == transfer_target &&
+              topology_commands[2].fit_mode ==
+                  omega::runtime::RenderTextureFitMode::Contain &&
+              topology_commands[2].filter_mode ==
                   omega::runtime::RenderTextureFilterMode::Nearest,
-        "LevelContent keeps the existing base-plus-topology Contain/Nearest draw path");
+        "LevelContent retains topology and adds the strict Packed24 transfer as split nearest panels");
 
     constexpr std::array coordinates{
         std::array{0U, 0U}, std::array{1U, 1U}, std::array{4U, 4U},
@@ -734,6 +783,255 @@ void CheckLevelContentPresentation(omega::app::OmegaApp& app)
         Check(OmegaAppTestAccess::GpuSnapshot(app) == initial_gpu,
             "the LevelContent topology readback leaves every GPU counter unchanged");
     }
+
+    constexpr std::array transfer_coordinates{
+        std::array{0U, 0U}, std::array{1U, 0U},
+        std::array{2U, 0U}, std::array{3U, 0U},
+        std::array{0U, 0U}, std::array{1U, 0U},
+        std::array{2U, 0U}, std::array{3U, 0U},
+        std::array{0U, 0U}, std::array{1U, 0U},
+        std::array{2U, 0U}, std::array{3U, 0U},
+        std::array{0U, 0U}, std::array{1U, 0U},
+        std::array{2U, 0U}, std::array{3U, 0U},
+    };
+    constexpr std::array transfer_expected{
+        omega::runtime::RenderClearColorRgba8{0x21U, 0x22U, 0x23U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x24U, 0x25U, 0x26U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x27U, 0x28U, 0x29U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x2aU, 0x2bU, 0x2cU, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x21U, 0x22U, 0x23U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x24U, 0x25U, 0x26U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x27U, 0x28U, 0x29U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x2aU, 0x2bU, 0x2cU, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x21U, 0x22U, 0x23U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x24U, 0x25U, 0x26U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x27U, 0x28U, 0x29U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x2aU, 0x2bU, 0x2cU, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x21U, 0x22U, 0x23U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x24U, 0x25U, 0x26U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x27U, 0x28U, 0x29U, 0xffU},
+        omega::runtime::RenderClearColorRgba8{0x2aU, 0x2bU, 0x2cU, 0xffU},
+    };
+    constexpr auto transfer_source_begin = [](const std::uint32_t coordinate) noexcept {
+        return static_cast<std::uint32_t>(
+            (static_cast<std::uint64_t>(coordinate) *
+                    omega::runtime::kNormalizedRenderExtent +
+                15U) /
+            16U);
+    };
+    constexpr auto transfer_source_end = [](const std::uint32_t coordinate) noexcept {
+        return static_cast<std::uint32_t>(
+            static_cast<std::uint64_t>(coordinate + 1U) *
+            omega::runtime::kNormalizedRenderExtent / 16U);
+    };
+    std::array<omega::runtime::RenderTextureBlitCommand, 16U> transfer_probes{};
+    for (std::size_t index = 0U; index < transfer_probes.size(); ++index)
+    {
+        const std::uint32_t column = static_cast<std::uint32_t>(index % 4U);
+        const std::uint32_t row = static_cast<std::uint32_t>(index / 4U);
+        const std::uint32_t source_x = transfer_coordinates[index][0];
+        const std::uint32_t source_y = transfer_coordinates[index][1];
+        transfer_probes[index] = omega::runtime::RenderTextureBlitCommand{
+            .texture = transfer_texture,
+            .source = omega::runtime::RenderSourceRectQ16{
+                .left = transfer_source_begin(source_x),
+                .top = transfer_source_begin(source_y),
+                .right = transfer_source_end(source_x),
+                .bottom = transfer_source_end(source_y),
+            },
+            .destination = omega::runtime::RenderTargetRectQ16{
+                .left = destination_edge(column),
+                .top = destination_edge(row),
+                .right = destination_edge(column + 1U),
+                .bottom = destination_edge(row + 1U),
+            },
+            .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+        };
+    }
+    auto transfer_draw_list = omega::runtime::RenderDrawList::Create(transfer_probes);
+    Check(transfer_draw_list.has_value(),
+        "the LevelContent transfer source-slot probes form a valid draw list");
+    if (transfer_draw_list)
+    {
+        omega::runtime::RenderFramePacket packet{
+            .clear_color = omega::runtime::kDefaultRenderClearColor,
+            .draw_list = *transfer_draw_list,
+        };
+        auto readback =
+            omega::app::detail::SdlGpuHostTestAccess::ReadbackBlitsForTesting(
+                OmegaAppTestAccess::Host(app), packet);
+        Check(readback && *readback == transfer_expected,
+            "the first strict Packed24 transfer preserves all twelve source slots and synthetic fourth slots on GPU");
+        Check(OmegaAppTestAccess::GpuSnapshot(app) == initial_gpu,
+            "the LevelContent transfer readback leaves every GPU counter unchanged");
+    }
+}
+
+void CheckNonPackedLevelContentFallback(omega::app::OmegaApp& app,
+    const std::filesystem::path& source_root)
+{
+    using omega::app::detail::OmegaAppTestAccess;
+    constexpr std::uint64_t kTopologyOnlyPresentationLogicalBytes =
+        2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 2ULL +
+        32ULL * 32ULL * 4ULL;
+    const auto assets = OmegaAppTestAccess::AssetSnapshot(app);
+    const omega::app::GpuHostSnapshot gpu = OmegaAppTestAccess::GpuSnapshot(app);
+    const auto topology_texture =
+        OmegaAppTestAccess::DiagnosticAssetTopologyTexture(app);
+    const auto transfer_texture =
+        OmegaAppTestAccess::DiagnosticAssetTransferTexture(app);
+    const auto commands =
+        OmegaAppTestAccess::DiagnosticAssetTopologyDrawList(app).commands();
+    constexpr omega::runtime::RenderSourceRectQ16 full_source{
+        .left = 0U,
+        .top = 0U,
+        .right = omega::runtime::kNormalizedRenderExtent,
+        .bottom = omega::runtime::kNormalizedRenderExtent,
+    };
+    constexpr omega::runtime::RenderTargetRectQ16 full_target{
+        .left = 0U,
+        .top = 0U,
+        .right = omega::runtime::kNormalizedRenderExtent,
+        .bottom = omega::runtime::kNormalizedRenderExtent,
+    };
+    constexpr omega::runtime::RenderTargetRectQ16 card_target{
+        .left = 2048U,
+        .top = 2048U,
+        .right = 26624U,
+        .bottom = 15872U,
+    };
+    Check(assets && IsAggregateEmpty(*assets, 64U) && topology_texture.valid() &&
+              !transfer_texture.valid(),
+        "non-Packed24 LevelContent restores assets and retains only topology presentation");
+    Check(gpu.successful_uploads == 4U &&
+              gpu.successful_upload_logical_bytes ==
+                  kTopologyOnlyPresentationLogicalBytes &&
+              gpu.successful_releases == 0U &&
+              gpu.textures.reserved_slots == 0U &&
+              gpu.textures.resident_slots == 4U &&
+              gpu.textures.resident_logical_bytes ==
+                  kTopologyOnlyPresentationLogicalBytes,
+        "non-Packed24 LevelContent preserves the four-upload 77,840-byte fallback");
+    Check(commands.size() == 2U &&
+              commands[0].texture == OmegaAppTestAccess::DiagnosticTexture(app) &&
+              commands[0].source == full_source &&
+              commands[0].destination == full_target &&
+              commands[1].texture == topology_texture &&
+              commands[1].source == full_source &&
+              commands[1].destination == card_target &&
+              commands[1].fit_mode ==
+                  omega::runtime::RenderTextureFitMode::Contain &&
+              commands[1].filter_mode ==
+                  omega::runtime::RenderTextureFilterMode::Nearest,
+        "non-Packed24 LevelContent keeps the full-width topology draw path");
+
+    constexpr std::string_view rejection_prefix =
+        "packed-24 transfer diagnostic unavailable:";
+    constexpr std::string_view exact_rejection =
+        "packed-24 transfer diagnostic unavailable: unsupported-sample-encoding";
+    constexpr std::array<std::string_view, 3U> source_identity_tokens{
+        "A_READY.TDX", "GAMEDATA/TEST", "TEX.HOG"};
+    const std::string source_root_text = source_root.string();
+    std::size_t exact_rejection_count = 0U;
+    bool unexpected_rejection = false;
+    bool source_identity_disclosed = false;
+    for (const omega::runtime::LogRecord& record :
+        OmegaAppTestAccess::LogSnapshot(app))
+    {
+        if (record.message.starts_with(rejection_prefix))
+        {
+            if (record.severity == omega::runtime::LogSeverity::Info &&
+                record.category == "startup" && record.message == exact_rejection)
+                ++exact_rejection_count;
+            else
+                unexpected_rejection = true;
+        }
+        if ((!source_root_text.empty() &&
+                record.message.find(source_root_text) != std::string::npos) ||
+            std::ranges::any_of(source_identity_tokens,
+                [&record](const std::string_view token) {
+                    return record.message.find(token) != std::string::npos;
+                }))
+            source_identity_disclosed = true;
+    }
+    Check(exact_rejection_count == 1U && !unexpected_rejection &&
+              !source_identity_disclosed,
+        "the fallback records one fixed Packed24 category and no source identity");
+}
+
+void CheckPackedTransferUploadBudgetFallback(omega::app::OmegaApp& app,
+    const std::filesystem::path& source_root)
+{
+    using omega::app::detail::OmegaAppTestAccess;
+    constexpr std::uint64_t kTopologyOnlyPresentationLogicalBytes =
+        2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 2ULL +
+        32ULL * 32ULL * 4ULL;
+    const auto assets = OmegaAppTestAccess::AssetSnapshot(app);
+    const omega::app::GpuHostSnapshot gpu = OmegaAppTestAccess::GpuSnapshot(app);
+    const auto topology_texture =
+        OmegaAppTestAccess::DiagnosticAssetTopologyTexture(app);
+    const auto transfer_texture =
+        OmegaAppTestAccess::DiagnosticAssetTransferTexture(app);
+    const auto commands =
+        OmegaAppTestAccess::DiagnosticAssetTopologyDrawList(app).commands();
+    constexpr omega::runtime::RenderTargetRectQ16 card_target{
+        .left = 2048U,
+        .top = 2048U,
+        .right = 26624U,
+        .bottom = 15872U,
+    };
+
+    Check(assets && IsAggregateEmpty(*assets, 64U) && topology_texture.valid() &&
+              !transfer_texture.valid(),
+        "a rejected optional transfer upload preserves owned topology and exact asset cleanup");
+    Check(gpu.successful_uploads == 4U &&
+              gpu.successful_upload_logical_bytes ==
+                  kTopologyOnlyPresentationLogicalBytes &&
+              gpu.successful_releases == 0U &&
+              gpu.textures.slot_capacity == 64U &&
+              gpu.textures.free_slots == 60U &&
+              gpu.textures.reserved_slots == 0U &&
+              gpu.textures.resident_slots == 4U &&
+              gpu.textures.resident_logical_bytes ==
+                  kTopologyOnlyPresentationLogicalBytes,
+        "the exact topology-only budget leaves no fifth reservation state");
+    Check(commands.size() == 2U && commands[1].texture == topology_texture &&
+              commands[1].destination == card_target &&
+              commands[1].fit_mode ==
+                  omega::runtime::RenderTextureFitMode::Contain &&
+              commands[1].filter_mode ==
+                  omega::runtime::RenderTextureFilterMode::Nearest,
+        "a rejected transfer upload restores the full-width topology draw path");
+
+    constexpr std::string_view exact_rejection =
+        "packed-24 transfer diagnostic unavailable: upload-failed";
+    constexpr std::array<std::string_view, 4U> forbidden_tokens{
+        "resident-budget-exceeded", "A_READY.TDX", "GAMEDATA/TEST", "TEX.HOG"};
+    const std::string source_root_text = source_root.string();
+    std::size_t exact_rejection_count = 0U;
+    bool unexpected_detail = false;
+    for (const omega::runtime::LogRecord& record :
+        OmegaAppTestAccess::LogSnapshot(app))
+    {
+        if (record.message == exact_rejection &&
+            record.severity == omega::runtime::LogSeverity::Info &&
+            record.category == "startup")
+        {
+            ++exact_rejection_count;
+        }
+        if ((!source_root_text.empty() &&
+                record.message.find(source_root_text) != std::string::npos) ||
+            std::ranges::any_of(forbidden_tokens,
+                [&record](const std::string_view token) {
+                    return record.message.find(token) != std::string::npos;
+                }))
+        {
+            unexpected_detail = true;
+        }
+    }
+    Check(exact_rejection_count == 1U && !unexpected_detail,
+        "the upload fallback records one fixed identity-free INFO category");
 }
 
 [[nodiscard]] bool PushQuit()
@@ -823,6 +1121,31 @@ int main()
                 CheckLevelContentPresentation(*level_app);
         }
 
+        auto constrained_config = omega::runtime::ParseConfigText("");
+        auto constrained_content = BuildLevelContentStartupState(generated_content);
+        Check(constrained_config && constrained_content,
+            "the transfer-upload budget fallback fixture is ready");
+        if (constrained_config && constrained_content)
+        {
+            constexpr omega::runtime::RenderTexturePoolConfig texture_config{
+                .slot_capacity = 64U,
+                .maximum_resident_logical_bytes =
+                    2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 2ULL +
+                    32ULL * 32ULL * 4ULL,
+            };
+            auto constrained_app =
+                omega::app::detail::OmegaAppTestAccess::CreateWithTextureConfig(
+                    std::move(*constrained_config), settings,
+                    std::move(*constrained_content), false, texture_config);
+            Check(constrained_app.has_value(),
+                "OmegaApp degrades to topology when the optional transfer exceeds the pool budget");
+            if (constrained_app)
+            {
+                CheckPackedTransferUploadBudgetFallback(
+                    *constrained_app, generated_content.root());
+            }
+        }
+
         auto mounted_config = omega::runtime::ParseConfigText("");
         auto mounted_content = BuildDataMountedStartupState(generated_content);
         const bool is_data_mounted = [&mounted_content] {
@@ -855,6 +1178,37 @@ int main()
                               kSyntheticPresentationLogicalBytes,
                     "DataMounted retains the synthetic 96x32 topology and exactly 122,880 resident bytes");
             }
+        }
+    }
+
+    GeneratedLevelContentTree generated_non_packed_content(
+        GeneratedTextureKind::Packed32);
+    Check(generated_non_packed_content.ready(),
+        "the public synthetic Packed32 LevelContent tree is created");
+    if (generated_non_packed_content.ready())
+    {
+        auto fallback_config = omega::runtime::ParseConfigText("");
+        auto fallback_content =
+            BuildLevelContentStartupState(generated_non_packed_content);
+        const bool is_level_content = [&fallback_content] {
+            if (!fallback_content)
+                return false;
+            const auto stage =
+                omega::runtime::ClassifyContentStartupState(*fallback_content);
+            return stage && *stage == omega::runtime::ContentStartupStage::LevelContent;
+        }();
+        Check(fallback_config && fallback_content && is_level_content,
+            "the Packed32 ownership aggregate classifies as LevelContent");
+        if (fallback_config && fallback_content)
+        {
+            auto fallback_app = omega::app::OmegaApp::Create(
+                std::move(*fallback_config), settings,
+                std::move(*fallback_content), false);
+            Check(fallback_app.has_value(),
+                "OmegaApp accepts non-Packed24 LevelContent through topology fallback");
+            if (fallback_app)
+                CheckNonPackedLevelContentFallback(
+                    *fallback_app, generated_non_packed_content.root());
         }
     }
 
@@ -931,6 +1285,10 @@ int main()
         OmegaAppTestAccess::DiagnosticControlsTexture(*app);
     const omega::runtime::RenderTextureHandle diagnostic_asset_topology_texture =
         OmegaAppTestAccess::DiagnosticAssetTopologyTexture(*app);
+    const omega::runtime::RenderTextureHandle diagnostic_asset_transfer_texture =
+        OmegaAppTestAccess::DiagnosticAssetTransferTexture(*app);
+    Check(!diagnostic_asset_transfer_texture.valid(),
+        "zero-file startup retains no owner-derived transfer texture");
     const omega::runtime::RenderDrawList initial_hidden_draw_list =
         OmegaAppTestAccess::DiagnosticHiddenDrawList(*app);
     const std::array<omega::runtime::RenderDrawList,
@@ -1552,6 +1910,8 @@ int main()
                   diagnostic_controls_texture &&
               OmegaAppTestAccess::DiagnosticAssetTopologyTexture(*app) ==
                   diagnostic_asset_topology_texture &&
+              OmegaAppTestAccess::DiagnosticAssetTransferTexture(*app) ==
+                  diagnostic_asset_transfer_texture &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
                   initial_hidden_draw_list) &&
               DrawListArraysEqual(OmegaAppTestAccess::DiagnosticVisibleDrawLists(*app),
@@ -2449,6 +2809,8 @@ int main()
                   diagnostic_controls_texture &&
               OmegaAppTestAccess::DiagnosticAssetTopologyTexture(*app) ==
                   diagnostic_asset_topology_texture &&
+              OmegaAppTestAccess::DiagnosticAssetTransferTexture(*app) ==
+                  diagnostic_asset_transfer_texture &&
               SameTextureResidency(initial_gpu, ready_gpu),
         "navigation preserves all four immutable presentation resources and their four uploads");
 
@@ -2490,6 +2852,8 @@ int main()
                    diagnostic_controls_texture &&
               OmegaAppTestAccess::DiagnosticAssetTopologyTexture(*app) ==
                   diagnostic_asset_topology_texture &&
+              OmegaAppTestAccess::DiagnosticAssetTransferTexture(*app) ==
+                  diagnostic_asset_transfer_texture &&
               OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
                   debug_position_before_terminal &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),

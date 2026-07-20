@@ -975,6 +975,30 @@ private path, hash, byte, address, symbol, disassembly, input copy, or ReSymbol 
 This is a bounded decoder-consistency result, not semantic, decompilation, or retail-behavior
 evidence.
 
+E-0082 wires the strict E-0078 Packed24 diagnostic into complete `LevelContent` startup through the
+existing E-0077 canonical `AssetService` transaction. The combined helper always returns owned
+topology and treats every transfer rejection as a typed nonfatal fallback. On the public synthetic
+Packed24 fixture it produces frozen 32x32 topology and 16x16/1,024-byte transfer outputs; app-state
+inspection pins five resident uploads totaling 78,864 bytes and an exact three-command
+base-plus-split-topology-plus-transfer draw list. A GPU probe verifies the first four source triples
+and their synthetic `0xff` fourth slots. Transfer teardown precedes topology. Synthetic Packed32
+startup remains topology-only with four resident uploads totaling 77,840 bytes and exactly one fixed
+identity-free `unsupported-sample-encoding` INFO record. A helper-level output-limit rejection
+preserves topology and restores aggregate `AssetService` state, and source inspection shows one
+Request/Release transaction. A test-only exact 77,840-byte renderer-pool budget rejects the optional
+fifth reservation before GPU allocation and proves successful four-texture/full-width-topology
+fallback, exact pool-state preservation, and one fixed identity-free `upload-failed` INFO record. Serialized
+local validation passed focused/full MSVC builds, direct
+asset-service and Direct3D12 app smokes, 32/36/32 CTest, dependency 168, tooling 209, Python
+compile-all, and the public-tree gate over 258 indexed text blobs. Diff and DCO checks passed. PR,
+head, publication, and exact-main validation remain unclaimed. The local opt-in GPU suite ran the
+integration test; default hosted CI only compiles it. These checks do not prove cumulative exact
+request count, every rejection category, full-image GPU fidelity, backend-specific fifth-upload
+failures, release failure, allocation injection, or valid-transfer failure rollback, and assign no retail texture,
+material, geometry, gameplay, or emulator-equivalence semantics. Only public source and generated
+fixtures were used; no private or owner file, proprietary input, D-drive content, disc image, retail
+executable, emulator, or PCSX2 input was accessed.
+
 - Window, input, logging, configuration, jobs, renderer, audio device, and frame scheduler.
 - Load the retail data tree supplied by the owner; clear diagnostics for missing/wrong region.
 - Render a debug scene with no proprietary data embedded in the executable.

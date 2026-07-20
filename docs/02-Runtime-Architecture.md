@@ -636,9 +636,10 @@ For element `n`, source slots `3n + 0..2` are copied without transformation to o
 output dimensions only. Seeded 16x16 public fixtures produce 1,024 bytes and hashes
 `0x4abb645f50f5a325` and `0x36590f25eee3ab25`. This projection supplies no channel names,
 display-ready claim, row origin/order, swizzle, color space, alpha meaning, premultiplication,
-Packed32/indexed policy, nibble/palette behavior, or material/UV/geometry semantics. It is not wired
-to OmegaApp, GPU upload, renderer selection, AssetService, or the E-0077 preview. Serialized local
-validation passed focused/full MSVC, the direct unit plus 100/100 repeated runs, focused and
+Packed32/indexed policy, nibble/palette behavior, or material/UV/geometry semantics. At E-0078's
+publication it was not wired to OmegaApp, GPU upload, renderer selection, AssetService, or the E-0077
+preview. Serialized local validation passed focused/full MSVC, the direct unit plus 100/100 repeated
+runs, focused and
 32/36/32 CTest, runtime-off direct/focused checks with 28 registrations, dependency 168, tooling
 209, and Python compile-all. The staged public-tree gate checked 255 indexed text blobs. The merged
 commit carries its matching DCO sign-off; PR #39 published E-0078 as exact `main` commit
@@ -740,6 +741,46 @@ isolated profile, so profile immutability is intentionally unclaimed. No proprie
 asset, retail executable, emulator, PCSX2 input, or D-drive filesystem input was accessed. This result does
 not establish a pixel-golden contract, retail-menu fidelity, owner-data behavior, controller or
 audio coverage, portability to another host or Windows release, or PCSX2 equivalence.
+
+E-0082 generalizes the E-0077 request/Get/build/Release transaction behind a shared internal helper
+without changing its error precedence or exact aggregate-state restoration requirement.
+`BuildFirstLevelTextureDiagnosticPreview` uses the same canonical handle-zero request to build the
+mandatory metadata topology image and attempt the strict E-0078 Packed24 transfer projection while
+the immutable asset view is borrowed. It returns independently owned output after Release: topology
+is mandatory, while exactly one of the optional transfer image or typed transfer error is populated.
+Every Packed24 diagnostic rejection remains nonfatal, including invalid or unsupported storage,
+configured output limits, arithmetic bounds, and allocation failure. `OmegaApp` therefore preserves
+the topology-only path and records a fixed identity-free INFO category when transfer projection is
+unavailable.
+
+For the public synthetic Packed24 `LevelContent` fixture, the combined helper freezes a 32x32
+topology image and 16x16/1,024-byte transfer image. Startup uploads that transfer as the fifth
+resident texture, for 78,864 logical bytes total, and builds an exact three-command draw list holding
+the base diagnostic, split topology panel, and transfer panel. A real Direct3D12 probe verifies the
+first four packed source triples and their synthetic `0xff` fourth slots. Draw lists clear before
+the transfer texture is released ahead of topology. The public synthetic Packed32 fixture exercises
+the nonfatal fallback: topology remains full-width, four uploads retain 77,840 resident bytes, and
+the log contains exactly one `unsupported-sample-encoding` INFO record with no fixture identity. A
+helper-level output-limit fixture proves that topology survives the typed transfer rejection and
+that aggregate `AssetService` state is restored. Source inspection shows one Request/Release
+transaction. Transfer upload is likewise optional: any failed fifth upload records the fixed
+identity-free `upload-failed` INFO category and rebuilds the full-width topology-only list. A
+test-only exact 77,840-byte renderer-pool budget rejects that fifth reservation before backend GPU
+allocation and proves startup success, four resident textures, exact pool-state preservation, no transfer
+handle, and no raw pool error or source identity in the log.
+
+Serialized local validation passed focused and full MSVC builds; direct asset-service and Direct3D12
+app smokes; default, GPU-opt-in, and restored CTest at 32/36/32; the 168-file dependency gate; all 209
+tooling tests; Python compile-all; and the public-tree gate over 258 indexed text blobs. Diff and DCO
+checks passed. PR, head, publication, and exact-main validation remain unclaimed. The GPU integration
+test ran in the local opt-in suite; default hosted CI compiles but does not run it. The app GPU probe
+covers four pixels while the standalone CPU projection contract covers all 256 triples. These checks
+do not prove a cumulative exact request count, every rejection category, full-image GPU fidelity,
+backend-specific fifth-upload failures, release failure, allocation injection, or valid-transfer failure rollback.
+They assign no channel, alpha, row-order, swizzle, color-space, material, geometry, retail-rendering,
+gameplay, or emulator-equivalence semantics. Only public source and generated fixtures were used; no
+private or owner file, proprietary input, D-drive content, disc image, retail executable, emulator,
+or PCSX2 input was accessed.
 
 ## Level texture inventory and loading
 

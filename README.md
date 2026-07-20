@@ -905,6 +905,34 @@ retail instruction blocks, or PS2 execution layer.
   accessed.
   This is not a pixel-golden test or evidence of retail-menu fidelity, owner-data behavior,
   controller or audio coverage, another machine, another Windows release, or PCSX2 equivalence.
+- E-0082 wires the strict E-0078 Packed24 projection into complete `LevelContent` startup while
+  preserving the mandatory E-0077 topology path. `BuildFirstLevelTextureDiagnosticPreview` runs
+  both builders inside the existing canonical-handle `AssetService` transaction and returns an
+  independently owned topology image plus either an optional transfer image or its typed rejection.
+  Every Packed24 diagnostic rejection is intentionally nonfatal; `OmegaApp` keeps the topology-only
+  presentation and emits one fixed identity-free INFO category. On the public synthetic Packed24
+  fixture, the combined helper produces frozen 32x32 topology and 16x16/1,024-byte transfer outputs.
+  App-state inspection establishes five resident uploads totaling 78,864 bytes and an exact
+  three-command base-plus-split-topology-plus-transfer draw list; a GPU probe confirms the first four
+  packed triples and their synthetic `0xff` fourth slots. Teardown releases the transfer texture
+  before the topology texture. On the synthetic Packed32 fixture, startup remains topology-only with
+  four resident uploads totaling 77,840 bytes, and the log contains exactly one fixed
+  `unsupported-sample-encoding` INFO record without fixture identity. A helper-level output-limit
+  rejection preserves topology and restores aggregate `AssetService` state. Source inspection shows
+  one Request/Release transaction. A test-only 77,840-byte renderer-pool budget rejects the optional
+  fifth upload before GPU allocation; startup still succeeds with four resident textures, the
+  full-width topology list, exact pool-state preservation, and one fixed identity-free `upload-failed`
+  INFO record. Serialized local validation passed focused and full MSVC builds;
+  direct asset-service and Direct3D12 app smokes; default, GPU-opt-in, and restored CTest at 32/36/32;
+  the 168-file dependency gate; all 209 tooling tests; Python compile-all; and the public-tree gate
+  over 258 indexed text blobs. Diff and DCO checks passed. PR, head, publication, and exact-main
+  validation remain unclaimed. These checks do not prove a cumulative exact request count, every
+  rejection category, full-image GPU fidelity, backend-specific fifth-upload failures, release
+  failure, allocation injection, or valid-transfer failure rollback. The opt-in GPU suite ran locally; default hosted CI
+  only compiles that integration test. The diagnostic assigns no channel, alpha, row-order, swizzle,
+  color-space, material, geometry, retail-rendering, gameplay, or emulator-equivalence semantics.
+  Only public source and generated fixtures were used; no private or owner file, proprietary input,
+  D-drive content, disc image, retail executable, emulator, or PCSX2 input was accessed.
 - A separate private aggregate-only ReSymbol cross-check pinned the explicit
   `Ps2EeR5900LeCoreV1` decoder profile. Because the frozen ELF was unavailable, it used the
   available private 32 MiB EE memory and reproduced 38/38 already-public loader control-transfer

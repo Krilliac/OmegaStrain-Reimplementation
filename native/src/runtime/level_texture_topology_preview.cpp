@@ -70,12 +70,11 @@ namespace
            snapshot.in_flight_requests == 0U &&
            snapshot.resident_logical_bytes == 0U;
 }
-} // namespace
 
-std::expected<DebugImage, LevelTextureTopologyPreviewError>
-BuildFirstLevelTextureTopologyPreview(AssetService& assets,
-    const content::LevelTextureStore& texture_store,
-    const TextureStorageTopologyDebugImageLimits& limits)
+template <typename Result, typename Builder>
+[[nodiscard]] std::expected<Result, LevelTextureTopologyPreviewError>
+BuildFirstLevelTexturePreviewTransaction(AssetService& assets,
+    const content::LevelTextureStore& texture_store, Builder builder)
 {
     const AssetServiceSnapshot entry_snapshot = assets.Snapshot();
     if (!IsAggregateEmpty(entry_snapshot))
@@ -111,7 +110,7 @@ BuildFirstLevelTextureTopologyPreview(AssetService& assets,
     }
 
     assets.WaitForIdle();
-    auto preview = [&]() -> std::expected<DebugImage, LevelTextureTopologyPreviewError> {
+    auto preview = [&]() -> std::expected<Result, LevelTextureTopologyPreviewError> {
         auto loaded = assets.Get(*requested);
         if (!loaded)
         {
@@ -122,16 +121,7 @@ BuildFirstLevelTextureTopologyPreview(AssetService& assets,
                 LevelTextureTopologyPreviewErrorCode::AssetGetFailed,
                 texture_store_error_code, loaded.error().code));
         }
-
-        auto built = BuildTextureStorageTopologyDebugImage(
-            loaded->storage.get(), limits);
-        if (!built)
-        {
-            return std::unexpected(MakeError(
-                LevelTextureTopologyPreviewErrorCode::ImageBuildFailed, std::nullopt,
-                std::nullopt, built.error().code));
-        }
-        return std::move(*built);
+        return builder(loaded->storage.get());
     }();
 
     auto released = assets.Release(*requested);
@@ -150,5 +140,58 @@ BuildFirstLevelTextureTopologyPreview(AssetService& assets,
     if (!preview)
         return std::unexpected(preview.error());
     return std::move(*preview);
+}
+} // namespace
+
+std::expected<DebugImage, LevelTextureTopologyPreviewError>
+BuildFirstLevelTextureTopologyPreview(AssetService& assets,
+    const content::LevelTextureStore& texture_store,
+    const TextureStorageTopologyDebugImageLimits& limits)
+{
+    return BuildFirstLevelTexturePreviewTransaction<DebugImage>(
+        assets, texture_store,
+        [&limits](const asset::TextureStorageIR& storage)
+            -> std::expected<DebugImage, LevelTextureTopologyPreviewError> {
+        auto built = BuildTextureStorageTopologyDebugImage(
+            storage, limits);
+        if (!built)
+        {
+            return std::unexpected(MakeError(
+                LevelTextureTopologyPreviewErrorCode::ImageBuildFailed, std::nullopt,
+                std::nullopt, built.error().code));
+        }
+        return std::move(*built);
+    });
+}
+
+std::expected<LevelTextureDiagnosticPreview, LevelTextureTopologyPreviewError>
+BuildFirstLevelTextureDiagnosticPreview(AssetService& assets,
+    const content::LevelTextureStore& texture_store,
+    const LevelTextureDiagnosticPreviewLimits& limits)
+{
+    return BuildFirstLevelTexturePreviewTransaction<LevelTextureDiagnosticPreview>(
+        assets, texture_store,
+        [&limits](const asset::TextureStorageIR& storage)
+            -> std::expected<LevelTextureDiagnosticPreview,
+                LevelTextureTopologyPreviewError> {
+        auto topology = BuildTextureStorageTopologyDebugImage(storage, limits.topology);
+        if (!topology)
+        {
+            return std::unexpected(MakeError(
+                LevelTextureTopologyPreviewErrorCode::ImageBuildFailed, std::nullopt,
+                std::nullopt, topology.error().code));
+        }
+
+        LevelTextureDiagnosticPreview preview{
+            .topology_image = std::move(*topology),
+        };
+        auto packed24 = BuildPacked24TransferDebugImage(
+            storage, limits.packed24_transfer);
+        if (packed24)
+            preview.packed24_transfer_image.emplace(std::move(*packed24));
+        else
+            preview.packed24_transfer_error_code = packed24.error().code;
+        return preview;
+    });
 }
 } // namespace omega::runtime

@@ -69,6 +69,13 @@ private:
 
     static constexpr std::uint32_t kQuitAction = 1U;
 
+    // Test-only seam for exercising renderer-pool policy without widening the production
+    // composition-root API. Production Create always supplies the default pool configuration.
+    [[nodiscard]] static std::expected<OmegaApp, std::string> CreateWithTextureConfig(
+        runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
+        runtime::ContentStartupState content, bool debug_device,
+        runtime::RenderTexturePoolConfig texture_config);
+
     struct RunLoopResult
     {
         RunResult result;
@@ -99,6 +106,7 @@ private:
         runtime::RenderTextureHandle diagnostic_menu_texture,
         runtime::RenderTextureHandle diagnostic_controls_texture,
         runtime::RenderTextureHandle diagnostic_asset_topology_texture,
+        runtime::RenderTextureHandle diagnostic_asset_transfer_texture,
         runtime::RenderDrawList diagnostic_hidden_draw_list,
         std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
             diagnostic_visible_draw_lists,
@@ -128,6 +136,7 @@ private:
     runtime::RenderTextureHandle diagnostic_menu_texture_;
     runtime::RenderTextureHandle diagnostic_controls_texture_;
     runtime::RenderTextureHandle diagnostic_asset_topology_texture_;
+    runtime::RenderTextureHandle diagnostic_asset_transfer_texture_;
     // Immutable non-owning draw data, retained independently from the explicit release handles.
     runtime::RenderDrawList diagnostic_hidden_draw_list_;
     std::array<runtime::RenderDrawList, kDiagnosticMenuRowCount>
