@@ -148,7 +148,8 @@ native-save manifest. No default profile is created.
 
 ## PS2 compatibility boundary
 
-PS2 compatibility will be implemented as stateless, bounded codecs plus a typed mapping layer:
+PS2 compatibility is split into implemented stateless bounded standard-format codecs and a future
+typed Omega Strain payload mapping layer:
 
 ```text
 PS2 save container/image bytes
@@ -163,13 +164,13 @@ owned compatibility directory/files
 typed OpenOmega import transaction -> SaveDatabase
 ```
 
-The first compatibility target is an archival logical round trip:
+The implemented standard-container boundary provides an archival logical round trip:
 
 - import one explicitly selected top-level save directory from an 8 MiB PS2 card image;
 - accept either 512-byte logical pages or 528-byte raw pages;
 - preserve the directory's ordered child names, full mode/attribute values, timestamps, and exact
   opaque file payloads;
-- export only to a new 8 MiB raw `.ps2` image with 528-byte pages; and
+- export only to a new deterministic 8 MiB logical image or raw `.ps2` image with 528-byte pages;
 - regenerate superblock, allocation tables/chains, physical placement, spare/ECC bytes, `.`/`..`,
   and unused entry tails rather than persisting emulator layout.
 
@@ -189,11 +190,11 @@ packages are outside v1. More importantly, archival import/export does not turn 
 records into an Omega Strain retail save. That requires an independently evidenced retail-payload
 codec for slot layout, checksums, and any compression or encryption.
 
-Export follows the reverse path from a stable database snapshot. The codecs will not become
-database backends, expose emulator state, execute retail code, or retain borrowed input. Standard
-container/filesystem support and Omega Strain payload interpretation require separate evidence and
-tests. Only synthetic fixtures may enter version control; owner saves and exported card images stay
-outside it.
+Export follows the reverse path from an owned compatibility-directory value. The codecs are not
+database backends, expose no emulator state, execute no retail code, and retain no borrowed input.
+Standard container/filesystem support is implemented; adapting a stable database snapshot to an
+Omega Strain payload still requires separate evidence and tests. Only synthetic fixtures may enter
+version control; owner saves and exported card images stay outside it.
 
 ## Current validation boundary
 
@@ -215,3 +216,9 @@ runtime-enabled Debug, and runtime-enabled Release builds. Their complete CTest 
 focused database test also passed 20 consecutive Debug runs and 20 consecutive Release runs. Those
 counts predate the profile and app-composition slices; their newer executable tests must be reported
 only from a build that contains those slices.
+
+The separate synthetic compatibility suites cover strict logical/raw envelope recognition,
+geometry and superblock rejection, canonical ECC conversion, bounded IFC/FAT and directory-chain
+walking, loops/shared clusters, ordered opaque file recovery, deterministic fresh-card creation,
+input/limit/capacity rejection, and logical/raw read-after-write round trips. They do not decode an
+Omega Strain payload or validate a generated image against owner data or a live PCSX2 session.

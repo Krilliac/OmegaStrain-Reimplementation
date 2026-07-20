@@ -1208,6 +1208,18 @@ shipping dependencies or execution mechanisms.
     accessed, and no front-end role, lookup, layout, state, binding, rendering, audio, or behavior
     is inferred.
 
+72. E-0085 adds the independent `omega_ps2_compat` standard-container leaf. It strictly recognizes
+    fixed 8 MiB PS2 cards with either 512-byte logical pages or 528-byte raw pages, validates the
+    versioned superblock and fixed geometry, and canonicalizes raw ECC/spare data. A bounded reader
+    follows IFC/FAT chains for one explicitly selected top-level directory and returns its immediate
+    regular files as ordered owned opaque bytes while rejecting loops, shared clusters, nested live
+    directories, malformed entries, ambiguity, and configured limits. A deterministic exporter
+    constructs a new logical or raw card with fresh superblock, allocation tables, directory entries,
+    cluster chains, and ECC; it never patches an existing card. Synthetic fixtures cover envelope,
+    filesystem, error, capacity, determinism, and logical/raw round-trip contracts. No owner save,
+    retail payload, private input, PCSX2 session, emulator state, or D-drive input was used, and no
+    Omega Strain payload semantics are claimed.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2
@@ -1230,10 +1242,9 @@ shipping dependencies or execution mechanisms.
 
 1. Compose the native save database into `OmegaApp` under the existing captured per-user root,
    define a typed project-owned profile repository, and drive profile enumeration from the native
-   main menu. Preserve process/package isolation by redirecting persistence in tests. Implement PS2
-   compatibility as bounded stateless import/export codecs over owned bytes, with standard container
-   structure and Omega Strain payload semantics treated as separate evidence. Never make a PS2
-   memory-card device, guest RAM, or emulator savestate part of the shipping runtime.
+   main menu. Preserve process/package isolation by redirecting persistence in tests. Build the
+   separately evidenced Omega Strain payload mapper over the now-bounded standard card codecs; never
+   make a PS2 memory-card device, guest RAM, or emulator savestate part of the shipping runtime.
 2. Use the accepted deterministic VUM trace only as a structural baseline. Collect additional
    bounded pairs through controlled comparisons that change one research condition at a time,
    require strict validation and byte-identical repeats, and compare only sanitized relative

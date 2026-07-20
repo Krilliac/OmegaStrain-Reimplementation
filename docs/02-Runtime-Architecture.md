@@ -225,6 +225,8 @@ The initial native build targets express the same direction:
   format dependency;
 - `omega_profiles`: bounded, versioned profile metadata over `omega_persistence`, with no implicit
   default or active-profile policy;
+- `omega_ps2_compat`: stateless bounded standard PS2 memory-card image/filesystem codecs over owned
+  bytes, with no dependency on persistence, retail payloads, PCSX2, or emulator state;
 - `omega_assets`: canonical owned IR values and decode contracts;
 - `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
 - `omega_retail_formats`: stateless POP/COL/VUM/TDX/SKM/SKL/SKA adapters that may depend on the
@@ -256,6 +258,14 @@ destroys it last. Non-probe startup resolves the host-native save directory, ope
 validates all profile markers before platform creation. `--probe-only` returns before persistence;
 `--frames=0` returns after bootstrap. This still assigns no active-profile, campaign, checkpoint,
 retail-payload, PS2 filesystem, memory-card-device, guest-memory, or emulator-savestate semantics.
+
+E-0085 implements the separate `omega_ps2_compat` compatibility leaf. It accepts only the fixed
+8 MiB 512-byte logical-page or 528-byte raw-page card layouts, validates the standard superblock and
+geometry, canonicalizes raw spare/ECC bytes, reads one explicitly named top-level directory through
+bounded IFC/FAT chains, and returns ordered owned opaque file payloads. Export always constructs a
+new deterministic card, allocation tables, directory entries, chains, and ECC; it cannot patch an
+existing image. The layer owns no filesystem path or persistence service and assigns no Omega Strain
+slot, checksum, compression, encryption, campaign, guest-memory, or emulator-state meaning.
 
 VUM has a bounded semantic adapter that returns owned source-order names plus one-to-three dense
 name indices per material. A separate retail-only passive descriptor preserves only the three

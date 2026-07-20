@@ -54,8 +54,12 @@ retail instruction blocks, or PS2 execution layer.
   fallback, missing-established-slot rejection, post-recovery commit, hard-link containment,
   namespace anchoring, both-slot corruption, future-version rejection, and competing owners.
   The native profile catalog and app-owned startup composition are implemented without an implicit
-  default or active profile; menu actions and bounded PS2 import/export codecs remain separate next
-  slices. Owner saves and exported card images stay outside version control.
+  default or active profile; menu actions remain a separate next slice. The standalone
+  `omega_ps2_compat` layer now recognizes strict standard 8 MiB logical/raw card envelopes, reads
+  one explicitly selected top-level directory as ordered opaque files, and creates a new
+  deterministic logical or raw card without patching an existing image. Owner saves and exported
+  card images stay outside version control; Omega Strain payload interpretation remains a separate
+  evidence-backed mapping slice.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public
