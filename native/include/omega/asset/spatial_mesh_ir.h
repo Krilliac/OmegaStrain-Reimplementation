@@ -1,5 +1,7 @@
 #pragma once
 
+#include "omega/asset/geometry_ir.h"
+
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -7,15 +9,6 @@
 
 namespace omega::asset
 {
-struct Float3IR
-{
-    float x = 0.0F;
-    float y = 0.0F;
-    float z = 0.0F;
-
-    bool operator==(const Float3IR&) const = default;
-};
-
 struct Bounds3IR
 {
     Float3IR minimum;
