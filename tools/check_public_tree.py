@@ -39,6 +39,20 @@ SECRET_PATTERNS = {
     "AWS access key": re.compile(rb"\bAKIA[0-9A-Z]{16}\b"),
 }
 
+# A concrete absolute user-home path names a specific developer machine and
+# username; it must never ship in the public tree. This matches Windows
+# drive-letter user-profile paths and Unix /home or /Users paths, but only when a
+# concrete name segment follows. Placeholder forms (an angle-bracketed name,
+# $HOME, %LOCALAPPDATA%) have no such segment and do not match, so documentation
+# may still describe paths generically.
+# Case-insensitive: Windows filesystems treat ``C:\\users`` and ``C:\\Users``
+# alike, and the placeholder exemptions ($HOME, <user>, %LOCALAPPDATA%) fail on
+# structure, not letter case, so IGNORECASE cannot make them match.
+OWNER_HOME_PATH = re.compile(
+    rb"(?:[A-Za-z]:[\\/]Users[\\/]|/home/|/Users/)[A-Za-z0-9._-]+",
+    re.IGNORECASE,
+)
+
 MAX_TRACKED_BYTES = 5 * 1024 * 1024
 PS2_EXECUTABLE_NAME = re.compile(
     r"(?:SCUS|SLUS|SLES|SCES|SLPS|SLPM|SCPS|SCPM|PBPX|PAPX)[_-]?\d{3}[._]\d{2}",
@@ -100,7 +114,7 @@ def check_blob(blob: TrackedBlob) -> list[str]:
         errors.append(f"blocked root: {normalized}")
     if path.suffix.lower() in BLOCKED_EXTENSIONS:
         errors.append(f"blocked retail/payload extension: {normalized}")
-    if PS2_EXECUTABLE_NAME.fullmatch(path.name):
+    if PS2_EXECUTABLE_NAME.search(path.name):
         errors.append(f"retail executable name: {normalized}")
     name_lower = path.name.lower()
     if name_lower in SENSITIVE_NAMES or name_lower.startswith(".env."):
@@ -126,6 +140,8 @@ def check_blob(blob: TrackedBlob) -> list[str]:
     for label, pattern in SECRET_PATTERNS.items():
         if pattern.search(data):
             errors.append(f"{label}: {normalized}")
+    if OWNER_HOME_PATH.search(data):
+        errors.append(f"absolute owner-home path leaks a developer machine/username: {normalized}")
     return errors
 
 
