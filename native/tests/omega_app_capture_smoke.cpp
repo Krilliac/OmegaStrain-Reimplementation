@@ -4200,6 +4200,9 @@ int main()
             .enable_debug_locomotion = true,
             .initial_front_end_state =
                 omega::app::InitialFrontEndState(),
+            .front_end_capabilities = omega::app::FrontEndCapabilities{
+                .can_start_diagnostic_campaign = true,
+            },
         });
     Check(replay_created.has_value(),
         "the actual real-host capture creates a fresh app replay session");

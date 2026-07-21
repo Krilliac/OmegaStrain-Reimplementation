@@ -178,7 +178,9 @@ void AppendU32(std::vector<std::byte>& bytes, const std::uint32_t value)
 [[nodiscard]] std::optional<profiles::ProfileId>
 DiagnosticCheckpointProfileIdFromKey(std::string_view key) noexcept
 {
-    if (!IsDiagnosticCheckpointKeyCandidate(key))
+    if (!IsDiagnosticCheckpointKeyCandidate(key) ||
+        key.size() <
+            kProfilesKeyPrefix.size() + kDiagnosticCheckpointKeySuffix.size())
         return std::nullopt;
     key.remove_prefix(kProfilesKeyPrefix.size());
     key.remove_suffix(kDiagnosticCheckpointKeySuffix.size());

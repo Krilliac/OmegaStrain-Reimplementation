@@ -448,7 +448,7 @@ void CheckFrontEndStartupProfileBudget()
 
         std::array noise{
             SaveMutation::Put(
-                "profiles/not-a-profile-id/metadata", 0U, Bytes("unparsed"),
+                "profiles/not-a-profile-id/metadata", 1U, Bytes("unparsed"),
                 SaveWriteCondition::MustBeAbsent()),
             SaveMutation::Put(
                 DiagnosticCheckpointKey(first),
@@ -988,6 +988,39 @@ void CheckGeneratedDiagnosticCheckpointDecodeFailures()
             "persisted diagnostic checkpoint validation failed",
             malformed_tree.path(), id,
             "malformed diagnostic-checkpoint key failure stays private");
+    }
+
+    TempDirectory overlap_tree("diagnostic-overlapping-key");
+    const auto overlap_root = overlap_tree.path() / "native-save";
+    {
+        auto database = SaveDatabase::Open({.directory = overlap_root});
+        Check(database.has_value(),
+              "the overlapping diagnostic-checkpoint key fixture opens");
+        if (database)
+        {
+            std::array mutation{
+                SaveMutation::Put(
+                    "profiles/campaigns/diagnostic/checkpoint",
+                    kDiagnosticCheckpointSchemaVersion, valid,
+                    SaveWriteCondition::MustBeAbsent()),
+            };
+            Check(database->Commit(mutation).has_value(),
+                  "the identifier-free overlapping diagnostic-checkpoint key "
+                  "fixture commits through raw storage");
+        }
+    }
+    const auto overlap = NativePersistence::Bootstrap(overlap_root);
+    CheckStartupError(
+        overlap,
+        NativePersistenceStartupErrorCode::PersistedDiagnosticCheckpoint,
+        "an identifier-free overlapping diagnostic-checkpoint key fails bootstrap");
+    if (!overlap)
+    {
+        CheckDiagnosticPrivateErrorMessage(
+            overlap.error().message,
+            "persisted diagnostic checkpoint validation failed",
+            overlap_tree.path(), id,
+            "overlapping diagnostic-checkpoint key failure stays private");
     }
 }
 
