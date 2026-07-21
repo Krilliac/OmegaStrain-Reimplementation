@@ -156,7 +156,7 @@ enum class FrontEndModelError : std::uint8_t
 
 // [any thread; reentrant] True when an already-confirmed identifier still
 // resolves against the caller-owned bounded model. This is the only supported
-// input to the explicit diagnostic-play gate below, so the gate can never be
+// live input to the explicit diagnostic-play gate below, so the gate can never be
 // satisfied by a position the model does not currently present.
 [[nodiscard]] constexpr bool FrontEndHasConfirmedActiveProfile(
     const FrontEndStartupModel &profiles,
