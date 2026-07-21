@@ -236,6 +236,15 @@ operation follows the durable write. Fresh replay models only the successful log
 transition and touches no persistence, identifier, time, or GPU state. Restart and constrained-pool
 fixtures cover durability and preflight rejection. This is synthetic native-shell behavior, not
 retail/PS2 profile, campaign, checkpoint, save, or parity evidence.
+E-0107 makes the existing synthetic positioned actor visible only in DiagnosticPlay. One pure total
+map converts X/Z into a fixed 2,048-square normalized-Q16 marker, with positive X right, positive Z
+up, Y ignored, and both used coordinates clamped to `[-31, 31]`. Startup owns a mandatory generated
+1x1 opaque RGBA8 `{255,64,224,255}` texture and a base-plus-marker CPU draw list. Post-simulation
+frames replace only that CPU list before packet construction; the GPU resource remains immutable.
+Fresh replay derives the same optional rectangle from its owned position without storing marker
+state or changing the trace schema. This is a project-authored diagnostic presentation, not actor,
+camera, scene-placement, collision, animation, physical-pixel, owner-corpus, PCSX2, or retail-parity
+evidence.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
@@ -260,9 +269,10 @@ The main thread applies and deinterleaves the provisional PSS PCM compatibility 
 ring, and contains it on transition. Generated fixtures establish implementation safety and
 self-consistency, while one owner-stream smoke establishes acceptance only; neither independently
 proves the custom field meanings. This is not a general mixer, final hardware-playback proof, or
-retail timing-parity claim. A synthetic positioned diagnostic component and pure digital
-locomotion planner now exercise the world/input boundary, but retail player components and gameplay
-systems, render scene snapshots, general decoded voices, and mixing remain incomplete.
+retail timing-parity claim. A synthetic positioned diagnostic component, pure digital locomotion
+planner, and E-0107's fixed marker now exercise the world/input/presentation boundary, but retail
+player components and gameplay systems, general render-scene snapshots, general decoded voices, and
+mixing remain incomplete.
 
 The simulation world now solely owns a bounded, preallocated generational entity registry plus one
 direct bounded `Position3` component store. Entity
@@ -1163,6 +1173,11 @@ emulator equivalence. It is not wired into level loading, effects, or the front 
 - Load level through a native command-line option independent of the retail argument parser.
 
 ## M4: Actors and controls
+
+Status: in progress. E-0060 owns one synthetic positioned diagnostic actor and bounded digital
+locomotion. E-0107 presents that value through one generated marker and a derived replay observer;
+it is deliberately not a retail actor, transform, camera, collision, animation, or scene-placement
+implementation.
 
 - Skeletons, animation, player movement, camera, collision, weapons, and basic AI.
 - Deterministic capture/replay for input and simulation state.

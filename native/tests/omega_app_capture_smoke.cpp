@@ -1,4 +1,5 @@
 #include "front_end.h"
+#include "diagnostic_actor_marker.h"
 #include "omega_app.h"
 #include "run_replay_session.h"
 
@@ -147,6 +148,43 @@ struct OmegaAppTestAccess final
         app.diagnostic_asset_topology_draw_list_ = {};
     }
 
+    [[nodiscard]] static bool InstallTwoCommandDiagnosticBase(
+        OmegaApp& app) noexcept
+    {
+        constexpr runtime::RenderSourceRectQ16 full_source{
+            .left = 0U,
+            .top = 0U,
+            .right = runtime::kNormalizedRenderExtent,
+            .bottom = runtime::kNormalizedRenderExtent,
+        };
+        constexpr runtime::RenderTargetRectQ16 full_target{
+            .left = 0U,
+            .top = 0U,
+            .right = runtime::kNormalizedRenderExtent,
+            .bottom = runtime::kNormalizedRenderExtent,
+        };
+        const runtime::RenderTextureBlitCommand command{
+            .texture = app.diagnostic_texture_,
+            .source = full_source,
+            .destination = full_target,
+            .fit_mode = runtime::RenderTextureFitMode::Contain,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        };
+        const std::array commands{command, command};
+        auto created = runtime::RenderDrawList::Create(commands);
+        if (!created)
+            return false;
+        app.diagnostic_hidden_draw_list_ = *created;
+        return true;
+    }
+
+    [[nodiscard]] static bool DestroyDiagnosticActor(OmegaApp& app) noexcept
+    {
+        return app.simulation_ != nullptr &&
+               app.simulation_->DestroyEntity(app.debug_locomotion_entity_) ==
+                   simulation::EntityDestroyResult::Destroyed;
+    }
+
     [[nodiscard]] static GpuHostSnapshot GpuSnapshot(const OmegaApp& app) noexcept
     {
         return app.host_->Snapshot();
@@ -171,6 +209,18 @@ struct OmegaAppTestAccess final
         const OmegaApp& app) noexcept
     {
         return app.diagnostic_texture_;
+    }
+
+    [[nodiscard]] static runtime::RenderTextureHandle
+    DiagnosticActorMarkerTexture(const OmegaApp& app) noexcept
+    {
+        return app.diagnostic_actor_marker_texture_;
+    }
+
+    static void SetDiagnosticActorMarkerTexture(OmegaApp& app,
+        const runtime::RenderTextureHandle texture) noexcept
+    {
+        app.diagnostic_actor_marker_texture_ = texture;
     }
 
     [[nodiscard]] static runtime::RenderTextureHandle FrontEndTexture(
@@ -219,6 +269,12 @@ struct OmegaAppTestAccess final
         const OmegaApp& app) noexcept
     {
         return app.diagnostic_hidden_draw_list_;
+    }
+
+    [[nodiscard]] static const runtime::RenderDrawList& DiagnosticActorDrawList(
+        const OmegaApp& app) noexcept
+    {
+        return app.diagnostic_actor_draw_list_;
     }
 
     [[nodiscard]] static const std::array<runtime::RenderDrawList,
@@ -488,6 +544,21 @@ void Check(const bool condition, const std::string_view message)
     return SameTextureResidency(before, after) &&
            after.frame_submissions == before.frame_submissions + 1U &&
            after.blit_submissions == before.blit_submissions + 1U &&
+           after.successful_blit_draws == before.successful_blit_draws + 2U &&
+           after.clear_submissions == before.clear_submissions &&
+           after.unavailable_swapchain_submissions ==
+               before.unavailable_swapchain_submissions &&
+           after.rejected_nondefault_texture_handles ==
+               before.rejected_nondefault_texture_handles;
+}
+
+[[nodiscard]] bool IsOneDiagnosticActorOnlySubmission(
+    const omega::app::GpuHostSnapshot& before,
+    const omega::app::GpuHostSnapshot& after) noexcept
+{
+    return SameTextureResidency(before, after) &&
+           after.frame_submissions == before.frame_submissions + 1U &&
+           after.blit_submissions == before.blit_submissions + 1U &&
            after.successful_blit_draws == before.successful_blit_draws + 1U &&
            after.clear_submissions == before.clear_submissions &&
            after.unavailable_swapchain_submissions ==
@@ -505,21 +576,6 @@ void Check(const bool condition, const std::string_view message)
            after.blit_submissions == before.blit_submissions + 1U &&
            after.successful_blit_draws == before.successful_blit_draws + 2U &&
            after.clear_submissions == before.clear_submissions &&
-           after.unavailable_swapchain_submissions ==
-               before.unavailable_swapchain_submissions &&
-           after.rejected_nondefault_texture_handles ==
-               before.rejected_nondefault_texture_handles;
-}
-
-[[nodiscard]] bool IsOneClearOnlySubmission(
-    const omega::app::GpuHostSnapshot& before,
-    const omega::app::GpuHostSnapshot& after) noexcept
-{
-    return SameTextureResidency(before, after) &&
-           after.frame_submissions == before.frame_submissions + 1U &&
-           after.blit_submissions == before.blit_submissions &&
-           after.successful_blit_draws == before.successful_blit_draws &&
-           after.clear_submissions == before.clear_submissions + 1U &&
            after.unavailable_swapchain_submissions ==
                before.unavailable_swapchain_submissions &&
            after.rejected_nondefault_texture_handles ==
@@ -793,21 +849,22 @@ void CheckLevelContentPresentation(omega::app::OmegaApp& app)
     using omega::app::detail::OmegaAppTestAccess;
     constexpr std::uint64_t kLevelContentPresentationLogicalBytes =
         2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 3ULL +
-        32ULL * 32ULL * 4ULL + 16ULL * 16ULL * 4ULL;
+        32ULL * 32ULL * 4ULL + 1ULL * 1ULL * 4ULL +
+        16ULL * 16ULL * 4ULL;
     const auto assets = OmegaAppTestAccess::AssetSnapshot(app);
     const omega::app::GpuHostSnapshot initial_gpu =
         OmegaAppTestAccess::GpuSnapshot(app);
     Check(assets && IsAggregateEmpty(*assets, 64U),
         "LevelContent consumes and releases canonical texture zero before SDL upload");
-    Check(initial_gpu.successful_uploads == 6U &&
+    Check(initial_gpu.successful_uploads == 7U &&
               initial_gpu.successful_upload_logical_bytes ==
                   kLevelContentPresentationLogicalBytes &&
               initial_gpu.successful_releases == 0U &&
               initial_gpu.textures.reserved_slots == 0U &&
-              initial_gpu.textures.resident_slots == 6U &&
+              initial_gpu.textures.resident_slots == 7U &&
               initial_gpu.textures.resident_logical_bytes ==
                   kLevelContentPresentationLogicalBytes,
-        "the base, three cards, topology, and strict transfer diagnostic own exactly 115,728 bytes");
+        "the base, three cards, topology, actor marker, and strict transfer diagnostic own exactly 115,732 bytes");
 
     const auto topology_texture =
         OmegaAppTestAccess::DiagnosticAssetTopologyTexture(app);
@@ -1018,7 +1075,7 @@ void CheckNonPackedLevelContentFallback(omega::app::OmegaApp& app,
     using omega::app::detail::OmegaAppTestAccess;
     constexpr std::uint64_t kTopologyOnlyPresentationLogicalBytes =
         2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 3ULL +
-        32ULL * 32ULL * 4ULL;
+        32ULL * 32ULL * 4ULL + 1ULL * 1ULL * 4ULL;
     const auto assets = OmegaAppTestAccess::AssetSnapshot(app);
     const omega::app::GpuHostSnapshot gpu = OmegaAppTestAccess::GpuSnapshot(app);
     const auto topology_texture =
@@ -1048,15 +1105,15 @@ void CheckNonPackedLevelContentFallback(omega::app::OmegaApp& app,
     Check(assets && IsAggregateEmpty(*assets, 64U) && topology_texture.valid() &&
               !transfer_texture.valid(),
         "non-Packed24 LevelContent restores assets and retains only topology presentation");
-    Check(gpu.successful_uploads == 5U &&
+    Check(gpu.successful_uploads == 6U &&
               gpu.successful_upload_logical_bytes ==
                   kTopologyOnlyPresentationLogicalBytes &&
               gpu.successful_releases == 0U &&
               gpu.textures.reserved_slots == 0U &&
-              gpu.textures.resident_slots == 5U &&
+              gpu.textures.resident_slots == 6U &&
               gpu.textures.resident_logical_bytes ==
                   kTopologyOnlyPresentationLogicalBytes,
-        "non-Packed24 LevelContent preserves the five-upload 114,704-byte fallback");
+        "non-Packed24 LevelContent preserves the six-upload 114,708-byte fallback");
     Check(commands.size() == 2U &&
               commands[0].texture == OmegaAppTestAccess::DiagnosticTexture(app) &&
               commands[0].source == full_source &&
@@ -1110,7 +1167,7 @@ void CheckPackedTransferUploadBudgetFallback(omega::app::OmegaApp& app,
     using omega::app::detail::OmegaAppTestAccess;
     constexpr std::uint64_t kTopologyOnlyPresentationLogicalBytes =
         2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 3ULL +
-        32ULL * 32ULL * 4ULL;
+        32ULL * 32ULL * 4ULL + 1ULL * 1ULL * 4ULL;
     const auto assets = OmegaAppTestAccess::AssetSnapshot(app);
     const omega::app::GpuHostSnapshot gpu = OmegaAppTestAccess::GpuSnapshot(app);
     const auto topology_texture =
@@ -1129,17 +1186,17 @@ void CheckPackedTransferUploadBudgetFallback(omega::app::OmegaApp& app,
     Check(assets && IsAggregateEmpty(*assets, 64U) && topology_texture.valid() &&
               !transfer_texture.valid(),
         "a rejected optional transfer upload preserves owned topology and exact asset cleanup");
-    Check(gpu.successful_uploads == 5U &&
+    Check(gpu.successful_uploads == 6U &&
               gpu.successful_upload_logical_bytes ==
                   kTopologyOnlyPresentationLogicalBytes &&
               gpu.successful_releases == 0U &&
               gpu.textures.slot_capacity == 64U &&
-              gpu.textures.free_slots == 59U &&
+              gpu.textures.free_slots == 58U &&
               gpu.textures.reserved_slots == 0U &&
-              gpu.textures.resident_slots == 5U &&
+              gpu.textures.resident_slots == 6U &&
               gpu.textures.resident_logical_bytes ==
                   kTopologyOnlyPresentationLogicalBytes,
-        "the exact topology-only budget leaves no sixth reservation state");
+        "the exact topology-only budget leaves no seventh reservation state");
     Check(commands.size() == 2U && commands[1].texture == topology_texture &&
               commands[1].destination == card_target &&
               commands[1].fit_mode ==
@@ -1243,7 +1300,7 @@ void CheckExplicitFirstProfileCreation(
                 128ULL * 72ULL * 4ULL;
             constexpr std::uint64_t kTopologyLogicalBytes = 96ULL * 32ULL * 4ULL;
             constexpr std::uint64_t kPreloadedLogicalBytes =
-                kFrontEndCardLogicalBytes * 6ULL + kTopologyLogicalBytes;
+                kFrontEndCardLogicalBytes * 6ULL + kTopologyLogicalBytes + 4ULL;
             const auto initial_model = Access::FrontEndModel(*app);
             const auto initial_gpu = Access::GpuSnapshot(*app);
             const std::array initial_active_textures{
@@ -1269,10 +1326,10 @@ void CheckExplicitFirstProfileCreation(
                       Access::ProfileCatalogCount(*app) ==
                           std::optional<std::size_t>{0U} &&
                       preload_handles_are_distinct &&
-                      initial_gpu.successful_uploads == 7U &&
+                      initial_gpu.successful_uploads == 8U &&
                       initial_gpu.successful_upload_logical_bytes ==
                           kPreloadedLogicalBytes &&
-                      initial_gpu.textures.resident_slots == 7U &&
+                      initial_gpu.textures.resident_slots == 8U &&
                       initial_gpu.textures.resident_logical_bytes ==
                           kPreloadedLogicalBytes,
                 "empty startup retains distinct complete empty and one-profile GPU presentations before mutation");
@@ -1503,7 +1560,7 @@ int main()
                 .slot_capacity = 64U,
                 .maximum_resident_logical_bytes =
                     2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 3ULL +
-                    32ULL * 32ULL * 4ULL,
+                    32ULL * 32ULL * 4ULL + 1ULL * 1ULL * 4ULL,
             };
             auto constrained_app =
                 omega::app::detail::OmegaAppTestAccess::CreateWithTextureConfig(
@@ -1541,14 +1598,15 @@ int main()
                 const omega::app::GpuHostSnapshot mounted_gpu =
                     omega::app::detail::OmegaAppTestAccess::GpuSnapshot(*mounted_app);
                 constexpr std::uint64_t kSyntheticPresentationLogicalBytes =
-                    128ULL * 72ULL * 4ULL * 4ULL + 96ULL * 32ULL * 4ULL;
-                Check(!mounted_assets && mounted_gpu.successful_uploads == 5U &&
+                    128ULL * 72ULL * 4ULL * 4ULL +
+                    96ULL * 32ULL * 4ULL + 1ULL * 1ULL * 4ULL;
+                Check(!mounted_assets && mounted_gpu.successful_uploads == 6U &&
                           mounted_gpu.successful_upload_logical_bytes ==
                               kSyntheticPresentationLogicalBytes &&
-                          mounted_gpu.textures.resident_slots == 5U &&
+                          mounted_gpu.textures.resident_slots == 6U &&
                           mounted_gpu.textures.resident_logical_bytes ==
                               kSyntheticPresentationLogicalBytes,
-                    "DataMounted retains the synthetic 96x32 topology and exactly 159,744 resident bytes");
+                    "DataMounted retains the synthetic 96x32 topology, actor marker, and exactly 159,748 resident bytes");
             }
         }
 
@@ -1783,6 +1841,23 @@ int main()
         }
     }
 
+    auto marker_capacity_config = omega::runtime::ParseConfigText("");
+    Check(marker_capacity_config.has_value(),
+        "the diagnostic actor marker capacity fixture parses");
+    if (marker_capacity_config)
+    {
+        constexpr omega::runtime::RenderTexturePoolConfig texture_config{
+            .slot_capacity = 5U,
+        };
+        auto constrained =
+            omega::app::detail::OmegaAppTestAccess::CreateWithTextureConfig(
+                std::move(*marker_capacity_config), settings,
+                omega::runtime::ContentStartupState{}, false, texture_config);
+        Check(!constrained && constrained.error() ==
+                  "SDL/GPU diagnostic actor marker texture upload: render texture reserve: slot-capacity-exceeded",
+            "the mandatory actor marker reports its exact startup upload failure after the five earlier textures");
+    }
+
     auto app = omega::app::detail::OmegaAppTestAccess::Create(
         std::move(*config), settings, omega::runtime::ContentStartupState{}, false);
     Check(app.has_value(), "the zero-file OmegaApp fixture starts");
@@ -1862,6 +1937,8 @@ int main()
 
     const omega::runtime::RenderTextureHandle diagnostic_texture =
         OmegaAppTestAccess::DiagnosticTexture(*app);
+    const omega::runtime::RenderTextureHandle diagnostic_actor_marker_texture =
+        OmegaAppTestAccess::DiagnosticActorMarkerTexture(*app);
     const omega::runtime::RenderTextureHandle front_end_texture =
         OmegaAppTestAccess::FrontEndTexture(*app);
     const omega::runtime::RenderTextureHandle front_end_profiles_texture =
@@ -1876,6 +1953,8 @@ int main()
         "zero-file startup retains no owner-derived transfer texture");
     const omega::runtime::RenderDrawList initial_hidden_draw_list =
         OmegaAppTestAccess::DiagnosticHiddenDrawList(*app);
+    const omega::runtime::RenderDrawList initial_actor_draw_list =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app);
     const std::array<omega::runtime::RenderDrawList,
         omega::app::kFrontEndMainRowCount> initial_visible_draw_lists =
         OmegaAppTestAccess::FrontEndMainDrawLists(*app);
@@ -1899,6 +1978,12 @@ int main()
         .top = 0U,
         .right = omega::runtime::kNormalizedRenderExtent,
         .bottom = omega::runtime::kNormalizedRenderExtent,
+    };
+    constexpr omega::runtime::RenderTargetRectQ16 kActorOriginDestination{
+        .left = 31'744U,
+        .top = 31'744U,
+        .right = 33'792U,
+        .bottom = 33'792U,
     };
     constexpr omega::runtime::RenderTargetRectQ16 kMenuDestination{
         .left = 2048U,
@@ -1955,6 +2040,17 @@ int main()
         hidden_commands[0].fit_mode ==
             omega::runtime::RenderTextureFitMode::Contain &&
         hidden_commands[0].filter_mode ==
+            omega::runtime::RenderTextureFilterMode::Nearest;
+    const auto actor_commands = initial_actor_draw_list.commands();
+    const bool actor_list_is_exact =
+        actor_commands.size() == 2U && hidden_commands.size() == 1U &&
+        actor_commands[0] == hidden_commands[0] &&
+        actor_commands[1].texture == diagnostic_actor_marker_texture &&
+        actor_commands[1].source == kFullMenuSource &&
+        actor_commands[1].destination == kActorOriginDestination &&
+        actor_commands[1].fit_mode ==
+            omega::runtime::RenderTextureFitMode::Stretch &&
+        actor_commands[1].filter_mode ==
             omega::runtime::RenderTextureFilterMode::Nearest;
     bool visible_lists_are_exact = true;
     for (std::size_t row = 0U; row < initial_visible_draw_lists.size(); ++row)
@@ -2063,7 +2159,9 @@ int main()
             asset_topology_card.filter_mode ==
                 omega::runtime::RenderTextureFilterMode::Nearest;
     }
-    Check(diagnostic_texture.valid() && front_end_texture.valid() &&
+    Check(diagnostic_texture.valid() &&
+              diagnostic_actor_marker_texture.valid() &&
+              front_end_texture.valid() &&
               front_end_profiles_texture.valid() &&
               diagnostic_controls_texture.valid() &&
               diagnostic_asset_topology_texture.valid() &&
@@ -2071,10 +2169,16 @@ int main()
               diagnostic_texture != front_end_profiles_texture &&
               diagnostic_texture != diagnostic_controls_texture &&
               diagnostic_texture != diagnostic_asset_topology_texture &&
+              diagnostic_texture != diagnostic_actor_marker_texture &&
               front_end_texture != front_end_profiles_texture &&
               front_end_texture != diagnostic_controls_texture &&
               front_end_texture != diagnostic_asset_topology_texture &&
+              front_end_texture != diagnostic_actor_marker_texture &&
+              front_end_profiles_texture != diagnostic_actor_marker_texture &&
+              diagnostic_controls_texture != diagnostic_actor_marker_texture &&
               diagnostic_controls_texture != diagnostic_asset_topology_texture &&
+              diagnostic_asset_topology_texture !=
+                  diagnostic_actor_marker_texture &&
               diagnostic_texture.pool_identity ==
                   front_end_texture.pool_identity &&
               diagnostic_texture.pool_identity ==
@@ -2083,22 +2187,26 @@ int main()
                   diagnostic_controls_texture.pool_identity &&
               diagnostic_texture.pool_identity ==
                   diagnostic_asset_topology_texture.pool_identity &&
+              diagnostic_texture.pool_identity ==
+                  diagnostic_actor_marker_texture.pool_identity &&
               diagnostic_texture.slot_index == 0U &&
               front_end_texture.slot_index == 1U &&
               front_end_profiles_texture.slot_index == 2U &&
               diagnostic_controls_texture.slot_index == 3U &&
               diagnostic_asset_topology_texture.slot_index == 4U &&
+              diagnostic_actor_marker_texture.slot_index == 5U &&
               OmegaAppTestAccess::FrontEndModel(*app) ==
                   omega::app::FrontEndStartupModel{} &&
               OmegaAppTestAccess::FrontEnd(*app) ==
                   omega::app::InitialFrontEndState() &&
-              hidden_list_is_exact && visible_lists_are_exact &&
+              hidden_list_is_exact && actor_list_is_exact &&
+              visible_lists_are_exact &&
               profiles_list_is_exact && profile_selection_lists_are_exact &&
               controls_list_is_exact &&
               asset_topology_list_is_exact &&
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   initial_visible_draw_lists[0]),
-        "the zero-file host uploads distinct diagnostic, main, profiles, controls, and topology textures in exact order and owns every immutable list");
+        "the zero-file host uploads distinct diagnostic, main, profiles, controls, topology, and actor textures in exact order and owns every immutable list");
 
     OmegaAppTestAccess::SetFrontEndState(*app,
         omega::app::FrontEndState{
@@ -2156,23 +2264,28 @@ int main()
     Check(DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
               initial_visible_draw_lists[0]),
         "an invalid AssetTopology row normalizes to the initial main-row draw list");
+    OmegaAppTestAccess::SetFrontEndState(*app, omega::app::FrontEndState{});
+    Check(DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
+              initial_actor_draw_list),
+        "a valid DiagnosticPlay state selects the base-then-actor draw list");
     OmegaAppTestAccess::SetFrontEndState(
         *app, omega::app::InitialFrontEndState());
 
     constexpr std::uint64_t kFrontEndLogicalBytes = 128ULL * 72ULL * 4ULL;
     constexpr std::uint64_t kDiagnosticPresentationLogicalBytes =
-        kFrontEndLogicalBytes * 4ULL + 96ULL * 32ULL * 4ULL;
+        kFrontEndLogicalBytes * 4ULL + 96ULL * 32ULL * 4ULL +
+        1ULL * 1ULL * 4ULL;
     const omega::app::GpuHostSnapshot initial_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    Check(initial_gpu.successful_uploads == 5U &&
+    Check(initial_gpu.successful_uploads == 6U &&
               initial_gpu.successful_upload_logical_bytes ==
                   kDiagnosticPresentationLogicalBytes &&
               initial_gpu.successful_releases == 0U &&
               initial_gpu.textures.reserved_slots == 0U &&
-              initial_gpu.textures.resident_slots == 5U &&
+              initial_gpu.textures.resident_slots == 6U &&
               initial_gpu.textures.resident_logical_bytes ==
                   kDiagnosticPresentationLogicalBytes,
-        "the four 128x72 cards and one 96x32 topology image own exactly 159,744 no-level resident logical bytes");
+        "the four 128x72 cards, 96x32 topology image, and actor marker own exactly 159,748 no-level resident logical bytes");
 
     // Stable main-card probes cover the frame, project header, content/profile
     // count line, and all four row panels without depending on a platform font.
@@ -2278,6 +2391,42 @@ int main()
             "the resident zero-file DiagnosticPlay placeholder preserves the exact sixteen-probe RGBA8 grid on GPU");
         Check(OmegaAppTestAccess::GpuSnapshot(*app) == initial_gpu,
             "the private no-level readback seam leaves every production GPU counter unchanged");
+    }
+
+    constexpr omega::runtime::RenderClearColorRgba8 actor_marker_color{
+        .red = 255U, .green = 64U, .blue = 224U, .alpha = 255U};
+    const std::array actor_marker_readback_commands{
+        omega::runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_actor_marker_texture,
+            .source = kFullMenuSource,
+            .destination = kFullTarget,
+            .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+        },
+    };
+    auto actor_marker_readback_draw_list =
+        omega::runtime::RenderDrawList::Create(
+            actor_marker_readback_commands);
+    Check(actor_marker_readback_draw_list.has_value(),
+        "the full-target actor marker readback command forms a valid draw list");
+    if (actor_marker_readback_draw_list)
+    {
+        const omega::runtime::RenderFramePacket actor_marker_readback_packet{
+            .clear_color = omega::runtime::kDefaultRenderClearColor,
+            .draw_list = *actor_marker_readback_draw_list,
+        };
+        auto actor_marker_readback =
+            omega::app::detail::SdlGpuHostTestAccess::ReadbackBlitsForTesting(
+                OmegaAppTestAccess::Host(*app), actor_marker_readback_packet);
+        Check(actor_marker_readback &&
+                  std::ranges::all_of(*actor_marker_readback,
+                      [actor_marker_color](
+                          const omega::runtime::RenderClearColorRgba8 pixel) {
+                          return pixel == actor_marker_color;
+                      }),
+            "the immutable 1x1 actor marker uploads exact opaque RGBA8 {255,64,224,255}");
+        Check(OmegaAppTestAccess::GpuSnapshot(*app) == initial_gpu,
+            "the private actor marker readback leaves every production GPU counter unchanged");
     }
 
     std::array<omega::runtime::RenderTextureBlitCommand, 16U> menu_probe_commands{};
@@ -2566,6 +2715,21 @@ int main()
         "movement step nonmodally");
     const omega::app::GpuHostSnapshot normal_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
+    const omega::runtime::RenderDrawList normal_actor_draw_list =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app);
+    const auto normal_actor_commands = normal_actor_draw_list.commands();
+    const std::optional<omega::runtime::RenderTargetRectQ16>
+        normal_actor_destination = normal_actor_commands.size() == 2U
+        ? std::optional<omega::runtime::RenderTargetRectQ16>{
+              normal_actor_commands[1].destination}
+        : std::nullopt;
+    constexpr omega::runtime::RenderTargetRectQ16
+        kActorPositiveZOneDestination{
+            .left = 31'744U,
+            .top = 30'720U,
+            .right = 33'792U,
+            .bottom = 32'768U,
+        };
     Check(OmegaAppTestAccess::FrontEnd(*app) ==
                   omega::app::FrontEndState{
                       .mode = omega::app::FrontEndMode::DiagnosticPlay,
@@ -2573,6 +2737,8 @@ int main()
                           omega::app::FrontEndMainRow::StartDiagnostic,
                   } &&
               OmegaAppTestAccess::DiagnosticTexture(*app) == diagnostic_texture &&
+              OmegaAppTestAccess::DiagnosticActorMarkerTexture(*app) ==
+                  diagnostic_actor_marker_texture &&
               OmegaAppTestAccess::FrontEndTexture(*app) ==
                   front_end_texture &&
               OmegaAppTestAccess::FrontEndProfilesTexture(*app) ==
@@ -2591,10 +2757,22 @@ int main()
                   initial_profiles_draw_list) &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticControlsDrawList(*app),
                   initial_controls_draw_list) &&
+              normal_actor_commands.size() == 2U &&
+              hidden_commands.size() == 1U &&
+              normal_actor_commands[0] == hidden_commands[0] &&
+              normal_actor_commands[1].texture ==
+                  diagnostic_actor_marker_texture &&
+              normal_actor_commands[1].source == kFullMenuSource &&
+              normal_actor_commands[1].destination ==
+                  kActorPositiveZOneDestination &&
+              normal_actor_commands[1].fit_mode ==
+                  omega::runtime::RenderTextureFitMode::Stretch &&
+              normal_actor_commands[1].filter_mode ==
+                  omega::runtime::RenderTextureFilterMode::Nearest &&
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
-                  initial_hidden_draw_list) &&
+                  normal_actor_draw_list) &&
               IsOneDiagnosticPlaySubmission(initial_gpu, normal_gpu),
-        "primary priority enters DiagnosticPlay with one no-level placeholder blit and no reupload");
+        "primary priority enters DiagnosticPlay with immutable base then post-step positive-Z-up actor marker and no reupload");
 
     const omega::runtime::FrameSchedulerState normal_before =
         normal->scheduler_state_before();
@@ -2767,6 +2945,11 @@ int main()
               replay_simulation_after->simulated_time == expected_fresh_time &&
               replay_simulation_after->alive_entities == 1U &&
               replay_session.debug_locomotion_position() == normal_debug_position &&
+              replay_session.diagnostic_actor_marker_destination() ==
+                  normal_actor_destination &&
+              replay_session.diagnostic_actor_marker_destination() ==
+                  std::optional<omega::runtime::RenderTargetRectQ16>{
+                      kActorPositiveZOneDestination} &&
               replay_session.front_end_state() ==
                   omega::app::FrontEndState{} &&
               normal_result.planned_simulation_steps ==
@@ -2776,7 +2959,7 @@ int main()
               replay_session.state() ==
                   omega::app::RunReplaySessionState::Complete &&
               replay_session.remaining_frames() == 0U,
-        "replay applies action 6 as menu activation and reaches the captured fresh-world position");
+        "replay applies action 6 and reaches the captured fresh-world position and actor destination");
 
     const auto replay_complete = replay_session.Next();
     Check(!replay_complete &&
@@ -3528,6 +3711,8 @@ int main()
         return EXIT_FAILURE;
     const omega::app::GpuHostSnapshot ready_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
+    const omega::runtime::RenderDrawList ready_actor_draw_list =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app);
 
     Check(DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
               initial_hidden_draw_list) &&
@@ -3541,6 +3726,8 @@ int main()
                   OmegaAppTestAccess::DiagnosticAssetTopologyDrawList(*app),
                   initial_asset_topology_draw_list) &&
               OmegaAppTestAccess::DiagnosticTexture(*app) == diagnostic_texture &&
+              OmegaAppTestAccess::DiagnosticActorMarkerTexture(*app) ==
+                  diagnostic_actor_marker_texture &&
               OmegaAppTestAccess::FrontEndTexture(*app) ==
                   front_end_texture &&
               OmegaAppTestAccess::FrontEndProfilesTexture(*app) ==
@@ -3551,6 +3738,8 @@ int main()
                   diagnostic_asset_topology_texture &&
               OmegaAppTestAccess::DiagnosticAssetTransferTexture(*app) ==
                   diagnostic_asset_transfer_texture &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
+                  ready_actor_draw_list) &&
               SameTextureResidency(initial_gpu, ready_gpu),
         "navigation preserves all immutable presentation resources and their startup uploads");
 
@@ -3594,6 +3783,8 @@ int main()
               both->scheduler_state_after() == scheduler_before_terminal &&
               OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
               OmegaAppTestAccess::DiagnosticTexture(*app) == diagnostic_texture &&
+              OmegaAppTestAccess::DiagnosticActorMarkerTexture(*app) ==
+                  diagnostic_actor_marker_texture &&
               OmegaAppTestAccess::FrontEndTexture(*app) ==
                   front_end_texture &&
               OmegaAppTestAccess::FrontEndProfilesTexture(*app) ==
@@ -3617,8 +3808,10 @@ int main()
               DrawListsEqual(
                   OmegaAppTestAccess::DiagnosticAssetTopologyDrawList(*app),
                   initial_asset_topology_draw_list) &&
+              DrawListsEqual(OmegaAppTestAccess::DiagnosticActorDrawList(*app),
+                  ready_actor_draw_list) &&
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
-                  initial_hidden_draw_list) &&
+                  ready_actor_draw_list) &&
               terminal_gpu == ready_gpu,
         "terminal action-6 and action-7 edges perform no render or menu/resource mutation");
 
@@ -3675,14 +3868,20 @@ int main()
     const auto* continued_pair = continued->trace_pair();
     const omega::app::GpuHostSnapshot continued_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
+    const auto continued_actor_commands =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app).commands();
     Check(continued->completion() == RunCaptureCompletion::FrameLimitReached &&
               continued_pair != nullptr &&
               continued->scheduler_state_before() == failed_after &&
               continued->result().input_frames == 1U &&
               continued->result().rendered_frames == 1 &&
               OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
-              IsOneClearOnlySubmission(failure_gpu_after, continued_gpu),
-        "capture resumes with one clear-only hidden submission at the scheduler boundary");
+              continued_actor_commands.size() == 1U &&
+              continued_actor_commands[0].texture ==
+                  diagnostic_actor_marker_texture &&
+              IsOneDiagnosticActorOnlySubmission(
+                  failure_gpu_after, continued_gpu),
+        "capture resumes with one actor-only submission at the scheduler boundary");
     if (continued_pair != nullptr)
     {
         Check(continued_pair->input_trace().first_frame_index() ==
@@ -3697,8 +3896,80 @@ int main()
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(plain && plain->rendered_frames == 1 && plain->input_frames == 1U &&
               !plain->quit_requested &&
-              IsOneClearOnlySubmission(continued_gpu, plain_gpu),
-        "plain Run adds one hidden clear submission without reuploading any card");
+              IsOneDiagnosticActorOnlySubmission(continued_gpu, plain_gpu),
+        "plain Run adds one actor-only submission without reuploading any texture");
+
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(
+              *app, std::chrono::nanoseconds::zero()),
+        "the rejected actor marker fixture arms without advancing time");
+    const omega::app::GpuHostSnapshot rejected_marker_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    const omega::runtime::RenderDrawList actor_draw_list_before_rejected_marker =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app);
+    OmegaAppTestAccess::SetDiagnosticActorMarkerTexture(*app, {});
+    auto rejected_marker = app->RunWithCapture(1);
+    OmegaAppTestAccess::SetDiagnosticActorMarkerTexture(
+        *app, diagnostic_actor_marker_texture);
+    Check(rejected_marker &&
+              rejected_marker->completion() ==
+                  RunCaptureCompletion::OperationalFailure &&
+              rejected_marker->failure() ==
+                  std::optional<std::string_view>{
+                      "diagnostic actor draw-list creation failed"} &&
+              rejected_marker->result().input_frames == 1U &&
+              rejected_marker->result().rendered_frames == 0 &&
+              OmegaAppTestAccess::GpuSnapshot(*app) ==
+                  rejected_marker_gpu_before &&
+              DrawListsEqual(OmegaAppTestAccess::DiagnosticActorDrawList(*app),
+                  actor_draw_list_before_rejected_marker),
+        "a rejected marker command is translated into a transactional operational failure");
+
+    Check(OmegaAppTestAccess::InstallTwoCommandDiagnosticBase(*app) &&
+              OmegaAppTestAccess::ArmNextRunElapsed(
+                  *app, std::chrono::nanoseconds::zero()),
+        "the runtime actor draw-list failure fixture installs without advancing time");
+    const omega::app::GpuHostSnapshot draw_list_failure_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    const omega::runtime::RenderDrawList actor_draw_list_before_failure =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app);
+    auto draw_list_failure = app->RunWithCapture(1);
+    Check(draw_list_failure &&
+              draw_list_failure->completion() ==
+                  RunCaptureCompletion::OperationalFailure &&
+              draw_list_failure->failure() ==
+                  std::optional<std::string_view>{
+                      "diagnostic actor draw-list creation failed"} &&
+              draw_list_failure->result().input_frames == 1U &&
+              draw_list_failure->result().rendered_frames == 0 &&
+              OmegaAppTestAccess::GpuSnapshot(*app) ==
+                  draw_list_failure_gpu_before &&
+              DrawListsEqual(OmegaAppTestAccess::DiagnosticActorDrawList(*app),
+                  actor_draw_list_before_failure),
+        "an invalid actor base is an operational pre-render failure with transactional draw-list state");
+
+    OmegaAppTestAccess::ClearDiagnosticDraw(*app);
+    Check(OmegaAppTestAccess::DestroyDiagnosticActor(*app) &&
+              OmegaAppTestAccess::ArmNextRunElapsed(
+                  *app, std::chrono::nanoseconds::zero()),
+        "the missing diagnostic actor runtime fixture removes its positioned entity without advancing time");
+    const omega::app::GpuHostSnapshot missing_actor_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    const omega::runtime::RenderDrawList actor_draw_list_before_missing_actor =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app);
+    auto missing_actor = app->RunWithCapture(1);
+    Check(missing_actor &&
+              missing_actor->completion() ==
+                  RunCaptureCompletion::OperationalFailure &&
+              missing_actor->failure() ==
+                  std::optional<std::string_view>{
+                      "diagnostic actor position is unavailable"} &&
+              missing_actor->result().input_frames == 1U &&
+              missing_actor->result().rendered_frames == 0 &&
+              OmegaAppTestAccess::GpuSnapshot(*app) ==
+                  missing_actor_gpu_before &&
+              DrawListsEqual(OmegaAppTestAccess::DiagnosticActorDrawList(*app),
+                  actor_draw_list_before_missing_actor),
+        "a missing actor position is an operational pre-render failure with transactional draw-list state");
 
     if (failures == 0)
         std::cout << "omega_app_capture_smoke: passed\n";
