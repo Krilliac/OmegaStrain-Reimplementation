@@ -22,6 +22,7 @@
 #include "omega/simulation/simulation_world.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -97,6 +98,7 @@ private:
 
     [[nodiscard]] RunLoopResult RunLoop(
         int frame_limit, runtime::RunCaptureSession* capture_session);
+    [[nodiscard]] bool ContainOpeningMovieAudio() noexcept;
     // [game/main thread; no concurrent use] Resolves only bounded startup slots
     // and copies their immutable ID. It performs no catalog or database access.
     void ApplyFrontEndCommand(FrontEndCommand command) noexcept;
@@ -163,6 +165,17 @@ private:
     runtime::RenderTextureHandle opening_movie_texture_;
     runtime::RenderDrawList opening_movie_draw_list_;
     BootSequenceState boot_sequence_state_{};
+    // Fixed producer scratch for one complete native audio-ring refill. It owns only decoded PCM
+    // and is never accessed by the SDL callback.
+    std::array<std::int16_t,
+        static_cast<std::size_t>(SdlAudioService::kOpeningMovieQueueCapacityFrames) *
+            SdlAudioService::kChannelCount>
+        opening_movie_audio_scratch_{};
+    bool opening_movie_audio_clock_started_ = false;
+    std::uint64_t opening_movie_audio_timeline_baseline_ = 0U;
+    std::uint64_t opening_movie_audio_timeline_applied_ = 0U;
+    std::uint64_t opening_movie_audio_nanosecond_remainder_ = 0U;
+    std::uint64_t opening_movie_audio_session_generation_ = 0U;
     // Non-owning generation-scoped identity. The host remains the backend-resource owner and a
     // default-moved-from app cannot release this copied value because its host_ is null.
     runtime::RenderTextureHandle diagnostic_texture_;
