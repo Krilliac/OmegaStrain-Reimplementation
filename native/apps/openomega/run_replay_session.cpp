@@ -130,8 +130,7 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
         std::move(*scheduler), std::move(*world), std::move(*replay),
         debug_locomotion_entity, config.initial_front_end_state,
         config.front_end_visible_profile_slots,
-        config.front_end_total_profile_count, front_end_capabilities,
-        config.front_end_active_profile_is_confirmed);
+        config.front_end_total_profile_count, front_end_capabilities);
     return std::expected<RunReplaySession, RunReplayError>{std::move(session)};
 }
 
@@ -142,8 +141,7 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
     const std::optional<FrontEndState> front_end_state,
     const std::uint8_t front_end_visible_profile_slots,
     const std::size_t front_end_total_profile_count,
-    const FrontEndCapabilities front_end_capabilities,
-    const bool front_end_active_profile_is_confirmed) noexcept
+    const FrontEndCapabilities front_end_capabilities) noexcept
     : scheduler_(std::in_place, std::move(scheduler)),
       simulation_(std::in_place, std::move(simulation)),
       replay_(std::in_place, std::move(replay)),
@@ -152,8 +150,7 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
       front_end_visible_profile_slots_(front_end_visible_profile_slots),
       front_end_total_profile_count_(front_end_total_profile_count),
       front_end_capabilities_(front_end_capabilities),
-      front_end_active_profile_is_confirmed_(
-          front_end_active_profile_is_confirmed),
+      front_end_active_profile_is_confirmed_(false),
       state_(replay_->complete()
                  ? RunReplaySessionState::Complete
                  : RunReplaySessionState::Ready)

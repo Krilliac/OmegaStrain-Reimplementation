@@ -102,6 +102,10 @@ using omega::simulation::SimulationState;
 using omega::simulation::SimulationStepResult;
 using omega::simulation::SimulationWorld;
 
+template <typename T>
+concept HasFrontEndActiveProfileConfirmationSeed =
+    requires(T value) { value.front_end_active_profile_is_confirmed; };
+
 int failures = 0;
 
 constexpr RenderTargetRectQ16 kOriginMarkerDestination{
@@ -485,7 +489,8 @@ void CheckContractAndTaxonomy()
     static_assert(!default_config.front_end_capabilities.can_create_first_profile);
     static_assert(!default_config.front_end_capabilities
                        .requires_active_profile_for_diagnostic_play);
-    static_assert(!default_config.front_end_active_profile_is_confirmed);
+    static_assert(
+        !HasFrontEndActiveProfileConfirmationSeed<RunReplaySessionConfig>);
     static_assert(static_cast<int>(
                       RunReplayErrorCode::SimulationRepresentationExhausted) == 7);
     static_assert(static_cast<int>(
@@ -1797,6 +1802,74 @@ void CheckDiagnosticPlayGateReplay()
         .can_create_first_profile = true,
         .requires_active_profile_for_diagnostic_play = true,
     };
+
+    // Public replay configuration can supply a non-default initial menu state,
+    // but it cannot supply an already-confirmed authorization. Even an initial
+    // DiagnosticPlay state therefore fails closed without needing an input
+    // edge, before its elapsed time can schedule simulation.
+    const std::array hostile_initial_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{15}},
+    };
+    RunCaptureTracePair hostile_initial_pair =
+        BuildScriptedPair(menu_actions, hostile_initial_frames);
+    RunReplaySessionConfig hostile_initial_config = ValidConfig();
+    hostile_initial_config.enable_debug_locomotion = true;
+    hostile_initial_config.initial_front_end_state = diagnostic_play;
+    hostile_initial_config.front_end_visible_profile_slots = 1U;
+    hostile_initial_config.front_end_total_profile_count = 1U;
+    hostile_initial_config.front_end_capabilities = gate_enabled;
+    auto hostile_initial_created = RunReplaySession::Create(
+        std::move(hostile_initial_pair), hostile_initial_config);
+    RunReplaySession hostile_initial = TakeSession(
+        hostile_initial_created,
+        "the hostile initial diagnostic-play replay is created closed");
+    const auto hostile_initial_scheduler = hostile_initial.scheduler_state();
+    const auto hostile_initial_world = hostile_initial.simulation_state();
+    Check(hostile_initial.front_end_state() == diagnostic_play &&
+              !hostile_initial.front_end_active_profile_is_confirmed(),
+          "a non-default initial DiagnosticPlay state cannot pre-open replay "
+          "authorization");
+    auto hostile_initial_frame = hostile_initial.Next();
+    Check(hostile_initial_frame && hostile_initial_frame->frame_plan() &&
+              hostile_initial_frame->front_end_command() == FrontEndCommand{} &&
+              hostile_initial.front_end_state() == main_start &&
+              !hostile_initial.front_end_active_profile_is_confirmed() &&
+              hostile_initial_frame->frame_plan()->simulation_steps == 0U &&
+              hostile_initial_frame->frame_plan()->interpolation_alpha == 0.0 &&
+              hostile_initial.scheduler_state() == hostile_initial_scheduler &&
+              SameSimulation(hostile_initial.simulation_state(),
+                  hostile_initial_world) &&
+              hostile_initial.debug_locomotion_position() == Position3{},
+          "the edge-free hostile DiagnosticPlay frame fails closed before its "
+          "elapsed time can mutate simulation");
+
+    // Creation is also a public replay command, but it is not confirmation. Pin
+    // that distinction independently from the longer interaction below.
+    const std::array hostile_creation_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{15},
+            .transitions = primary_down},
+    };
+    RunCaptureTracePair hostile_creation_pair =
+        BuildScriptedPair(menu_actions, hostile_creation_frames);
+    RunReplaySessionConfig hostile_creation_config = ValidConfig();
+    hostile_creation_config.initial_front_end_state = profiles_first;
+    hostile_creation_config.front_end_capabilities = create_and_gate_enabled;
+    auto hostile_creation_created = RunReplaySession::Create(
+        std::move(hostile_creation_pair), hostile_creation_config);
+    RunReplaySession hostile_creation = TakeSession(
+        hostile_creation_created,
+        "the focused first-profile creation replay is created closed");
+    auto hostile_creation_frame = hostile_creation.Next();
+    Check(hostile_creation_frame && hostile_creation_frame->frame_plan() &&
+              hostile_creation_frame->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::CreateFirstProfile,
+                  .profile_slot = FrontEndProfileSlot::First,
+              } &&
+              hostile_creation.front_end_state() == profiles_first &&
+              !hostile_creation.front_end_active_profile_is_confirmed() &&
+              hostile_creation_frame->frame_plan()->simulation_steps == 0U,
+          "a replayed creation cannot initialize or publish active-profile "
+          "confirmation");
 
     // One existing bounded profile, nothing confirmed. Start Diagnostic must
     // reach the surface that can satisfy the gate instead of starting play.

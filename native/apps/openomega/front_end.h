@@ -213,10 +213,13 @@ struct FrontEndCapabilities
 // [any thread; reentrant] True when the explicit diagnostic-play gate is
 // satisfied. The default capability leaves the gate open, so callers that do
 // not opt in observe the exact legacy result without supplying a confirmation.
-// The caller must derive `active_profile_is_confirmed` with
-// FrontEndHasConfirmedActiveProfile: this predicate deliberately holds no
-// identity of its own and therefore cannot be satisfied by a second, separately
-// mutable selection. No allocation, I/O, or catalog access occurs.
+// Live callers must derive `active_profile_is_confirmed` with
+// FrontEndHasConfirmedActiveProfile. The bounded replay adapter may instead
+// supply its private identity-free mirror, which begins closed and opens only
+// after a replayed SetActiveProfile command. This predicate deliberately holds
+// no identity of its own and therefore cannot be satisfied by a second,
+// separately mutable live selection. No allocation, I/O, or catalog access
+// occurs.
 [[nodiscard]] constexpr bool FrontEndSatisfiesDiagnosticPlayGate(
     const FrontEndCapabilities capabilities, const bool active_profile_is_confirmed) noexcept
 {
@@ -330,15 +333,17 @@ struct FrontEndView
 // selection/navigation is otherwise inert. Simultaneous navigation edges are
 // neutral, and navigation is press-edge-only and clamps at both bounds.
 //
-// The confirmation participates only through the explicit diagnostic-play gate,
-// and `active_profile_is_confirmed` must be derived with
-// FrontEndHasConfirmedActiveProfile. With the default capability it cannot
-// change any result. With the gate enabled and nothing confirmed, an already
-// entered DiagnosticPlay state fails closed to the initial front end before any
-// edge is considered, and the Main diagnostic row opens the Profiles surface
-// that can satisfy the gate instead of starting diagnostic play. That redirect
-// publishes no command, so the gate can never itself confirm, select, or create
-// a profile. No allocation, I/O, catalog access, or persistence mutation occurs.
+// The confirmation participates only through the explicit diagnostic-play gate.
+// Live callers must derive it with FrontEndHasConfirmedActiveProfile; the
+// bounded replay adapter may use its private identity-free mirror, initialized
+// closed and opened only by a replayed SetActiveProfile command. With the
+// default capability it cannot change any result. With the gate enabled and
+// nothing confirmed, an already entered DiagnosticPlay state fails closed to
+// the initial front end before any edge is considered, and the Main diagnostic
+// row opens the Profiles surface that can satisfy the gate instead of starting
+// diagnostic play. That redirect publishes no command, so the gate can never
+// itself confirm, select, or create a profile. No allocation, I/O, catalog
+// access, or persistence mutation occurs.
 [[nodiscard]] constexpr FrontEndReduction ReduceFrontEnd(
     FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots,
     const FrontEndCapabilities capabilities = {}, const bool active_profile_is_confirmed = false) noexcept

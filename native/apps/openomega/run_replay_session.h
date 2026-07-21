@@ -49,14 +49,9 @@ struct RunReplaySessionConfig
     // Default closed preserves legacy replay. Create gates this capability against
     // both startup counts before any frame can reach the pure reducer.
     FrontEndCapabilities front_end_capabilities{};
-    // Replay-local authorization mirror for the explicit diagnostic-play gate.
-    // It is deliberately identity-free: replay holds no ProfileId, catalog view,
-    // database, or persistence owner, and models only whether a confirmation has
-    // already been replayed. Default false matches the app, whose startup never
-    // copies a durable confirmation into session state; with the default closed
-    // capability it cannot change any result, so legacy replay stays byte-for-byte.
-    bool front_end_active_profile_is_confirmed = false;
-
+    // Replay authorization is intentionally not configurable: every new session
+    // begins unconfirmed, and only its replayed SetActiveProfile command can
+    // open the identity-free mirror.
     friend constexpr bool operator==(
         const RunReplaySessionConfig&, const RunReplaySessionConfig&) noexcept = default;
 };
@@ -279,8 +274,7 @@ private:
         std::optional<FrontEndState> front_end_state,
         std::uint8_t front_end_visible_profile_slots,
         std::size_t front_end_total_profile_count,
-        FrontEndCapabilities front_end_capabilities,
-        bool front_end_active_profile_is_confirmed) noexcept;
+        FrontEndCapabilities front_end_capabilities) noexcept;
     void NormalizeInert() noexcept;
 
     std::optional<runtime::FrameScheduler> scheduler_;
