@@ -2122,6 +2122,49 @@ native persistence and front-end composition only. It establishes no retail or P
 profile, campaign, checkpoint, memory-card, guest-RAM, savestate, emulator, proprietary-input,
 owner-corpus, or behavioral-parity semantics.
 
+### E-0111 project-owned diagnostic checkpoint
+
+E-0111 narrows native startup enumeration to the shared front-end ceiling:
+`ProfileCatalog::ListBounded(1'024)` counts only direct metadata markers, spends that budget before
+parsing each marker, and ignores checkpoint and other child records for cardinality. A generated
+1,025-direct-marker fixture includes both valid checkpoint and non-marker noise and fails closed in
+the profile-catalog startup category before the malformed last marker is parsed. Production retains
+the storage layer's independent hard bounds and raises only its app record ceiling from E-0109's
+1,025 to 2,049, enough for 1,024 profile markers, one diagnostic marker per profile, and the active
+pointer when no unrelated record consumes capacity.
+
+`FrontEndCapabilities` owns three independent booleans: first-profile creation,
+diagnostic-start support, and whether diagnostic play requires an active confirmation. The pure
+contract is `play_allowed = can_start_diagnostic_campaign &&
+(!requires_active_profile_for_diagnostic_play || active_profile_is_confirmed)`. Closed support and
+an unsatisfied confirmation requirement both leave Main/Start Diagnostic inert and publish no
+command. A support-open composition with no confirmation requirement is the explicit synthetic,
+persistence-free path. Production derives both its start capability and authorization from
+`ActiveProfileIsConfirmed()`, which resolves the single session ID against the current bounded
+model; raw optional presence never authorizes a start.
+
+An allowed Primary edge publishes `StartDiagnosticCampaign`. The live app accepts only its fixed
+First sentinel, completes `NativePersistence::PrepareDiagnosticCampaignStart` before publishing
+DiagnosticPlay, and only then permits simulation. Preparation requires the same owned confirmed ID,
+re-reads `profiles/active` at the revision observed by confirmation/bootstrap, and revalidates the
+profile. Canonical record `profiles/<id>/campaigns/diagnostic/checkpoint`, database schema 1, owns an
+exact 32-byte value: ASCII `OODIAGCP`, little-endian payload version 1, zero flags, zero reserved
+word, and the raw 16-byte `ProfileId`. Bootstrap rejects malformed keys or values, key/value ID
+mismatch, and orphan markers through `persisted-diagnostic-checkpoint`. An exact existing marker is
+a no-write success; definite validation, conflict, and limit failures publish no app state, while
+the existing indeterminate-publication poison-and-reopen rule remains unchanged.
+
+Replay carries the same three capability inputs and its one identity-free confirmation mirror. A
+replayed selection opens that mirror; replay may then publish the typed start command and simulate,
+but never creates or validates persistence. Generated reducer, replay, live capture, and
+opening-movie acceptance cover the inert and successful paths. Successful persistence is exactly
+generation 3, three records, and 105 logical bytes: 41-byte metadata, 32-byte active pointer, and
+32-byte checkpoint. Static validation covers 361 tooling tests and 111 evidence records. No local
+C++ compilation or executable test was attempted under the host RAM STOP condition; remote
+compilation and execution remain pending. This is a project-generated diagnostic boundary, not a
+retail/PS2 campaign, save, checkpoint, gameplay, continuation, world-state, owner-input, or parity
+claim.
+
 ### Project-owned front-end cancel action
 
 Logical action 7 is a distinct project-owned cancel edge. Keyboard Backspace and gamepad East map

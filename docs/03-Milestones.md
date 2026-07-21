@@ -275,6 +275,24 @@ publication CI remain pending. Static validation passed 340 tooling tests, Pytho
 262-file native dependency gate, both 109-record ledger gates, the 439-blob staged public-tree gate,
 diff checks, and independent core/package reviews. This is not retail or PS2 save, menu, profile,
 campaign, checkpoint, memory-card, owner-input, or parity evidence.
+E-0111 supersedes only E-0109's app record ceiling and no-checkpoint boundary. Production startup
+uses the shared 1,024-profile front-end maximum through `ProfileCatalog::ListBounded`; direct
+markers spend the budget before parsing, while checkpoint and other child records do not. The app
+database now permits 2,049 records for at most 1,024 profile markers, one project diagnostic marker
+per profile, and `profiles/active` when unrelated records have not consumed capacity. The reducer's
+three independent booleans distinguish first-profile creation, diagnostic-start support, and the
+optional active-profile requirement. Closed support or an unsatisfied requirement leaves Main/Start
+Diagnostic inert. Production derives authorization from the confirmed ID still resolving against
+the bounded model, applies typed `StartDiagnosticCampaign` before state publication, and stores the
+exact 32-byte `OODIAGCP` schema-1 marker at
+`profiles/<id>/campaigns/diagnostic/checkpoint`. Bootstrap rejects malformed, mismatched, or orphan
+markers; preparation requires the same durable active ID and observed pointer revision, and exact
+existing markers are no-write successes. Replay mirrors selection with no identity and may publish
+the typed command, but remains persistence-free. Generated live and opening-movie acceptance reaches
+generation 3, three records, and 105 logical bytes. Static validation covers 361 tooling tests and
+111 ledger records. No local C++ build or executable test ran under the host RAM STOP condition;
+remote compile/test remains pending. This assigns no retail/PS2 campaign, save, checkpoint,
+gameplay, continuation, world-state, memory-card, owner-input, or parity semantics.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
