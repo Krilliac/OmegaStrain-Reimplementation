@@ -1313,7 +1313,9 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME omega_native_persistence_tests
             COMMAND omega_native_persistence_tests)
-        set_tests_properties(omega_native_persistence_tests PROPERTIES TIMEOUT 10)
+        # The generated rollback/reopen matrix performs many intentionally durable
+        # snapshot publications; Windows filesystem flush latency can exceed 10 seconds.
+        set_tests_properties(omega_native_persistence_tests PROPERTIES TIMEOUT 30)
     endif()
 
     if(TARGET openomega)
