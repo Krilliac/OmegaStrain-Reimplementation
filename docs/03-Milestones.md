@@ -143,11 +143,13 @@ Other scene decoders remain incomplete.
   assigns no geometry, topology, vertex, material, packet, draw, placement, visibility, or gameplay
   semantics.
 - Passive SKM and SKL native descriptors preserve only bounded structural metadata. The passive
-  SKA descriptor implements the aggregate-proven neutral counted-word extent as fixed output, while
-  the separate bounded SKAS adapter owns only exact structural text and opaque line ranges. Neither
-  assigns animation semantics or a relationship between SKA and SKAS. The native corpus verifier
-  accepts 213/213 SKA spans with zero errors: 158 exact, 55 zero-padded, and 2,180,832 aggregate
-  logical bytes.
+  SKA descriptor preserves the aggregate-proven header and observed-word gates and returns fixed
+  output classifying the correlated counted-word extent as exact, zero-padded tail, nonzero tail,
+  or exceeding input. Generated fixtures exercise all four relations, but the tracked
+  213-candidate owner corpus establishes only 158 exact and 55 zero-padded cases, totaling
+  2,180,832 aggregate logical bytes; it contains no observed nonzero-tail or exceeds-input case.
+  The separate bounded SKAS adapter owns only exact structural text and opaque line ranges. Neither
+  family is assigned animation semantics or an inferred relationship.
 - E-0091 adds an owned LPD counted-envelope IR and stateless two-pass decoder for the fixed
   22-word/21-track structure. It preserves every source-order four-byte entry as opaque bytes,
   accepts exact input or any all-zero tail through the aggregate-proven 1,932-byte maximum, and

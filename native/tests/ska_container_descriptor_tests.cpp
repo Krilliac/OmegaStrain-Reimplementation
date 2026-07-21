@@ -93,7 +93,10 @@ int SkaContainerDescriptorFailureCount()
 
     const auto exact_bytes = MakeSka();
     const auto exact = omega::retail::InspectSkaContainer(exact_bytes);
+    const auto exact_repeat = omega::retail::InspectSkaContainer(exact_bytes);
     Check(exact.has_value(), "minimum-envelope SKA structure is accepted");
+    Check(exact && exact_repeat && *exact == *exact_repeat,
+        "SKA exact-extent classification is deterministic");
     if (exact)
     {
         Check(exact->format_version == 3 && exact->observed_word_0x04 == 1 &&
@@ -108,11 +111,14 @@ int SkaContainerDescriptorFailureCount()
 
     auto zero_tail_bytes = MakeSka({}, 16U);
     const auto zero_tail = omega::retail::InspectSkaContainer(zero_tail_bytes);
+    const auto zero_tail_repeat = omega::retail::InspectSkaContainer(zero_tail_bytes);
     Check(zero_tail && zero_tail->logical_extent.observed_bytes == exact_bytes.size() &&
               zero_tail->logical_extent.input_bytes == zero_tail_bytes.size() &&
               zero_tail->logical_extent.relation ==
                   omega::retail::ObservedExtentRelation::ZeroPaddedTail,
         "SKA accepts and classifies an aligned all-zero trailing region");
+    Check(zero_tail && zero_tail_repeat && *zero_tail == *zero_tail_repeat,
+        "SKA zero-padded-tail classification is deterministic");
 
     const auto maximum_zero_tail = omega::retail::InspectSkaContainer(MakeSka({}, 2000U));
     Check(maximum_zero_tail && maximum_zero_tail->logical_extent.input_bytes == 2464U &&
@@ -125,9 +131,14 @@ int SkaContainerDescriptorFailureCount()
     {
         auto dirty_tail = zero_tail_bytes;
         dirty_tail[dirty_offset] = std::byte{1};
-        CheckErrorAt(omega::retail::InspectSkaContainer(dirty_tail),
-            omega::asset::DecodeErrorCode::Malformed, dirty_offset,
-            "SKA rejects and locates a nonzero byte in the trailing region");
+        const auto first = omega::retail::InspectSkaContainer(dirty_tail);
+        const auto second = omega::retail::InspectSkaContainer(dirty_tail);
+        Check(first && second && *first == *second &&
+                  first->logical_extent.observed_bytes == exact_bytes.size() &&
+                  first->logical_extent.input_bytes == dirty_tail.size() &&
+                  first->logical_extent.relation ==
+                      omega::retail::ObservedExtentRelation::NonzeroTail,
+            "SKA deterministically classifies a nonzero trailing region without interpreting it");
     }
 
     auto misaligned_span = exact_bytes;
@@ -136,20 +147,36 @@ int SkaContainerDescriptorFailureCount()
         omega::asset::DecodeErrorCode::Malformed,
         "SKA rejects a complete physical span that is not 16-byte aligned");
 
-    bool all_prefixes_truncated = true;
-    for (std::size_t size = 0; size < exact_bytes.size(); ++size)
+    bool all_fixed_header_prefixes_truncated = true;
+    for (std::size_t size = 0; size < 112U; ++size)
     {
         const auto result = omega::retail::InspectSkaContainer(
             std::span<const std::byte>(exact_bytes.data(), size));
-        all_prefixes_truncated = all_prefixes_truncated && !result &&
+        all_fixed_header_prefixes_truncated = all_fixed_header_prefixes_truncated && !result &&
             result.error().code == omega::asset::DecodeErrorCode::Truncated;
     }
-    Check(all_prefixes_truncated,
-        "every truncated SKA prefix is classified as truncated before alignment");
-    CheckErrorAt(omega::retail::InspectSkaContainer(std::span<const std::byte>(
-                     exact_bytes.data(), exact_bytes.size() - 1U)),
-        omega::asset::DecodeErrorCode::Truncated, exact_bytes.size() - 1U,
-        "SKA reports the supplied byte count for a one-byte-short counted region");
+    Check(all_fixed_header_prefixes_truncated,
+        "every truncated SKA fixed-header prefix is classified as truncated before alignment");
+
+    for (const std::size_t input_bytes :
+        std::array<std::size_t, 2>{112U, exact_bytes.size() - 16U})
+    {
+        const auto result = omega::retail::InspectSkaContainer(
+            std::span<const std::byte>(exact_bytes.data(), input_bytes));
+        const auto repeat = omega::retail::InspectSkaContainer(
+            std::span<const std::byte>(exact_bytes.data(), input_bytes));
+        Check(result && repeat && *result == *repeat &&
+                  result->logical_extent.observed_bytes == exact_bytes.size() &&
+                  result->logical_extent.input_bytes == input_bytes &&
+                  result->logical_extent.relation ==
+                      omega::retail::ObservedExtentRelation::ExceedsInput,
+            "SKA deterministically classifies an aligned counted extent beyond the input");
+    }
+
+    CheckError(omega::retail::InspectSkaContainer(std::span<const std::byte>(
+                   exact_bytes.data(), 113U)),
+        omega::asset::DecodeErrorCode::Malformed,
+        "SKA preserves physical-span alignment before reporting an extent relation");
 
     const std::array<SkaSpec, 5> observed_pairs{{
         {.word_0x04 = 1, .word_0x08 = 56, .word_0x10 = 0},
@@ -200,12 +227,12 @@ int SkaContainerDescriptorFailureCount()
         omega::asset::DecodeErrorCode::UnsupportedVariant, 4,
         "SKA rejects a marginally valid combination beyond the observed logical range");
 
-    auto invalid_version_short_payload = exact_bytes;
-    WriteU32(invalid_version_short_payload, 0, 2);
+    auto invalid_version_short_input = exact_bytes;
+    WriteU32(invalid_version_short_input, 0, 2);
     CheckErrorAt(omega::retail::InspectSkaContainer(std::span<const std::byte>(
-                     invalid_version_short_payload.data(), 112U)),
+                     invalid_version_short_input.data(), 112U)),
         omega::asset::DecodeErrorCode::UnsupportedVariant, 0,
-        "SKA validates the version before diagnosing a short counted region");
+        "SKA validates the version before classifying the counted extent relation");
 
     const auto owned = [&]() {
         auto transient_source = MakeSka();
@@ -233,6 +260,13 @@ int SkaContainerDescriptorFailureCount()
     const auto opaque_payload_result = omega::retail::InspectSkaContainer(opaque_payload);
     Check(exact && opaque_payload_result && *opaque_payload_result == *exact,
         "SKA descriptor remains independent of counted-region payload bytes");
+
+    std::vector<std::byte> unaligned_storage(exact_bytes.size() + 1U, std::byte{0});
+    std::copy(exact_bytes.begin(), exact_bytes.end(), unaligned_storage.begin() + 1);
+    const auto unaligned_backing = omega::retail::InspectSkaContainer(
+        std::span<const std::byte>(unaligned_storage.data() + 1, exact_bytes.size()));
+    Check(exact && unaligned_backing && *unaligned_backing == *exact,
+        "SKA requires physical-span length alignment, not backing-address alignment");
 
     auto limits = omega::asset::DecodeLimits{};
     limits.maximum_input_bytes = exact_bytes.size();
