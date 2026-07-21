@@ -4,6 +4,7 @@
 #include "front_end.h"
 #include "native_persistence.h"
 #include "opening_movie_audio_clock.h"
+#include "opening_movie_audio_fault.h"
 #include "run_capture.h"
 #include "sdl_audio_service.h"
 #include "sdl_gpu_host.h"
@@ -111,6 +112,16 @@ private:
         int frame_limit, runtime::RunCaptureSession* capture_session,
         std::optional<std::chrono::nanoseconds> first_elapsed_override);
     [[nodiscard]] bool ContainOpeningMovieAudio() noexcept;
+    [[nodiscard]] static OpeningMovieAudioFaultCounters OpeningMovieAudioFaultCountersOf(
+        const AudioServiceSnapshot& snapshot) noexcept;
+    // [game/main thread] Completes the front-end transition after attempting
+    // audio containment. This is intentionally not noexcept: logging and GPU
+    // release are ordinary operational calls and must never terminate the process.
+    [[nodiscard]] bool FinishOpeningMovieFrontEndTransition(
+        AudioServiceSnapshot& audio_fault_baseline);
+    // [game/main thread] Releases CPU/GPU movie state after audio has already
+    // been contained or the run has become fatal.
+    void ReleaseOpeningMovieForFrontEnd();
     // [game/main thread; no concurrent use] Resolves only bounded startup slots
     // and copies their immutable ID. It performs no catalog or database access.
     void ApplyFrontEndCommand(FrontEndCommand command) noexcept;

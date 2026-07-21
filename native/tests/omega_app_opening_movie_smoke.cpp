@@ -24,6 +24,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -67,6 +68,11 @@ struct OmegaAppTestAccess final
     [[nodiscard]] static AudioServiceSnapshot Audio(const OmegaApp& app) noexcept
     {
         return app.audio_->Snapshot();
+    }
+
+    [[nodiscard]] static SdlAudioService* MutableAudio(OmegaApp& app) noexcept
+    {
+        return app.audio_.get();
     }
 
     [[nodiscard]] static std::vector<runtime::LogRecord> Logs(
@@ -125,6 +131,7 @@ using omega::app::OpeningMoviePlayerErrorCode;
 using omega::app::OpeningMoviePlayerStatus;
 using omega::app::OpeningMoviePlayerUpdate;
 using omega::app::OmegaApp;
+using omega::app::SdlAudioService;
 using omega::app::detail::OmegaAppTestAccess;
 
 constexpr std::uint32_t kGeneratedWidth = 2U;
@@ -185,6 +192,11 @@ struct GeneratedPlaybackObservation
     std::size_t destruction_count = 0U;
     bool skip_event_attempted = false;
     bool skip_event_queued = false;
+    SdlAudioService* audio_for_fault_injection = nullptr;
+    bool queue_rejection_attempted = false;
+    bool queue_rejection_accepted = false;
+    bool control_fault_attempted = false;
+    bool wrong_thread_discard_succeeded = false;
 };
 
 struct GeneratedPlaybackConfig
@@ -197,6 +209,8 @@ struct GeneratedPlaybackConfig
     std::uint32_t presentation_height = kGeneratedHeight;
     std::uint64_t safety_duration_ticks = kGeneratedSafetyTicks;
     bool over_report_audio_frames = false;
+    bool inject_queue_rejection_on_first_advance = false;
+    bool inject_control_fault_on_first_advance = false;
 };
 
 class GeneratedOpeningMovie final : public OpeningMoviePlayback
@@ -225,6 +239,28 @@ public:
     Advance(const std::chrono::nanoseconds) override
     {
         ++observation_->advance_calls;
+        if (config_.inject_queue_rejection_on_first_advance &&
+            observation_->advance_calls == 1U &&
+            observation_->audio_for_fault_injection != nullptr)
+        {
+            observation_->queue_rejection_attempted = true;
+            observation_->queue_rejection_accepted =
+                observation_->audio_for_fault_injection->QueueOpeningMoviePcm16(
+                    std::span<const std::int16_t>{});
+        }
+        if (config_.inject_control_fault_on_first_advance &&
+            observation_->advance_calls == 1U &&
+            observation_->audio_for_fault_injection != nullptr)
+        {
+            observation_->control_fault_attempted = true;
+            SdlAudioService* const audio =
+                observation_->audio_for_fault_injection;
+            std::thread wrong_thread([observation = observation_, audio]() {
+                observation->wrong_thread_discard_succeeded =
+                    audio->DiscardOpeningMovieAudio();
+            });
+            wrong_thread.join();
+        }
         if (config_.mode == GeneratedPlaybackMode::AdvanceFailure)
         {
             return std::unexpected(OpeningMoviePlayerError{
@@ -376,7 +412,8 @@ void CheckTransitionCleanup(const OmegaApp& app, const AppBaseline& before,
     const std::uint64_t expected_updates,
     const std::uint64_t expected_rendered_frames,
     const std::uint64_t expected_movie_frames,
-    const std::string_view context)
+    const std::string_view context,
+    const std::uint64_t expected_control_failure_delta = 0U)
 {
     const GpuHostSnapshot gpu = OmegaAppTestAccess::Gpu(app);
     const AudioServiceSnapshot audio = OmegaAppTestAccess::Audio(app);
@@ -397,8 +434,9 @@ void CheckTransitionCleanup(const OmegaApp& app, const AppBaseline& before,
               !audio.opening_movie_device_resumed,
         context, "real SDL movie audio is inactive and empty");
     Check(audio.opening_movie_control_failures ==
-              before.audio.opening_movie_control_failures,
-        context, "audio containment adds no control failure");
+              before.audio.opening_movie_control_failures +
+                  expected_control_failure_delta,
+        context, "audio control-failure accounting matches the script");
     Check(audio.opening_movie_discard_count ==
               before.audio.opening_movie_discard_count + 2U,
         context, "transition and run epilogue each perform containment");
@@ -745,6 +783,110 @@ void CheckHostileRuntimeErrorRedaction()
     Check(!leaked_hostile_detail, context,
         "the playback-supplied path-bearing message never escapes");
 }
+
+void CheckLateAudioFaultFailsOpenToActionableMenu()
+{
+    constexpr std::string_view context = "late-audio-fault";
+    auto observation = std::make_shared<GeneratedPlaybackObservation>();
+    auto app = CreateApp(std::make_unique<GeneratedOpeningMovie>(
+        GeneratedPlaybackConfig{
+            .mode = GeneratedPlaybackMode::ScheduledSkip,
+            .inject_queue_rejection_on_first_advance = true,
+        },
+        observation));
+    Check(app.has_value(), context, "generated playback app starts");
+    if (!app)
+        return;
+
+    observation->audio_for_fault_injection =
+        OmegaAppTestAccess::MutableAudio(*app);
+    const AppBaseline before = CaptureBaseline(*app);
+    auto failed_open = app->Run(2);
+    Check(failed_open && failed_open->rendered_frames == 2 &&
+              failed_open->planned_simulation_steps == 0U &&
+              failed_open->executed_simulation_steps == 0U,
+        context,
+        "a fault raised after the pre-render sample keeps the run alive");
+    Check(observation->queue_rejection_attempted &&
+              !observation->queue_rejection_accepted &&
+              OmegaAppTestAccess::Audio(*app).opening_movie_queue_rejections ==
+                  before.audio.opening_movie_queue_rejections + 1U,
+        context, "one real audio-service rejection drives the late-fault path");
+    Check(observation->advance_calls == 1U &&
+              observation->destruction_count == 1U,
+        context, "the fault releases playback after its first frame");
+    Check(OmegaAppTestAccess::BootSequence(*app).phase ==
+              BootSequencePhase::Failed &&
+              OmegaAppTestAccess::FrontEnd(*app) ==
+                  omega::app::InitialFrontEndState(),
+        context, "the late fault enters the initial main menu");
+    CheckTransitionCleanup(*app, before, 1U, 2U, 1U, context);
+
+    std::size_t warning_count = 0U;
+    for (const omega::runtime::LogRecord& record :
+        OmegaAppTestAccess::Logs(*app))
+    {
+        if (record.category == "opening_movie" &&
+            record.severity == omega::runtime::LogSeverity::Warning &&
+            record.message ==
+                omega::app::OpeningMovieAudioFaultMessage(
+                    omega::app::OpeningMovieAudioFault::QueueRejection))
+        {
+            ++warning_count;
+        }
+    }
+    Check(warning_count == 1U, context,
+        "the late fault emits one categorical path-free warning");
+
+    Check(PushKey(SDL_SCANCODE_DOWN, true), context,
+        "a post-fault menu edge enters the SDL queue");
+    auto navigated = app->Run(1);
+    Check(navigated && OmegaAppTestAccess::FrontEnd(*app) == FrontEndState{
+              .mode = FrontEndMode::Main,
+              .selected_main_row = FrontEndMainRow::Profiles,
+              .selected_profile_slot = FrontEndProfileSlot::First,
+          },
+        context, "the next frame accepts main-menu navigation");
+}
+
+void CheckLateControlFaultRebaselinesForMenu()
+{
+    constexpr std::string_view context = "late-control-fault";
+    auto observation = std::make_shared<GeneratedPlaybackObservation>();
+    auto app = CreateApp(std::make_unique<GeneratedOpeningMovie>(
+        GeneratedPlaybackConfig{
+            .mode = GeneratedPlaybackMode::ScheduledSkip,
+            .inject_control_fault_on_first_advance = true,
+        },
+        observation));
+    Check(app.has_value(), context, "generated playback app starts");
+    if (!app)
+        return;
+
+    observation->audio_for_fault_injection =
+        OmegaAppTestAccess::MutableAudio(*app);
+    const AppBaseline before = CaptureBaseline(*app);
+    auto failed_open = app->Run(2);
+    Check(failed_open && failed_open->rendered_frames == 2 &&
+              failed_open->planned_simulation_steps == 0U &&
+              failed_open->executed_simulation_steps == 0U,
+        context,
+        "a late control fault is handled once and the next menu frame succeeds");
+    Check(observation->control_fault_attempted &&
+              !observation->wrong_thread_discard_succeeded &&
+              OmegaAppTestAccess::Audio(*app).opening_movie_control_failures ==
+                  before.audio.opening_movie_control_failures + 1U,
+        context, "one real wrong-thread discard raises the control counter");
+    Check(observation->advance_calls == 1U &&
+              observation->destruction_count == 1U,
+        context, "the control fault releases playback after its first frame");
+    Check(OmegaAppTestAccess::BootSequence(*app).phase ==
+              BootSequencePhase::Failed &&
+              OmegaAppTestAccess::FrontEnd(*app) ==
+                  omega::app::InitialFrontEndState(),
+        context, "the control fault enters the initial main menu");
+    CheckTransitionCleanup(*app, before, 1U, 2U, 1U, context, 1U);
+}
 } // namespace
 
 int main()
@@ -757,6 +899,8 @@ int main()
     CheckScheduledSkip(5U, "late-skip");
     CheckOverReportedPcmRejection();
     CheckHostileRuntimeErrorRedaction();
+    CheckLateAudioFaultFailsOpenToActionableMenu();
+    CheckLateControlFaultRebaselinesForMenu();
 
     if (failures == 0)
         std::cout << "omega_app_opening_movie_smoke: all checks passed\n";

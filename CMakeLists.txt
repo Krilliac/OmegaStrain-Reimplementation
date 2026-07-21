@@ -660,6 +660,34 @@ if(BUILD_TESTING)
         COMMAND omega_opening_movie_audio_clock_tests)
     set_tests_properties(omega_opening_movie_audio_clock_tests PROPERTIES TIMEOUT 10)
 
+    add_executable(omega_opening_movie_audio_fault_tests
+        native/tests/opening_movie_audio_fault_tests.cpp
+    )
+    target_include_directories(omega_opening_movie_audio_fault_tests PRIVATE
+        native/apps/openomega
+    )
+    if(MSVC)
+        target_compile_options(omega_opening_movie_audio_fault_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_opening_movie_audio_fault_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_opening_movie_audio_fault_tests
+        COMMAND omega_opening_movie_audio_fault_tests)
+    set_tests_properties(omega_opening_movie_audio_fault_tests PROPERTIES TIMEOUT 10)
+
     add_executable(omega_sdl_gpu_exception_boundary_tests
         native/tests/sdl_gpu_exception_boundary_tests.cpp
     )
