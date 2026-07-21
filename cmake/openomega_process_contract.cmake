@@ -276,7 +276,7 @@ else()
 endif()
 run_openomega_case(help_bypasses_malformed_default TRUE "${openomega_usage}" "" --help)
 run_openomega_case(parse_error_bypasses_malformed_default FALSE ""
-    "unknown option: --replay-capture=true\n${openomega_usage}"
+    "unknown option: --replay-capture\n${openomega_usage}"
     --replay-capture=true
 )
 

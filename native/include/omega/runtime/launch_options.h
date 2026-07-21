@@ -33,6 +33,8 @@ struct LaunchOptions
 };
 
 // [any thread; reentrant] Parses arguments after argv[0]. No filesystem access occurs here.
+// Failure diagnostics never contain positional or option values; an unknown diagnostic may
+// retain only a bounded, syntactically validated long-option name.
 [[nodiscard]] std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     std::span<const std::string_view> arguments);
 
