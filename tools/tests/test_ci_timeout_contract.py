@@ -38,6 +38,7 @@ class WindowsCiTimeoutContractTests(unittest.TestCase):
                 "openomega_positive_package_timeout_seconds": 60,
                 "openomega_archive_list_timeout_seconds": 20,
                 "openomega_launcher_timeout_seconds": 10,
+                "openomega_fixture_writer_timeout_seconds": 10,
             },
         )
         timeout_uses = re.findall(
@@ -65,13 +66,18 @@ class WindowsCiTimeoutContractTests(unittest.TestCase):
             "openomega_launcher_timeout_seconds": self._call_count(
                 "run_launcher_case"
             ),
+            "openomega_fixture_writer_timeout_seconds": self._call_count(
+                "run_native_persistence_fixture_writer_case"
+            ),
         }
-        self.assertEqual(tuple(multiplicities.values()), (4, 2, 1, 2, 2, 1, 1, 3))
+        self.assertEqual(
+            tuple(multiplicities.values()), (4, 2, 1, 2, 2, 1, 1, 5, 1)
+        )
         sequential_subprocess_maximum = sum(
             timeout_constants[name] * count
             for name, count in multiplicities.items()
         )
-        self.assertEqual(sequential_subprocess_maximum, 500)
+        self.assertEqual(sequential_subprocess_maximum, 530)
         self.assertEqual(package_contract_timeout, 600)
 
         workflow_timeout_seconds = (

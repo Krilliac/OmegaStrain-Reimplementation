@@ -31,6 +31,7 @@ set(openomega_reparse_inspection_timeout_seconds 10)
 set(openomega_positive_package_timeout_seconds 60)
 set(openomega_archive_list_timeout_seconds 20)
 set(openomega_launcher_timeout_seconds 10)
+set(openomega_fixture_writer_timeout_seconds 10)
 
 set(required_path_variables
     OPENOMEGA_CPACK_COMMAND
@@ -42,6 +43,8 @@ set(required_path_variables
     OPENOMEGA_PACKAGE_EXTRACT_DIRECTORY
     OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY
     OPENOMEGA_PACKAGE_PROFILE_DIRECTORY
+    OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY
+    OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER
     OPENOMEGA_DUMP_TOOL
     OPENOMEGA_COMSPEC
     OPENOMEGA_POWERSHELL
@@ -65,6 +68,7 @@ endif()
 foreach(existing_file_variable IN ITEMS
         OPENOMEGA_CPACK_COMMAND
         OPENOMEGA_CPACK_CONFIG
+        OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER
         OPENOMEGA_DUMP_TOOL
         OPENOMEGA_COMSPEC
         OPENOMEGA_POWERSHELL)
@@ -101,6 +105,7 @@ set(managed_directory_variables
     OPENOMEGA_PACKAGE_EXTRACT_DIRECTORY
     OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY
     OPENOMEGA_PACKAGE_PROFILE_DIRECTORY
+    OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY
 )
 set(expected_managed_directories
     "${OPENOMEGA_BUILD_DIRECTORY}/package"
@@ -108,6 +113,7 @@ set(expected_managed_directories
     "${OPENOMEGA_BUILD_DIRECTORY}/package-contract/extract"
     "${OPENOMEGA_BUILD_DIRECTORY}/package-contract/unrelated"
     "${OPENOMEGA_BUILD_DIRECTORY}/package-contract/profile"
+    "${OPENOMEGA_BUILD_DIRECTORY}/package-contract/confirmed-profile"
 )
 list(LENGTH managed_directory_variables managed_directory_count)
 math(EXPR managed_directory_last "${managed_directory_count} - 1")
@@ -275,6 +281,8 @@ function(run_cpack_failure case_name generator configuration expected_guard)
     directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" package_before)
     directory_manifest("${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}" unrelated_before)
     directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}" profile_before_case)
+    directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+        confirmed_profile_before_case)
 
     set(command
         "${OPENOMEGA_CPACK_COMMAND}"
@@ -316,11 +324,15 @@ function(run_cpack_failure case_name generator configuration expected_guard)
     directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" package_after)
     directory_manifest("${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}" unrelated_after)
     directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}" profile_after_case)
+    directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+        confirmed_profile_after_case)
     require_same_manifest("${case_name} package directory" "${package_before}" "${package_after}")
     require_same_manifest("${case_name} unrelated directory"
         "${unrelated_before}" "${unrelated_after}")
     require_same_manifest("${case_name} synthetic profile"
         "${profile_before_case}" "${profile_after_case}")
+    require_same_manifest("${case_name} confirmed synthetic profile"
+        "${confirmed_profile_before_case}" "${confirmed_profile_after_case}")
 endfunction()
 
 function(run_install_failure configuration)
@@ -329,6 +341,8 @@ function(run_install_failure configuration)
     file(MAKE_DIRECTORY "${install_prefix}")
     directory_manifest("${install_prefix}" before)
     directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}" profile_before_case)
+    directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+        confirmed_profile_before_case)
     execute_process(
         COMMAND "${CMAKE_COMMAND}"
             --install "${OPENOMEGA_BUILD_DIRECTORY}"
@@ -363,9 +377,13 @@ function(run_install_failure configuration)
     endif()
     directory_manifest("${install_prefix}" after)
     directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}" profile_after_case)
+    directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+        confirmed_profile_after_case)
     require_same_manifest("direct install ${configuration}" "${before}" "${after}")
     require_same_manifest("direct install ${configuration} synthetic profile"
         "${profile_before_case}" "${profile_after_case}")
+    require_same_manifest("direct install ${configuration} confirmed synthetic profile"
+        "${confirmed_profile_before_case}" "${confirmed_profile_after_case}")
 endfunction()
 
 function(read_uint16_le hex_value byte_offset output_variable)
@@ -741,17 +759,48 @@ function(run_launcher_case case_name expected_result expected_stdout expected_st
     endif()
 endfunction()
 
+function(run_native_persistence_fixture_writer_case case_name native_save_directory)
+    execute_process(
+        COMMAND "${OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER}"
+            "${native_save_directory}"
+        WORKING_DIRECTORY "${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}"
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+        TIMEOUT ${openomega_fixture_writer_timeout_seconds}
+        ENCODING AUTO
+    )
+    normalize_process_output(stdout "${stdout}")
+    normalize_process_output(stderr "${stderr}")
+    if(NOT result STREQUAL "0")
+        message(FATAL_ERROR
+            "${case_name}: fixture writer failed with '${result}'\n"
+            "stdout=[${stdout}]\nstderr=[${stderr}]")
+    endif()
+    if(NOT "${stdout}" STREQUAL "${fixture_writer_stdout}")
+        message(FATAL_ERROR
+            "${case_name}: stdout mismatch\nexpected=[${fixture_writer_stdout}]\n"
+            "actual=[${stdout}]")
+    endif()
+    if(NOT stderr STREQUAL "")
+        message(FATAL_ERROR
+            "${case_name}: expected empty stderr, got [${stderr}]")
+    endif()
+endfunction()
+
 file(MAKE_DIRECTORY "${OPENOMEGA_PACKAGE_DIRECTORY}")
 file(REMOVE_RECURSE
     "${OPENOMEGA_PACKAGE_STAGE_DIRECTORY}"
     "${OPENOMEGA_PACKAGE_EXTRACT_DIRECTORY}"
     "${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}"
     "${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}"
+    "${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
 )
 file(MAKE_DIRECTORY
     "${OPENOMEGA_PACKAGE_STAGE_DIRECTORY}"
     "${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}"
     "${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}"
+    "${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
 )
 
 run_cpack_failure(
@@ -787,6 +836,8 @@ file(MAKE_DIRECTORY "${release_install_prefix}")
 directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" install_package_before)
 directory_manifest("${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}" install_unrelated_before)
 directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}" install_profile_before)
+directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+    install_confirmed_profile_before)
 execute_process(
     COMMAND "${CMAKE_COMMAND}"
         --install "${OPENOMEGA_BUILD_DIRECTORY}"
@@ -816,12 +867,16 @@ validate_dependencies("${installed_executable}")
 directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" install_package_after)
 directory_manifest("${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}" install_unrelated_after)
 directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}" install_profile_after)
+directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+    install_confirmed_profile_after)
 require_same_manifest("direct Release install package directory"
     "${install_package_before}" "${install_package_after}")
 require_same_manifest("direct Release install unrelated directory"
     "${install_unrelated_before}" "${install_unrelated_after}")
 require_same_manifest("direct Release install synthetic profile"
     "${install_profile_before}" "${install_profile_after}")
+require_same_manifest("direct Release install confirmed synthetic profile"
+    "${install_confirmed_profile_before}" "${install_confirmed_profile_after}")
 
 file(REMOVE_RECURSE
     "${OPENOMEGA_PACKAGE_STAGE_DIRECTORY}"
@@ -838,6 +893,8 @@ clean_cpack_outputs()
 require_known_outputs_absent("positive package precondition")
 directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" package_before)
 directory_manifest("${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}" unrelated_before)
+directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+    confirmed_profile_before_package)
 
 execute_process(
     COMMAND "${OPENOMEGA_CPACK_COMMAND}"
@@ -871,6 +928,10 @@ directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" package_after
     "${OPENOMEGA_PACKAGE_BASENAME}.zip.sha256"
 )
 require_same_manifest("positive package directory" "${package_before}" "${package_after}")
+directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+    confirmed_profile_after_package)
+require_same_manifest("positive package confirmed synthetic profile"
+    "${confirmed_profile_before_package}" "${confirmed_profile_after_package}")
 
 file(READ "${package_checksum}" sidecar)
 normalize_process_output(sidecar "${sidecar}")
@@ -977,6 +1038,9 @@ validate_pe_contract("${package_executable}")
 require_no_private_workspace_paths("${package_executable}")
 validate_dependencies("${package_executable}")
 directory_manifest("${package_root}" package_root_before_launch)
+directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" package_directory_before_launch)
+directory_manifest("${OPENOMEGA_PACKAGE_EXTRACT_DIRECTORY}"
+    package_extract_before_launch)
 
 set(had_localappdata FALSE)
 if(DEFINED ENV{LOCALAPPDATA})
@@ -988,9 +1052,54 @@ if(DEFINED ENV{OPENOMEGA_DISABLE_STARTUP_DIALOG})
     set(had_disable_dialog TRUE)
     set(saved_disable_dialog "$ENV{OPENOMEGA_DISABLE_STARTUP_DIALOG}")
 endif()
-set(ENV{LOCALAPPDATA} "${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}")
 set(ENV{OPENOMEGA_DISABLE_STARTUP_DIALOG} "1")
 
+# E-0109 writes one deterministic project-owned profile and active pointer through a build-tree,
+# test-only helper. Exact install and archive allowlists above prove that neither the helper nor
+# native-save state is shipped. The packaged executable may only reopen the dedicated profile root.
+string(CONCAT confirmed_zero_frame_stdout
+    "OpenOmega native persistence: profiles=1\n"
+    "OpenOmega native shell: rendered_frames=0\n"
+)
+set(fixture_writer_stdout
+    "OpenOmega native persistence fixture: profiles=1 active=confirmed\n")
+set(confirmed_native_save_directory
+    "${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}/OpenOmega/native-save")
+if(EXISTS "${confirmed_native_save_directory}" OR
+   IS_SYMLINK "${confirmed_native_save_directory}")
+    message(FATAL_ERROR "packaged confirmed-profile native-save precondition is not absent")
+endif()
+run_native_persistence_fixture_writer_case(
+    package_confirmed_profile_writer "${confirmed_native_save_directory}")
+directory_manifest("${confirmed_native_save_directory}"
+    confirmed_native_save_after_writer)
+directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+    confirmed_profile_after_writer)
+set(ENV{LOCALAPPDATA} "${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}")
+run_launcher_case(package_launcher_confirmed_profile 0
+    "${confirmed_zero_frame_stdout}" "" --frames=0)
+directory_manifest("${confirmed_native_save_directory}"
+    confirmed_native_save_after_first_open)
+directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+    confirmed_profile_after_first_open)
+require_same_manifest("packaged confirmed-profile first native-save reopen"
+    "${confirmed_native_save_after_writer}"
+    "${confirmed_native_save_after_first_open}")
+require_same_manifest("packaged confirmed-profile first profile-root reopen"
+    "${confirmed_profile_after_writer}" "${confirmed_profile_after_first_open}")
+run_launcher_case(package_launcher_confirmed_profile_reopen 0
+    "${confirmed_zero_frame_stdout}" "" --frames=0)
+directory_manifest("${confirmed_native_save_directory}"
+    confirmed_native_save_after_second_open)
+directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+    confirmed_profile_after_second_open)
+require_same_manifest("packaged confirmed-profile second native-save reopen"
+    "${confirmed_native_save_after_writer}"
+    "${confirmed_native_save_after_second_open}")
+require_same_manifest("packaged confirmed-profile second profile-root reopen"
+    "${confirmed_profile_after_writer}" "${confirmed_profile_after_second_open}")
+
+set(ENV{LOCALAPPDATA} "${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}")
 # E-0089's packaged zero-frame startup builds the empty bounded front-end model before this early
 # return; the existing stdout and native-save non-mutation contract remain unchanged.
 string(CONCAT zero_frame_stdout
@@ -1035,9 +1144,20 @@ endif()
 
 directory_manifest("${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}" unrelated_after)
 directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}" profile_after)
+directory_manifest("${OPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY}"
+    confirmed_profile_after)
 directory_manifest("${package_root}" package_root_after_launch)
+directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" package_directory_after_launch)
+directory_manifest("${OPENOMEGA_PACKAGE_EXTRACT_DIRECTORY}"
+    package_extract_after_launch)
 require_same_manifest("launcher unrelated directory" "${unrelated_before}" "${unrelated_after}")
 require_same_manifest("launcher synthetic profile"
     "${profile_after_first_native_startup}" "${profile_after}")
+require_same_manifest("launcher confirmed synthetic profile"
+    "${confirmed_profile_after_writer}" "${confirmed_profile_after}")
 require_same_manifest("launcher package root"
     "${package_root_before_launch}" "${package_root_after_launch}")
+require_same_manifest("launcher package directory"
+    "${package_directory_before_launch}" "${package_directory_after_launch}")
+require_same_manifest("launcher extracted tree"
+    "${package_extract_before_launch}" "${package_extract_after_launch}")

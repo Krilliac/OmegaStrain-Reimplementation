@@ -140,6 +140,29 @@ Studio's historical engine source or internal toolchain.
   bytes on transition. Compilation and execution of the new fixtures remain pending. This is
   project-owned startup composition, not retail
   startup, menu, profile, save, PS2, proprietary-input, or behavioral-parity evidence.
+- E-0109 makes the existing Profiles Primary action an explicit project-owned durable
+  confirmation before it publishes either the projected Main state or the app-session active
+  profile. `NativePersistence` stores `profiles/active` at record schema 1 as exactly 32 bytes:
+  `OOACTPRF`, little-endian payload version 1, zero flags, zero reserved word, and the raw 16-byte
+  `ProfileId`. Its default app database ceiling is 1,025 records, providing capacity for the
+  bounded 1,024-profile startup model plus this pointer without claiming a namespace reservation.
+  Bootstrap rejects a malformed, unsupported, or stale pointer through one typed startup category.
+  A same-ID reconfirmation validates the durable revision but writes no new generation. Every app
+  launch still enters `Profiles/Profiles/First` with session activation unset; a valid stored
+  confirmation is never an automatic selection. Generated persistence totals are exactly one
+  41-byte logical profile value at generation 1, then two records / 73 logical value bytes at
+  generation 2 after the 32-byte pointer commit. Failure leaves Profiles, database totals, session
+  state, and GPU state unchanged. Capture/replay retains the existing schema and remains
+  persistence-free, and the live policy adds no GPU resource. A non-installed test-only writer now
+  prepares the same deterministic profile plus confirmation for the direct process and Windows
+  portable-package contracts. Both launch the real shell twice at zero frames, require one profile
+  with empty stderr, and require the native-save bytes and neighboring test/package trees to remain
+  unchanged; the package's exact member allowlist excludes both the helper and native-save state.
+  Static validation passed all 340 tooling tests, Python compile-all, the 262-file native dependency
+  gate, the 109-record ledger gates, the 439-blob staged public-tree gate, diff checks, and independent
+  core/package reviews. Local C++ compilation/execution and publication CI remain pending. This
+  establishes no retail or PS2 save, menu, profile, campaign, checkpoint, memory-card,
+  proprietary-input, owner-corpus, or behavioral-parity semantics.
 - E-0103 gives that project-owned front end a distinct cancel action without changing the global
   quit path. Backspace and gamepad East publish action 7; Escape and gamepad Back remain action 1
   quit controls. Cancel is inert on Main, otherwise returns Profiles, DiagnosticPlay, Controls, or
@@ -1254,12 +1277,15 @@ Configure with `-DOMEGA_RUN_GPU_SMOKE_TEST=ON` to register it as a serial GPU in
 
 OpenOmega owns a native persistence database rather than emulating PS2 RAM, memory-card hardware,
 or emulator savestates. Non-probe startup opens the platform-native `OpenOmega/native-save`
-directory and validates a deterministic profile catalog before platform creation; `--frames=0`
+directory and validates a deterministic profile catalog plus any project-owned `profiles/active`
+confirmation pointer before platform creation; `--frames=0`
 therefore bootstraps persistence, while `--probe-only` never touches it. A fresh database contains
 two checksummed generation-zero snapshots and an empty process-lock file. Profiles use bounded,
 versioned `profiles/<32-lower-hex-id>/metadata` records. Startup never automatically creates or
 selects a default profile; creation occurs only after the explicit empty-Profiles Primary action,
-and that new profile remains unselected until a later Primary action.
+and that new profile remains unselected until a later Primary action durably confirms it. A reopened
+confirmation is validated but never becomes the new session's active profile without another
+explicit Primary edge.
 Windows uses `%LOCALAPPDATA%/OpenOmega/native-save`, macOS uses
 `$HOME/Library/Application Support/OpenOmega/native-save`, and XDG hosts use
 `$XDG_DATA_HOME/openomega/native-save` or `$HOME/.local/share/openomega/native-save`.

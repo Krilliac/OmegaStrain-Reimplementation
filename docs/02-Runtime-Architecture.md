@@ -352,9 +352,11 @@ The profile composition slice adds `omega_profiles` and the app-owned `NativePer
 selects a profile implicitly. `OmegaApp` solely owns the composed service on the persistence/game
 thread and destroys it last. Non-probe startup resolves the host-native save directory, opens the
 database, and
-validates all profile markers before platform creation. `--probe-only` returns before persistence;
-`--frames=0` returns after bootstrap. This still assigns no active-profile, campaign, checkpoint,
-retail-payload, PS2 filesystem, memory-card-device, guest-memory, or emulator-savestate semantics.
+validates all profile markers and any project-owned `profiles/active` confirmation pointer before
+platform creation. `--probe-only` returns before persistence; `--frames=0` returns after bootstrap.
+A validated pointer is not an automatic session selection. This still assigns no retail
+active-profile, campaign, checkpoint, retail-payload, PS2 filesystem, memory-card-device,
+guest-memory, or emulator-savestate semantics.
 
 E-0085 implements the separate `omega_ps2_compat` compatibility leaf. It accepts only the fixed
 8 MiB 512-byte logical-page or 528-byte raw-page card layouts, validates the standard superblock and
@@ -2070,6 +2072,55 @@ generated fixtures are present but compilation and execution validation
 remain pending. This policy establishes no retail startup, menu, profile, save, active-profile
 persistence, campaign, checkpoint, PS2, memory-card, savestate, emulator, proprietary-input, or
 behavioral-parity semantics.
+
+### E-0109 project-owned active-profile confirmation
+
+The app-owned `NativePersistence` layer assigns record schema 1 at canonical key
+`profiles/active` to one exact 32-byte project format. Bytes 0 through 7 are ASCII `OOACTPRF`;
+bytes 8 through 9 are little-endian payload version 1; bytes 10 through 11 are zero flags; bytes
+12 through 15 are a zero little-endian reserved word; and bytes 16 through 31 are the raw owned
+`ProfileId`. Production bootstrap configures the database for at most 1,025 records. This provides
+capacity for the bounded 1,024-profile startup model plus the pointer, but it is a ceiling rather
+than a namespace reservation: another accepted record can still consume capacity and make a later
+confirmation fail through a typed error. Bootstrap reads and validates the pointer before app
+construction. A malformed length, magic, version, flags, or reserved field, an unsupported record
+schema, or an ID absent from the validated startup catalog fails closed through
+`persisted-active-profile`; no stale or partially understood identity reaches the app.
+
+The already-established Profiles Primary command remains the sole explicit confirmation edge for
+an existing displayed profile. `ConfirmActiveProfile` first re-reads the profile metadata, then
+atomically commits the encoded pointer with `MustBeAbsent` or the previously observed exact
+revision. The app applies this operation before publishing the reducer's projected state or copying
+the selected ID into its session-active value. A missing profile, stale revision, capacity failure,
+storage failure, or allocation failure therefore ends the run operationally while retaining the
+prior Profiles state, published database generation/records/logical bytes, prior session value, and
+exact GPU snapshot. An already confirmed same ID revalidates the current pointer and revision and succeeds
+without a write or generation change; it still requires that launch's explicit Primary edge before
+session activation.
+
+Reopen validates and owns the persisted confirmed ID, but app construction deliberately starts the
+project-owned front end at `Profiles / Profiles / First` with session activation unset. The stored
+confirmation is an integrity-checked durable choice, not an automatic selection or continuation.
+Generated acceptance starts with exactly one 41-byte logical profile value at generation 1 and
+commits the 32-byte pointer as the second record at generation 2, producing exactly 73 logical value
+bytes. Reconfirming the same ID preserves generation 2, two records, and 73 bytes. The generated
+failure cases preserve those totals or their exact pre-commit baseline. The live slice creates no
+texture, draw list, upload, or other GPU resource.
+
+Capture continues to record only the existing bounded `SetActiveProfile` command. Replay reduces
+that command with the unchanged capture schema and performs no profile lookup, database access,
+commit, or other persistence work. A non-installed build-tree fixture writer creates the one
+deterministic generated profile and confirms it through `NativePersistence`. The direct process and
+Windows portable-package contracts then launch the real shell twice with `--frames=0`, require
+`profiles=1` with empty stderr, and compare byte manifests so both reopens leave the native database
+and their neighboring working, package, and extracted trees unchanged. Exact install and ZIP member
+allowlists prove that neither the writer nor native-save state ships. Local C++ compilation and
+execution and publication CI remain pending. Static validation passed 340 tooling tests, Python
+compile-all, the 262-file native dependency gate, both 109-record ledger gates, the 439-blob staged
+public-tree gate, diff checks, and independent core/package reviews. E-0109 establishes project-owned
+native persistence and front-end composition only. It establishes no retail or PS2 save, menu,
+profile, campaign, checkpoint, memory-card, guest-RAM, savestate, emulator, proprietary-input,
+owner-corpus, or behavioral-parity semantics.
 
 ### Project-owned front-end cancel action
 

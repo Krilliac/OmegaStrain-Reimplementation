@@ -1264,6 +1264,30 @@ if(BUILD_TESTING)
     set_tests_properties(omega_par_text_envelope_tests PROPERTIES TIMEOUT 5)
 
     if(TARGET omega_native_persistence)
+        add_executable(omega_native_persistence_fixture_writer
+            native/tests/native_persistence_fixture_writer.cpp
+        )
+        target_link_libraries(omega_native_persistence_fixture_writer
+            PRIVATE omega_native_persistence)
+        if(MSVC)
+            target_compile_options(omega_native_persistence_fixture_writer PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_native_persistence_fixture_writer PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+
         add_executable(omega_native_persistence_tests
             native/tests/native_persistence_tests.cpp
         )
@@ -1296,10 +1320,11 @@ if(BUILD_TESTING)
         add_test(NAME openomega_process_contract
             COMMAND "${CMAKE_COMMAND}"
                 "-DOPENOMEGA_EXECUTABLE=$<TARGET_FILE:openomega>"
+                "-DOPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER=$<TARGET_FILE:omega_native_persistence_fixture_writer>"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/openomega_process_contract.cmake"
         )
         set_tests_properties(openomega_process_contract PROPERTIES
-            TIMEOUT 10
+            TIMEOUT 20
             LABELS "integration"
         )
         set_openomega_synthetic_profile_environment(openomega_process_contract)
@@ -2172,6 +2197,8 @@ if(OMEGA_WINDOWS_PORTABLE_PACKAGE_ENABLED)
                 "-DOPENOMEGA_PACKAGE_EXTRACT_DIRECTORY=${CMAKE_BINARY_DIR}/package-contract/extract"
                 "-DOPENOMEGA_PACKAGE_UNRELATED_DIRECTORY=${CMAKE_BINARY_DIR}/package-contract/unrelated"
                 "-DOPENOMEGA_PACKAGE_PROFILE_DIRECTORY=${CMAKE_BINARY_DIR}/package-contract/profile"
+                "-DOPENOMEGA_PACKAGE_CONFIRMED_PROFILE_DIRECTORY=${CMAKE_BINARY_DIR}/package-contract/confirmed-profile"
+                "-DOPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER=$<TARGET_FILE:omega_native_persistence_fixture_writer>"
                 "-DOPENOMEGA_PACKAGE_BASENAME=${OMEGA_WINDOWS_PORTABLE_PACKAGE_ROOT}"
                 "-DOPENOMEGA_CONFIGURED_ARCHITECTURE=${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}"
                 "-DOPENOMEGA_DUMP_TOOL=${OMEGA_WINDOWS_DEPENDENCY_DUMP_TOOL}"
@@ -2184,7 +2211,7 @@ if(OMEGA_WINDOWS_PORTABLE_PACKAGE_ENABLED)
         set_tests_properties(openomega_windows_portable_package_contract PROPERTIES
             LABELS "integration;package"
             RUN_SERIAL TRUE
-            # The package driver has a 500-second weighted sequential subprocess maximum.
+            # The package driver has a 530-second weighted sequential subprocess maximum.
             # Ten minutes preserves room for bounded file checks while remaining well below
             # the 30-minute Windows package-job watchdog.
             TIMEOUT 600

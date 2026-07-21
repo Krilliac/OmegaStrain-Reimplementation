@@ -257,6 +257,24 @@ empty/nonempty totals remain 8 / 233,476 and 6 / 159,748, while the generated `N
 fixture temporarily coexists at 9 / 233,492 before releasing one slot / 16 bytes. Compilation and
 execution validation remain pending. This is not retail startup, menu, profile, save, PS2,
 proprietary-input, or parity evidence.
+E-0109 turns the existing Profiles Primary selection into explicit project-owned durable
+confirmation before app-state or session-active publication. Native record `profiles/active`, schema
+1, owns exactly 32 bytes: `OOACTPRF`, little-endian version 1, zero flags/reserved fields, and one raw
+16-byte `ProfileId`. The app's default 1,025-record ceiling provides capacity for its bounded 1,024
+profile summaries plus the pointer without enforcing a reserved namespace slot. Bootstrap rejects
+malformed, unsupported, or stale pointers. Reopen validates a stored confirmation, but every app
+launch remains at Profiles/First with session activation unset until another explicit Primary edge;
+same-ID reconfirmation is a revision-checked no-write success. Generated acceptance fixes one
+41-byte profile value at generation 1 and two records / 73 logical bytes after pointer commit at
+generation 2. Typed failures preserve Profiles, database, session, and GPU state. Capture/replay
+schema is unchanged and replay remains persistence-free; no GPU resource is added. A non-installed
+generated-state writer plus direct-process and Windows portable-package contracts now require two
+real zero-frame reopens with one profile, empty stderr, unchanged save/package manifests, and exact
+package allowlists that exclude the helper and save state. Local C++ compilation/execution and
+publication CI remain pending. Static validation passed 340 tooling tests, Python compile-all, the
+262-file native dependency gate, both 109-record ledger gates, the 439-blob staged public-tree gate,
+diff checks, and independent core/package reviews. This is not retail or PS2 save, menu, profile,
+campaign, checkpoint, memory-card, owner-input, or parity evidence.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-

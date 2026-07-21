@@ -6,6 +6,16 @@ endif()
 if(NOT EXISTS "${OPENOMEGA_EXECUTABLE}")
     message(FATAL_ERROR "OPENOMEGA_EXECUTABLE does not name an existing file")
 endif()
+if(NOT DEFINED OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER OR
+   OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER STREQUAL "")
+    message(FATAL_ERROR "OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER is required")
+endif()
+if(NOT IS_ABSOLUTE "${OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER}" OR
+   NOT EXISTS "${OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER}" OR
+   IS_DIRECTORY "${OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER}")
+    message(FATAL_ERROR
+        "OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER must name an existing absolute file")
+endif()
 
 function(normalize_process_output output_variable input_value)
     string(REPLACE "\r\n" "\n" normalized "${input_value}")
@@ -55,6 +65,44 @@ function(run_openomega_case case_name expect_success expected_stdout expected_st
         message(FATAL_ERROR
             "${case_name}: stderr mismatch\nexpected=[${expected_stderr}]\n"
             "actual=[${actual_stderr}]")
+    endif()
+endfunction()
+
+function(run_native_persistence_fixture_writer_case case_name native_save_directory)
+    execute_process(
+        COMMAND "${OPENOMEGA_NATIVE_PERSISTENCE_FIXTURE_WRITER}"
+            "${native_save_directory}"
+        WORKING_DIRECTORY "${process_working_directory}"
+        RESULT_VARIABLE actual_result
+        OUTPUT_VARIABLE actual_stdout
+        ERROR_VARIABLE actual_stderr
+        TIMEOUT 10
+    )
+
+    normalize_process_output(actual_stdout "${actual_stdout}")
+    normalize_process_output(actual_stderr "${actual_stderr}")
+    foreach(forbidden_fragment IN LISTS openomega_forbidden_diagnostic_fragments)
+        string(FIND "${actual_stdout}${actual_stderr}" "${forbidden_fragment}"
+            forbidden_position)
+        if(NOT forbidden_position EQUAL -1)
+            message(FATAL_ERROR
+                "${case_name}: fixture-writer output disclosed a forbidden private-path fragment")
+        endif()
+    endforeach()
+
+    if(NOT actual_result STREQUAL "0")
+        message(FATAL_ERROR
+            "${case_name}: fixture writer failed with '${actual_result}'\n"
+            "stdout=[${actual_stdout}]\nstderr=[${actual_stderr}]")
+    endif()
+    if(NOT "${actual_stdout}" STREQUAL "${fixture_writer_stdout}")
+        message(FATAL_ERROR
+            "${case_name}: stdout mismatch\nexpected=[${fixture_writer_stdout}]\n"
+            "actual=[${actual_stdout}]")
+    endif()
+    if(NOT actual_stderr STREQUAL "")
+        message(FATAL_ERROR
+            "${case_name}: expected empty stderr, got [${actual_stderr}]")
     endif()
 endfunction()
 
@@ -167,6 +215,12 @@ string(CONCAT zero_frame_stdout
     "OpenOmega native persistence: profiles=0\n"
     "OpenOmega native shell: rendered_frames=0\n"
 )
+string(CONCAT confirmed_zero_frame_stdout
+    "OpenOmega native persistence: profiles=1\n"
+    "OpenOmega native shell: rendered_frames=0\n"
+)
+set(fixture_writer_stdout
+    "OpenOmega native persistence fixture: profiles=1 active=confirmed\n")
 set(empty_data_root "${CMAKE_CURRENT_BINARY_DIR}/openomega-process-contract-empty-data-root")
 set(process_working_directory
     "${CMAKE_CURRENT_BINARY_DIR}/openomega-process-contract-working-directory")
@@ -302,6 +356,86 @@ run_openomega_case(zero_frames_reopen TRUE "${zero_frame_stdout}" "" --frames=0)
 directory_manifest("${native_save_directory}" native_save_after_reopen)
 require_same_manifest("second zero-frame native-save reopen"
     "${native_save_after_first_startup}" "${native_save_after_reopen}")
+
+# E-0109 prepares one generated profile through the same typed persistence owner used by the app.
+# The writer receives only a dedicated synthetic native-save path; neither executable may mutate
+# the process working tree or the neighboring generated roots.
+set(confirmed_profile_root
+    "$ENV{OPENOMEGA_TEST_PROFILE_ROOT}/confirmed-active-profile")
+file(REMOVE_RECURSE "${confirmed_profile_root}")
+file(MAKE_DIRECTORY
+    "${confirmed_profile_root}/local-app-data"
+    "${confirmed_profile_root}/xdg-config-home"
+    "${confirmed_profile_root}/xdg-data-home"
+    "${confirmed_profile_root}/synthetic-home"
+)
+if(WIN32)
+    set(confirmed_native_save_directory
+        "${confirmed_profile_root}/local-app-data/OpenOmega/native-save")
+elseif(APPLE)
+    set(confirmed_native_save_directory
+        "${confirmed_profile_root}/synthetic-home/Library/Application Support/OpenOmega/native-save")
+else()
+    set(confirmed_native_save_directory
+        "${confirmed_profile_root}/xdg-data-home/openomega/native-save")
+endif()
+if(EXISTS "${confirmed_native_save_directory}" OR
+   IS_SYMLINK "${confirmed_native_save_directory}")
+    message(FATAL_ERROR "confirmed-profile native-save precondition is not absent")
+endif()
+
+directory_manifest("${process_working_directory}" confirmed_working_tree_before)
+directory_manifest("${empty_data_root}" confirmed_empty_data_before)
+set(saved_contract_profile_root "$ENV{OPENOMEGA_TEST_PROFILE_ROOT}")
+set(saved_contract_local_app_data "$ENV{LOCALAPPDATA}")
+set(saved_contract_xdg_config_home "$ENV{XDG_CONFIG_HOME}")
+set(saved_contract_xdg_data_home "$ENV{XDG_DATA_HOME}")
+set(saved_contract_home "$ENV{HOME}")
+set(ENV{OPENOMEGA_TEST_PROFILE_ROOT} "${confirmed_profile_root}")
+set(ENV{LOCALAPPDATA} "${confirmed_profile_root}/local-app-data")
+set(ENV{XDG_CONFIG_HOME} "${confirmed_profile_root}/xdg-config-home")
+set(ENV{XDG_DATA_HOME} "${confirmed_profile_root}/xdg-data-home")
+set(ENV{HOME} "${confirmed_profile_root}/synthetic-home")
+
+run_native_persistence_fixture_writer_case(
+    confirmed_profile_writer "${confirmed_native_save_directory}")
+directory_manifest("${confirmed_native_save_directory}"
+    confirmed_native_save_after_writer)
+directory_manifest("${confirmed_profile_root}" confirmed_profile_after_writer)
+run_openomega_case(confirmed_profile_zero_frames TRUE
+    "${confirmed_zero_frame_stdout}" ""
+    "--config=${explicit_empty_config}" --frames=0)
+directory_manifest("${confirmed_native_save_directory}"
+    confirmed_native_save_after_first_open)
+directory_manifest("${confirmed_profile_root}" confirmed_profile_after_first_open)
+require_same_manifest("confirmed-profile first native-save reopen"
+    "${confirmed_native_save_after_writer}"
+    "${confirmed_native_save_after_first_open}")
+require_same_manifest("confirmed-profile first profile-root reopen"
+    "${confirmed_profile_after_writer}" "${confirmed_profile_after_first_open}")
+run_openomega_case(confirmed_profile_zero_frames_reopen TRUE
+    "${confirmed_zero_frame_stdout}" ""
+    "--config=${explicit_empty_config}" --frames=0)
+directory_manifest("${confirmed_native_save_directory}"
+    confirmed_native_save_after_second_open)
+directory_manifest("${confirmed_profile_root}" confirmed_profile_after_second_open)
+require_same_manifest("confirmed-profile second native-save reopen"
+    "${confirmed_native_save_after_writer}"
+    "${confirmed_native_save_after_second_open}")
+require_same_manifest("confirmed-profile second profile-root reopen"
+    "${confirmed_profile_after_writer}" "${confirmed_profile_after_second_open}")
+
+set(ENV{OPENOMEGA_TEST_PROFILE_ROOT} "${saved_contract_profile_root}")
+set(ENV{LOCALAPPDATA} "${saved_contract_local_app_data}")
+set(ENV{XDG_CONFIG_HOME} "${saved_contract_xdg_config_home}")
+set(ENV{XDG_DATA_HOME} "${saved_contract_xdg_data_home}")
+set(ENV{HOME} "${saved_contract_home}")
+directory_manifest("${process_working_directory}" confirmed_working_tree_after)
+directory_manifest("${empty_data_root}" confirmed_empty_data_after)
+require_same_manifest("confirmed-profile process working tree"
+    "${confirmed_working_tree_before}" "${confirmed_working_tree_after}")
+require_same_manifest("confirmed-profile unrelated empty data root"
+    "${confirmed_empty_data_before}" "${confirmed_empty_data_after}")
 
 file(MAKE_DIRECTORY "${default_profile}")
 run_openomega_case(nonregular_default_profile FALSE ""

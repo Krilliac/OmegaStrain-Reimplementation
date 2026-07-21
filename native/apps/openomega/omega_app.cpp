@@ -1576,7 +1576,6 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                     FrontEndCapabilities{
                         .can_create_first_profile = can_create_first_profile_,
                     });
-            front_end_state_ = front_end.state;
             auto applied = ApplyFrontEndCommand(front_end.command);
             if (!applied)
             {
@@ -1588,6 +1587,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                     .capture_error = std::nullopt,
                 };
             }
+            front_end_state_ = front_end.state;
         }
         const bool simulation_allowed =
             !movie_was_active && FrontEndAllowsSimulation(front_end_state_);
@@ -1941,14 +1941,33 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
     if (command.type != FrontEndCommandType::SetActiveProfile)
         return {};
 
+    constexpr std::string_view confirmation_failure_prefix =
+        "active profile confirmation failed: ";
+    const auto confirmation_failure = [confirmation_failure_prefix](
+                                          const ActiveProfileConfirmationErrorCode code) {
+        return std::string(confirmation_failure_prefix) +
+               std::string(ActiveProfileConfirmationErrorCodeName(code));
+    };
+
     const std::size_t slot = static_cast<std::size_t>(command.profile_slot);
     if (slot >= kFrontEndVisibleProfiles || slot >= front_end_startup_model_.visible_profiles ||
         slot >= front_end_startup_model_.total_profiles)
-        return {};
+    {
+        return std::unexpected(confirmation_failure(
+            ActiveProfileConfirmationErrorCode::ProfileNotFound));
+    }
 
     const std::optional<profiles::ProfileId>& profile_id = front_end_startup_model_.profiles[slot].id;
-    if (!profile_id)
-        return {};
+    if (!profile_id || native_persistence_ == nullptr)
+    {
+        return std::unexpected(confirmation_failure(
+            ActiveProfileConfirmationErrorCode::ProfileNotFound));
+    }
+
+    auto confirmed = native_persistence_->ConfirmActiveProfile(*profile_id);
+    if (!confirmed)
+        return std::unexpected(confirmation_failure(confirmed.error().code));
+
     active_profile_id_ = *profile_id;
     return {};
 }
