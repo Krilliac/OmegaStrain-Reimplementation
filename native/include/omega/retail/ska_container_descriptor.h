@@ -29,10 +29,11 @@ struct SkaContainerDescriptor
     }
 };
 
-// [any worker thread; reentrant] Retail-only passive structural inspection. The fixed-size
-// descriptor retains no input bytes and assigns no animation, timing, channel, transform, bone,
-// compression, or payload semantics to the observed words or counted region. SKAS is a separate
-// text family and is intentionally outside this API.
+// [any worker thread; reentrant] Retail-only passive observed-family inspection. The fixed-size
+// descriptor retains no input bytes and classifies the correlated counted-word extent without
+// treating a nonzero tail or an extent beyond the input as malformed structure. It assigns no
+// animation, timing, channel, transform, bone, compression, or payload semantics to the observed
+// words or counted region. SKAS is a separate text family and is intentionally outside this API.
 [[nodiscard]] asset::DecodeResult<SkaContainerDescriptor> InspectSkaContainer(
     std::span<const std::byte> bytes, asset::DecodeLimits limits = {});
 } // namespace omega::retail

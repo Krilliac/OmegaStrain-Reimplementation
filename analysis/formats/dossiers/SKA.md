@@ -3,12 +3,12 @@
 ## 1. Identity
 
 `.SKA` is a game-asset suffix found inside the retail HOG archive family. At the evidence
-level the tracked corpus supports, it is a **counted 32-bit-word binary envelope**: a fixed
-112-byte header followed by a computed logical extent, version word 3 in every observed
-instance. No animation, skeleton, timing, channel, transform, bone, or compression semantics
-are established. The related `.SKAS` suffix (a bounded CRLF text envelope, only 2 instances)
-is a structurally distinct family and is not assumed to relate to `.SKA` beyond sharing a
-name prefix.
+level the tracked corpus supports, it is a **passively described 32-bit-word binary family**: a
+fixed 112-byte header participates in a corpus-wide counted-word extent correlation, and every
+observed instance carries version word 3. No animation, skeleton, timing, channel, transform, bone,
+compression, or payload semantics are established. The related `.SKAS` suffix (a bounded CRLF text
+envelope, only 2 instances) is a structurally distinct family and is not assumed to relate to `.SKA`
+beyond sharing a name prefix.
 
 ## 2. Occurrence evidence
 
@@ -38,10 +38,10 @@ corroborated by `ASSET-RECON.md` and evidence-ledger entries E-0026/E-0027.
 | 6 | Observed `word_0x08` values across the corpus: 56 (16 spans), 88 (192 spans), 92 (5 spans). Observed `word_0x10` values: 0 (140 spans), 1 (73 spans). Observed `word_0x04` range: 1-357. | `analysis/formats/asset-fingerprints.json` (`ska.observed_word_0x08`, `ska.observed_word_0x10`, `ska.observed_word_0x04_range`) |
 | 7 | Ledger entry **E-0026** (state: confirmed) records the same 213-span, 112-byte-prefix, counted-word extent proof (158 exact / 55 zero-padded) and explicitly disclaims animation/timing/transform/channel/compression/label/value/relationship semantics. | `analysis/evidence/ledger.jsonl` id `E-0026` |
 | 8 | Ledger entry **E-0027** (state: confirmed) records that the native `SkaContainerDescriptor` independently validates all 213 owned-corpus spans with zero errors (158 exact, 55 zero-padded, 2,180,832 aggregate logical bytes) and retains no payload bytes or semantics; SKAS is explicitly kept separate. | `analysis/evidence/ledger.jsonl` id `E-0027`; `native/include/omega/retail/ska_container_descriptor.h`; `native/src/retail/ska_container_descriptor.cpp`; `native/apps/omega_tool/asset_commands.cpp` |
-| 9 | `SkaContainerDescriptor` (native struct) retains exactly four scalar fields plus an `ObservedExtent`: `format_version`, `observed_word_0x04`, `observed_word_0x08`, `observed_word_0x10`, `logical_extent{observed_bytes, input_bytes, relation}`. Its header comment states it "retains no input bytes and assigns no animation, timing, channel, transform, bone, compression, or payload semantics," and explicitly states SKAS "is a separate text family and is intentionally outside this API." | `native/include/omega/retail/ska_container_descriptor.h` |
+| 9 | `SkaContainerDescriptor` (native struct) retains exactly four scalar fields plus an `ObservedExtent`: `format_version`, `observed_word_0x04`, `observed_word_0x08`, `observed_word_0x10`, `logical_extent{observed_bytes, input_bytes, relation}`. Its header comment states that the fixed descriptor retains no input bytes, classifies the correlated counted-word extent without treating nonzero-tail or exceeds-input relations as malformed structure, assigns no animation, timing, channel, transform, bone, compression, or payload semantics, and keeps SKAS outside this API. | `native/include/omega/retail/ska_container_descriptor.h` |
 | 10 | `InspectSkaContainer()` is declared `[[nodiscard]]`, takes `std::span<const std::byte>` plus `asset::DecodeLimits`, and returns `asset::DecodeResult<SkaContainerDescriptor>` — a passive, allocation-bounded decode contract. | `native/include/omega/retail/ska_container_descriptor.h` |
 | 11 | The CLI tool `omega_tool asset-metadata-verify-tree` recognizes the `.ska` extension (`InputKind::Ska`), calls `retail::InspectSkaContainer`, and aggregates `stats.ska.candidates/valid/errors`, `stats.ska_extents.{exact,zero_padded_tail,nonzero_tail,exceeds_input}`, and `stats.ska_structural.logical_bytes`. | `native/apps/omega_tool/asset_commands.cpp` (lines ~185-186, 428-432, 488-489, 617-629, 917-919) |
-| 12 | A dedicated native unit test target `native/tests/ska_container_descriptor_tests.cpp` exists, is compiled into `omega_core_tests`, and is linked against `omega_retail_formats`. Its test harness builds synthetic spans from a `SkaSpec{word_0x04, word_0x08, word_0x10, version}` and a `MakeSka()` helper that reproduces the exact 112 + counted-word formula, plus an optional appended zero-tail length parameter. | `CMakeLists.txt` (line 1402, target `omega_core_tests`); `native/tests/ska_container_descriptor_tests.cpp` |
+| 12 | A dedicated native unit test target `native/tests/ska_container_descriptor_tests.cpp` exists, is compiled into `omega_core_tests`, and is linked against `omega_retail_formats`. Its test harness builds synthetic spans from a `SkaSpec{word_0x04, word_0x08, word_0x10, version}` and a `MakeSka()` helper that reproduces the exact 112 + counted-word formula, plus an optional appended zero-tail length parameter. Generated cases cover all four extent relations; the synthetic nonzero-tail and exceeds-input cases establish classifier behavior only and do not claim those variants occur in the owner corpus. | `CMakeLists.txt` (target `omega_core_tests`); `native/tests/ska_container_descriptor_tests.cpp` |
 | 13 | `analysis/formats/ASSET-RECON.md` corpus-results table lists SKA at 213 validated entries with confirmed result "Every span satisfies the neutral counted-word extent below; version word is 3." | `analysis/formats/ASSET-RECON.md` |
 | 14 | The `SKA.HOG` top-level container has `entry_count: 157`, `data_offset: 4784`, `tag: 0x40245D11`; the `SKALEVEL.HOG` top-level container has `entry_count: 55`, `data_offset: 2048`, `tag: 0x40245D20`. (157 + 55 = 212, matching the top-level `.ska` suffix count.) | `analysis/formats/hog-validation.json` |
 | 15 | No `SKA.md` grammar document exists in `analysis/formats/`; the only published per-format `.md` file for this family is `analysis/formats/SKAS.md` (for the distinct SKAS text envelope), and `.ska` grammar is documented only inline within `ASSET-RECON.md`. | `analysis/formats/` directory listing (glob `SKA*.md` matches only `SKAS.md`) |
@@ -77,12 +77,20 @@ remains UNKNOWN.
 
 ## 7. Decoder/tooling status: **passive_descriptor_only**
 
-- **Native descriptor exists** and is registered: `native/include/omega/retail/ska_container_descriptor.h` declares `SkaContainerDescriptor` and `InspectSkaContainer()`; `native/src/retail/ska_container_descriptor.cpp` is compiled into the `omega_retail_formats` library (`CMakeLists.txt` line ~99); the CLI tool `native/apps/omega_tool/asset_commands.cpp` wires it into `InputKind::Ska` classification and `asset-metadata-verify-tree` reporting.
-- **Test registration exists**: `native/tests/ska_container_descriptor_tests.cpp` is built into `omega_core_tests` (`CMakeLists.txt` line 1402) and linked against `omega_retail_formats`.
+- **Native descriptor exists** and is registered: `native/include/omega/retail/ska_container_descriptor.h` declares `SkaContainerDescriptor` and `InspectSkaContainer()`; `native/src/retail/ska_container_descriptor.cpp` is compiled into the `omega_retail_formats` library; the CLI tool `native/apps/omega_tool/asset_commands.cpp` wires it into `InputKind::Ska` classification and `asset-metadata-verify-tree` reporting.
+- **Test registration exists**: `native/tests/ska_container_descriptor_tests.cpp` is built into `omega_core_tests` and linked against `omega_retail_formats`.
 - The authoritative coverage matrix classifies this API `passive_descriptor_only`: it retains four
-  observed header words plus an extent relation, never decodes the counted-word payload, and assigns
-  no animation, timing, channel, transform, bone, or compression semantics.
-- **Adversarial/resource-boundary coverage confirmed**: beyond the well-formed `SkaSpec`/`MakeSka` construction path (plus its optional zero-tail parameter), the test harness explicitly exercises every rejection branch implemented in the Python fingerprinter — bad version word and zero counted-word values via `CheckUnsupportedWord`, unsupported `word_0x10` values via the same helper, undersized/truncated headers via the all-prefixes-truncated loop, and extent-exceeds-physical-span via the nonzero-trailing-byte `Malformed` checks. No coverage gap against the Python fingerprinter's rejection branches was found.
+  observed header words plus a classified extent relation, never decodes the counted-word payload,
+  and assigns no animation, timing, channel, transform, bone, or compression semantics. A successful
+  result means the observed header family was classified, not that every extent relation is a known
+  retail variant.
+- **Adversarial/resource-boundary coverage confirmed**: beyond the well-formed `SkaSpec`/`MakeSka`
+  construction path (plus its optional zero-tail parameter), generated fixtures cover exact,
+  zero-padded-tail, nonzero-tail, and exceeds-input relations; every truncated 112-byte-header
+  prefix; physical-span length alignment without imposing backing-address alignment; observed-word
+  and word-pair gates; caller limits; deterministic results; source-lifetime independence; and
+  opaque header/payload mutation. Only exact and zero-padded-tail relations are established in the
+  tracked 213-candidate corpus; the other generated relations do not widen that evidence.
 
 ## 8. Codex work order (ranked, privacy-safe, no semantic speculation)
 

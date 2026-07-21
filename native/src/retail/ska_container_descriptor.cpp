@@ -66,6 +66,34 @@ constexpr std::uint64_t kContainerAlignment = 16;
 {
     return word_0x08 != 56 || word_0x10 == 0;
 }
+
+[[nodiscard]] ObservedExtent ClassifyExtent(
+    const std::span<const std::byte> bytes, const std::uint64_t observed_bytes) noexcept
+{
+    ObservedExtentRelation relation = ObservedExtentRelation::Exact;
+    if (observed_bytes > bytes.size())
+    {
+        relation = ObservedExtentRelation::ExceedsInput;
+    }
+    else if (observed_bytes < bytes.size())
+    {
+        relation = ObservedExtentRelation::ZeroPaddedTail;
+        for (std::uint64_t offset = observed_bytes; offset < bytes.size(); ++offset)
+        {
+            if (bytes[static_cast<std::size_t>(offset)] != std::byte{0})
+            {
+                relation = ObservedExtentRelation::NonzeroTail;
+                break;
+            }
+        }
+    }
+
+    return ObservedExtent{
+        .observed_bytes = observed_bytes,
+        .input_bytes = bytes.size(),
+        .relation = relation,
+    };
+}
 } // namespace
 
 asset::DecodeResult<SkaContainerDescriptor> InspectSkaContainer(
@@ -139,29 +167,10 @@ asset::DecodeResult<SkaContainerDescriptor> InspectSkaContainer(
         return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
             "SKA computed logical extent is outside the observed range", 4));
     }
-    if (logical_bytes > bytes.size())
-    {
-        return std::unexpected(Error(asset::DecodeErrorCode::Truncated,
-            "SKA counted-word region is truncated", bytes.size()));
-    }
     if (bytes.size() % kContainerAlignment != 0)
     {
         return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
             "SKA physical span is not 16-byte aligned"));
-    }
-
-    ObservedExtentRelation relation = ObservedExtentRelation::Exact;
-    if (logical_bytes < bytes.size())
-    {
-        relation = ObservedExtentRelation::ZeroPaddedTail;
-        for (std::uint64_t offset = logical_bytes; offset < bytes.size(); ++offset)
-        {
-            if (bytes[static_cast<std::size_t>(offset)] != std::byte{0})
-            {
-                return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-                    "SKA trailing bytes are not zero padding", offset));
-            }
-        }
     }
 
     return SkaContainerDescriptor{
@@ -169,11 +178,7 @@ asset::DecodeResult<SkaContainerDescriptor> InspectSkaContainer(
         .observed_word_0x04 = word_0x04,
         .observed_word_0x08 = word_0x08,
         .observed_word_0x10 = word_0x10,
-        .logical_extent = ObservedExtent{
-            .observed_bytes = logical_bytes,
-            .input_bytes = bytes.size(),
-            .relation = relation,
-        },
+        .logical_extent = ClassifyExtent(bytes, logical_bytes),
     };
 }
 } // namespace omega::retail

@@ -149,14 +149,17 @@ nonzero tail or a computed extent beyond its physical boundary. This proves a co
 envelope only; frames, channels, bones, transforms, compression, timing, and animation meaning
 remain unassigned.
 
-The retail-only `SkaContainerDescriptor` implements exactly this proven envelope as a fixed-size
+The retail-only `SkaContainerDescriptor` implements this observed header family as a fixed-size
 passive result. It retains only the version word, the observed words at `0x04`, `0x08`, and `0x10`,
-and the computed logical extent with exact or zero-padded classification. It does not retain or
-interpret counted-region bytes, and combinations outside the observed word and extent ranges remain
-unsupported. `omega_tool asset-metadata-verify-tree` classifies `.ska` and emits only sanitized
-candidate, validity, extent, and aggregate logical-byte counters. The independent native corpus pass
-accepts all 213 owner-supplied spans with zero errors: 158 exact, 55 zero-padded, and 2,180,832
-aggregate logical bytes.
+and the computed logical extent classified as exact, zero-padded tail, nonzero tail, or exceeding
+the input. Generated nonzero-tail and exceeds-input cases establish classifier behavior only; the
+owner corpus proves only the 158 exact and 55 zero-padded relations above. The descriptor does not
+retain or interpret counted-region bytes. Header-word combinations and computed logical sizes
+outside the observed numeric ranges remain
+unsupported. `omega_tool asset-metadata-verify-tree` classifies `.ska` and emits only
+sanitized candidate, validity, extent, and aggregate logical-byte counters. The independent native
+corpus pass accepts all 213 owner-supplied spans with zero errors: 158 exact, 55 zero-padded, and
+2,180,832 aggregate logical bytes.
 
 SKAS is kept separate because only two distinct candidates exist. Both are printable ASCII with
 CRLF delimiters, a final CRLF, 72 lines, 5 blank lines, 67 lines containing exactly one colon, and

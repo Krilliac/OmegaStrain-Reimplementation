@@ -1404,6 +1404,20 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     parsing, H.262/PSS decode, and Media Foundation lifetime, and therefore proves no real decoder
     teardown, finite-source PCM or hardware-backlog drain, perceptual synchronization, retail timing,
     or repeated owner-run stability.
+82. E-0105 corrects the passive SKA descriptor's extent-classification boundary without widening
+    the confirmed corpus or assigning payload meaning. After the existing caller-budget, complete
+    112-byte header, version-3, observed-word/range/pair, computed-logical-range, and 16-byte
+    physical-length gates pass, `InspectSkaContainer` returns `Exact`, `ZeroPaddedTail`,
+    `NonzeroTail`, or `ExceedsInput` as a successful fixed descriptor. With caller budgets
+    satisfied, only an input shorter than the fixed header remains `Truncated`; a nonzero tail and
+    a computed extent beyond the supplied input are neutral classification results rather than
+    malformed or truncated failures. Generated fixtures exercise all four relations, determinism,
+    every short-header prefix, aligned short spans, backing-address independence, opaque bytes,
+    source lifetime, and limit boundaries. The tracked owner corpus remains 213 candidates:
+    158 exact, 55 zero-padded, no observed nonzero-tail or exceeds-input case, and 2,180,832
+    aggregate logical bytes. No new owner-corpus run or private input was used, and no animation,
+    skeleton, timing, channel, transform, compression, payload, runtime, or retail-behavior
+    semantics are established.
 
 ## Disc observations
 
