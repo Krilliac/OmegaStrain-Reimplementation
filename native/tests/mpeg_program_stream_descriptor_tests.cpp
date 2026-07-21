@@ -255,6 +255,38 @@ void RunCanonicalChecks()
         "MPEG-PS descriptor remains owned after source replacement and destruction");
 }
 
+void RunPayloadClassBoundaryChecks()
+{
+    std::vector<std::byte> bytes;
+    AppendPackHeader(bytes);
+    constexpr std::array<std::uint8_t, 1> payload{{0x5A}};
+    AppendPes(bytes, 0xDF, payload);
+    AppendPes(bytes, 0xEF, payload);
+    AppendLengthDelimited(bytes, 0xF0, payload);
+    AppendStartCode(bytes, 0xB9);
+
+    const auto descriptor = omega::media::InspectMpegProgramStream(bytes);
+    Check(descriptor && descriptor->packets.size() == 5U,
+        "MPEG-PS accepts generated stream-ID upper-bound fixtures");
+    if (!descriptor || descriptor->packets.size() != 5U)
+        return;
+
+    Check(descriptor->packets[1].stream_id == 0xDF &&
+              descriptor->packets[1].payload_class == MpegProgramStreamPayloadClass::Audio,
+        "MPEG-PS classifies 0xDF as the inclusive audio stream upper bound");
+    Check(descriptor->packets[2].stream_id == 0xEF &&
+              descriptor->packets[2].payload_class == MpegProgramStreamPayloadClass::Video,
+        "MPEG-PS classifies 0xEF as the inclusive video stream upper bound");
+    Check(descriptor->packets[3].stream_id == 0xF0 &&
+              descriptor->packets[3].payload_class == MpegProgramStreamPayloadClass::Other &&
+              descriptor->packets[3].kind ==
+                  MpegProgramStreamPacketKind::OpaqueLengthDelimited,
+        "MPEG-PS classifies adjacent stream 0xF0 outside the video range");
+    Check(descriptor->audio_pes_packet_count == 1U &&
+              descriptor->video_pes_packet_count == 1U,
+        "MPEG-PS boundary classifications contribute to exact audio/video counts");
+}
+
 void RunZeroLengthVideoChecks()
 {
     std::vector<std::byte> bytes;
@@ -559,6 +591,7 @@ int main()
                   omega::media::kMpegProgramStreamMaximumInputBytes);
 
     RunCanonicalChecks();
+    RunPayloadClassBoundaryChecks();
     RunZeroLengthVideoChecks();
     RunTrailingZeroPaddingChecks();
     RunTruncationChecks();

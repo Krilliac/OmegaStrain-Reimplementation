@@ -266,6 +266,23 @@ void RunSelectionChecks()
                    DecodeErrorCode::InvalidReference, "MPEG video ES",
                    "automatic video selection rejects a program with no video PES");
     }
+
+    std::vector<std::byte> upper_bound;
+    AppendPackHeader(upper_bound);
+    constexpr std::array<std::uint8_t, 2> upper_payload{{0xEF, 0x5A}};
+    AppendPes(upper_bound, 0xEF, upper_payload, 84U);
+    AppendProgramEnd(upper_bound);
+    auto upper_descriptor = Describe(upper_bound);
+    if (upper_descriptor)
+    {
+        const auto selected_upper = omega::media::BuildMpegVideoElementaryStreamPlan(
+            upper_bound, *upper_descriptor, std::uint8_t{0xEF});
+        Check(selected_upper && selected_upper->stream_id == 0xEF &&
+                  selected_upper->payloads.size() == 1U &&
+                  selected_upper->total_payload_bytes == upper_payload.size() &&
+                  selected_upper->payloads.front().presentation_timestamp_90khz == 84U,
+            "explicit video selection accepts 0xEF at the stream-ID upper bound");
+    }
 }
 
 void RunDescriptorAdversarialChecks()

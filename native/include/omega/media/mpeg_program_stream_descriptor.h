@@ -90,8 +90,9 @@ struct MpegProgramStreamDescriptor
 // stream, codec, subtitle, audio, or game-specific payload grammar is decoded. In particular, this
 // generic fixture-backed API does not assert that any retail .pss member uses this syntax.
 //
-// The result owns its descriptor vector, uses zero dynamic scratch, and treats the root as nesting
-// depth zero. maximum_items charges one root plus one item per packet descriptor.
+// The borrowed source storage must remain alive and immutable for the entire call. The result owns
+// its descriptor vector, uses zero dynamic scratch, and treats the root as nesting depth zero.
+// maximum_items charges one root plus one item per packet descriptor.
 [[nodiscard]] asset::DecodeResult<MpegProgramStreamDescriptor> InspectMpegProgramStream(
     std::span<const std::byte> bytes,
     asset::DecodeLimits limits = DefaultMpegProgramStreamDecodeLimits());
