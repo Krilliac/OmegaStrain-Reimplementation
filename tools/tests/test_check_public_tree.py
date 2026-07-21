@@ -141,6 +141,21 @@ class PublicTreeGateTests(unittest.TestCase):
                     [],
                 )
 
+    def test_earlier_url_does_not_mask_later_owner_home_path(self) -> None:
+        owner_home = b"/home" + b"/alice/repo"
+        compact_values = (
+            b'{"url":"https://example.test","path":"' + owner_home + b'"}',
+            b"url=https://example.test&path=" + owner_home,
+            b"url=https://example.test/path=" + owner_home,
+            b"cwd:" + owner_home,
+            b"path:" + owner_home,
+        )
+        for compact in compact_values:
+            with self.subTest(compact=compact):
+                self.assertTrue(
+                    any("owner-home path" in error for error in self.errors("record.jsonl", compact))
+                )
+
     def test_generic_home_placeholders_are_not_blocked(self) -> None:
         for safe in (
             b"documented under <user>/OpenOmega",
