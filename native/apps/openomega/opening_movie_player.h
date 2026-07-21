@@ -117,18 +117,46 @@ struct OpeningMoviePlayerUpdate {
   const media::Rgba8VideoFrame *current_frame = nullptr;
 };
 
+// Non-hot-reloadable app boundary for one synchronous opening-movie source.
+// OmegaApp owns exactly one implementation and invokes and destroys it on the
+// creating game/main thread. Published frame storage is borrowed only through
+// the next non-const call and is consumed synchronously by the app.
+class OpeningMoviePlayback {
+public:
+  OpeningMoviePlayback(const OpeningMoviePlayback &) = delete;
+  OpeningMoviePlayback &operator=(const OpeningMoviePlayback &) = delete;
+  virtual ~OpeningMoviePlayback() noexcept = default;
+
+  [[nodiscard]] virtual std::expected<OpeningMoviePlayerUpdate,
+                                      OpeningMoviePlayerError>
+  Advance(std::chrono::nanoseconds elapsed) = 0;
+  [[nodiscard]] virtual std::expected<std::uint64_t,
+                                      OpeningMoviePlayerError>
+  ReadAudioFrames(std::span<std::int16_t> interleaved_samples) = 0;
+  [[nodiscard]] virtual bool audio_finished() const noexcept = 0;
+  [[nodiscard]] virtual std::uint32_t width() const noexcept = 0;
+  [[nodiscard]] virtual std::uint32_t height() const noexcept = 0;
+  [[nodiscard]] virtual std::uint64_t
+  safety_duration_ticks() const noexcept = 0;
+
+protected:
+  OpeningMoviePlayback() = default;
+  OpeningMoviePlayback(OpeningMoviePlayback &&) noexcept = default;
+  OpeningMoviePlayback &operator=(OpeningMoviePlayback &&) noexcept = default;
+};
+
 // Non-hot-reloadable, synchronous opening-movie owner. Source inspection,
 // Media Foundation decoding, and frame conversion all run on the creating
 // game/main thread. The player stores no source path and exposes no encoded
 // input bytes or platform decoder object.
-class OpeningMoviePlayer final {
+class OpeningMoviePlayer final : public OpeningMoviePlayback {
 public:
   OpeningMoviePlayer(const OpeningMoviePlayer &) = delete;
   OpeningMoviePlayer &operator=(const OpeningMoviePlayer &) = delete;
   OpeningMoviePlayer(OpeningMoviePlayer &&) noexcept;
   OpeningMoviePlayer &operator=(OpeningMoviePlayer &&) noexcept = delete;
   // [creating game/main thread]
-  ~OpeningMoviePlayer();
+  ~OpeningMoviePlayer() noexcept override;
 
   // [creating game/main thread, startup] Privately reads exactly the explicit
   // external path under kOpeningMovieMaximumSourceBytes, validates its MPEG-PS,
@@ -145,7 +173,7 @@ public:
   // boundary errors; errors reached after those checks permanently mark the
   // player Failed, and later calls return the identical categorical error.
   [[nodiscard]] std::expected<OpeningMoviePlayerUpdate, OpeningMoviePlayerError>
-  Advance(std::chrono::nanoseconds elapsed);
+  Advance(std::chrono::nanoseconds elapsed) override;
 
   // [creating game/main thread] After the first video frame has been published, decodes up to the
   // caller's frame-aligned stereo capacity into host-endian signed PCM16. The returned count is in
@@ -153,9 +181,9 @@ public:
   // for samples written successfully; no allocation occurs. WrongThread and MovedFrom are the same
   // non-mutating boundary errors described for Advance.
   [[nodiscard]] std::expected<std::uint64_t, OpeningMoviePlayerError>
-  ReadAudioFrames(std::span<std::int16_t> interleaved_samples);
+  ReadAudioFrames(std::span<std::int16_t> interleaved_samples) override;
   // [creating game/main thread] True once every validated PCM frame has been returned.
-  [[nodiscard]] bool audio_finished() const noexcept;
+  [[nodiscard]] bool audio_finished() const noexcept override;
 
   // [creating game/main thread]
   [[nodiscard]] OpeningMoviePlayerStatus status() const noexcept;
@@ -166,13 +194,13 @@ public:
 
   // [creating game/main thread] Validated H.262 display extent available
   // immediately after Create. A moved-from player reports zero.
-  [[nodiscard]] std::uint32_t width() const noexcept;
-  [[nodiscard]] std::uint32_t height() const noexcept;
+  [[nodiscard]] std::uint32_t width() const noexcept override;
+  [[nodiscard]] std::uint32_t height() const noexcept override;
 
   // [creating game/main thread] Nonzero MPEG-PTS-derived fail-open guard in
   // boot-sequence ticks. Completion itself is driven only by decoder EOS and
   // the final decoded frame duration.
-  [[nodiscard]] std::uint64_t safety_duration_ticks() const noexcept;
+  [[nodiscard]] std::uint64_t safety_duration_ticks() const noexcept override;
 
 private:
   struct Impl;

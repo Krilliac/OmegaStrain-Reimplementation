@@ -1,5 +1,6 @@
 #include "omega_app.h"
 #include "opening_movie_player.h"
+#include "opening_movie_safety.h"
 #include "run_replay_session.h"
 
 #include "omega/gameplay/debug_locomotion.h"
@@ -47,6 +48,26 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     const runtime::RenderTexturePoolConfig texture_config,
     std::optional<std::filesystem::path> opening_movie_path)
 {
+    return CreateWithTextureConfigAndOpeningMoviePlayback(std::move(config),
+        settings, std::move(content), std::move(native_persistence), debug_device,
+        texture_config, std::move(opening_movie_path), nullptr);
+}
+
+std::expected<OmegaApp, std::string>
+OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
+    runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
+    runtime::ContentStartupState content,
+    std::unique_ptr<NativePersistence> native_persistence, const bool debug_device,
+    const runtime::RenderTexturePoolConfig texture_config,
+    std::optional<std::filesystem::path> opening_movie_path,
+    std::unique_ptr<OpeningMoviePlayback> opening_movie_playback)
+{
+    if (opening_movie_path && opening_movie_playback)
+    {
+        return std::unexpected(
+            std::string{"opening movie source selection is ambiguous"});
+    }
+
     const auto classified_content = runtime::ClassifyContentStartupState(content);
     if (!classified_content)
     {
@@ -336,6 +357,10 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
         return std::unexpected(created_host.error());
     }
     auto host = std::make_unique<SdlGpuHost>(std::move(*created_host));
+    // Adopt an injected test source immediately after the host exists so every later startup
+    // failure destroys playback before the GPU and process-global SDL owners.
+    std::unique_ptr<OpeningMoviePlayback> opening_movie_candidate =
+        std::move(opening_movie_playback);
 
     constexpr runtime::RenderSourceRectQ16 full_source{
         .left = 0U,
@@ -664,7 +689,7 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     auto diagnostic_asset_topology_draw_list =
         std::move(*created_asset_topology_draw_list);
 
-    std::unique_ptr<OpeningMoviePlayer> opening_movie_player;
+    std::unique_ptr<OpeningMoviePlayback> opening_movie_player;
     runtime::RenderTextureHandle opening_movie_texture;
     runtime::RenderDrawList opening_movie_draw_list;
     BootSequenceState boot_sequence_state{};
@@ -673,78 +698,90 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
         auto created_opening_movie = OpeningMoviePlayer::Create(*opening_movie_path);
         if (!created_opening_movie)
         {
-            log->Warning("opening_movie", created_opening_movie.error().message);
+            log->Warning("opening_movie",
+                OpeningMoviePlayerErrorMessage(created_opening_movie.error().code));
         }
         else
         {
-            auto candidate =
+            opening_movie_candidate =
                 std::make_unique<OpeningMoviePlayer>(std::move(*created_opening_movie));
-            const std::uint64_t logical_bytes =
-                static_cast<std::uint64_t>(candidate->width()) * candidate->height() * 4U;
-            if (logical_bytes == 0U ||
-                logical_bytes > static_cast<std::uint64_t>(
-                                    std::numeric_limits<std::size_t>::max()))
+        }
+    }
+    if (opening_movie_candidate)
+    {
+        const std::uint32_t movie_width = opening_movie_candidate->width();
+        const std::uint32_t movie_height = opening_movie_candidate->height();
+        const std::uint64_t safety_duration_ticks =
+            opening_movie_candidate->safety_duration_ticks();
+        const std::uint64_t logical_bytes =
+            static_cast<std::uint64_t>(movie_width) * movie_height * 4U;
+        if (movie_width == 0U || movie_height == 0U ||
+            movie_width > media::kMaximumNv12FrameWidth ||
+            movie_height > media::kMaximumNv12FrameHeight ||
+            safety_duration_ticks == 0U ||
+            safety_duration_ticks > kOpeningMovieMaximumSafetyTicks ||
+            logical_bytes > static_cast<std::uint64_t>(
+                                std::numeric_limits<std::size_t>::max()))
+        {
+            log->Warning("opening_movie",
+                "opening movie presentation rejected invalid metadata");
+        }
+        else
+        {
+            std::vector<std::byte> black_frame(
+                static_cast<std::size_t>(logical_bytes), std::byte{0});
+            for (std::size_t alpha = 3U; alpha < black_frame.size(); alpha += 4U)
+                black_frame[alpha] = std::byte{255};
+
+            auto uploaded_opening_movie =
+                host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+                    .width = movie_width,
+                    .height = movie_height,
+                    .pixels = black_frame,
+                });
+            if (!uploaded_opening_movie)
             {
                 log->Warning("opening_movie",
-                    "opening movie presentation rejected an invalid frame extent");
+                    "opening movie presentation texture upload failed");
             }
             else
             {
-                std::vector<std::byte> black_frame(
-                    static_cast<std::size_t>(logical_bytes), std::byte{0});
-                for (std::size_t alpha = 3U; alpha < black_frame.size(); alpha += 4U)
-                    black_frame[alpha] = std::byte{255};
-
-                auto uploaded_opening_movie =
-                    host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
-                        .width = candidate->width(),
-                        .height = candidate->height(),
-                        .pixels = black_frame,
-                    });
-                if (!uploaded_opening_movie)
+                constexpr runtime::RenderTargetRectQ16 movie_target{
+                    .left = 0U,
+                    .top = 0U,
+                    .right = runtime::kNormalizedRenderExtent,
+                    .bottom = runtime::kNormalizedRenderExtent,
+                };
+                const std::array movie_commands{
+                    runtime::RenderTextureBlitCommand{
+                        .texture = *uploaded_opening_movie,
+                        .source = full_source,
+                        .destination = movie_target,
+                        .fit_mode = runtime::RenderTextureFitMode::Contain,
+                        .filter_mode = runtime::RenderTextureFilterMode::Linear,
+                    },
+                };
+                auto created_opening_movie_draw_list =
+                    runtime::RenderDrawList::Create(movie_commands);
+                if (!created_opening_movie_draw_list)
                 {
                     log->Warning("opening_movie",
-                        "opening movie presentation texture upload failed");
+                        "opening movie presentation draw-list creation failed");
+                    static_cast<void>(host->ReleaseTexture(*uploaded_opening_movie));
                 }
                 else
                 {
-                    constexpr runtime::RenderTargetRectQ16 movie_target{
-                        .left = 0U,
-                        .top = 0U,
-                        .right = runtime::kNormalizedRenderExtent,
-                        .bottom = runtime::kNormalizedRenderExtent,
-                    };
-                    const std::array movie_commands{
-                        runtime::RenderTextureBlitCommand{
-                            .texture = *uploaded_opening_movie,
-                            .source = full_source,
-                            .destination = movie_target,
-                            .fit_mode = runtime::RenderTextureFitMode::Contain,
-                            .filter_mode = runtime::RenderTextureFilterMode::Linear,
-                        },
-                    };
-                    auto created_opening_movie_draw_list =
-                        runtime::RenderDrawList::Create(movie_commands);
-                    if (!created_opening_movie_draw_list)
-                    {
-                        log->Warning("opening_movie",
-                            "opening movie presentation draw-list creation failed");
-                        static_cast<void>(host->ReleaseTexture(*uploaded_opening_movie));
-                    }
-                    else
-                    {
-                        opening_movie_texture = *uploaded_opening_movie;
-                        opening_movie_draw_list =
-                            std::move(*created_opening_movie_draw_list);
-                        boot_sequence_state = InitialBootSequenceState(
-                            BootSequenceConfig{
-                                .duration_ticks = candidate->safety_duration_ticks(),
-                                .source_available = true,
-                            });
-                        opening_movie_player = std::move(candidate);
-                        log->Info("opening_movie",
-                            "opening movie presentation is ready");
-                    }
+                    opening_movie_texture = *uploaded_opening_movie;
+                    opening_movie_draw_list =
+                        std::move(*created_opening_movie_draw_list);
+                    boot_sequence_state = InitialBootSequenceState(
+                        BootSequenceConfig{
+                            .duration_ticks = safety_duration_ticks,
+                            .source_available = true,
+                        });
+                    opening_movie_player = std::move(opening_movie_candidate);
+                    log->Info("opening_movie",
+                        "opening movie presentation is ready");
                 }
             }
         }
@@ -777,7 +814,7 @@ OmegaApp::OmegaApp(
     std::unique_ptr<simulation::SimulationWorld> simulation, const simulation::EntityId debug_locomotion_entity,
     std::unique_ptr<SdlPlatformService> platform, std::unique_ptr<SdlInputService> sdl_input,
     std::unique_ptr<SdlAudioService> audio, std::unique_ptr<SdlGpuHost> host,
-    std::unique_ptr<OpeningMoviePlayer> opening_movie_player,
+    std::unique_ptr<OpeningMoviePlayback> opening_movie_player,
     const runtime::RenderTextureHandle opening_movie_texture,
     runtime::RenderDrawList opening_movie_draw_list,
     const BootSequenceState boot_sequence_state,
@@ -1153,7 +1190,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                         auto movie_update = opening_movie_player_->Advance(presentation_elapsed);
                         if (!movie_update)
                         {
-                            log_->Warning("opening_movie", movie_update.error().message);
+                            log_->Warning("opening_movie",
+                                OpeningMoviePlayerErrorMessage(movie_update.error().code));
                             source_failed = true;
                         }
                         else
@@ -1204,7 +1242,16 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                                         opening_movie_player_->ReadAudioFrames(output);
                                     if (!decoded)
                                     {
-                                        log_->Warning("opening_movie", decoded.error().message);
+                                        log_->Warning("opening_movie",
+                                            OpeningMoviePlayerErrorMessage(
+                                                decoded.error().code));
+                                        source_failed = true;
+                                    }
+                                    else if (*decoded > available_frames)
+                                    {
+                                        log_->Warning("opening_movie",
+                                            "opening movie PCM decode exceeded the requested "
+                                            "refill");
                                         source_failed = true;
                                     }
                                     else if (*decoded != 0U)

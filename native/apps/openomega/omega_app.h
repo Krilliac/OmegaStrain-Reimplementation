@@ -34,7 +34,7 @@
 
 namespace omega::app
 {
-class OpeningMoviePlayer;
+class OpeningMoviePlayback;
 
 namespace detail
 {
@@ -81,14 +81,23 @@ private:
 
     static constexpr std::uint32_t kQuitAction = 1U;
 
-    // Test-only seam for exercising renderer-pool policy without widening the production
-    // composition-root API. Production Create always supplies the default pool configuration.
+    // Test-only seams for exercising renderer-pool policy and a generated opening-movie source
+    // without widening the production composition-root API. Production Create always supplies
+    // the default pool configuration and creates playback only from its explicit path.
     [[nodiscard]] static std::expected<OmegaApp, std::string> CreateWithTextureConfig(
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
         runtime::ContentStartupState content,
         std::unique_ptr<NativePersistence> native_persistence, bool debug_device,
         runtime::RenderTexturePoolConfig texture_config,
         std::optional<std::filesystem::path> opening_movie_path = std::nullopt);
+    [[nodiscard]] static std::expected<OmegaApp, std::string>
+    CreateWithTextureConfigAndOpeningMoviePlayback(
+        runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
+        runtime::ContentStartupState content,
+        std::unique_ptr<NativePersistence> native_persistence, bool debug_device,
+        runtime::RenderTexturePoolConfig texture_config,
+        std::optional<std::filesystem::path> opening_movie_path,
+        std::unique_ptr<OpeningMoviePlayback> opening_movie_playback);
 
     struct RunLoopResult
     {
@@ -121,7 +130,7 @@ private:
         std::unique_ptr<SdlInputService> sdl_input,
         std::unique_ptr<SdlAudioService> audio,
         std::unique_ptr<SdlGpuHost> host,
-        std::unique_ptr<OpeningMoviePlayer> opening_movie_player,
+        std::unique_ptr<OpeningMoviePlayback> opening_movie_player,
         runtime::RenderTextureHandle opening_movie_texture,
         runtime::RenderDrawList opening_movie_draw_list,
         BootSequenceState boot_sequence_state,
@@ -160,9 +169,9 @@ private:
     std::unique_ptr<SdlInputService> sdl_input_;
     std::unique_ptr<SdlAudioService> audio_;
     std::unique_ptr<SdlGpuHost> host_;
-    // The synchronous decoder is destroyed before the host. Its source path is
-    // never retained; the stable texture handle remains backend-owned.
-    std::unique_ptr<OpeningMoviePlayer> opening_movie_player_;
+    // The synchronous playback source is destroyed before the host. Production playback retains
+    // no source path; the stable texture handle remains backend-owned.
+    std::unique_ptr<OpeningMoviePlayback> opening_movie_player_;
     runtime::RenderTextureHandle opening_movie_texture_;
     runtime::RenderDrawList opening_movie_draw_list_;
     BootSequenceState boot_sequence_state_{};

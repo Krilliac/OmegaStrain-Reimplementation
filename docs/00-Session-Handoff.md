@@ -1391,6 +1391,19 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     focused replay tests, and the direct SDL/GPU capture smoke exercise the slice. This is
     project-authored shell policy and establishes no retail control, menu-graph, timing, or fidelity
     claim; private and proprietary inputs were not used.
+81. E-0104 adds a friend-private generated `OpeningMoviePlayback` seam and an opt-in
+    `omega_app_opening_movie_smoke` without widening the production creation API. Supplying both an
+    external path and injected playback fails categorically before SDL startup. Generated scenarios
+    cover natural EOS into Main, a fresh next-frame Down edge selecting Profiles, and primary skip at
+    zero, two, and five player advances. Mid/late cases feed one 256-frame silent stereo PCM block
+    through the actual SDL audio service; the presentation run-loop scenarios traverse the real app,
+    SDL event, GPU host, boot, scheduler-gating, and front-end paths. Assertions cover zero
+    simulation, exact playback and
+    texture release, cleared draw/audio state, and categorical redaction of a hostile path-bearing
+    player error. No owner stream or private input was used. The smoke bypasses production stream
+    parsing, H.262/PSS decode, and Media Foundation lifetime, and therefore proves no real decoder
+    teardown, finite-source PCM or hardware-backlog drain, perceptual synchronization, retail timing,
+    or repeated owner-run stability.
 
 ## Disc observations
 

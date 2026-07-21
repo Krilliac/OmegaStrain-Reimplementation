@@ -1811,7 +1811,40 @@ if(BUILD_TESTING)
                 -Wno-missing-field-initializers
             )
         endif()
+
+        add_executable(omega_app_opening_movie_smoke
+            native/tests/omega_app_opening_movie_smoke.cpp
+        )
+        target_link_libraries(omega_app_opening_movie_smoke PRIVATE omega_app_host)
+        if(MSVC)
+            target_compile_options(omega_app_opening_movie_smoke PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_app_opening_movie_smoke PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+
         if(OMEGA_RUN_GPU_SMOKE_TEST)
+            add_test(NAME omega_app_opening_movie_smoke
+                COMMAND omega_app_opening_movie_smoke)
+            set_tests_properties(omega_app_opening_movie_smoke PROPERTIES
+                ENVIRONMENT "SDL_AUDIO_DRIVER=dummy"
+                TIMEOUT 30
+                RUN_SERIAL TRUE
+                LABELS "gpu;integration;opening-movie"
+            )
+
             add_test(NAME omega_app_capture_smoke COMMAND omega_app_capture_smoke)
             set_tests_properties(omega_app_capture_smoke PROPERTIES
                 ENVIRONMENT "SDL_AUDIO_DRIVER=dummy"
