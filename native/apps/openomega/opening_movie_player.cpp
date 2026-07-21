@@ -1,6 +1,5 @@
 #include "opening_movie_player.h"
-
-#include "boot_sequence.h"
+#include "opening_movie_safety.h"
 
 #include "omega/media/media_foundation_h262_decoder.h"
 #include "omega/media/mpeg_program_stream_descriptor.h"
@@ -31,11 +30,6 @@ constexpr media::MediaFoundationH262DecoderLimits kDecoderLimits =
 constexpr std::size_t kMaximumQueuedFrames =
     static_cast<std::size_t>(kDecoderLimits.maximum_frames_per_call);
 constexpr std::size_t kMaximumDecoderFeedsPerAdvance = 64U;
-constexpr std::uint64_t kSafetySlackTicks = 10U * kBootSequenceTicksPerSecond;
-constexpr std::uint64_t kFallbackSafetyTicks =
-    5U * 60U * kBootSequenceTicksPerSecond;
-constexpr std::uint64_t kMpegTimestampWrap = 1ULL << 33U;
-constexpr std::uint64_t kMpegTimestampHalfWrap = kMpegTimestampWrap / 2U;
 constexpr std::uint64_t kMpegTimestampTicksPerSecond = 90'000U;
 constexpr std::uint64_t kMediaFoundationTicksPerSecond = 10'000'000U;
 constexpr std::uint32_t kOpeningMovieAudioSampleRateHz = 48'000U;
@@ -98,57 +92,6 @@ ReadSource(const std::filesystem::path &path) {
   }
 }
 
-[[nodiscard]] constexpr std::uint64_t
-SaturatingAdd(const std::uint64_t left, const std::uint64_t right) noexcept {
-  return right > std::numeric_limits<std::uint64_t>::max() - left
-             ? std::numeric_limits<std::uint64_t>::max()
-             : left + right;
-}
-
-[[nodiscard]] constexpr std::uint64_t
-Convert90KhzToTicksCeil(const std::uint64_t timestamp) noexcept {
-  const std::uint64_t whole_seconds = timestamp / kMpegTimestampTicksPerSecond;
-  const std::uint64_t remainder = timestamp % kMpegTimestampTicksPerSecond;
-  if (whole_seconds >
-      std::numeric_limits<std::uint64_t>::max() / kBootSequenceTicksPerSecond) {
-    return std::numeric_limits<std::uint64_t>::max();
-  }
-  const std::uint64_t whole_ticks = whole_seconds * kBootSequenceTicksPerSecond;
-  const std::uint64_t partial_ticks = (remainder * kBootSequenceTicksPerSecond +
-                                       kMpegTimestampTicksPerSecond - 1U) /
-                                      kMpegTimestampTicksPerSecond;
-  return SaturatingAdd(whole_ticks, partial_ticks);
-}
-
-[[nodiscard]] std::uint64_t
-SafetyDurationTicks(const media::MpegVideoElementaryStreamPlan &plan) noexcept {
-  std::optional<std::uint64_t> minimum;
-  std::optional<std::uint64_t> maximum;
-  std::optional<std::uint64_t> previous_raw;
-  std::uint64_t wrap_base = 0U;
-  std::size_t timestamp_count = 0U;
-
-  for (const media::MpegVideoElementaryStreamPayloadRange &payload :
-       plan.payloads) {
-    if (!payload.presentation_timestamp_90khz)
-      continue;
-    const std::uint64_t raw = *payload.presentation_timestamp_90khz;
-    if (previous_raw && *previous_raw > raw &&
-        *previous_raw - raw > kMpegTimestampHalfWrap)
-      wrap_base = SaturatingAdd(wrap_base, kMpegTimestampWrap);
-    const std::uint64_t unwrapped = SaturatingAdd(wrap_base, raw);
-    minimum = minimum ? std::min(*minimum, unwrapped) : unwrapped;
-    maximum = maximum ? std::max(*maximum, unwrapped) : unwrapped;
-    previous_raw = raw;
-    ++timestamp_count;
-  }
-
-  if (timestamp_count < 2U || !minimum || !maximum || *maximum <= *minimum)
-    return kFallbackSafetyTicks;
-  return SaturatingAdd(Convert90KhzToTicksCeil(*maximum - *minimum),
-                       kSafetySlackTicks);
-}
-
 [[nodiscard]] constexpr std::optional<std::int64_t>
 Convert90KhzTo100ns(const std::optional<std::uint64_t> timestamp) noexcept {
   if (!timestamp)
@@ -203,8 +146,9 @@ struct OpeningMoviePlayer::Impl {
        const std::uint32_t video_width, const std::uint32_t video_height,
        const std::uint64_t safety_ticks) noexcept
       : source(std::move(source_bytes)), plan(std::move(stream_plan)),
-        audio_plan(std::move(pcm_plan)), decoder(std::move(video_decoder)), width(video_width),
-        height(video_height), safety_duration_ticks(safety_ticks),
+        audio_plan(std::move(pcm_plan)), decoder(std::move(video_decoder)),
+        width(video_width), height(video_height),
+        safety_duration_ticks(safety_ticks),
         creator_thread(std::this_thread::get_id()) {}
 
   void RememberFailure(const Error error) noexcept {
@@ -346,9 +290,9 @@ struct OpeningMoviePlayer::Impl {
     return std::move(*pushed);
   }
 
-  // Destruction is reverse declaration order: decoder first, then both plans and source. This
-  // preserves every borrowed-input owner through decoder shutdown even though the decoder retains
-  // none of them.
+  // Destruction is reverse declaration order: decoder first, then both plans
+  // and source. This preserves every borrowed-input owner through decoder
+  // shutdown even though the decoder retains none of them.
   std::vector<std::byte> source;
   media::MpegVideoElementaryStreamPlan plan;
   media::PssPcmAudioStreamPlan audio_plan;
@@ -368,7 +312,7 @@ struct OpeningMoviePlayer::Impl {
   std::uint64_t playback_time_100ns = 0U;
   std::uint64_t nanosecond_remainder = 0U;
   std::uint64_t audio_frame_cursor = 0U;
-  std::uint64_t safety_duration_ticks = kFallbackSafetyTicks;
+  std::uint64_t safety_duration_ticks = kOpeningMovieMaximumSafetyTicks;
   OpeningMoviePlayerStatus status = OpeningMoviePlayerStatus::Ready;
   std::optional<Error> failure;
   bool decoder_drained = false;
@@ -395,14 +339,19 @@ OpeningMoviePlayer::Create(const std::filesystem::path &path) {
     auto plan = media::BuildMpegVideoElementaryStreamPlan(*source, *descriptor);
     if (!plan)
       return std::unexpected(MakeError(ErrorCode::VideoStreamRejected));
-    auto view = media::BorrowMpegVideoElementaryStream(*plan, *source);
-    if (!view)
-      return std::unexpected(MakeError(ErrorCode::VideoStreamRejected));
-    auto sequence = media::InspectH262SequenceHeaderFacts(*view);
-    if (!sequence)
-      return std::unexpected(MakeError(ErrorCode::H262StreamRejected));
+    media::H262SequenceHeaderFacts sequence;
+    {
+      auto view = media::BorrowMpegVideoElementaryStream(*plan, *source);
+      if (!view)
+        return std::unexpected(MakeError(ErrorCode::VideoStreamRejected));
+      auto inspected_sequence = media::InspectH262SequenceHeaderFacts(*view);
+      if (!inspected_sequence)
+        return std::unexpected(MakeError(ErrorCode::H262StreamRejected));
+      sequence = *inspected_sequence;
+    }
     auto audio_plan = media::BuildPssPcmAudioStreamPlan(*source, *descriptor);
-    if (!audio_plan || audio_plan->sample_rate_hz != kOpeningMovieAudioSampleRateHz ||
+    if (!audio_plan ||
+        audio_plan->sample_rate_hz != kOpeningMovieAudioSampleRateHz ||
         audio_plan->channel_count != kOpeningMovieAudioChannelCount)
       return std::unexpected(MakeError(ErrorCode::AudioStreamRejected));
 
@@ -413,14 +362,15 @@ OpeningMoviePlayer::Create(const std::filesystem::path &path) {
     auto decoder_limits = kDecoderLimits;
     decoder_limits.maximum_total_input_bytes = plan->total_payload_bytes;
     auto decoder =
-        media::MediaFoundationH262Decoder::Create(*sequence, decoder_limits);
+        media::MediaFoundationH262Decoder::Create(sequence, decoder_limits);
     if (!decoder)
       return std::unexpected(MapDecoderCreationError(decoder.error()));
 
-    const std::uint64_t safety_ticks = SafetyDurationTicks(*plan);
-    auto impl = std::make_unique<Impl>(std::move(*source), std::move(*plan),
-                                       std::move(*audio_plan), std::move(*decoder),
-                                       sequence->width, sequence->height, safety_ticks);
+    const std::uint64_t safety_ticks =
+        CalculateOpeningMovieSafetyDurationTicks(*plan);
+    auto impl = std::make_unique<Impl>(
+        std::move(*source), std::move(*plan), std::move(*audio_plan),
+        std::move(*decoder), sequence.width, sequence.height, safety_ticks);
     impl->decoder_input_chunk_bytes = decoder_limits.maximum_input_chunk_bytes;
     return OpeningMoviePlayer(std::move(impl));
   } catch (const std::bad_alloc &) {
@@ -434,10 +384,10 @@ std::expected<OpeningMoviePlayerUpdate, OpeningMoviePlayerError>
 OpeningMoviePlayer::Advance(const std::chrono::nanoseconds elapsed) {
   if (!impl_)
     return std::unexpected(MakeError(ErrorCode::MovedFrom));
+  if (std::this_thread::get_id() != impl_->creator_thread)
+    return std::unexpected(MakeError(ErrorCode::WrongThread));
   if (impl_->failure)
     return std::unexpected(*impl_->failure);
-  if (std::this_thread::get_id() != impl_->creator_thread)
-    return impl_->Fail(MakeError(ErrorCode::WrongThread));
   if (impl_->status == OpeningMoviePlayerStatus::Completed) {
     return OpeningMoviePlayerUpdate{
         .status = impl_->status,
@@ -499,12 +449,10 @@ OpeningMoviePlayer::ReadAudioFrames(
     const std::span<std::int16_t> interleaved_samples) {
   if (!impl_)
     return std::unexpected(MakeError(ErrorCode::MovedFrom));
+  if (std::this_thread::get_id() != impl_->creator_thread)
+    return std::unexpected(MakeError(ErrorCode::WrongThread));
   if (impl_->failure)
     return std::unexpected(*impl_->failure);
-  if (std::this_thread::get_id() != impl_->creator_thread) {
-    impl_->RememberFailure(MakeError(ErrorCode::WrongThread));
-    return std::unexpected(*impl_->failure);
-  }
   if (!impl_->current_frame) {
     impl_->RememberFailure(MakeError(ErrorCode::AudioNotReady));
     return std::unexpected(*impl_->failure);
@@ -522,8 +470,8 @@ OpeningMoviePlayer::ReadAudioFrames(
       std::min(requested_frames, remaining_frames);
   if (frame_count == 0U)
     return 0U;
-  const auto output = interleaved_samples.first(static_cast<std::size_t>(
-      frame_count * kOpeningMovieAudioChannelCount));
+  const auto output = interleaved_samples.first(
+      static_cast<std::size_t>(frame_count * kOpeningMovieAudioChannelCount));
   auto decoded = media::DecodePssPcm16Interleaved(
       impl_->audio_plan, impl_->source, impl_->audio_frame_cursor, output);
   if (!decoded || *decoded != frame_count) {

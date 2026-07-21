@@ -457,6 +457,7 @@ if(OMEGA_BUILD_RUNTIME)
     endif()
 
     add_library(omega_app_host STATIC
+        native/apps/openomega/opening_movie_safety.cpp
         native/apps/openomega/opening_movie_player.cpp
         native/apps/openomega/omega_app.cpp
     )
@@ -1553,6 +1554,36 @@ if(BUILD_TESTING)
     set_tests_properties(omega_tdx_indexed8_candidate_debug_image_tests PROPERTIES TIMEOUT 5)
 
     if(TARGET omega_sdl_backend)
+        add_executable(omega_opening_movie_safety_tests
+            native/apps/openomega/opening_movie_safety.cpp
+            native/tests/opening_movie_safety_tests.cpp
+        )
+        target_include_directories(omega_opening_movie_safety_tests PRIVATE
+            native/apps/openomega
+        )
+        target_link_libraries(omega_opening_movie_safety_tests PRIVATE omega_media)
+        if(MSVC)
+            target_compile_options(omega_opening_movie_safety_tests PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_opening_movie_safety_tests PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+        add_test(NAME omega_opening_movie_safety_tests
+            COMMAND omega_opening_movie_safety_tests)
+        set_tests_properties(omega_opening_movie_safety_tests PROPERTIES TIMEOUT 5)
+
         add_executable(omega_startup_failure_dialog_tests
             native/tests/startup_failure_dialog_tests.cpp
         )
