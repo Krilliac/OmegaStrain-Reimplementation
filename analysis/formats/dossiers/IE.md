@@ -32,6 +32,11 @@ semantics.
   failures.
 - `analysis/formats/DECODER-COVERAGE.md` classifies `.ie` as
   `passive_descriptor_only`; no canonical or semantic decoder is claimed.
+- The bounded front-end topology scanner schema version 3 maps `.ie` to the
+  public aggregate category `ie` and includes the fixed `.gui+.ie`
+  sibling-pair key. The label and pair key expose only frozen aggregate
+  vocabulary; they assign no front-end role, payload structure, or binding.
+
 ## 4. Aggregate-only facts
 
 The aggregate inventories still carry occurrence totals and the derived nested count only; no

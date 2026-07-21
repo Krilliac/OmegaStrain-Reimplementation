@@ -150,17 +150,20 @@ class FrontendHogTopologyTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, serialized)
 
-    def test_gui_is_promoted_and_neighbors_stay_in_other(self) -> None:
-        # Only `.gui` graduates from the ``other`` bucket into the frozen
-        # public vocabulary. Menu-adjacent-sounding suffixes such as `.fnt`
-        # and `.ie` deliberately remain unpromoted.
+    def test_gui_ie_nested_pair_is_aggregate_only_and_fnt_stays_other(self) -> None:
+        nested_hog = make_hog(
+            [
+                ("ZXQPAIR100.GUI", b"gui"),
+                ("ZXQPAIR100.IE", b"ie"),
+                ("ZXQCROSS700.IE", b"ie"),
+                ("ZXQGLYPH300.FNT", b"font"),
+            ]
+        )
         root_hog = make_hog(
             [
-                ("ZXQMENU100.GUI", b"gui"),
-                ("ZXQMENU100.TDX", b"texture"),
-                ("ZXQPANEL200.GUI", b"gui"),
-                ("ZXQGLYPH300.FNT", b"font"),
-                ("ZXQEVENT400.IE", b"opaque"),
+                ("ZXQCHILD900.HOG", nested_hog),
+                ("ZXQCROSS700.GUI", b"gui"),
+                ("ZXQOUTER800.IE", b"ie"),
             ]
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -169,62 +172,73 @@ class FrontendHogTopologyTests(unittest.TestCase):
             result = topology.scan_input(path)
 
         # Schema version was bumped to record the vocabulary extension.
-        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["schema_version"], 3)
 
-        # `.gui` is now first-class vocabulary and its own category.
+        # `.gui` and `.ie` are first-class, neutrally named vocabulary slots.
         self.assertIn(".gui", topology.APPROVED_EXTENSIONS)
+        self.assertIn(".ie", topology.APPROVED_EXTENSIONS)
         self.assertIn("gui", topology.APPROVED_CATEGORIES)
+        self.assertIn("ie", topology.APPROVED_CATEGORIES)
         self.assertIn(".gui", result["approved_extension_counts"])
+        self.assertIn(".ie", result["approved_extension_counts"])
         self.assertIn("gui", result["approved_category_counts"])
+        self.assertIn("ie", result["approved_category_counts"])
         self.assertEqual(result["approved_extension_counts"][".gui"], 2)
+        self.assertEqual(result["approved_extension_counts"][".ie"], 3)
         self.assertEqual(result["approved_category_counts"]["gui"], 2)
+        self.assertEqual(result["approved_category_counts"]["ie"], 3)
 
-        # `.fnt` and `.ie` are NOT promoted; they still collapse into other.
+        # `.fnt` is not promoted and still collapses into ``other``.
         self.assertNotIn(".fnt", topology.APPROVED_EXTENSIONS)
-        self.assertNotIn(".ie", topology.APPROVED_EXTENSIONS)
         self.assertNotIn(".fnt", result["approved_extension_counts"])
-        self.assertNotIn(".ie", result["approved_extension_counts"])
-        self.assertEqual(result["totals"]["other_member_occurrences"], 2)
-        self.assertEqual(result["other_category_count"], 2)
+        self.assertEqual(result["totals"]["other_member_occurrences"], 1)
+        self.assertEqual(result["other_category_count"], 1)
 
-        self.assertEqual(result["totals"]["member_occurrences"], 5)
-        self.assertEqual(result["totals"]["approved_member_occurrences"], 3)
+        self.assertEqual(result["totals"]["archive_occurrences"], 2)
+        self.assertEqual(result["totals"]["nested_archive_occurrences"], 1)
+        self.assertEqual(result["archive_depth_distribution"]["1"], 1)
+        self.assertEqual(result["totals"]["member_occurrences"], 7)
+        self.assertEqual(result["totals"]["approved_member_occurrences"], 6)
 
-        # A `.gui` member sharing a basename with an approved sibling yields a
-        # pair key that now exists in the frozen pair-key contract.
-        self.assertIn(".gui+.tdx", topology.PAIR_KEYS)
-        self.assertIn(".col+.gui", topology.PAIR_KEYS)
-        self.assertEqual(result["basename_pair_totals"][".gui+.tdx"], 1)
+        # The fixed `.gui+.ie` key counts one same-basename sibling group in a
+        # nested HOG. A shared stem split across root and child does not pair
+        # across archive-directory boundaries.
+        self.assertIn(".gui+.ie", topology.PAIR_KEYS)
+        self.assertEqual(result["basename_pair_totals"][".gui+.ie"], 1)
         self.assertEqual(result["totals"]["basename_groups"], 1)
         self.assertEqual(result["totals"]["basename_pairs"], 1)
 
-        # `gui` participates in the per-category extent buckets.
+        # Both neutral categories participate in fixed extent buckets.
         self.assertEqual(
             sum(result["category_extent_buckets"]["gui"].values()), 2
+        )
+        self.assertEqual(
+            sum(result["category_extent_buckets"]["ie"].values()), 3
         )
 
         # Privacy: no member identity or raw/unapproved suffix ever leaks.
         serialized = json.dumps(result, sort_keys=True).lower()
         for forbidden in (
-            "zxqmenu100",
-            "zxqpanel200",
+            "zxqpair100",
+            "zxqchild900",
+            "zxqcross700",
+            "zxqouter800",
             "zxqglyph300",
-            "zxqevent400",
             ".fnt",
-            ".ie",
         ):
             self.assertNotIn(forbidden, serialized)
 
     def test_frozen_public_vocabulary_matches_documented_set(self) -> None:
         # Guards the frozen contract: exactly these suffixes/categories are
-        # public. `.gui`/`gui` are present; `.fnt`/`.ie` and their imagined
-        # categories are absent.
+        # public. `.gui`/`gui` and `.ie`/`ie` are present; `.fnt` and its
+        # imagined category are absent.
         self.assertEqual(
             topology.APPROVED_EXTENSIONS,
             (
                 ".col",
                 ".gui",
                 ".hog",
+                ".ie",
                 ".pop",
                 ".ska",
                 ".skas",
@@ -246,6 +260,7 @@ class FrontendHogTopologyTests(unittest.TestCase):
                 "collision",
                 "container",
                 "gui",
+                "ie",
                 "material",
                 "mesh",
                 "scene",
@@ -484,7 +499,7 @@ class FrontendHogTopologyTests(unittest.TestCase):
         self.assertEqual(second_code, 0)
         self.assertEqual(first_text, second_text)
         self.assertEqual(first, second)
-        self.assertEqual(first["schema_version"], 2)
+        self.assertEqual(first["schema_version"], 3)
         self.assertTrue(first_text.endswith("\n"))
         lowered = first_text.lower()
         for forbidden in (
@@ -500,6 +515,9 @@ class FrontendHogTopologyTests(unittest.TestCase):
         exit_code, rendered, result = run_main([secret])
         self.assertEqual(exit_code, 1)
         self.assertNotIn(secret.lower(), rendered.lower())
+        self.assertEqual(result["schema_version"], 3)
+        self.assertEqual(result["approved_extension_counts"][".ie"], 0)
+        self.assertEqual(result["basename_pair_totals"][".gui+.ie"], 0)
         self.assertEqual(result["totals"]["errors"], 1)
         self.assertEqual(result["error_categories"]["missing_input"], 1)
         self.assertEqual(

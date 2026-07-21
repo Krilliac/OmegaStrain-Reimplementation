@@ -32,7 +32,9 @@ semantics.
   failures.
 - `analysis/formats/DECODER-COVERAGE.md` classifies `.gui` as
   `passive_descriptor_only`; no canonical or semantic decoder is claimed.
-- The bounded front-end topology scanner schema version 2 maps `.gui` to the public aggregate category `gui`. That label echoes the suffix and assigns no front-end role or payload structure.
+- The bounded front-end topology scanner schema version 3 maps `.gui` to the public aggregate
+  category `gui` and includes the fixed `.gui+.ie` sibling-pair key. The label and pair key expose
+  only frozen aggregate vocabulary; they assign no front-end role, payload structure, or binding.
 
 ## 4. Aggregate-only facts
 
