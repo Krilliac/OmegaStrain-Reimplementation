@@ -29,8 +29,11 @@ MATRIX_HEADING = "## 1. Suffix classification matrix"
 MATRIX_COLUMNS = ("Suffix", "Class", "Native/tool evidence", "Test evidence")
 CPP_PATH_PATTERN = re.compile(
     r"native/(?:include|src|tests)/[A-Za-z0-9_./-]+\.(?:h|cpp)"
-    r"(?![A-Za-z0-9_./-])"
 )
+CPP_PATH_FRAGMENT_PATTERN = re.compile(
+    r"native/(?:include|src|tests)/[A-Za-z0-9_./-]+\.(?:h|cpp)"
+)
+INLINE_CODE_PATTERN = re.compile(r"`(?P<value>[^`\r\n]+)`")
 BOUNDARY_FUNCTION_PATTERN = re.compile(
     r"\b(?P<name>(?:Decode|Inspect)[A-Z0-9][A-Za-z0-9_]*)\s*\("
 )
@@ -792,6 +795,23 @@ def format_suffixes(values: set[str]) -> str:
     return ", ".join(sorted(values))
 
 
+def cited_cpp_paths(evidence: str) -> tuple[set[str], bool]:
+    paths: set[str] = set()
+    valid_ranges: list[tuple[int, int]] = []
+    for match in INLINE_CODE_PATTERN.finditer(evidence):
+        value = match["value"]
+        if CPP_PATH_PATTERN.fullmatch(value) is None:
+            continue
+        paths.add(value)
+        valid_ranges.append((match.start("value"), match.end("value")))
+
+    malformed = any(
+        not any(start <= match.start() < end for start, end in valid_ranges)
+        for match in CPP_PATH_FRAGMENT_PATTERN.finditer(evidence)
+    )
+    return paths, malformed
+
+
 def validate_summary(text: str, rows: dict[str, MatrixRow]) -> list[str]:
     match = re.search(r"(?ms)^Totals observed in this pass:(.*?)(?:\n\s*\n|\Z)", text)
     if match is None:
@@ -972,10 +992,26 @@ def validate_decoder_coverage(root: Path) -> list[str]:
                 f"public retail suffix {suffix} is classified as non-native "
                 f"{row.decoder_class}"
             )
+        else:
+            expected_headers = {
+                header.as_posix() for header in suffix_headers[suffix]
+            }
+            cited_headers, _ = cited_cpp_paths(row.native_evidence)
+            missing_headers = expected_headers - cited_headers
+            if missing_headers:
+                errors.append(
+                    f"matrix row {suffix} omits public boundary headers: "
+                    f"{', '.join(sorted(missing_headers))}"
+                )
 
     for suffix, row in sorted(rows.items()):
-        native_paths = set(CPP_PATH_PATTERN.findall(row.native_evidence))
-        test_paths = set(CPP_PATH_PATTERN.findall(row.test_evidence))
+        native_paths, malformed_native_path = cited_cpp_paths(row.native_evidence)
+        test_paths, malformed_test_path = cited_cpp_paths(row.test_evidence)
+        if malformed_native_path or malformed_test_path:
+            errors.append(
+                f"matrix row {suffix} cites malformed or non-repository C++ "
+                "evidence path"
+            )
         paths = native_paths | test_paths
         safe_paths: set[str] = set()
         for path in sorted(paths):
@@ -1024,6 +1060,31 @@ def validate_decoder_coverage(root: Path) -> list[str]:
                     f"native matrix row {suffix} cites no test that includes one of its "
                     "cited public headers"
                 )
+
+            for header in sorted(headers):
+                if Path(header) not in boundaries:
+                    continue
+                public_include = header.removeprefix("native/include/")
+                implementing_sources = {
+                    source
+                    for source, includes in source_includes.items()
+                    if public_include in includes
+                }
+                if not (native_paths & implementing_sources):
+                    errors.append(
+                        f"matrix row {suffix} cites no implementing source for public "
+                        f"boundary header {header}"
+                    )
+                covering_tests = {
+                    test
+                    for test, includes in test_includes.items()
+                    if public_include in includes
+                }
+                if not (tests & covering_tests):
+                    errors.append(
+                        f"matrix row {suffix} cites no focused test for public boundary "
+                        f"header {header}"
+                    )
 
         for path in sorted(safe_paths):
             if path.startswith("native/src/") and path not in all_cmake_sources:
@@ -1129,6 +1190,114 @@ class DecoderCoverageContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_synthetic_repository(root)
+            self.assertEqual(validate_decoder_coverage(root), [])
+
+    def test_every_public_boundary_requires_row_source_and_test_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_synthetic_repository(root)
+            secondary_header = (
+                root
+                / "native/include/omega/retail/foo_secondary_descriptor.h"
+            )
+            secondary_source = (
+                root / "native/src/retail/foo_secondary_descriptor.cpp"
+            )
+            secondary_test = (
+                root / "native/tests/foo_secondary_descriptor_tests.cpp"
+            )
+            secondary_header.write_text(
+                "int InspectFooSecondary(const void* bytes);\n",
+                encoding="utf-8",
+            )
+            secondary_source.write_text(
+                '#include "omega/retail/foo_secondary_descriptor.h"\n',
+                encoding="utf-8",
+            )
+            secondary_test.write_text(
+                '#include "omega/retail/foo_secondary_descriptor.h"\n',
+                encoding="utf-8",
+            )
+            (root / "CMakeLists.txt").write_text(
+                "\n".join(
+                    (
+                        "add_library(omega_retail_formats STATIC",
+                        "    native/src/retail/foo_decoder.cpp",
+                        "    native/src/retail/foo_secondary_descriptor.cpp",
+                        ")",
+                        "add_executable(foo_tests ",
+                        "    native/tests/foo_decoder_tests.cpp)",
+                        "add_test(NAME foo_tests COMMAND foo_tests)",
+                        "add_executable(foo_secondary_tests",
+                        "    native/tests/foo_secondary_descriptor_tests.cpp)",
+                        "add_test(NAME foo_secondary_tests COMMAND foo_secondary_tests)",
+                        "",
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            missing_boundary = (
+                "matrix row .foo omits public boundary headers: "
+                "native/include/omega/retail/foo_secondary_descriptor.h"
+            )
+            self.assertEqual(validate_decoder_coverage(root), [missing_boundary])
+
+            missing_source_evidence = (
+                "`DecodeFoo` and `InspectFooSecondary` "
+                "(`native/include/omega/retail/foo_decoder.h`, "
+                "`native/src/retail/foo_decoder.cpp`, "
+                "`native/include/omega/retail/foo_secondary_descriptor.h`)"
+            )
+            coverage = root / "analysis/formats/DECODER-COVERAGE.md"
+            missing_source_row = (
+                f"| `.foo` | canonical decoder | {missing_source_evidence} | "
+                "`native/tests/foo_decoder_tests.cpp`, "
+                "`native/tests/foo_secondary_descriptor_tests.cpp` |"
+            )
+            coverage.write_text(
+                synthetic_document([missing_source_row]), encoding="utf-8"
+            )
+            self.assertEqual(
+                validate_decoder_coverage(root),
+                [
+                    "matrix row .foo cites no implementing source for public "
+                    "boundary header "
+                    "native/include/omega/retail/foo_secondary_descriptor.h"
+                ],
+            )
+
+            native_evidence = (
+                "`DecodeFoo` and `InspectFooSecondary` "
+                "(`native/include/omega/retail/foo_decoder.h`, "
+                "`native/src/retail/foo_decoder.cpp`, "
+                "`native/include/omega/retail/foo_secondary_descriptor.h`, "
+                "`native/src/retail/foo_secondary_descriptor.cpp`)"
+            )
+            missing_test_row = (
+                f"| `.foo` | canonical decoder | {native_evidence} | "
+                "`native/tests/foo_decoder_tests.cpp` |"
+            )
+            coverage.write_text(
+                synthetic_document([missing_test_row]), encoding="utf-8"
+            )
+            self.assertEqual(
+                validate_decoder_coverage(root),
+                [
+                    "matrix row .foo cites no focused test for public boundary "
+                    "header "
+                    "native/include/omega/retail/foo_secondary_descriptor.h"
+                ],
+            )
+
+            complete_row = (
+                f"| `.foo` | canonical decoder | {native_evidence} | "
+                "`native/tests/foo_decoder_tests.cpp`, "
+                "`native/tests/foo_secondary_descriptor_tests.cpp` |"
+            )
+            coverage.write_text(
+                synthetic_document([complete_row]), encoding="utf-8"
+            )
             self.assertEqual(validate_decoder_coverage(root), [])
 
     def test_malformed_row_has_stable_failure_message(self) -> None:
@@ -1497,6 +1666,29 @@ class DecoderCoverageContractTests(unittest.TestCase):
                 f"matrix row .foo cites unsafe non-repository path {unsafe}",
                 validate_decoder_coverage(root),
             )
+
+    def test_prefixed_repository_path_substrings_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_synthetic_repository(root)
+            coverage = root / "analysis/formats/DECODER-COVERAGE.md"
+            expected = (
+                "matrix row .foo cites malformed or non-repository C++ evidence "
+                "path"
+            )
+            for prefix in ("C:/secret/", "../../", "x"):
+                with self.subTest(prefix=prefix):
+                    row = (
+                        "| `.foo` | canonical decoder | `DecodeFoo` "
+                        "(`native/include/omega/retail/foo_decoder.h`, "
+                        "`native/src/retail/foo_decoder.cpp`, "
+                        f"`{prefix}native/include/omega/retail/foo_decoder.h`) | "
+                        "`native/tests/foo_decoder_tests.cpp` |"
+                    )
+                    coverage.write_text(
+                        synthetic_document([row]), encoding="utf-8"
+                    )
+                    self.assertEqual(validate_decoder_coverage(root), [expected])
 
     def test_fixed_input_link_is_rejected_before_any_text_read(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
