@@ -52,7 +52,7 @@ OWNER_HOME_UNIX_PATH = re.compile(
     re.IGNORECASE,
 )
 URI_PREFIX = re.compile(
-    r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*):/+[^\s]*$",
+    r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*):(?P<slashes>/+)[\w.~%/@:\[\]-]*$",
     re.IGNORECASE,
 )
 
@@ -70,12 +70,16 @@ def contains_owner_home_path(text: str) -> bool:
             return True
     for match in OWNER_HOME_UNIX_PATH.finditer(text):
         uri = URI_PREFIX.search(text[: match.start() + 1])
-        if uri is not None and uri.group("scheme").lower() != "file":
+        if (
+            uri is not None
+            and uri.group("scheme").lower() != "file"
+            and len(uri.group("slashes")) >= 2
+        ):
             continue
         if (
             uri is None
             and match.start() > 0
-            and re.fullmatch(r"[\w:/.-]", text[match.start() - 1])
+            and re.fullmatch(r"[\w/.-]", text[match.start() - 1])
         ):
             continue
         if match.group("user").strip("."):
