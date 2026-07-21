@@ -18,11 +18,13 @@ inline constexpr std::uint64_t kIeRootBoundaryOffset = 4;
 inline constexpr std::uint64_t kIeMaximumInputBytes = 1ULL * 1024ULL * 1024ULL;
 inline constexpr std::uint64_t kIeMaximumDecodedItems = 1;
 
-// Passive description of the bounded IE prefix consumed before the opaque
-// root bytes. The leading two bytes are skipped by the observed consumer and
-// remain opaque. The word at 0x02 remains observational: no tag, version,
-// count, flag, string, node, or recursive-layout semantics are assigned. No
-// source bytes are retained.
+// Passive description of the bounded, project-defined IE prefix hypothesis
+// consumed before the opaque root bytes. The offsets are a falsifiable project
+// boundary with no tracked retail provenance (see
+// analysis/formats/FRONTEND-EVIDENCE-AUDIT.md, tier C6). The leading two bytes
+// are skipped by this descriptor and remain opaque. The word at 0x02 remains
+// observational: no tag, version, count, flag, string, node, or recursive-layout
+// semantics are assigned. No source bytes are retained.
 struct IeEnvelopeDescriptor {
   std::uint16_t observed_word_0x02 = 0;
   ObservedByteRange opaque_prefix_region;

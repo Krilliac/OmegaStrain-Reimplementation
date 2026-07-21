@@ -24,11 +24,13 @@ inline constexpr std::uint64_t kGuiRootBoundaryOffset = 6;
 inline constexpr std::uint64_t kGuiMaximumInputBytes = 1ULL * 1024ULL * 1024ULL;
 inline constexpr std::uint64_t kGuiMaximumDecodedItems = 1;
 
-// Passive description of the bounded GUI prefix consumed before the opaque
-// root bytes. The word at 0x04 remains observational: no version, count, flag,
-// layout, widget, or recursive-node semantics are assigned. The byte at 0x03
-// is skipped by the observed consumer and remains opaque. No source bytes are
-// retained.
+// Passive description of the bounded, project-defined GUI prefix hypothesis
+// consumed before the opaque root bytes. The tag and offsets are a falsifiable
+// project boundary with no tracked retail provenance (see
+// analysis/formats/FRONTEND-EVIDENCE-AUDIT.md, tier C6). The word at 0x04
+// remains observational: no version, count, flag, layout, widget, or
+// recursive-node semantics are assigned. The byte at 0x03 is skipped by this
+// descriptor and remains opaque. No source bytes are retained.
 struct GuiEnvelopeDescriptor {
   std::uint16_t observed_word_0x04 = 0;
   ObservedByteRange tag_region;
