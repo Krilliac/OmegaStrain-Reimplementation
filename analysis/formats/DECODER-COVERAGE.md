@@ -69,7 +69,7 @@ audio/video parity.
 | `.bon` | aggregate scanner only | Raw suffix count only | none |
 | `.gun` | aggregate scanner only | Raw suffix count only (`asset-fingerprints.json`; absent from `hog-validation.json`'s narrower top-level tally) | none |
 | `.prn` | aggregate scanner only | Raw suffix count only | none |
-| `.pss` | aggregate scanner only (suffix classification) | Raw suffix counts remain the only tracked suffix-wide corpus evidence. Separately, the native opening-movie path bounds and inspects MPEG-2 Program Stream/PES framing, builds a zero-copy MPEG video plan, inspects H.262 sequence facts, decodes video through Media Foundation on Windows, parses one narrow SShd/SSbd signed-PCM shape, deinterleaves it into caller-owned samples, and presents it through bounded SDL video/audio queues. Those APIs accept an explicit external movie and do not prove that every retail `.pss` member uses the accepted shape or behaves like the retail runtime (`native/include/omega/media/`, `native/apps/openomega/opening_movie_player.h`, `native/apps/openomega/sdl_audio_service.h`) | Suffix occurrence only; synthetic media coverage in `native/tests/mpeg_program_stream_descriptor_tests.cpp`, `mpeg_video_elementary_stream_tests.cpp`, `media_foundation_h262_decoder_tests.cpp`, `pss_pcm_audio_stream_tests.cpp`, and app/audio tests |
+| `.pss` | aggregate scanner only (suffix classification) | Raw suffix counts remain the only tracked suffix-wide corpus evidence. Separately, the native opening-movie path bounds and inspects MPEG-2 Program Stream/PES framing, builds a zero-copy MPEG video plan, inspects H.262 sequence facts, decodes video through Media Foundation on Windows, applies one project-defined provisional SShd/SSbd signed-PCM compatibility hypothesis, deinterleaves it into caller-owned samples, and presents it through bounded SDL video/audio queues. Those APIs accept an explicit external movie but do not independently prove the custom PCM field meanings or deinterleave semantics, that every retail `.pss` member uses the accepted shape, or that it behaves like the retail runtime (`native/include/omega/media/`, `native/apps/openomega/opening_movie_player.h`, `native/apps/openomega/sdl_audio_service.h`) | Suffix occurrence only; synthetic media safety and self-consistency coverage in `native/tests/mpeg_program_stream_descriptor_tests.cpp`, `mpeg_video_elementary_stream_tests.cpp`, `media_foundation_h262_decoder_tests.cpp`, `pss_pcm_audio_stream_tests.cpp`, and app/audio tests |
 | `.scc` | aggregate scanner only | Raw suffix count only in both archive inventories, plus a separate whole-disc count in `disc-summary.json` | none |
 | `.skel` | aggregate scanner only | Raw suffix count only | none |
 | `.skf` | aggregate scanner only | Raw suffix count only | none |
@@ -92,8 +92,9 @@ registration was found** for a matrix-listed native format boundary.
 The separate `omega_media` target registers the generic MPEG-2 Program Stream inspector, video
 range planning/H.262 inspection, Windows Media Foundation video adapter, and narrow PSS PCM stream
 planner/deinterleaver. `openomega` composes those pieces with its opening-movie player and bounded
-SDL presentation services. Keeping them outside `omega_retail_formats` is deliberate: media
-presentation for one accepted external stream shape is not a suffix-wide canonical asset decoder.
+SDL presentation services. The PCM grammar remains a provisional compatibility hypothesis. Keeping
+these pieces outside `omega_retail_formats` is deliberate: media presentation for one external
+stream that passes that hypothesis is not a suffix-wide canonical asset decoder.
 
 ## 3. Mixed-layer families and mechanical inconsistencies (not fixed)
 

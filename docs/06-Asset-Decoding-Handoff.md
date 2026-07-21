@@ -35,9 +35,10 @@ a regression. See `docs/01-Clean-Room-Method.md` and `analysis/evidence/ledger.j
   acceptance, UI/font semantics, consumer bindings, runtime integration, and retail parity
   explicitly unclaimed.
 - Ledger entry `E-0102` records the bounded private-stream PCM planner/deinterleaver and its native
-  opening-movie SDL presentation path. That path presents one accepted MPEG-PS/H.262/PCM shape; it
-  does not establish suffix-wide `.pss` coverage, exact retail A/V parity, or portable end-to-end
-  playback.
+  opening-movie SDL presentation path. That path presents one external stream which passes a
+  project-defined provisional MPEG-PS/H.262/PCM compatibility shape; it does not independently
+  establish the custom PCM field meanings or deinterleave semantics, suffix-wide `.pss` coverage,
+  exact retail A/V parity, or portable end-to-end playback.
 
 ## Queue for Codex
 
@@ -110,9 +111,10 @@ reconcile — including decode-result contract fragmentation across `asset::Deco
 
 For media work, keep `omega_media` and `openomega` presentation claims separate from the retail
 suffix matrix. The tracked path bounds MPEG-PS inspection, H.262 video decoding on Windows, one
-SShd/SSbd signed-PCM plan/deinterleave shape, the SDL audio ring, and the audio-demand presentation
-clock. Future tests should target demonstrated variants and lifecycle/fail-open behavior; they must
-not turn one accepted external stream into a general `.pss` or retail-sync claim.
+project-defined provisional SShd/SSbd signed-PCM plan/deinterleave hypothesis, the SDL audio ring,
+and the audio-demand presentation clock. Future tests should target demonstrated variants and
+lifecycle/fail-open behavior; they must not turn one accepted external stream into independent
+format semantics, a general `.pss` claim, or a retail-sync claim.
 
 ### 4. AI-brief hot-file corrections
 

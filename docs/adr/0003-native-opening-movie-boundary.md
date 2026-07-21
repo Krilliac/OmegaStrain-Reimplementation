@@ -14,9 +14,10 @@ decoder publishes owned NV12 frames; the app converts due frames to opaque RGBA8
 stable SDL GPU texture in place. Non-Windows builds retain the same public boundary through a
 fail-closed unsupported decoder stub, and the app fails open to the existing front end.
 
-Accept opening-stream audio only through the validated PSS `private_stream_1` PCM variant currently
-required by this path: complete `SShd`/`SSbd` framing, encoding tag 1, signed 16-bit little-endian
-samples, 48,000 Hz stereo, and complete channel-interleave rounds. The media layer retains an
+Accept opening-stream audio only through the project-defined provisional PSS `private_stream_1` PCM
+compatibility hypothesis currently implemented by this path: complete `SShd`/`SSbd` framing,
+encoding tag 1, signed 16-bit little-endian samples, 48,000 Hz stereo, and complete
+channel-interleave rounds. The media layer retains an
 offset-only plan into the bounded owned source and deinterleaves exact frame intervals into
 caller-owned PCM16 without allocation. The main thread refills a fixed-capacity SDL audio ring; the
 project callback code converts no media and performs no file access, logging, explicit locking, or
@@ -33,6 +34,12 @@ the validated PCM source to be returned, and the audio ring to drain. Skip, comp
 presentation failure pause and clear movie audio before CPU and GPU movie resources are released.
 Ring drain is a project queue observation; it does not prove that SDL conversion backlog or the final
 hardware samples have completed playback.
+
+Generated fixtures establish the parser and deinterleaver's safety and self-consistency. E-0102's
+bounded owner-stream smoke establishes only that one external stream passed this structural gate;
+it does not independently establish the custom field meanings, tag-1 PCM16LE mapping, all-ones loop
+interpretation, four-byte selector handling, or channel-block order. Those semantics remain
+provisional pending a sanitized metadata check and independent behavioral comparison.
 
 External movie playback is mutually exclusive with capture and capture replay. This decision adds
 only opening-movie PCM presentation; it does not establish a general audio mixer, support other PSS
@@ -71,6 +78,8 @@ audio variants, or claim retail audiovisual timing parity.
   H.262 decoder. Therefore non-Windows builds do not claim end-to-end movie decode or presentation.
 - The fixed 48 kHz stereo acceptance rule is an opening-movie compatibility boundary, not a general
   native mix format or an assertion about every retail PSS stream.
+- The PSS PCM grammar is a project-defined provisional compatibility hypothesis, not confirmed
+  retail format semantics. Generated fixtures and one accepted owner stream do not promote it.
 - Audio callback, queue, underrun, clock, or containment failures fail open to the front end and may
   not leave the device running or retain queued proprietary samples.
 
@@ -78,7 +87,8 @@ audio variants, or claim retail audiovisual timing parity.
 
 - Synthetic MPEG-PS, elementary-stream, PSS PCM plan/deinterleave, H.262, decoder-state, NV12
   conversion, opening-audio queue/drain/discard, isolated audio-clock, boot-reducer, launch
-  isolation, texture-update, dependency-policy, and public-tree tests run in CI.
+  isolation, texture-update, dependency-policy, and public-tree tests run in CI. The PSS PCM
+  fixtures validate implemented boundaries and self-consistency, not independent format provenance.
 - Windows builds cover the real Media Foundation implementation; Linux builds cover the unsupported
   H.262 stub and platform-neutral parser layers, not a non-Windows movie-playback claim.
 - Private validation may confirm full-stream audiovisual presentation, skip, drain, menu transition,

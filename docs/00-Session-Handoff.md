@@ -1371,7 +1371,8 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     their exact constants. They remain offline scaffolding and establish no font, widget, hierarchy,
     layout, rendering, consumer relationship, retail behavior, or PCSX2 parity.
     E-0102 records the merged native opening-movie media path: bounded MPEG-PS/H.262 inspection and
-    Windows decode, a validated 48 kHz stereo PSS PCM variant, allocation-free interval deinterleave,
+    Windows decode, a project-defined provisional 48 kHz stereo PSS PCM compatibility hypothesis,
+    allocation-free interval deinterleave,
     a fixed SDL audio ring, device-demand presentation clock, stable GPU texture updates, modal skip
     and fail-open transition, and containment before resource release. It remains one narrow Windows
     compatibility path, not a general mixer, full PSS grammar, perceptual-sync proof, frame-exact

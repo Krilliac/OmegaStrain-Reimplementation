@@ -27,9 +27,11 @@ retail behavior parity.
   `aggregate_scanner_only` at the suffix-family level.
 - `omega::media::InspectMpegProgramStream` provides bounded, codec-neutral MPEG-2 Program Stream/PES
   framing; the video layer builds an offset-only payload plan and inspects H.262 sequence facts.
-- `BuildPssPcmAudioStreamPlan` validates one narrow private-stream SShd/SSbd signed-PCM shape and
-  returns offset-only metadata; `DecodePssPcm16Interleaved` revalidates that plan and deinterleaves
-  exact caller-requested frame ranges without allocation.
+- `BuildPssPcmAudioStreamPlan` bounds one narrow project-defined provisional private-stream
+  SShd/SSbd signed-PCM compatibility hypothesis and returns offset-only metadata;
+  `DecodePssPcm16Interleaved` revalidates that plan and deinterleaves exact caller-requested frame
+  ranges without allocation. Generated fixtures establish implementation safety and
+  self-consistency, not the field meanings or deinterleave semantics independently.
 - On Windows, `OpeningMoviePlayer` composes those boundaries with the Media Foundation H.262
   decoder. `openomega` presents owned video frames and decoded stereo PCM through bounded SDL
   queues and an isolated audio-demand clock, with explicit skip/fail-open teardown.
@@ -39,7 +41,8 @@ The available aggregate evidence still carries occurrence totals and the derived
 It does not publish a suffix-wide size fingerprint, accepted-variant distribution, per-container
 row, or payload byte. The current hardened size-only member collector does not allowlist this
 suffix. Expanding a frozen public schema requires a separate reviewed change; do not silently add
-it. Generated media fixtures prove implemented parser/presentation boundaries, not corpus coverage.
+it. Generated media fixtures prove implemented parser/presentation boundaries, not independent
+format semantics or corpus coverage.
 
 ## 5. Hypotheses
 
@@ -63,7 +66,8 @@ it. Generated media fixtures prove implemented parser/presentation boundaries, n
 Generic suffix occurrence counting is not a decoder. The native tree nevertheless contains reusable
 bounded media infrastructure: MPEG-PS/PES inspection, MPEG-video range planning, H.262 inspection
 and Windows decode, one PSS-named PCM plan/deinterleave shape, and project-owned opening-movie
-presentation. These interfaces have focused generated-fixture and lifecycle tests. They do not
+presentation. The PCM shape is a provisional compatibility hypothesis. These interfaces have
+focused generated-fixture and lifecycle tests. They do not
 produce a canonical `.pss` asset IR, accept all retail members, or establish retail playback policy
 or behavior parity, so the suffix classification does not change.
 
