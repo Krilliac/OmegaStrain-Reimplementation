@@ -1997,6 +1997,46 @@ record, but this establishes no persistent active-profile policy, retail/PS2 sav
 or checkpoint schema, memory-card or savestate semantics, proprietary-data contract, or behavioral
 parity.
 
+### E-0107 project-owned diagnostic actor overlay
+
+`PlanProjectDiagnosticActorMarkerDestination` is a renderer-neutral, total,
+`constexpr`/`noexcept` presentation map. It accepts an owned synthetic `Position3` value and returns
+one half-open `RenderTargetRectQ16`. The normalized extent is 65,536, the center is 32,768, one
+synthetic unit is 1,024, and the marker half-extent is also 1,024. X increases to the right, positive
+Z decreases the screen-space top/bottom values and therefore moves up, and Y is ignored. X and Z
+are clamped independently to `[-31, 31]` before multiplication and before Z reversal, so every
+signed 64-bit input produces a valid 2,048 by 2,048 rectangle within the complete normalized
+viewport. The origin maps to `{31744,31744,33792,33792}`.
+
+Before the app enters its frame loop, `OmegaApp` builds a generated one-pixel opaque RGBA8 marker
+with exact bytes `{255,64,224,255}` and uploads it after the mandatory topology texture but before an
+optional transfer texture. The marker is a mandatory app resource: it adds one texture-pool slot and
+four logical resident bytes. In the tested no-opening-movie baselines, NoContent and DataMounted with
+one front-end presentation own 6 slots and 159,748 bytes; an exact-empty catalog that preloads both
+E-0106 presentations owns 8 slots and 233,476 bytes; LevelContent with one front-end presentation
+and an optional transfer owns 7 slots and 115,732 bytes; and its topology-only fallback owns 6 slots
+and 114,708 bytes. Optional movie residency is additional and is not included in those totals.
+Startup constructs the complete DiagnosticPlay CPU draw list from its existing base command followed
+by a full-source marker command using `Stretch` and `Nearest`.
+
+On a non-movie `DiagnosticPlay` frame, all planned simulation steps complete first. The app then
+copies the current positioned actor value, rebuilds only the fixed CPU draw-list value, and constructs
+the render packet from that list. The marker texture remains immutable and resident: no frame-time
+GPU upload, texture update, release, CPU image generation, raster construction, file access, or asset
+decode is introduced. A missing simulation position or rejected draw list becomes a bounded
+operational run error instead of silently drawing stale state. Other front-end modes continue
+selecting their existing immutable lists. Teardown clears the actor list before releasing the marker
+texture while the GPU host is alive.
+
+`RunReplaySession::diagnostic_actor_marker_destination` applies the same pure map to its existing
+owned diagnostic-locomotion position. It returns null when that position is absent or the session is
+inert and stores no second marker value, renderer handle, or resource. The trace and input schema are
+unchanged; capture/replay parity compares the derived normalized-Q16 rectangles, not backend physical
+pixels. This entire overlay is project-authored diagnostic policy. It establishes no retail actor or
+player, coordinate axes or units, camera, transform, level placement, collision, visibility,
+animation, asset binding, framebuffer identity, physical-pixel result, owner-corpus result, PCSX2
+equivalence, or behavioral parity.
+
 ### Project-owned front-end cancel action
 
 Logical action 7 is a distinct project-owned cancel edge. Keyboard Backspace and gamepad East map

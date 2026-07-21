@@ -128,6 +128,11 @@ private:
     [[nodiscard]] std::expected<void, std::string> ApplyFrontEndCommand(
         FrontEndCommand command);
     [[nodiscard]] std::expected<void, std::string> CreateFirstProfile();
+    // [game/main/render thread; no concurrent use] Rebuilds only the fixed CPU
+    // command value for the post-step diagnostic actor position. The marker
+    // texture remains immutable and resident for the complete app lifetime.
+    [[nodiscard]] std::expected<void, std::string>
+    RefreshDiagnosticActorDrawList();
     [[nodiscard]] const runtime::RenderDrawList& CurrentFrontEndDrawList() const noexcept;
 
     struct FrontEndPresentation
@@ -161,6 +166,8 @@ private:
         runtime::RenderDrawList opening_movie_draw_list,
         BootSequenceState boot_sequence_state,
         runtime::RenderTextureHandle diagnostic_texture,
+        runtime::RenderTextureHandle diagnostic_actor_marker_texture,
+        runtime::RenderDrawList diagnostic_actor_draw_list,
         FrontEndPresentation front_end_presentation,
         std::optional<FrontEndPresentation> first_profile_presentation,
         runtime::RenderTextureHandle diagnostic_controls_texture,
@@ -206,6 +213,10 @@ private:
     // Non-owning generation-scoped identity. The host remains the backend-resource owner and a
     // default-moved-from app cannot release this copied value because its host_ is null.
     runtime::RenderTextureHandle diagnostic_texture_;
+    runtime::RenderTextureHandle diagnostic_actor_marker_texture_;
+    // Allocation-free post-step presentation value. It retains the immutable
+    // base command followed by the actor marker command while DiagnosticPlay is active.
+    runtime::RenderDrawList diagnostic_actor_draw_list_;
     FrontEndPresentation front_end_presentation_;
     // When present, this retains the inactive half of the one-time empty -> first
     // profile presentation swap so both texture pairs remain explicitly releasable.

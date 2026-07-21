@@ -338,6 +338,16 @@ RunReplaySession::debug_locomotion_position() const noexcept
     return simulation_->PositionOf(*debug_locomotion_entity_);
 }
 
+std::optional<runtime::RenderTargetRectQ16>
+RunReplaySession::diagnostic_actor_marker_destination() const noexcept
+{
+    const std::optional<simulation::Position3> position =
+        debug_locomotion_position();
+    if (!position)
+        return std::nullopt;
+    return PlanProjectDiagnosticActorMarkerDestination(*position);
+}
+
 std::optional<FrontEndState>
 RunReplaySession::front_end_state() const noexcept
 {

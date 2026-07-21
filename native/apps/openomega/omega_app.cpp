@@ -1,4 +1,5 @@
 #include "omega_app.h"
+#include "diagnostic_actor_marker.h"
 #include "opening_movie_player.h"
 #include "opening_movie_safety.h"
 #include "run_replay_session.h"
@@ -33,7 +34,9 @@ static_assert(kOpeningMovieAudioClockRateHz ==
               static_cast<std::uint64_t>(SdlAudioService::kSampleRate));
 constexpr profiles::ProfileId kFirstProfileId = profiles::ProfileId::FromBytes(
     std::array<std::uint8_t, 16U>{0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
-                                  0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U});
+                                   0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U});
+constexpr std::array<std::byte, 4U> kDiagnosticActorMarkerRgba8{
+    std::byte{255U}, std::byte{64U}, std::byte{224U}, std::byte{255U}};
 } // namespace
 
 std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore config,
@@ -290,6 +293,12 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         no_level_diagnostic_image = BuildProjectFrontEndDiagnosticPlayImage();
     const runtime::DebugImage &diagnostic_image =
         content_owner->debug_image ? *content_owner->debug_image : no_level_diagnostic_image;
+    const runtime::DebugImage diagnostic_actor_marker_image{
+        .width = 1U,
+        .height = 1U,
+        .rgba8_pixels = std::vector<std::byte>(
+            kDiagnosticActorMarkerRgba8.begin(), kDiagnosticActorMarkerRgba8.end()),
+    };
 
     runtime::DebugImage asset_topology_image;
     std::optional<runtime::DebugImage> asset_transfer_image;
@@ -443,6 +452,8 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     static_assert(kFrontEndVisibleProfiles <= kFrontEndMainRowCount);
 
     runtime::RenderTextureHandle diagnostic_texture;
+    runtime::RenderTextureHandle diagnostic_actor_marker_texture;
+    runtime::RenderDrawList diagnostic_actor_draw_list;
     FrontEndPresentation front_end_presentation;
     std::optional<FrontEndPresentation> first_profile_presentation;
     runtime::RenderTextureHandle diagnostic_controls_texture;
@@ -692,6 +703,51 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         return std::unexpected(error);
     }
     diagnostic_asset_topology_texture = *uploaded_asset_topology;
+
+    auto uploaded_actor_marker = host->UploadRgba8Texture(
+        runtime::Rgba8TextureUploadView{
+            .width = diagnostic_actor_marker_image.width,
+            .height = diagnostic_actor_marker_image.height,
+            .pixels = diagnostic_actor_marker_image.pixels(),
+        });
+    if (!uploaded_actor_marker)
+    {
+        const std::string error =
+            "SDL/GPU diagnostic actor marker texture upload: " +
+            uploaded_actor_marker.error();
+        log->Error("startup", error);
+        return std::unexpected(error);
+    }
+    diagnostic_actor_marker_texture = *uploaded_actor_marker;
+    if (diagnostic_hidden_draw_list.size() != 1U)
+    {
+        constexpr std::string_view error =
+            "SDL/GPU diagnostic actor draw-list creation failed";
+        log->Error("startup", error);
+        return std::unexpected(std::string(error));
+    }
+    const std::array diagnostic_actor_commands{
+        diagnostic_hidden_draw_list.commands().front(),
+        runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_actor_marker_texture,
+            .source = full_source,
+            .destination = PlanProjectDiagnosticActorMarkerDestination(
+                simulation::Position3{}),
+            .fit_mode = runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        },
+    };
+    auto created_actor_draw_list = runtime::RenderDrawList::Create(
+        diagnostic_actor_commands);
+    if (!created_actor_draw_list)
+    {
+        constexpr std::string_view error =
+            "SDL/GPU diagnostic actor draw-list creation failed";
+        log->Error("startup", error);
+        return std::unexpected(std::string(error));
+    }
+    diagnostic_actor_draw_list = std::move(*created_actor_draw_list);
+
     diagnostic_commands[diagnostic_base_command_count] =
         runtime::RenderTextureBlitCommand{
             .texture = diagnostic_asset_topology_texture,
@@ -853,6 +909,8 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                     std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
                     std::move(opening_movie_player), opening_movie_texture,
                     std::move(opening_movie_draw_list), boot_sequence_state, diagnostic_texture,
+                    diagnostic_actor_marker_texture,
+                    std::move(diagnostic_actor_draw_list),
                     std::move(front_end_presentation),
                     std::move(first_profile_presentation), diagnostic_controls_texture,
                     diagnostic_asset_topology_texture, diagnostic_asset_transfer_texture,
@@ -875,6 +933,8 @@ OmegaApp::OmegaApp(
     runtime::RenderDrawList opening_movie_draw_list,
     const BootSequenceState boot_sequence_state,
     const runtime::RenderTextureHandle diagnostic_texture,
+    const runtime::RenderTextureHandle diagnostic_actor_marker_texture,
+    runtime::RenderDrawList diagnostic_actor_draw_list,
     FrontEndPresentation front_end_presentation,
     std::optional<FrontEndPresentation> first_profile_presentation,
     const runtime::RenderTextureHandle diagnostic_controls_texture,
@@ -893,6 +953,8 @@ OmegaApp::OmegaApp(
       opening_movie_texture_(opening_movie_texture),
       opening_movie_draw_list_(std::move(opening_movie_draw_list)),
       boot_sequence_state_(boot_sequence_state), diagnostic_texture_(diagnostic_texture),
+      diagnostic_actor_marker_texture_(diagnostic_actor_marker_texture),
+      diagnostic_actor_draw_list_(std::move(diagnostic_actor_draw_list)),
       front_end_presentation_(std::move(front_end_presentation)),
       first_profile_presentation_(std::move(first_profile_presentation)),
       diagnostic_controls_texture_(diagnostic_controls_texture),
@@ -927,6 +989,7 @@ OmegaApp::~OmegaApp() noexcept
     opening_movie_player_.reset();
     diagnostic_asset_topology_draw_list_ = {};
     diagnostic_controls_draw_list_ = {};
+    diagnostic_actor_draw_list_ = {};
     const auto clear_front_end_draw_lists = [](FrontEndPresentation& presentation) noexcept
     {
         for (runtime::RenderDrawList& draw_list :
@@ -991,6 +1054,8 @@ OmegaApp::~OmegaApp() noexcept
         "front-end profiles texture release failed; SDL/GPU host cleanup will retry");
     release_texture(front_end_presentation_.main_texture,
         "front-end main texture release failed; SDL/GPU host cleanup will retry");
+    release_texture(diagnostic_actor_marker_texture_,
+        "diagnostic actor marker texture release failed; SDL/GPU host cleanup will retry");
     release_texture(diagnostic_texture_, "diagnostic texture release failed; SDL/GPU host cleanup will retry");
     opening_movie_texture_ = {};
     diagnostic_asset_topology_texture_ = {};
@@ -1003,6 +1068,7 @@ OmegaApp::~OmegaApp() noexcept
     }
     front_end_presentation_.profiles_texture = {};
     front_end_presentation_.main_texture = {};
+    diagnostic_actor_marker_texture_ = {};
     diagnostic_texture_ = {};
 }
 
@@ -1603,6 +1669,22 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
 
         const simulation::SimulationState simulation_snapshot = simulation_->Snapshot();
         const bool movie_is_active = IsBootSequenceActive(boot_sequence_state_);
+        if (!movie_is_active && FrontEndAllowsSimulation(front_end_state_))
+        {
+            auto refreshed_actor_draw_list = RefreshDiagnosticActorDrawList();
+            if (!refreshed_actor_draw_list)
+            {
+                (void)ContainOpeningMovieAudio();
+                jobs_->WaitForIdle();
+                log_->Error("render", refreshed_actor_draw_list.error());
+                return RunLoopResult{
+                    .result = result,
+                    .operational_error =
+                        std::move(refreshed_actor_draw_list.error()),
+                    .capture_error = std::nullopt,
+                };
+            }
+        }
         constexpr runtime::RenderClearColorRgba8 kOpeningMovieClearColor{
             .red = 0U,
             .green = 0U,
@@ -1866,6 +1948,59 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
     return {};
 }
 
+std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
+{
+    if (simulation_ == nullptr)
+    {
+        return std::unexpected(
+            std::string{"diagnostic actor position is unavailable"});
+    }
+    const std::optional<simulation::Position3> position =
+        simulation_->PositionOf(debug_locomotion_entity_);
+    if (!position)
+    {
+        return std::unexpected(
+            std::string{"diagnostic actor position is unavailable"});
+    }
+
+    constexpr runtime::RenderSourceRectQ16 full_source{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    std::array<runtime::RenderTextureBlitCommand, 2U> commands{};
+    const std::span<const runtime::RenderTextureBlitCommand> base_commands =
+        diagnostic_hidden_draw_list_.commands();
+    if (base_commands.size() > 1U)
+    {
+        return std::unexpected(
+            std::string{"diagnostic actor draw-list creation failed"});
+    }
+
+    std::size_t command_count = 0U;
+    if (!base_commands.empty())
+        commands[command_count++] = base_commands.front();
+    commands[command_count++] = runtime::RenderTextureBlitCommand{
+        .texture = diagnostic_actor_marker_texture_,
+        .source = full_source,
+        .destination =
+            PlanProjectDiagnosticActorMarkerDestination(*position),
+        .fit_mode = runtime::RenderTextureFitMode::Stretch,
+        .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+    };
+    auto created = runtime::RenderDrawList::Create(
+        std::span<const runtime::RenderTextureBlitCommand>{
+            commands.data(), command_count});
+    if (!created)
+    {
+        return std::unexpected(
+            std::string{"diagnostic actor draw-list creation failed"});
+    }
+    diagnostic_actor_draw_list_ = std::move(*created);
+    return {};
+}
+
 const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcept
 {
     const FrontEndView view = BuildFrontEndView(front_end_state_, content_stage_, front_end_startup_model_);
@@ -1892,7 +2027,7 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
     case FrontEndMode::AssetTopology:
         return diagnostic_asset_topology_draw_list_;
     case FrontEndMode::DiagnosticPlay:
-        return diagnostic_hidden_draw_list_;
+        return diagnostic_actor_draw_list_;
     }
     return front_end_presentation_.main_draw_lists.front();
 }

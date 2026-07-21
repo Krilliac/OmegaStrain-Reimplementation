@@ -1605,6 +1605,32 @@ if(BUILD_TESTING)
     add_test(NAME omega_front_end_tests COMMAND omega_front_end_tests)
     set_tests_properties(omega_front_end_tests PROPERTIES TIMEOUT 5)
 
+    add_executable(omega_diagnostic_actor_marker_tests
+        native/tests/diagnostic_actor_marker_tests.cpp
+    )
+    target_link_libraries(omega_diagnostic_actor_marker_tests PRIVATE omega_app_core)
+    if(MSVC)
+        target_compile_options(omega_diagnostic_actor_marker_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_diagnostic_actor_marker_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_diagnostic_actor_marker_tests
+        COMMAND omega_diagnostic_actor_marker_tests)
+    set_tests_properties(omega_diagnostic_actor_marker_tests PROPERTIES TIMEOUT 5)
+
     add_executable(omega_render_texture_pool_tests
         native/tests/render_texture_pool_tests.cpp
     )

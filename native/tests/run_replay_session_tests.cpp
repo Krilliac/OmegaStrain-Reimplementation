@@ -90,6 +90,7 @@ using omega::runtime::InputBindingTable;
 using omega::runtime::InputDevice;
 using omega::runtime::InputEvent;
 using omega::runtime::InputTracker;
+using omega::runtime::RenderTargetRectQ16;
 using omega::runtime::RunCaptureReplayErrorCode;
 using omega::runtime::RunCaptureReplayOperation;
 using omega::runtime::RunCaptureSession;
@@ -102,6 +103,32 @@ using omega::simulation::SimulationStepResult;
 using omega::simulation::SimulationWorld;
 
 int failures = 0;
+
+constexpr RenderTargetRectQ16 kOriginMarkerDestination{
+    .left = 31'744U,
+    .top = 31'744U,
+    .right = 33'792U,
+    .bottom = 33'792U,
+};
+constexpr RenderTargetRectQ16 kForwardOneMarkerDestination{
+    .left = 31'744U,
+    .top = 30'720U,
+    .right = 33'792U,
+    .bottom = 32'768U,
+};
+constexpr RenderTargetRectQ16 kForwardTwoMarkerDestination{
+    .left = 31'744U,
+    .top = 29'696U,
+    .right = 33'792U,
+    .bottom = 31'744U,
+};
+
+static_assert(omega::app::PlanProjectDiagnosticActorMarkerDestination(Position3{}) ==
+              kOriginMarkerDestination);
+static_assert(omega::app::PlanProjectDiagnosticActorMarkerDestination(Position3{.z = 1}) ==
+              kForwardOneMarkerDestination);
+static_assert(omega::app::PlanProjectDiagnosticActorMarkerDestination(Position3{.z = 2}) ==
+              kForwardTwoMarkerDestination);
 
 [[noreturn]] void FailFixture(const std::string_view site) noexcept
 {
@@ -398,6 +425,8 @@ void CheckContractAndTaxonomy()
         std::declval<const RunReplaySession&>().simulation_state()));
     static_assert(noexcept(
         std::declval<const RunReplaySession&>().debug_locomotion_position()));
+    static_assert(noexcept(std::declval<const RunReplaySession&>()
+                               .diagnostic_actor_marker_destination()));
     static_assert(noexcept(
         std::declval<const RunReplaySession&>().front_end_state()));
 
@@ -430,6 +459,10 @@ void CheckContractAndTaxonomy()
     static_assert(std::is_same_v<
         decltype(std::declval<const RunReplaySession&>().debug_locomotion_position()),
         std::optional<Position3>>);
+    static_assert(std::is_same_v<
+        decltype(std::declval<const RunReplaySession&>()
+                     .diagnostic_actor_marker_destination()),
+        std::optional<RenderTargetRectQ16>>);
     static_assert(std::is_same_v<
         decltype(std::declval<const RunReplaySession&>().front_end_state()),
         std::optional<FrontEndState>>);
@@ -866,63 +899,91 @@ void CheckDebugLocomotionOptIn()
         TakeSession(enabled_created, "the debug-locomotion replay is created");
 
     const auto enabled_initial_state = enabled.simulation_state();
-    Check(enabled.debug_locomotion_position() == Position3{} &&
+    const auto enabled_initial_position = enabled.debug_locomotion_position();
+    const auto enabled_initial_marker =
+        enabled.diagnostic_actor_marker_destination();
+    Check(enabled_initial_position == Position3{} &&
+              enabled_initial_marker == kOriginMarkerDestination &&
+              enabled_initial_position &&
+              enabled_initial_marker ==
+                  omega::app::PlanProjectDiagnosticActorMarkerDestination(
+                      *enabled_initial_position) &&
               enabled_initial_state &&
               SameSimulation(*enabled_initial_state, SimulationState{
                   .alive_entities = 1U,
               }),
-        "opt-in replay owns one positioned synthetic diagnostic entity at the origin");
+        "opt-in replay derives the exact origin marker from its positioned synthetic actor");
 
     auto moved = enabled.Next();
     const auto moved_plan = moved ? moved->frame_plan() : std::nullopt;
     const auto moved_state = enabled.simulation_state();
+    const auto moved_position = enabled.debug_locomotion_position();
+    const auto moved_marker = enabled.diagnostic_actor_marker_destination();
     Check(moved && moved_plan && moved_plan->simulation_steps == 2U &&
               moved->input().IsHeld(omega::app::kDebugMoveForwardAction) &&
               !moved->input().IsHeld(omega::app::kDebugMoveBackwardAction) &&
               !moved->input().IsHeld(omega::app::kDebugMoveLeftAction) &&
               !moved->input().IsHeld(omega::app::kDebugMoveRightAction) &&
-              enabled.debug_locomotion_position() == Position3{.z = 2} &&
+              moved_position == Position3{.z = 2} &&
+              moved_marker == kForwardTwoMarkerDestination && moved_position &&
+              moved_marker ==
+                  omega::app::PlanProjectDiagnosticActorMarkerDestination(
+                      *moved_position) &&
               moved_state && SameSimulation(*moved_state, SimulationState{
                   .completed_steps = 2U,
                   .simulated_time = milliseconds{20},
                   .alive_entities = 1U,
               }) &&
               enabled.state() == RunReplaySessionState::Ready,
-        "one held command is planned once and its same translation reaches every fixed step");
+        "one held command moves both the replay position and its derived marker exactly twice");
 
     const auto scheduler_before_move = enabled.scheduler_state();
     const auto simulation_before_move = enabled.simulation_state();
     const auto position_before_move = enabled.debug_locomotion_position();
+    const auto marker_before_move =
+        enabled.diagnostic_actor_marker_destination();
     RunReplaySession moved_enabled = std::move(enabled);
     Check(enabled.state() == RunReplaySessionState::Inert &&
               enabled.remaining_frames() == 0U && !enabled.scheduler_state() &&
-              !enabled.simulation_state() && !enabled.debug_locomotion_position(),
-        "moving an enabled replay leaves the source inert and positionless");
+              !enabled.simulation_state() && !enabled.debug_locomotion_position() &&
+              !enabled.diagnostic_actor_marker_destination(),
+        "moving an enabled replay leaves the source inert, positionless, and markerless");
     Check(moved_enabled.state() == RunReplaySessionState::Ready &&
               moved_enabled.remaining_frames() == 2U &&
               moved_enabled.scheduler_state() == scheduler_before_move &&
               SameSimulation(moved_enabled.simulation_state(), simulation_before_move) &&
-              moved_enabled.debug_locomotion_position() == position_before_move,
-        "moving an enabled replay transfers its exact positioned world and pending frames");
+              moved_enabled.debug_locomotion_position() == position_before_move &&
+              moved_enabled.diagnostic_actor_marker_destination() == marker_before_move,
+        "moving an enabled replay transfers the world from which the exact marker is derived");
 
     auto released = moved_enabled.Next();
     const auto released_plan = released ? released->frame_plan() : std::nullopt;
     const auto released_state = moved_enabled.simulation_state();
+    const auto released_position = moved_enabled.debug_locomotion_position();
+    const auto released_marker =
+        moved_enabled.diagnostic_actor_marker_destination();
     Check(released && released_plan && released_plan->simulation_steps == 1U &&
               released->input().WasReleased(omega::app::kDebugMoveForwardAction) &&
               !released->input().IsHeld(omega::app::kDebugMoveForwardAction) &&
-              moved_enabled.debug_locomotion_position() == Position3{.z = 2} &&
+              released_position == Position3{.z = 2} &&
+              released_marker == kForwardTwoMarkerDestination &&
+              released_position &&
+              released_marker ==
+                  omega::app::PlanProjectDiagnosticActorMarkerDestination(
+                      *released_position) &&
               released_state && SameSimulation(*released_state, SimulationState{
                   .completed_steps = 3U,
                   .simulated_time = milliseconds{30},
                   .alive_entities = 1U,
               }) &&
               moved_enabled.state() == RunReplaySessionState::Ready,
-        "a released action advances the clock with a neutral translation and stops movement");
+        "a released action advances only the clock and preserves the exact marker destination");
 
     const auto scheduler_before_terminal = moved_enabled.scheduler_state();
     const auto simulation_before_terminal = moved_enabled.simulation_state();
     const auto position_before_terminal = moved_enabled.debug_locomotion_position();
+    const auto marker_before_terminal =
+        moved_enabled.diagnostic_actor_marker_destination();
     auto terminal = moved_enabled.Next();
     Check(terminal && terminal->terminal_input() && !terminal->elapsed() &&
               !terminal->frame_plan() &&
@@ -930,8 +991,10 @@ void CheckDebugLocomotionOptIn()
               moved_enabled.state() == RunReplaySessionState::Complete &&
               moved_enabled.scheduler_state() == scheduler_before_terminal &&
               SameSimulation(moved_enabled.simulation_state(), simulation_before_terminal) &&
-              moved_enabled.debug_locomotion_position() == position_before_terminal,
-        "a terminal frame cannot mutate scheduler or synthetic position");
+              moved_enabled.debug_locomotion_position() == position_before_terminal &&
+              moved_enabled.diagnostic_actor_marker_destination() ==
+                  marker_before_terminal,
+        "a terminal frame cannot mutate scheduler, synthetic position, or derived marker");
 
     constexpr std::array<nanoseconds, 1U> legacy_elapsed{milliseconds{25}};
     RunCaptureTracePair disabled_pair = BuildPair(actions, 1U, legacy_elapsed);
@@ -944,6 +1007,7 @@ void CheckDebugLocomotionOptIn()
     Check(neutral && neutral->frame_plan() &&
               neutral->frame_plan()->simulation_steps == 2U &&
               !disabled.debug_locomotion_position() &&
+              !disabled.diagnostic_actor_marker_destination() &&
               disabled_state && SameSimulation(*disabled_state, SimulationState{
                   .completed_steps = 2U,
                   .simulated_time = milliseconds{20},
@@ -1000,6 +1064,8 @@ void CheckFrontEndModalGate()
               legacy_plan->simulation_steps == 2U &&
               !legacy.front_end_state() &&
               legacy.debug_locomotion_position() == Position3{.z = 2} &&
+              legacy.diagnostic_actor_marker_destination() ==
+                  kForwardTwoMarkerDestination &&
               legacy_simulation && SameSimulation(*legacy_simulation,
                   SimulationState{
                       .completed_steps = 2U,
@@ -1094,6 +1160,14 @@ void CheckFrontEndModalGate()
     const auto modal_scheduler_origin = modal.scheduler_state();
     const auto modal_world_origin = modal.simulation_state();
     const auto modal_position_origin = modal.debug_locomotion_position();
+    const auto modal_marker_origin =
+        modal.diagnostic_actor_marker_destination();
+    Check(modal_marker_origin == kOriginMarkerDestination &&
+              modal_position_origin &&
+              modal_marker_origin ==
+                  omega::app::PlanProjectDiagnosticActorMarkerDestination(
+                      *modal_position_origin),
+        "modal replay begins with the exact derived origin marker");
     for (std::size_t index = 0U; index < expected_modal_states.size(); ++index)
     {
         auto frame = modal.Next();
@@ -1118,8 +1192,11 @@ void CheckFrontEndModalGate()
                            : FrontEndCommand{}) &&
                   modal.scheduler_state() == modal_scheduler_origin &&
                   SameSimulation(modal.simulation_state(), modal_world_origin) &&
-                  modal.debug_locomotion_position() == modal_position_origin,
-            "main and profile-card edges preserve held-versus-pressed input, discard elapsed, and freeze every simulation owner");
+                  modal.debug_locomotion_position() == modal_position_origin &&
+                  modal.diagnostic_actor_marker_destination() ==
+                      modal_marker_origin,
+            "main and profile-card edges discard elapsed and freeze every "
+            "simulation and marker value");
     }
     auto activated = modal.Next();
     const auto activated_plan = activated ? activated->frame_plan() : std::nullopt;
@@ -1142,8 +1219,10 @@ void CheckFrontEndModalGate()
                       .simulated_time = milliseconds{10},
                       .alive_entities = 1U,
                   }) &&
-              modal.debug_locomotion_position() == Position3{},
-        "activation schedules only its own elapsed sample after large modal time is discarded");
+              modal.debug_locomotion_position() == Position3{} &&
+              modal.diagnostic_actor_marker_destination() ==
+                  kOriginMarkerDestination,
+        "activation schedules only its own elapsed and retains the derived origin marker");
 
     constexpr std::array primary_up{
         InputTransition{.code = 2U, .pressed = false}};
@@ -1315,6 +1394,10 @@ void CheckFrontEndModalGate()
     const auto scheduler_before_open = reopen.scheduler_state();
     const auto world_before_open = reopen.simulation_state();
     const auto position_before_open = reopen.debug_locomotion_position();
+    const auto marker_before_open =
+        reopen.diagnostic_actor_marker_destination();
+    Check(marker_before_open == kOriginMarkerDestination,
+        "the pre-modal scheduler remainder leaves the marker at its exact origin");
     for (std::size_t index = 1U; index < 4U; ++index)
     {
         auto frame = reopen.Next();
@@ -1326,8 +1409,10 @@ void CheckFrontEndModalGate()
                       omega::app::InitialFrontEndState() &&
                   reopen.scheduler_state() == scheduler_before_open &&
                   SameSimulation(reopen.simulation_state(), world_before_open) &&
-                  reopen.debug_locomotion_position() == position_before_open,
-            "opening with held movement and subsequent large modal frames call no locomotion or simulation work");
+                  reopen.debug_locomotion_position() == position_before_open &&
+                  reopen.diagnostic_actor_marker_destination() ==
+                      marker_before_open,
+            "opening with held movement and later modal frames freezes locomotion and its marker");
     }
     auto resumed = reopen.Next();
     const auto resumed_plan = resumed ? resumed->frame_plan() : std::nullopt;
@@ -1339,8 +1424,10 @@ void CheckFrontEndModalGate()
                   .config = reopen_config.scheduler,
                   .total_planned_steps = 1U,
               } &&
-              reopen.debug_locomotion_position() == Position3{.z = 1},
-        "reactivation combines the preserved remainder with only its own elapsed and then resumes held movement");
+              reopen.debug_locomotion_position() == Position3{.z = 1} &&
+              reopen.diagnostic_actor_marker_destination() ==
+                  kForwardOneMarkerDestination,
+        "reactivation uses only its elapsed and resumes the position and marker by one step");
 
     constexpr std::array cancel_priority_transitions{
         InputTransition{.code = 0U, .pressed = true},

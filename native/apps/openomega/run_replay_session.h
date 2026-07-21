@@ -1,5 +1,6 @@
 #pragma once
 
+#include "diagnostic_actor_marker.h"
 #include "front_end.h"
 
 #include "omega/runtime/frame_scheduler.h"
@@ -249,6 +250,11 @@ public:
     // locomotion option created its positioned diagnostic entity.
     [[nodiscard]] std::optional<simulation::Position3>
     debug_locomotion_position() const noexcept;
+    // [game thread; no concurrent use] Derived from the current owned position through the fixed
+    // project diagnostic presentation policy. No marker state or renderer resource is retained;
+    // null means the positioned diagnostic entity is absent or this session is inert.
+    [[nodiscard]] std::optional<runtime::RenderTargetRectQ16>
+    diagnostic_actor_marker_destination() const noexcept;
     // [game thread; no concurrent use] Null means this session uses legacy nonmodal replay.
     [[nodiscard]] std::optional<FrontEndState>
     front_end_state() const noexcept;

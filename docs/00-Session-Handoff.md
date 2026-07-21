@@ -1440,6 +1440,29 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     project-owned native profile-shell behavior. It assigns no retail or PS2 profile, save,
     campaign, checkpoint, memory-card, savestate, emulator,
     or behavioral-parity semantics, and no proprietary or owner input was used.
+84. E-0107 makes the existing synthetic diagnostic actor visible without introducing a retail
+    actor or scene model. `PlanProjectDiagnosticActorMarkerDestination` is a total
+    `constexpr`/`noexcept` map from an owned `Position3` copy to one half-open normalized-Q16
+    rectangle. It uses center 32,768, a fixed 2,048 by 2,048 marker, and a 1,024 step; X increases
+    right, Z increases up, Y is ignored, and X/Z clamp independently to `[-31, 31]` before multiply
+    or Z reversal. The origin rectangle is `{31744,31744,33792,33792}`. Startup creates one mandatory
+    generated 1x1 opaque RGBA8 `{255,64,224,255}` marker texture after the topology texture and
+    before the optional transfer texture. It adds exactly one pool slot and four logical resident
+    bytes. `OmegaApp` owns the marker handle and a fixed CPU base-plus-marker draw list, refreshes
+    only that draw-list value from the post-simulation position before packet construction, and
+    returns it only for `DiagnosticPlay`; no frame-time GPU resource mutation occurs. Missing
+    position or draw-list construction fails the run operationally. Teardown clears the list before
+    releasing its texture. `RunReplaySession` exposes the same destination as a derived optional
+    observer over its existing position, retaining no marker state and changing no trace byte or
+    schema. Capture/replay comparison therefore stays in normalized Q16 rather than physical pixels.
+    This is project-authored diagnostic policy only. It assigns no retail actor/player, coordinate
+    axes or units, camera, transform, level placement, collision, visibility, animation, or
+    framebuffer semantics and claims no owner-corpus, PCSX2, physical-pixel, or behavioral
+    equivalence. The implementation and generated fixtures use no proprietary or owner input.
+    Tooling 340/340, Python compile-all, the 261-file native-dependency gate, the 438-blob staged
+    public-tree gate, the 107-record ledger gate, diff checks, and independent static reviews passed.
+    Local serialized C++ build/test was not attempted because the RAM preflight reported critical
+    kernel-pool pressure; publication CI and exact-main results remain unclaimed.
 
 ## Disc observations
 
@@ -1461,16 +1484,17 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
 
 ## Next focused pass
 
-1. Add the next visible project-owned runtime step as a bounded diagnostic actor overlay: preload
-   one generated marker texture, map the existing synthetic `Position3` X/Z values into a fixed Q16
-   viewport with explicit clamping, compose it over DiagnosticPlay without frame-time resource
-   mutation, and require capture/replay to publish the same final marker rectangle. Treat that map
-   strictly as native debug policy, not retail camera, placement, collision, level, or player
-   semantics. Define any later profile-owned campaign/checkpoint schema only from independently
-   corroborated evidence, and decide persistent active-profile policy separately from E-0096/E-0106
-   session-only selection. Preserve process/package isolation in persistence tests. Build the
-   separately evidenced Omega Strain payload mapper over the bounded standard card codecs; never
-   make a PS2 memory-card device, guest RAM, or emulator savestate part of the shipping runtime.
+1. Add a pure project-owned startup-entry planner and one composed generated acceptance for the
+   existing movie/profile flows. Route a valid visible profile set, or an exact-empty catalog with
+   first-profile capability, into Profiles; fail closed to Main for inconsistent counts or missing
+   persistence capability. Apply the same planner to live startup and fresh replay without automatic
+   creation or selection. Extend the generated opening-movie smoke through
+   `movie -> Profiles -> create -> release -> select -> Main`, proving skip-edge containment, durable
+   `PROFILE 1`, zero simulation while modal, the existing draw-list transitions, and no command-time
+   GPU allocation. This is native shell policy, not retail startup/menu behavior, and adds no GPU
+   resource. Define persistent active-profile and campaign/checkpoint policy separately. Preserve
+   process/package isolation in persistence tests and never make a PS2 memory-card device, guest RAM,
+   or emulator savestate part of the shipping runtime.
 2. Treat E-0099 as runnable-tool and configuration-initialization readiness only. Before any new
    observation, prepare a fresh neutral-menu savestate under the enforced modes and run the private
    producer's synthetic contract and security checks outside every OpenOmega worktree. Then collect

@@ -613,6 +613,19 @@ Studio's historical engine source or internal toolchain.
   This diagnostic actor is not the retail player. Its identifiers, bindings, origin, axes, integer
   unit, step rate, and diagonal policy establish no retail controls, coordinates, movement,
   physics, collision, camera, animation, mission, network, asset, or rendering semantics.
+- E-0107 gives that synthetic actor one bounded project-owned presentation only while
+  `DiagnosticPlay` is active. A pure `constexpr`/`noexcept` planner maps an owned `Position3` copy
+  into a half-open normalized-Q16 marker rectangle: the origin is centered, every marker is
+  2,048 by 2,048, each synthetic X/Z unit moves 1,024, X increases right, Z increases up, Y is
+  ignored, and X/Z saturate independently to `[-31, 31]` before arithmetic. `OmegaApp` preloads one
+  opaque 1x1 RGBA8 `{255,64,224,255}` texture, adding exactly one texture slot and four logical
+  resident bytes. After simulation it rebuilds only the fixed CPU base-plus-marker draw list, using
+  Stretch plus Nearest; it performs no frame-time upload, texture update, or release. Fresh replay
+  derives the same optional Q16 destination from its existing owned diagnostic position without a
+  capture-schema change or retained marker state. This overlay, mapping, color, extent, axes, clamp,
+  composition, and error policy are native diagnostics, not retail actor/player, coordinate,
+  camera, transform, level-placement, collision, visibility, animation, or rendering-equivalence
+  evidence. No proprietary or owner input is consumed.
 - E-0061 begins with a portable project-owned diagnostic-menu value and deterministic 128x72
   opaque RGBA8 `DEV` card. The pure toggle-edge reducer and integer-only image generator use no
   files, platform APIs, decoded assets, or retail inputs. The complete 36,864-byte output contains
