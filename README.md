@@ -1049,22 +1049,23 @@ Studio's historical engine source or internal toolchain.
   color-space, material, geometry, retail-rendering, gameplay, or emulator-equivalence semantics.
   Only public source and generated fixtures were used; no private or owner file, proprietary input,
   D-drive content, disc image, retail executable, emulator, or PCSX2 input was accessed.
-- A separate private aggregate-only ReSymbol cross-check pinned the explicit
-  `Ps2EeR5900LeCoreV1` decoder profile. Because the frozen ELF was unavailable, it used the
-  available private 32 MiB EE memory and reproduced 38/38 already-public loader control-transfer
-  sites: 33 calls and five branches, with zero mismatch or error classes. No private path, hash,
-  byte, address, symbol, disassembly, input copy, or ReSymbol output is committed. This is a bounded
-  decoder-consistency result, not a semantic, decompilation, or retail-behavior claim.
-- The native VUM adapter converts all 7,036 material catalogs into owned neutral data: 38,793
-  source-order names, 38,899 material records, and 42,631 dense name references with zero errors.
-  Level-wide service orchestration independently loads the 5,351 manifest-referenced catalogs
-  across all 18 levels with zero errors: 34,267 owned names, 34,589 material records, and 37,893
-  dense references in exact manifest order.
-  A separate retail-only passive descriptor validates 91,460 payload pairs, 38,023 normalized
-  targets, 134,122 middle-to-final references, and 365,840 ordered Q/P references without
-  exposing payload bytes, render geometry, or console instructions.
-- A bounded analysis-only lexical-coherence pass compares complete normalized VUM member-name
-  occurrences only against exact complete direct locator strings when the VUM name ends `.TDX`.
+> **Provenance quarantine:** an earlier README revision reported a private ReSymbol
+> `Ps2EeR5900LeCoreV1` cross-check with a 38/38 result. No evidence-ledger entry preserves its
+> source and check, so it is excluded from this verified baseline pending a new reproducible,
+> privacy-safe evidence record. It supports no current loader, decoder, format, runtime, or
+> retail-behavior claim.
+
+- E-0023 records that the native VUM adapter converts all 7,036 material catalogs into owned neutral
+  data: 38,793 source-order names, 38,899 material records, and 42,631 dense name references with
+  zero errors. E-0033 records that level-wide service orchestration independently loads the 5,351
+  manifest-referenced catalogs across all 18 levels with zero errors: 34,267 owned names, 34,589
+  material records, and 37,893 dense references in exact manifest order. E-0024 records that a
+  separate retail-only passive descriptor validates 91,460 payload pairs, 38,023 normalized targets,
+  134,122 middle-to-final references, and 365,840 ordered Q/P references without exposing payload
+  bytes, render geometry, or console instructions.
+- E-0041 records a bounded analysis-only lexical-coherence pass that compares complete normalized
+  VUM member-name occurrences only against exact complete direct locator strings when the VUM name
+  ends `.TDX`.
   Two passes are byte-identical, scan 18/18 levels with zero errors, and exactly reproduce the native
   cell/catalog/name/material/reference and container/locator populations. All 34,267 VUM name
   occurrences and 37,893 dense references classify as non-`.TDX`; no name enters the eligible
@@ -1072,27 +1073,29 @@ Studio's historical engine source or internal toolchain.
   negative result tests no alias family, observes no native or retail lookup, establishes no texture
   role, material binding, source priority, or runtime integration, and exposes no identities or
   proprietary data.
-- A separate exact-first one-terminal-extension pass keeps that direct `.TDX` locator universe
-  unchanged. After complete normalization, it independently removes at most one syntactic extension
-  from the final component on both sides only when the full strings are not already equal; directory
-  components and original class-qualified locators are preserved. Two passes are byte-identical and
-  scan 18/18 levels with zero errors. All 34,267 VUM name occurrences and 37,893 dense references are
+- E-0042 records a separate exact-first one-terminal-extension pass that keeps that direct `.TDX`
+  locator universe unchanged. After complete normalization, it independently removes at most one
+  syntactic extension from the final component on both sides only when the full strings are not
+  already equal; directory components and original class-qualified locators are preserved. Two
+  passes are byte-identical and scan 18/18 levels with zero errors. All 34,267 VUM name occurrences
+  and 37,893 dense references are
   extension-elided unique-primary candidates; all 34,589 material records inherit a unique
   extension-elided candidate, while 5,690 original locator occurrences are reached only through
   extension elision and 111 remain unreached. This offline lexical result does not observe a retail
   alias rule or material consumption, establish a texture role or binding, assign class priority, or
   justify runtime integration, and it exposes no identities or proprietary data.
-- The first privacy-safe VUM consumer trace has one strict-validator-accepted complete 120-frame pair
-  from one selected runtime copy. Its repeat is byte-identical; each validated report contains two
-  EE-read aggregate rows, two anonymous-site rows, and zero VIF1 chunk rows. Post-run containment
-  auditing found no retained runtime copy, executable surface, reparse point, owner-input copy, or
-  emulator/build process. An independently guarded second ranked trial reproduced those aggregates
-  exactly: one capture with four accepted aggregate rows, split evenly between EE-read and
-  anonymous-site rows, zero VIF1 rows, and zero aggregate-count deltas. In both trials, the EE-read
-  rows remain confined to the already-opaque header-vector block; no accepted row reaches counts,
-  records, metadata, payload, VIF, or tail data. This repeated header-only observation does not
-  exclude copied buffers or activity outside the bounded observation window and assigns no geometry,
-  topology, vertex, material, packet, draw, placement, visibility, or gameplay semantics.
+- E-0034 records the first privacy-safe VUM consumer trace: one strict-validator-accepted complete
+  120-frame pair from one selected runtime copy. Its repeat is byte-identical; each validated report
+  contains two EE-read aggregate rows, two anonymous-site rows, and zero VIF1 chunk rows. Post-run
+  containment auditing found no retained runtime copy, executable surface, reparse point,
+  owner-input copy, or emulator/build process. An independently guarded second ranked trial
+  reproduced those aggregates exactly: one capture with four accepted aggregate rows, split evenly
+  between EE-read and anonymous-site rows, zero VIF1 rows, and zero aggregate-count deltas. In both
+  trials, the EE-read rows remain confined to the already-opaque header-vector block; no accepted
+  row reaches counts, records, metadata, payload, VIF, or tail data. This repeated header-only
+  observation does not exclude copied buffers or activity outside the bounded observation window
+  and assigns no geometry, topology, vertex, material, packet, draw, placement, visibility, or
+  gameplay semantics.
 
 ## Quick start
 
