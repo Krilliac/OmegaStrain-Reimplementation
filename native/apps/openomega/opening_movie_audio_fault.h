@@ -60,10 +60,11 @@ enum class OpeningMovieAudioFaultDisposition : std::uint8_t
     return OpeningMovieAudioFault::None;
 }
 
-// Callback/control counters can describe general device failures. They fail
-// open only while a frame still belongs to the modal opening-movie window.
-// Underrun/rejection counters are movie-scoped and are stale once that window
-// has closed, so they cannot make an unrelated front-end frame fatal.
+// [any thread; reentrant] Callback/control counters can describe general device
+// failures. They fail open only while a frame still belongs to the modal
+// opening-movie window. Underrun/rejection counters are movie-scoped and are
+// stale once that window has closed, so they cannot make an unrelated front-end
+// frame fatal. No allocation, no I/O, no borrowed lifetime.
 [[nodiscard]] constexpr OpeningMovieAudioFaultDisposition
 DisposeOpeningMovieAudioFault(const OpeningMovieAudioFault fault,
     const bool movie_window_open) noexcept
@@ -83,7 +84,13 @@ DisposeOpeningMovieAudioFault(const OpeningMovieAudioFault fault,
             ? OpeningMovieAudioFaultDisposition::FailOpen
             : OpeningMovieAudioFaultDisposition::Ignore;
     }
-    return OpeningMovieAudioFaultDisposition::Fatal;
+    // An out-of-domain classification is either a corrupted value or an
+    // enumerator added without updating this switch. It must still respect the
+    // modal boundary: while the opening-movie window is open, every audio fault
+    // costs at most the movie, never the session. Only outside that window may
+    // an unclassifiable audio fault be fatal.
+    return movie_window_open ? OpeningMovieAudioFaultDisposition::FailOpen
+                             : OpeningMovieAudioFaultDisposition::Fatal;
 }
 
 [[nodiscard]] constexpr std::string_view OpeningMovieAudioFaultMessage(
