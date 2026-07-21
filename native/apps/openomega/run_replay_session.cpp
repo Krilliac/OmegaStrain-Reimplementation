@@ -125,12 +125,18 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
         front_end_capabilities.can_create_first_profile &&
         config.front_end_visible_profile_slots == 0U &&
         config.front_end_total_profile_count == 0U;
+    front_end_capabilities.can_create_first_character =
+        front_end_capabilities.supports_character_selection &&
+        front_end_capabilities.can_create_first_character;
 
     RunReplaySession session(
         std::move(*scheduler), std::move(*world), std::move(*replay),
         debug_locomotion_entity, config.initial_front_end_state,
         config.front_end_visible_profile_slots,
-        config.front_end_total_profile_count, front_end_capabilities);
+        config.front_end_total_profile_count,
+        config.front_end_visible_character_slots_by_profile,
+        config.front_end_total_character_counts_by_profile,
+        front_end_capabilities);
     return std::expected<RunReplaySession, RunReplayError>{std::move(session)};
 }
 
@@ -141,6 +147,10 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
     const std::optional<FrontEndState> front_end_state,
     const std::uint8_t front_end_visible_profile_slots,
     const std::size_t front_end_total_profile_count,
+    std::array<std::uint8_t, kFrontEndVisibleProfiles>
+        front_end_visible_character_slots_by_profile,
+    std::array<std::size_t, kFrontEndVisibleProfiles>
+        front_end_total_character_counts_by_profile,
     const FrontEndCapabilities front_end_capabilities) noexcept
     : scheduler_(std::in_place, std::move(scheduler)),
       simulation_(std::in_place, std::move(simulation)),
@@ -149,8 +159,16 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
       front_end_state_(front_end_state),
       front_end_visible_profile_slots_(front_end_visible_profile_slots),
       front_end_total_profile_count_(front_end_total_profile_count),
+      front_end_visible_character_slots_by_profile_(
+          front_end_visible_character_slots_by_profile),
+      front_end_total_character_counts_by_profile_(
+          front_end_total_character_counts_by_profile),
+      front_end_active_profile_slot_(std::nullopt),
+      front_end_active_visible_character_slots_(0U),
+      front_end_active_total_character_count_(0U),
       front_end_capabilities_(front_end_capabilities),
       front_end_active_profile_is_confirmed_(false),
+      front_end_active_character_is_confirmed_(false),
       state_(replay_->complete()
                  ? RunReplaySessionState::Complete
                  : RunReplaySessionState::Ready)
@@ -169,10 +187,24 @@ RunReplaySession::RunReplaySession(RunReplaySession&& other) noexcept
           other.front_end_visible_profile_slots_, std::uint8_t{0U})),
       front_end_total_profile_count_(std::exchange(
           other.front_end_total_profile_count_, std::size_t{0U})),
+      front_end_visible_character_slots_by_profile_(std::exchange(
+          other.front_end_visible_character_slots_by_profile_,
+          std::array<std::uint8_t, kFrontEndVisibleProfiles>{})),
+      front_end_total_character_counts_by_profile_(std::exchange(
+          other.front_end_total_character_counts_by_profile_,
+          std::array<std::size_t, kFrontEndVisibleProfiles>{})),
+      front_end_active_profile_slot_(std::exchange(
+          other.front_end_active_profile_slot_, std::nullopt)),
+      front_end_active_visible_character_slots_(std::exchange(
+          other.front_end_active_visible_character_slots_, std::uint8_t{0U})),
+      front_end_active_total_character_count_(std::exchange(
+          other.front_end_active_total_character_count_, std::size_t{0U})),
       front_end_capabilities_(std::exchange(
           other.front_end_capabilities_, FrontEndCapabilities{})),
       front_end_active_profile_is_confirmed_(std::exchange(
           other.front_end_active_profile_is_confirmed_, false)),
+      front_end_active_character_is_confirmed_(std::exchange(
+          other.front_end_active_character_is_confirmed_, false)),
       state_(std::exchange(other.state_, RunReplaySessionState::Inert))
 {
     other.NormalizeInert();
@@ -185,8 +217,14 @@ void RunReplaySession::NormalizeInert() noexcept
     front_end_state_.reset();
     front_end_visible_profile_slots_ = 0U;
     front_end_total_profile_count_ = 0U;
+    front_end_visible_character_slots_by_profile_ = {};
+    front_end_total_character_counts_by_profile_ = {};
+    front_end_active_profile_slot_.reset();
+    front_end_active_visible_character_slots_ = 0U;
+    front_end_active_total_character_count_ = 0U;
     front_end_capabilities_ = {};
     front_end_active_profile_is_confirmed_ = false;
+    front_end_active_character_is_confirmed_ = false;
     simulation_.reset();
     scheduler_.reset();
     state_ = RunReplaySessionState::Inert;
@@ -231,6 +269,16 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             front_end_capabilities_.can_start_diagnostic_campaign,
         .requires_active_profile_for_diagnostic_play =
             front_end_capabilities_.requires_active_profile_for_diagnostic_play,
+        .supports_character_selection =
+            front_end_capabilities_.supports_character_selection,
+        .can_create_first_character =
+            front_end_capabilities_.supports_character_selection &&
+            front_end_capabilities_.can_create_first_character &&
+            front_end_active_visible_character_slots_ == 0U &&
+            front_end_active_total_character_count_ == 0U,
+        .requires_active_character_for_diagnostic_play =
+            front_end_capabilities_.supports_character_selection &&
+            front_end_capabilities_.requires_active_character_for_diagnostic_play,
     };
     FrontEndCommand front_end_command{};
     if (front_end_state_)
@@ -247,7 +295,9 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
                     replay_frame->input().WasPressed(kFrontEndCancelAction),
             },
             front_end_visible_profile_slots_, front_end_capabilities,
-            front_end_active_profile_is_confirmed_);
+            front_end_active_profile_is_confirmed_,
+            front_end_active_visible_character_slots_,
+            front_end_active_character_is_confirmed_);
         *front_end_state_ = front_end.state;
         front_end_command = front_end.command;
         if (front_end_command.type == FrontEndCommandType::CreateFirstProfile)
@@ -259,6 +309,8 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             // diagnostic play until a later selection is replayed.
             front_end_visible_profile_slots_ = 1U;
             front_end_total_profile_count_ = 1U;
+            front_end_visible_character_slots_by_profile_[0U] = 0U;
+            front_end_total_character_counts_by_profile_[0U] = 0U;
             front_end_capabilities_.can_create_first_profile = false;
         }
         else if (front_end_command.type == FrontEndCommandType::SetActiveProfile)
@@ -275,15 +327,54 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             front_end_active_profile_is_confirmed_ =
                 selected_profile_slot < front_end_visible_profile_slots_ &&
                 selected_profile_slot < front_end_total_profile_count_;
+            front_end_active_character_is_confirmed_ = false;
+            front_end_active_profile_slot_.reset();
+            front_end_active_visible_character_slots_ = 0U;
+            front_end_active_total_character_count_ = 0U;
+            if (front_end_active_profile_is_confirmed_ &&
+                front_end_capabilities_.supports_character_selection)
+            {
+                front_end_active_profile_slot_ = front_end_command.profile_slot;
+                front_end_active_visible_character_slots_ =
+                    front_end_visible_character_slots_by_profile_[selected_profile_slot];
+                front_end_active_total_character_count_ =
+                    front_end_total_character_counts_by_profile_[selected_profile_slot];
+            }
         }
-        // StartDiagnosticCampaign is deliberately publication-only here.
-        // Replay owns no profile identity or persistence boundary and therefore
-        // cannot create or validate a durable diagnostic checkpoint.
+        else if (front_end_command.type ==
+                 FrontEndCommandType::CreateFirstCharacter)
+        {
+            // Character creation is a replay-local logical effect only. It
+            // publishes no identity and therefore cannot open confirmation.
+            front_end_active_visible_character_slots_ = 1U;
+            front_end_active_total_character_count_ = 1U;
+            if (front_end_active_profile_slot_)
+            {
+                const std::size_t selected_profile_slot =
+                    static_cast<std::size_t>(*front_end_active_profile_slot_);
+                front_end_visible_character_slots_by_profile_[selected_profile_slot] = 1U;
+                front_end_total_character_counts_by_profile_[selected_profile_slot] = 1U;
+            }
+        }
+        else if (front_end_command.type ==
+                 FrontEndCommandType::SetActiveCharacter)
+        {
+            const std::size_t selected_character_slot =
+                static_cast<std::size_t>(front_end_command.character_slot);
+            front_end_active_character_is_confirmed_ =
+                front_end_active_profile_is_confirmed_ &&
+                selected_character_slot < front_end_active_visible_character_slots_ &&
+                selected_character_slot < front_end_active_total_character_count_;
+        }
+        // StartDiagnosticCampaign is deliberately publication-only here. Replay
+        // owns no profile/character identity or persistence boundary and cannot
+        // create or validate a durable diagnostic session marker.
     }
     const bool simulation_allowed = !front_end_state_ ||
-                                    FrontEndAllowsSimulation(
-                                        *front_end_state_, front_end_capabilities,
-                                        front_end_active_profile_is_confirmed_);
+                                     FrontEndAllowsSimulation(
+                                         *front_end_state_, front_end_capabilities,
+                                         front_end_active_profile_is_confirmed_,
+                                         front_end_active_character_is_confirmed_);
     const std::optional<std::chrono::nanoseconds> elapsed = replay_frame->elapsed();
     const std::chrono::nanoseconds effective_elapsed = simulation_allowed
         ? *elapsed
@@ -390,5 +481,10 @@ RunReplaySession::front_end_state() const noexcept
 bool RunReplaySession::front_end_active_profile_is_confirmed() const noexcept
 {
     return front_end_active_profile_is_confirmed_;
+}
+
+bool RunReplaySession::front_end_active_character_is_confirmed() const noexcept
+{
+    return front_end_active_character_is_confirmed_;
 }
 } // namespace omega::app

@@ -1544,6 +1544,28 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     proprietary, D-drive, emulator, or PCSX2 input was accessed. This is not a retail/PS2 campaign,
     save, checkpoint, gameplay, continuation, world-state, memory-card, emulator, or parity claim.
 
+88. E-0112 completes one project-owned native bootstrap from profile confirmation through character
+    creation/selection into DiagnosticPlay. `CharacterCatalog` owns profile-scoped metadata beneath
+    `profiles/<profile-id>/characters/<character-id>/metadata`; every operation validates the parent
+    profile and bounded listing spends its marker budget before parsing. Production profile
+    confirmation prepares a bounded Characters model and GPU card before publishing the selected
+    profile. Exact empty state permits one fixed `DIAGNOSTIC CHARACTER` creation without implicit
+    selection. A later Primary confirms the chosen character with the schema-1 48-byte `OOACTCHR`
+    pointer. Profile switching atomically updates `profiles/active` and invalidates
+    `profiles/active-character`, including an absence precondition that rejects an interfering raw
+    pointer rather than leaving cross-profile state.
+
+    Start Diagnostic requires both per-launch confirmations, revalidates both pointer revisions and
+    catalog records, and writes or reuses the schema-1 48-byte `OOGAMECP` marker at the canonical
+    character-owned diagnostic-session key before state publication or simulation. Reopen validates
+    all four identities/records but activates neither session value automatically. Generated tests
+    cover catalog boundaries, pure creation/selection reduction, interference, corruption, profile
+    switching, durable reopen, and idempotent session preparation. A separate owner-only manual run
+    traversed create, select, start, close, reopen, reselect, and restart into the existing MINSK
+    diagnostic topology and actor marker; proprietary inputs and observations remained outside Git.
+    This is not retail character customization, appearance, loadout, campaign, mission, scene,
+    checkpoint, world-state, save, or behavioral parity.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2
@@ -1564,11 +1586,11 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
 
 ## Next focused pass
 
-1. Compile and execute the reconciled E-0111 reducer, persistence, replay, capture, and opening-movie
-   fixtures in hosted Native CI, then validate the exact merged main tree. Keep the project marker
-   explicit, transactional, and independent of PS2 save representation. Do not infer retail or PS2
-   save/menu/profile/gameplay behavior or introduce a PS2 memory-card device, guest RAM, or emulator
-   savestate into the shipping runtime.
+1. Publish E-0112 through protected-main CI and validate the exact merged tree. Preserve the working
+   profile -> character -> session route while replacing only independently evidenced pieces of the
+   current diagnostic topology/marker view with native level, actor, camera, and control behavior.
+   Keep the project schemas explicit, transactional, and independent of PS2 save representation;
+   do not infer retail customization, mission, world, or save behavior from the bootstrap itself.
 2. Treat E-0099 as runnable-tool and configuration-initialization readiness only. Before any new
    observation, prepare a fresh neutral-menu savestate under the enforced modes and run the private
    producer's synthetic contract and security checks outside every OpenOmega worktree. Then collect

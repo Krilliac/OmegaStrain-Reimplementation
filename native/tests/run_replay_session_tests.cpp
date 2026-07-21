@@ -69,6 +69,7 @@ namespace
 using std::chrono::milliseconds;
 using std::chrono::nanoseconds;
 using omega::app::FrontEndCapabilities;
+using omega::app::FrontEndCharacterSlot;
 using omega::app::FrontEndMode;
 using omega::app::FrontEndMainRow;
 using omega::app::FrontEndCommand;
@@ -105,6 +106,10 @@ using omega::simulation::SimulationWorld;
 template <typename T>
 concept HasFrontEndActiveProfileConfirmationSeed =
     requires(T value) { value.front_end_active_profile_is_confirmed; };
+
+template <typename T>
+concept HasFrontEndActiveCharacterConfirmationSeed =
+    requires(T value) { value.front_end_active_character_is_confirmed; };
 
 int failures = 0;
 
@@ -435,6 +440,8 @@ void CheckContractAndTaxonomy()
         std::declval<const RunReplaySession&>().front_end_state()));
     static_assert(noexcept(std::declval<const RunReplaySession&>()
                                .front_end_active_profile_is_confirmed()));
+    static_assert(noexcept(std::declval<const RunReplaySession&>()
+                               .front_end_active_character_is_confirmed()));
 
     static_assert(!std::is_aggregate_v<RunReplayFrame>);
     static_assert(!std::is_default_constructible_v<RunReplayFrame>);
@@ -476,6 +483,10 @@ void CheckContractAndTaxonomy()
         decltype(std::declval<const RunReplaySession&>()
                      .front_end_active_profile_is_confirmed()),
         bool>);
+    static_assert(std::is_same_v<
+        decltype(std::declval<const RunReplaySession&>()
+                     .front_end_active_character_is_confirmed()),
+        bool>);
     static_assert(std::is_nothrow_move_constructible_v<CreateResult>);
     static_assert(std::is_nothrow_move_constructible_v<NextResult>);
 
@@ -486,13 +497,27 @@ void CheckContractAndTaxonomy()
     static_assert(!default_config.initial_front_end_state);
     static_assert(default_config.front_end_visible_profile_slots == 0U);
     static_assert(default_config.front_end_total_profile_count == 0U);
+    static_assert(default_config.front_end_visible_character_slots_by_profile ==
+                  std::array<std::uint8_t,
+                      omega::app::kFrontEndVisibleProfiles>{});
+    static_assert(default_config.front_end_total_character_counts_by_profile ==
+                  std::array<std::size_t,
+                      omega::app::kFrontEndVisibleProfiles>{});
     static_assert(!default_config.front_end_capabilities.can_create_first_profile);
     static_assert(!default_config.front_end_capabilities
                        .can_start_diagnostic_campaign);
     static_assert(!default_config.front_end_capabilities
                        .requires_active_profile_for_diagnostic_play);
+    static_assert(!default_config.front_end_capabilities
+                       .supports_character_selection);
+    static_assert(!default_config.front_end_capabilities
+                       .can_create_first_character);
+    static_assert(!default_config.front_end_capabilities
+                       .requires_active_character_for_diagnostic_play);
     static_assert(
         !HasFrontEndActiveProfileConfirmationSeed<RunReplaySessionConfig>);
+    static_assert(
+        !HasFrontEndActiveCharacterConfirmationSeed<RunReplaySessionConfig>);
     static_assert(static_cast<int>(
                       RunReplayErrorCode::SimulationRepresentationExhausted) == 7);
     static_assert(static_cast<int>(
@@ -2246,6 +2271,237 @@ void CheckDiagnosticPlayGateReplay()
         "closed diagnostic-start support is inert and discards elapsed time");
 }
 
+void CheckCharacterFlowReplay()
+{
+    constexpr std::array menu_actions{
+        omega::app::kFrontEndPreviousAction,
+        omega::app::kFrontEndNextAction,
+        omega::app::kFrontEndPrimaryAction,
+        omega::app::kFrontEndCancelAction,
+    };
+    constexpr std::array primary_down{
+        InputTransition{.code = 2U, .pressed = true}};
+    constexpr std::array primary_up{
+        InputTransition{.code = 2U, .pressed = false}};
+    constexpr FrontEndState profiles_second{
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::Second,
+    };
+    constexpr FrontEndState characters_first{
+        .mode = FrontEndMode::Characters,
+        .selected_main_row = FrontEndMainRow::Profiles,
+    };
+    constexpr FrontEndState main_start{
+        .mode = FrontEndMode::Main,
+        .selected_main_row = FrontEndMainRow::StartDiagnostic,
+    };
+
+    // Supplying character snapshots cannot alter the legacy profile-selection
+    // route while character selection support remains disabled.
+    const std::array legacy_frames{
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+    };
+    RunReplaySessionConfig legacy_config = ValidConfig();
+    legacy_config.initial_front_end_state = profiles_second;
+    legacy_config.front_end_visible_profile_slots = 3U;
+    legacy_config.front_end_total_profile_count = 3U;
+    legacy_config.front_end_visible_character_slots_by_profile = {2U, 0U, 1U};
+    legacy_config.front_end_total_character_counts_by_profile = {2U, 0U, 1U};
+    legacy_config.front_end_capabilities.requires_active_character_for_diagnostic_play = true;
+    legacy_config.front_end_capabilities.can_create_first_character = true;
+    auto legacy_created = RunReplaySession::Create(
+        BuildScriptedPair(menu_actions, legacy_frames), legacy_config);
+    RunReplaySession legacy = TakeSession(
+        legacy_created, "the character-snapshot legacy replay is created");
+    auto legacy_selection = legacy.Next();
+    Check(legacy_selection && legacy_selection->frame_plan() &&
+              legacy_selection->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::SetActiveProfile,
+                  .profile_slot = FrontEndProfileSlot::Second,
+              } &&
+              legacy.front_end_state() == FrontEndState{
+                  .mode = FrontEndMode::Main,
+                  .selected_main_row = FrontEndMainRow::Profiles,
+              } &&
+              legacy.front_end_active_profile_is_confirmed() &&
+              !legacy.front_end_active_character_is_confirmed() &&
+              legacy_selection->frame_plan()->simulation_steps == 0U,
+        "character snapshots preserve the legacy profile-to-Main route when selection support is closed");
+
+    // The character gate is independently effective even when the profile gate
+    // is not requested.
+    const std::array gated_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{15},
+            .transitions = primary_down},
+    };
+    RunReplaySessionConfig gated_config = ValidConfig();
+    gated_config.initial_front_end_state = main_start;
+    gated_config.front_end_capabilities = FrontEndCapabilities{
+        .can_start_diagnostic_campaign = true,
+        .supports_character_selection = true,
+        .requires_active_character_for_diagnostic_play = true,
+    };
+    auto gated_created = RunReplaySession::Create(
+        BuildScriptedPair(menu_actions, gated_frames), gated_config);
+    RunReplaySession gated = TakeSession(
+        gated_created, "the character-only gated replay is created");
+    const auto gated_scheduler = gated.scheduler_state();
+    const auto gated_simulation = gated.simulation_state();
+    auto gated_start = gated.Next();
+    Check(gated_start && gated_start->frame_plan() &&
+              gated_start->front_end_command() == FrontEndCommand{} &&
+              gated.front_end_state() == main_start &&
+              !gated.front_end_active_profile_is_confirmed() &&
+              !gated.front_end_active_character_is_confirmed() &&
+              gated_start->frame_plan()->simulation_steps == 0U &&
+              gated.scheduler_state() == gated_scheduler &&
+              SameSimulation(gated.simulation_state(), gated_simulation),
+        "the configured character gate leaves Start Diagnostic inert and freezes simulation while its mirror is closed");
+
+    const std::array character_frames{
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = milliseconds{15},
+            .transitions = primary_down},
+    };
+    RunReplaySessionConfig config = ValidConfig();
+    config.initial_front_end_state = profiles_second;
+    config.front_end_visible_profile_slots = 3U;
+    config.front_end_total_profile_count = 3U;
+    // Selecting the empty second snapshot must not accidentally consume either
+    // neighboring profile's nonempty character counts.
+    config.front_end_visible_character_slots_by_profile = {2U, 0U, 1U};
+    config.front_end_total_character_counts_by_profile = {2U, 0U, 1U};
+    config.front_end_capabilities = FrontEndCapabilities{
+        .can_start_diagnostic_campaign = true,
+        .requires_active_profile_for_diagnostic_play = true,
+        .supports_character_selection = true,
+        .can_create_first_character = true,
+        .requires_active_character_for_diagnostic_play = true,
+    };
+    auto created = RunReplaySession::Create(
+        BuildScriptedPair(menu_actions, character_frames), config);
+    RunReplaySession source = TakeSession(
+        created, "the full character-flow replay is created");
+    const auto scheduler_origin = source.scheduler_state();
+    const auto simulation_origin = source.simulation_state();
+    Check(!source.front_end_active_profile_is_confirmed() &&
+              !source.front_end_active_character_is_confirmed(),
+        "both identity-free replay mirrors begin closed");
+
+    auto selected_profile = source.Next();
+    Check(selected_profile && selected_profile->frame_plan() &&
+              selected_profile->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::SetActiveProfile,
+                  .profile_slot = FrontEndProfileSlot::Second,
+              } &&
+              source.front_end_state() == characters_first &&
+              source.front_end_active_profile_is_confirmed() &&
+              !source.front_end_active_character_is_confirmed() &&
+              selected_profile->frame_plan()->simulation_steps == 0U &&
+              source.scheduler_state() == scheduler_origin &&
+              SameSimulation(source.simulation_state(), simulation_origin),
+        "profile selection loads only its indexed empty character snapshot and routes to Characters");
+
+    auto profile_release = source.Next();
+    auto created_character = source.Next();
+    Check(profile_release && profile_release->front_end_command() == FrontEndCommand{} &&
+              created_character && created_character->frame_plan() &&
+              created_character->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::CreateFirstCharacter,
+                  .profile_slot = FrontEndProfileSlot::First,
+                  .character_slot = FrontEndCharacterSlot::First,
+              } &&
+              source.front_end_state() == characters_first &&
+              source.front_end_active_profile_is_confirmed() &&
+              !source.front_end_active_character_is_confirmed() &&
+              created_character->frame_plan()->simulation_steps == 0U &&
+              source.scheduler_state() == scheduler_origin &&
+              SameSimulation(source.simulation_state(), simulation_origin),
+        "first-character creation advances only the selected replay-local logical snapshot from zero to one");
+
+    auto character_release = source.Next();
+    auto selected_character = source.Next();
+    Check(character_release && character_release->front_end_command() == FrontEndCommand{} &&
+              selected_character && selected_character->frame_plan() &&
+              selected_character->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::SetActiveCharacter,
+                  .profile_slot = FrontEndProfileSlot::First,
+                  .character_slot = FrontEndCharacterSlot::First,
+              } &&
+              source.front_end_state() == main_start &&
+              source.front_end_active_profile_is_confirmed() &&
+              source.front_end_active_character_is_confirmed() &&
+              selected_character->frame_plan()->simulation_steps == 0U &&
+              source.scheduler_state() == scheduler_origin &&
+              SameSimulation(source.simulation_state(), simulation_origin),
+        "selecting the replay-created character opens its identity-free mirror and returns to Main");
+
+    const auto menu_before_move = source.front_end_state();
+    RunReplaySession replay = std::move(source);
+    Check(source.state() == RunReplaySessionState::Inert &&
+              !source.front_end_state() &&
+              !source.front_end_active_profile_is_confirmed() &&
+              !source.front_end_active_character_is_confirmed() &&
+              replay.state() == RunReplaySessionState::Ready &&
+              replay.front_end_state() == menu_before_move &&
+              replay.front_end_active_profile_is_confirmed() &&
+              replay.front_end_active_character_is_confirmed(),
+        "move construction transfers both replay mirrors and leaves the source observably inert");
+
+    auto selection_release = replay.Next();
+    Check(selection_release && selection_release->frame_plan() &&
+              selection_release->front_end_command() == FrontEndCommand{} &&
+              selection_release->frame_plan()->simulation_steps == 0U &&
+              replay.front_end_state() == main_start &&
+              replay.front_end_active_profile_is_confirmed() &&
+              replay.front_end_active_character_is_confirmed() &&
+              replay.scheduler_state() == scheduler_origin &&
+              SameSimulation(replay.simulation_state(), simulation_origin),
+        "the post-selection release preserves both gates without advancing simulation");
+
+    auto started = replay.Next();
+    const auto started_plan = started ? started->frame_plan() : std::nullopt;
+    const auto started_scheduler = replay.scheduler_state();
+    const auto started_simulation = replay.simulation_state();
+    Check(started && started_plan &&
+              started->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::StartDiagnosticCampaign,
+                  .profile_slot = FrontEndProfileSlot::First,
+                  .character_slot = FrontEndCharacterSlot::First,
+              } &&
+              replay.front_end_state() == FrontEndState{} &&
+              replay.front_end_active_profile_is_confirmed() &&
+              replay.front_end_active_character_is_confirmed() &&
+              started_plan->simulation_steps == 1U &&
+              started_plan->interpolation_alpha == 0.5 &&
+              !started_plan->clamped_delta && !started_plan->dropped_time &&
+              started_scheduler && *started_scheduler == FrameSchedulerState{
+                  .config = config.scheduler,
+                  .accumulated_remainder = milliseconds{5},
+                  .total_planned_steps = 1U,
+              } &&
+              started_simulation && SameSimulation(*started_simulation,
+                  SimulationState{
+                      .completed_steps = 1U,
+                      .simulated_time = milliseconds{10},
+                  }) &&
+              replay.state() == RunReplaySessionState::Complete,
+        "the fully confirmed profile-character replay publishes Start Diagnostic and advances exactly one simulation step");
+}
+
 void CheckMoveLifecycle()
 {
     constexpr std::array<std::uint32_t, 1U> actions{17U};
@@ -2377,6 +2633,7 @@ int main()
     CheckFrontEndModalGate();
     CheckFirstProfileCreationReplay();
     CheckDiagnosticPlayGateReplay();
+    CheckCharacterFlowReplay();
     CheckMoveLifecycle();
     CheckReplayAllocationRetry();
 

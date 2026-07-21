@@ -355,15 +355,17 @@ void CheckAbsentBootstrapAndLimits()
 
     const SaveDatabaseLimits defaults;
     const auto* config = persistence->database().config();
-    Check(config && config->limits.max_records == 2'049U,
-          "production native persistence has capacity for 1,024 profile markers, 1,024 project diagnostic checkpoints, and the active pointer when no other record consumes it");
+    Check(config && config->limits.max_records ==
+                        SaveDatabase::kHardMaxRecords,
+          "production native persistence uses the storage layer's hard project-record ceiling");
     Check(config && config->limits.max_mutations_per_commit ==
                         defaults.max_mutations_per_commit &&
-              config->limits.max_key_bytes == defaults.max_key_bytes &&
+              config->limits.max_key_bytes ==
+                  SaveDatabase::kHardMaxKeyBytes &&
               config->limits.max_value_bytes == defaults.max_value_bytes &&
               config->limits.max_logical_value_bytes == defaults.max_logical_value_bytes &&
               config->limits.max_file_bytes == defaults.max_file_bytes,
-          "production native persistence otherwise preserves default database limits");
+          "production native persistence uses the hard record and key ceilings needed by profile-scoped character sessions");
 
     const ProfileId missing = Id("ffffffffffffffffffffffffffffffff");
     const std::uint64_t before_generation = persistence->database().generation();

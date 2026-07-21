@@ -19,6 +19,12 @@ constexpr std::uint32_t kPersistedActiveProfileSchemaVersion = 1U;
 constexpr std::uint16_t kPersistedActiveProfilePayloadVersion = 1U;
 constexpr std::string_view kPersistedActiveProfileMagic = "OOACTPRF";
 constexpr std::size_t kPersistedActiveProfileValueBytes = 32U;
+constexpr std::string_view kPersistedActiveCharacterKey =
+    "profiles/active-character";
+constexpr std::uint32_t kPersistedActiveCharacterSchemaVersion = 1U;
+constexpr std::uint16_t kPersistedActiveCharacterPayloadVersion = 1U;
+constexpr std::string_view kPersistedActiveCharacterMagic = "OOACTCHR";
+constexpr std::size_t kPersistedActiveCharacterValueBytes = 48U;
 constexpr std::string_view kProfilesKeyPrefix = "profiles/";
 constexpr std::string_view kDiagnosticCheckpointKeySuffix =
     "/campaigns/diagnostic/checkpoint";
@@ -26,12 +32,26 @@ constexpr std::uint32_t kDiagnosticCheckpointSchemaVersion = 1U;
 constexpr std::uint16_t kDiagnosticCheckpointPayloadVersion = 1U;
 constexpr std::string_view kDiagnosticCheckpointMagic = "OODIAGCP";
 constexpr std::size_t kDiagnosticCheckpointValueBytes = 32U;
+constexpr std::string_view kGameSessionCheckpointKeySuffix =
+    "/sessions/diagnostic/checkpoint";
+constexpr std::uint32_t kGameSessionCheckpointSchemaVersion = 1U;
+constexpr std::uint16_t kGameSessionCheckpointPayloadVersion = 1U;
+constexpr std::string_view kGameSessionCheckpointMagic = "OOGAMECP";
+constexpr std::size_t kGameSessionCheckpointValueBytes = 48U;
 static_assert(kPersistedActiveProfileMagic.size() == 8U);
 static_assert(16U + profiles::ProfileId::FromBytes({}).bytes().size() ==
               kPersistedActiveProfileValueBytes);
+static_assert(kPersistedActiveCharacterMagic.size() == 8U);
+static_assert(16U + profiles::ProfileId::FromBytes({}).bytes().size() +
+                      profiles::CharacterId::FromBytes({}).bytes().size() ==
+              kPersistedActiveCharacterValueBytes);
 static_assert(kDiagnosticCheckpointMagic.size() == 8U);
 static_assert(16U + profiles::ProfileId::FromBytes({}).bytes().size() ==
               kDiagnosticCheckpointValueBytes);
+static_assert(kGameSessionCheckpointMagic.size() == 8U);
+static_assert(16U + profiles::ProfileId::FromBytes({}).bytes().size() +
+                      profiles::CharacterId::FromBytes({}).bytes().size() ==
+              kGameSessionCheckpointValueBytes);
 
 [[nodiscard]] NativePersistenceStartupError MakeError(const NativePersistenceStartupErrorCode code,
                                                       std::string message)
@@ -45,8 +65,20 @@ static_assert(16U + profiles::ProfileId::FromBytes({}).bytes().size() ==
     return {.code = code, .message = std::move(message)};
 }
 
+[[nodiscard]] ActiveCharacterConfirmationError MakeCharacterConfirmationError(
+    const ActiveCharacterConfirmationErrorCode code, std::string message)
+{
+    return {.code = code, .message = std::move(message)};
+}
+
 [[nodiscard]] DiagnosticCampaignStartError MakeDiagnosticStartError(
     const DiagnosticCampaignStartErrorCode code, std::string message)
+{
+    return {.code = code, .message = std::move(message)};
+}
+
+[[nodiscard]] GameSessionStartError MakeGameSessionStartError(
+    const GameSessionStartErrorCode code, std::string message)
 {
     return {.code = code, .message = std::move(message)};
 }
@@ -75,13 +107,41 @@ static_assert(16U + profiles::ProfileId::FromBytes({}).bytes().size() ==
     return PersistedDiagnosticCheckpointStartupError();
 }
 
+[[nodiscard]] NativePersistenceStartupError PersistedActiveCharacterStartupError()
+{
+    return MakeError(NativePersistenceStartupErrorCode::PersistedActiveCharacter,
+                     "persisted active character validation failed");
+}
+
+[[nodiscard]] NativePersistenceStartupError PersistedGameSessionCheckpointStartupError()
+{
+    return MakeError(
+        NativePersistenceStartupErrorCode::PersistedGameSessionCheckpoint,
+        "persisted game session checkpoint validation failed");
+}
+
+[[nodiscard]] NativePersistenceStartupError
+PersistedGameSessionCheckpointStartupError(
+    const persistence::SaveDatabaseErrorCode code)
+{
+    if (code == persistence::SaveDatabaseErrorCode::LimitExceeded)
+    {
+        return MakeError(NativePersistenceStartupErrorCode::ResourceExhausted,
+                         "native persistence startup allocation failed");
+    }
+    return PersistedGameSessionCheckpointStartupError();
+}
+
 [[nodiscard]] persistence::SaveDatabaseLimits DefaultNativePersistenceLimits() noexcept
 {
     persistence::SaveDatabaseLimits limits;
-    // One bounded profile marker and one project diagnostic checkpoint per
-    // front-end profile, plus the single active-profile pointer. This remains
-    // a ceiling rather than a namespace reservation.
-    limits.max_records = 2'049U;
+    // Profile, character, and session markers share the storage layer's hard
+    // project ceiling. It is a total-record bound, not a reservation or a
+    // claim about retail slot capacity.
+    limits.max_records = persistence::SaveDatabase::kHardMaxRecords;
+    // The canonical profile/character/session key is longer than the generic
+    // 96-byte default while remaining beneath the storage layer's hard cap.
+    limits.max_key_bytes = persistence::SaveDatabase::kHardMaxKeyBytes;
     return limits;
 }
 
@@ -162,6 +222,67 @@ void AppendU32(std::vector<std::byte>& bytes, const std::uint32_t value)
     return profiles::ProfileId::FromBytes(id_bytes);
 }
 
+using ProfileCharacterPair =
+    std::pair<profiles::ProfileId, profiles::CharacterId>;
+
+[[nodiscard]] std::vector<std::byte> EncodePersistedActiveCharacter(
+    const profiles::ProfileId profile_id,
+    const profiles::CharacterId character_id)
+{
+    std::vector<std::byte> bytes;
+    bytes.reserve(kPersistedActiveCharacterValueBytes);
+    for (const char value : kPersistedActiveCharacterMagic)
+        bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(value)));
+    AppendU16(bytes, kPersistedActiveCharacterPayloadVersion);
+    AppendU16(bytes, 0U);
+    AppendU32(bytes, 0U);
+    for (const std::uint8_t value : profile_id.bytes())
+        bytes.push_back(static_cast<std::byte>(value));
+    for (const std::uint8_t value : character_id.bytes())
+        bytes.push_back(static_cast<std::byte>(value));
+    return bytes;
+}
+
+[[nodiscard]] std::optional<ProfileCharacterPair>
+DecodePersistedActiveCharacter(
+    const persistence::SaveRecord& record) noexcept
+{
+    if (record.schema_version != kPersistedActiveCharacterSchemaVersion ||
+        record.value.size() != kPersistedActiveCharacterValueBytes)
+    {
+        return std::nullopt;
+    }
+
+    const std::span<const std::byte> bytes(record.value);
+    for (std::size_t index = 0U;
+         index < kPersistedActiveCharacterMagic.size(); ++index)
+    {
+        if (std::to_integer<unsigned char>(bytes[index]) !=
+            static_cast<unsigned char>(kPersistedActiveCharacterMagic[index]))
+        {
+            return std::nullopt;
+        }
+    }
+    if (LoadU16(bytes, 8U) != kPersistedActiveCharacterPayloadVersion ||
+        LoadU16(bytes, 10U) != 0U || LoadU32(bytes, 12U) != 0U)
+    {
+        return std::nullopt;
+    }
+
+    std::array<std::uint8_t, 16U> profile_bytes{};
+    std::array<std::uint8_t, 16U> character_bytes{};
+    for (std::size_t index = 0U; index < profile_bytes.size(); ++index)
+    {
+        profile_bytes[index] =
+            std::to_integer<std::uint8_t>(bytes[16U + index]);
+        character_bytes[index] =
+            std::to_integer<std::uint8_t>(bytes[32U + index]);
+    }
+    return ProfileCharacterPair{
+        profiles::ProfileId::FromBytes(profile_bytes),
+        profiles::CharacterId::FromBytes(character_bytes)};
+}
+
 [[nodiscard]] std::string DiagnosticCheckpointKey(const profiles::ProfileId id)
 {
     return std::string(kProfilesKeyPrefix) + id.ToString() +
@@ -232,6 +353,105 @@ DiagnosticCheckpointProfileIdFromKey(std::string_view key) noexcept
     return profiles::ProfileId::FromBytes(id_bytes);
 }
 
+[[nodiscard]] std::string GameSessionCheckpointKey(
+    const profiles::ProfileId profile_id,
+    const profiles::CharacterId character_id)
+{
+    return std::string(kProfilesKeyPrefix) + profile_id.ToString() +
+           "/characters/" + character_id.ToString() +
+           std::string(kGameSessionCheckpointKeySuffix);
+}
+
+[[nodiscard]] bool IsGameSessionCheckpointKeyCandidate(
+    const std::string_view key) noexcept
+{
+    return key.starts_with(kProfilesKeyPrefix) &&
+           key.ends_with(kGameSessionCheckpointKeySuffix) &&
+           key.find("/characters/") != std::string_view::npos;
+}
+
+[[nodiscard]] std::optional<ProfileCharacterPair>
+GameSessionCheckpointIdsFromKey(std::string_view key) noexcept
+{
+    constexpr std::string_view separator = "/characters/";
+    if (!IsGameSessionCheckpointKeyCandidate(key))
+        return std::nullopt;
+    key.remove_prefix(kProfilesKeyPrefix.size());
+    key.remove_suffix(kGameSessionCheckpointKeySuffix.size());
+    const std::size_t separator_offset = key.find(separator);
+    if (separator_offset == std::string_view::npos ||
+        key.find(separator, separator_offset + separator.size()) !=
+            std::string_view::npos)
+    {
+        return std::nullopt;
+    }
+    const auto profile_id = profiles::ProfileId::Parse(
+        key.substr(0U, separator_offset));
+    const auto character_id = profiles::CharacterId::Parse(
+        key.substr(separator_offset + separator.size()));
+    if (!profile_id || !character_id)
+        return std::nullopt;
+    return ProfileCharacterPair{*profile_id, *character_id};
+}
+
+[[nodiscard]] std::vector<std::byte> EncodeGameSessionCheckpoint(
+    const profiles::ProfileId profile_id,
+    const profiles::CharacterId character_id)
+{
+    std::vector<std::byte> bytes;
+    bytes.reserve(kGameSessionCheckpointValueBytes);
+    for (const char value : kGameSessionCheckpointMagic)
+        bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(value)));
+    AppendU16(bytes, kGameSessionCheckpointPayloadVersion);
+    AppendU16(bytes, 0U);
+    AppendU32(bytes, 0U);
+    for (const std::uint8_t value : profile_id.bytes())
+        bytes.push_back(static_cast<std::byte>(value));
+    for (const std::uint8_t value : character_id.bytes())
+        bytes.push_back(static_cast<std::byte>(value));
+    return bytes;
+}
+
+[[nodiscard]] std::optional<ProfileCharacterPair>
+DecodeGameSessionCheckpoint(
+    const persistence::SaveRecord& record) noexcept
+{
+    if (record.schema_version != kGameSessionCheckpointSchemaVersion ||
+        record.value.size() != kGameSessionCheckpointValueBytes)
+    {
+        return std::nullopt;
+    }
+
+    const std::span<const std::byte> bytes(record.value);
+    for (std::size_t index = 0U;
+         index < kGameSessionCheckpointMagic.size(); ++index)
+    {
+        if (std::to_integer<unsigned char>(bytes[index]) !=
+            static_cast<unsigned char>(kGameSessionCheckpointMagic[index]))
+        {
+            return std::nullopt;
+        }
+    }
+    if (LoadU16(bytes, 8U) != kGameSessionCheckpointPayloadVersion ||
+        LoadU16(bytes, 10U) != 0U || LoadU32(bytes, 12U) != 0U)
+    {
+        return std::nullopt;
+    }
+
+    std::array<std::uint8_t, 16U> profile_bytes{};
+    std::array<std::uint8_t, 16U> character_bytes{};
+    for (std::size_t index = 0U; index < profile_bytes.size(); ++index)
+    {
+        profile_bytes[index] =
+            std::to_integer<std::uint8_t>(bytes[16U + index]);
+        character_bytes[index] =
+            std::to_integer<std::uint8_t>(bytes[32U + index]);
+    }
+    return ProfileCharacterPair{
+        profiles::ProfileId::FromBytes(profile_bytes),
+        profiles::CharacterId::FromBytes(character_bytes)};
+}
+
 [[nodiscard]] bool ContainsProfile(
     const std::span<const profiles::ProfileSummary> profile_summaries,
     const profiles::ProfileId id) noexcept
@@ -258,10 +478,64 @@ std::string_view NativePersistenceStartupErrorCodeName(
         return "persisted-active-profile";
     case NativePersistenceStartupErrorCode::PersistedDiagnosticCheckpoint:
         return "persisted-diagnostic-checkpoint";
+    case NativePersistenceStartupErrorCode::CharacterCatalogBootstrap:
+        return "character-catalog-bootstrap";
+    case NativePersistenceStartupErrorCode::PersistedActiveCharacter:
+        return "persisted-active-character";
+    case NativePersistenceStartupErrorCode::PersistedGameSessionCheckpoint:
+        return "persisted-game-session-checkpoint";
     case NativePersistenceStartupErrorCode::ResourceExhausted:
         return "resource-exhausted";
     }
     return "resource-exhausted";
+}
+
+std::string_view ActiveCharacterConfirmationErrorCodeName(
+    const ActiveCharacterConfirmationErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case ActiveCharacterConfirmationErrorCode::ActiveProfileRequired:
+        return "active-profile-required";
+    case ActiveCharacterConfirmationErrorCode::ProfileNotFound:
+        return "profile-not-found";
+    case ActiveCharacterConfirmationErrorCode::CharacterNotFound:
+        return "character-not-found";
+    case ActiveCharacterConfirmationErrorCode::RevisionConflict:
+        return "revision-conflict";
+    case ActiveCharacterConfirmationErrorCode::StorageLimitExceeded:
+        return "storage-limit-exceeded";
+    case ActiveCharacterConfirmationErrorCode::StorageFailure:
+        return "storage-failure";
+    case ActiveCharacterConfirmationErrorCode::ResourceExhausted:
+        return "resource-exhausted";
+    }
+    return "storage-failure";
+}
+
+std::string_view GameSessionStartErrorCodeName(
+    const GameSessionStartErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case GameSessionStartErrorCode::ActiveProfileRequired:
+        return "active-profile-required";
+    case GameSessionStartErrorCode::ActiveCharacterRequired:
+        return "active-character-required";
+    case GameSessionStartErrorCode::ProfileNotFound:
+        return "profile-not-found";
+    case GameSessionStartErrorCode::CharacterNotFound:
+        return "character-not-found";
+    case GameSessionStartErrorCode::RevisionConflict:
+        return "revision-conflict";
+    case GameSessionStartErrorCode::StorageLimitExceeded:
+        return "storage-limit-exceeded";
+    case GameSessionStartErrorCode::StorageFailure:
+        return "storage-failure";
+    case GameSessionStartErrorCode::ResourceExhausted:
+        return "resource-exhausted";
+    }
+    return "storage-failure";
 }
 
 std::string_view DiagnosticCampaignStartErrorCodeName(
@@ -329,6 +603,8 @@ std::expected<NativePersistence, NativePersistenceStartupError> NativePersistenc
 
         auto database = std::make_unique<persistence::SaveDatabase>(std::move(*opened));
         auto profile_catalog = std::make_unique<profiles::ProfileCatalog>(*database);
+        auto character_catalog =
+            std::make_unique<profiles::CharacterCatalog>(*database);
         auto startup_profiles =
             profile_catalog->ListBounded(kFrontEndMaximumProfiles);
         if (!startup_profiles)
@@ -339,6 +615,23 @@ std::expected<NativePersistence, NativePersistenceStartupError> NativePersistenc
             message += startup_profiles.error().message;
             return std::unexpected(MakeError(
                 NativePersistenceStartupErrorCode::ProfileCatalogBootstrap, std::move(message)));
+        }
+
+        for (const profiles::ProfileSummary& profile : *startup_profiles)
+        {
+            auto characters = character_catalog->ListBounded(
+                profile.id, kFrontEndMaximumCharacters);
+            if (!characters)
+            {
+                std::string message = "character catalog [";
+                message += profiles::CharacterCatalogErrorCodeName(
+                    characters.error().code);
+                message += "]: ";
+                message += characters.error().message;
+                return std::unexpected(MakeError(
+                    NativePersistenceStartupErrorCode::CharacterCatalogBootstrap,
+                    std::move(message)));
+            }
         }
 
         std::optional<profiles::ProfileId> persisted_confirmed_profile_id;
@@ -355,6 +648,33 @@ std::expected<NativePersistence, NativePersistenceStartupError> NativePersistenc
             persisted_confirmed_profile_revision = (**persisted_active_profile).revision;
         }
 
+        std::optional<profiles::ProfileId>
+            persisted_confirmed_character_profile_id;
+        std::optional<profiles::CharacterId> persisted_confirmed_character_id;
+        std::uint64_t persisted_confirmed_character_revision = 0U;
+        auto persisted_active_character =
+            database->Read(kPersistedActiveCharacterKey);
+        if (!persisted_active_character)
+            return std::unexpected(PersistedActiveCharacterStartupError());
+        if (*persisted_active_character)
+        {
+            const auto decoded =
+                DecodePersistedActiveCharacter(**persisted_active_character);
+            if (!decoded || !persisted_confirmed_profile_id ||
+                decoded->first != *persisted_confirmed_profile_id)
+            {
+                return std::unexpected(PersistedActiveCharacterStartupError());
+            }
+            auto character = character_catalog->Read(decoded->first,
+                                                     decoded->second);
+            if (!character || !*character)
+                return std::unexpected(PersistedActiveCharacterStartupError());
+            persisted_confirmed_character_profile_id = decoded->first;
+            persisted_confirmed_character_id = decoded->second;
+            persisted_confirmed_character_revision =
+                (**persisted_active_character).revision;
+        }
+
         auto profile_records = database->List(kProfilesKeyPrefix);
         if (!profile_records)
         {
@@ -363,6 +683,43 @@ std::expected<NativePersistence, NativePersistenceStartupError> NativePersistenc
         }
         for (const persistence::SaveRecordInfo& info : *profile_records)
         {
+            if (IsGameSessionCheckpointKeyCandidate(info.key))
+            {
+                const auto key_ids =
+                    GameSessionCheckpointIdsFromKey(info.key);
+                if (!key_ids)
+                {
+                    return std::unexpected(
+                        PersistedGameSessionCheckpointStartupError());
+                }
+                auto checkpoint = database->Read(info.key);
+                if (!checkpoint)
+                {
+                    return std::unexpected(
+                        PersistedGameSessionCheckpointStartupError(
+                            checkpoint.error().code));
+                }
+                if (!*checkpoint)
+                {
+                    return std::unexpected(
+                        PersistedGameSessionCheckpointStartupError());
+                }
+                const auto checkpoint_ids =
+                    DecodeGameSessionCheckpoint(**checkpoint);
+                if (!checkpoint_ids || *checkpoint_ids != *key_ids)
+                {
+                    return std::unexpected(
+                        PersistedGameSessionCheckpointStartupError());
+                }
+                auto character = character_catalog->Read(
+                    key_ids->first, key_ids->second);
+                if (!character || !*character)
+                {
+                    return std::unexpected(
+                        PersistedGameSessionCheckpointStartupError());
+                }
+                continue;
+            }
             if (!IsDiagnosticCheckpointKeyCandidate(info.key))
                 continue;
 
@@ -390,9 +747,13 @@ std::expected<NativePersistence, NativePersistenceStartupError> NativePersistenc
         }
 
         return NativePersistence(std::move(database), std::move(profile_catalog),
+                                 std::move(character_catalog),
                                  std::move(*startup_profiles),
                                  persisted_confirmed_profile_id,
-                                 persisted_confirmed_profile_revision);
+                                 persisted_confirmed_profile_revision,
+                                 persisted_confirmed_character_profile_id,
+                                 persisted_confirmed_character_id,
+                                 persisted_confirmed_character_revision);
     }
     catch (const std::bad_alloc&)
     {
@@ -404,13 +765,24 @@ std::expected<NativePersistence, NativePersistenceStartupError> NativePersistenc
 NativePersistence::NativePersistence(
     std::unique_ptr<persistence::SaveDatabase> database,
     std::unique_ptr<profiles::ProfileCatalog> profiles,
+    std::unique_ptr<profiles::CharacterCatalog> characters,
     std::vector<profiles::ProfileSummary> startup_profiles,
     std::optional<profiles::ProfileId> persisted_confirmed_profile_id,
-    const std::uint64_t persisted_confirmed_profile_revision) noexcept
+    const std::uint64_t persisted_confirmed_profile_revision,
+    std::optional<profiles::ProfileId>
+        persisted_confirmed_character_profile_id,
+    std::optional<profiles::CharacterId> persisted_confirmed_character_id,
+    const std::uint64_t persisted_confirmed_character_revision) noexcept
     : database_(std::move(database)), profiles_(std::move(profiles)),
+      characters_(std::move(characters)),
       startup_profiles_(std::move(startup_profiles)),
       persisted_confirmed_profile_id_(persisted_confirmed_profile_id),
-      persisted_confirmed_profile_revision_(persisted_confirmed_profile_revision)
+      persisted_confirmed_profile_revision_(persisted_confirmed_profile_revision),
+      persisted_confirmed_character_profile_id_(
+          persisted_confirmed_character_profile_id),
+      persisted_confirmed_character_id_(persisted_confirmed_character_id),
+      persisted_confirmed_character_revision_(
+          persisted_confirmed_character_revision)
 {
 }
 
@@ -426,6 +798,11 @@ profiles::ProfileCatalog& NativePersistence::profiles() noexcept
     return *profiles_;
 }
 
+profiles::CharacterCatalog& NativePersistence::characters() noexcept
+{
+    return *characters_;
+}
+
 std::span<const profiles::ProfileSummary> NativePersistence::startup_profiles() const noexcept
 {
     return startup_profiles_;
@@ -435,6 +812,12 @@ const std::optional<profiles::ProfileId>&
 NativePersistence::persisted_confirmed_profile_id() const noexcept
 {
     return persisted_confirmed_profile_id_;
+}
+
+const std::optional<profiles::CharacterId>&
+NativePersistence::persisted_confirmed_character_id() const noexcept
+{
+    return persisted_confirmed_character_id_;
 }
 
 std::expected<void, ActiveProfileConfirmationError> NativePersistence::ConfirmActiveProfile(
@@ -491,12 +874,19 @@ std::expected<void, ActiveProfileConfirmationError> NativePersistence::ConfirmAc
                                                               ? persistence::SaveWriteCondition::ExactRevision(
                                                                     persisted_confirmed_profile_revision_)
                                                               : persistence::SaveWriteCondition::MustBeAbsent();
-        std::array mutation{
-            persistence::SaveMutation::Put(std::string(kPersistedActiveProfileKey),
-                                           kPersistedActiveProfileSchemaVersion,
-                                           EncodePersistedActiveProfile(id), condition),
-        };
-        const auto committed = database_->Commit(mutation);
+        std::vector<persistence::SaveMutation> mutations;
+        mutations.reserve(2U);
+        mutations.push_back(persistence::SaveMutation::Put(
+            std::string(kPersistedActiveProfileKey),
+            kPersistedActiveProfileSchemaVersion,
+            EncodePersistedActiveProfile(id), condition));
+        mutations.push_back(persistence::SaveMutation::Erase(
+            std::string(kPersistedActiveCharacterKey),
+            persisted_confirmed_character_id_
+                ? persistence::SaveWriteCondition::ExactRevision(
+                      persisted_confirmed_character_revision_)
+                : persistence::SaveWriteCondition::MustBeAbsent()));
+        const auto committed = database_->Commit(mutations);
         if (!committed)
         {
             switch (committed.error().code)
@@ -518,6 +908,9 @@ std::expected<void, ActiveProfileConfirmationError> NativePersistence::ConfirmAc
 
         persisted_confirmed_profile_id_ = id;
         persisted_confirmed_profile_revision_ = *committed;
+        persisted_confirmed_character_profile_id_.reset();
+        persisted_confirmed_character_id_.reset();
+        persisted_confirmed_character_revision_ = 0U;
         return {};
     }
     catch (const std::bad_alloc&)
@@ -525,6 +918,166 @@ std::expected<void, ActiveProfileConfirmationError> NativePersistence::ConfirmAc
         return std::unexpected(MakeConfirmationError(
             ActiveProfileConfirmationErrorCode::ResourceExhausted,
             "active profile confirmation allocation failed"));
+    }
+}
+
+std::expected<void, ActiveCharacterConfirmationError>
+NativePersistence::ConfirmActiveCharacter(
+    const profiles::ProfileId profile_id,
+    const profiles::CharacterId character_id)
+{
+    try
+    {
+        if (!persisted_confirmed_profile_id_ ||
+            *persisted_confirmed_profile_id_ != profile_id)
+        {
+            return std::unexpected(MakeCharacterConfirmationError(
+                ActiveCharacterConfirmationErrorCode::ActiveProfileRequired,
+                "active character confirmation requires the same confirmed profile"));
+        }
+
+        auto current_profile_pointer =
+            database_->Read(kPersistedActiveProfileKey);
+        if (!current_profile_pointer)
+        {
+            const auto code = current_profile_pointer.error().code ==
+                                      persistence::SaveDatabaseErrorCode::LimitExceeded
+                                  ? ActiveCharacterConfirmationErrorCode::ResourceExhausted
+                                  : ActiveCharacterConfirmationErrorCode::StorageFailure;
+            return std::unexpected(MakeCharacterConfirmationError(
+                code, code == ActiveCharacterConfirmationErrorCode::ResourceExhausted
+                          ? "active character confirmation allocation failed"
+                          : "active character confirmation storage failed"));
+        }
+        const auto decoded_profile = *current_profile_pointer
+                                         ? DecodePersistedActiveProfile(
+                                               **current_profile_pointer)
+                                         : std::nullopt;
+        if (!*current_profile_pointer || !decoded_profile ||
+            *decoded_profile != profile_id ||
+            (**current_profile_pointer).revision !=
+                persisted_confirmed_profile_revision_)
+        {
+            return std::unexpected(MakeCharacterConfirmationError(
+                ActiveCharacterConfirmationErrorCode::RevisionConflict,
+                "active character confirmation observed changed profile state"));
+        }
+
+        auto profile = profiles_->Read(profile_id);
+        if (!profile)
+        {
+            const auto code = profile.error().code ==
+                                      profiles::ProfileCatalogErrorCode::ResourceExhausted
+                                  ? ActiveCharacterConfirmationErrorCode::ResourceExhausted
+                                  : ActiveCharacterConfirmationErrorCode::StorageFailure;
+            return std::unexpected(MakeCharacterConfirmationError(
+                code, code == ActiveCharacterConfirmationErrorCode::ResourceExhausted
+                          ? "active character confirmation allocation failed"
+                          : "active character confirmation storage failed"));
+        }
+        if (!*profile)
+        {
+            return std::unexpected(MakeCharacterConfirmationError(
+                ActiveCharacterConfirmationErrorCode::ProfileNotFound,
+                "active character confirmation requires an existing profile"));
+        }
+
+        auto character = characters_->Read(profile_id, character_id);
+        if (!character)
+        {
+            const auto code = character.error().code ==
+                                      profiles::CharacterCatalogErrorCode::ResourceExhausted
+                                  ? ActiveCharacterConfirmationErrorCode::ResourceExhausted
+                                  : ActiveCharacterConfirmationErrorCode::StorageFailure;
+            return std::unexpected(MakeCharacterConfirmationError(
+                code, code == ActiveCharacterConfirmationErrorCode::ResourceExhausted
+                          ? "active character confirmation allocation failed"
+                          : "active character confirmation storage failed"));
+        }
+        if (!*character)
+        {
+            return std::unexpected(MakeCharacterConfirmationError(
+                ActiveCharacterConfirmationErrorCode::CharacterNotFound,
+                "active character confirmation requires an existing character"));
+        }
+
+        if (persisted_confirmed_character_profile_id_ &&
+            persisted_confirmed_character_id_ &&
+            *persisted_confirmed_character_profile_id_ == profile_id &&
+            *persisted_confirmed_character_id_ == character_id)
+        {
+            auto current_character_pointer =
+                database_->Read(kPersistedActiveCharacterKey);
+            if (!current_character_pointer)
+            {
+                const auto code = current_character_pointer.error().code ==
+                                          persistence::SaveDatabaseErrorCode::LimitExceeded
+                                      ? ActiveCharacterConfirmationErrorCode::ResourceExhausted
+                                      : ActiveCharacterConfirmationErrorCode::StorageFailure;
+                return std::unexpected(MakeCharacterConfirmationError(
+                    code, code == ActiveCharacterConfirmationErrorCode::ResourceExhausted
+                              ? "active character confirmation allocation failed"
+                              : "active character confirmation storage failed"));
+            }
+            const auto decoded = *current_character_pointer
+                                     ? DecodePersistedActiveCharacter(
+                                           **current_character_pointer)
+                                     : std::nullopt;
+            if (!*current_character_pointer || !decoded ||
+                decoded->first != profile_id ||
+                decoded->second != character_id ||
+                (**current_character_pointer).revision !=
+                    persisted_confirmed_character_revision_)
+            {
+                return std::unexpected(MakeCharacterConfirmationError(
+                    ActiveCharacterConfirmationErrorCode::RevisionConflict,
+                    "persisted active character changed before confirmation committed"));
+            }
+            return {};
+        }
+
+        const persistence::SaveWriteCondition condition =
+            persisted_confirmed_character_id_
+                ? persistence::SaveWriteCondition::ExactRevision(
+                      persisted_confirmed_character_revision_)
+                : persistence::SaveWriteCondition::MustBeAbsent();
+        std::array mutation{
+            persistence::SaveMutation::Put(
+                std::string(kPersistedActiveCharacterKey),
+                kPersistedActiveCharacterSchemaVersion,
+                EncodePersistedActiveCharacter(profile_id, character_id),
+                condition),
+        };
+        const auto committed = database_->Commit(mutation);
+        if (!committed)
+        {
+            switch (committed.error().code)
+            {
+            case persistence::SaveDatabaseErrorCode::PreconditionFailed:
+                return std::unexpected(MakeCharacterConfirmationError(
+                    ActiveCharacterConfirmationErrorCode::RevisionConflict,
+                    "persisted active character changed before confirmation committed"));
+            case persistence::SaveDatabaseErrorCode::LimitExceeded:
+                return std::unexpected(MakeCharacterConfirmationError(
+                    ActiveCharacterConfirmationErrorCode::StorageLimitExceeded,
+                    "active character confirmation exceeds native storage limits"));
+            default:
+                return std::unexpected(MakeCharacterConfirmationError(
+                    ActiveCharacterConfirmationErrorCode::StorageFailure,
+                    "active character confirmation storage failed"));
+            }
+        }
+
+        persisted_confirmed_character_profile_id_ = profile_id;
+        persisted_confirmed_character_id_ = character_id;
+        persisted_confirmed_character_revision_ = *committed;
+        return {};
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected(MakeCharacterConfirmationError(
+            ActiveCharacterConfirmationErrorCode::ResourceExhausted,
+            "active character confirmation allocation failed"));
     }
 }
 
@@ -640,6 +1193,169 @@ NativePersistence::PrepareDiagnosticCampaignStart(const profiles::ProfileId id)
         return std::unexpected(MakeDiagnosticStartError(
             DiagnosticCampaignStartErrorCode::ResourceExhausted,
             "diagnostic campaign start allocation failed"));
+    }
+}
+
+std::expected<void, GameSessionStartError>
+NativePersistence::PrepareGameSessionStart(
+    const profiles::ProfileId profile_id,
+    const profiles::CharacterId character_id)
+{
+    try
+    {
+        if (!persisted_confirmed_profile_id_ ||
+            *persisted_confirmed_profile_id_ != profile_id)
+        {
+            return std::unexpected(MakeGameSessionStartError(
+                GameSessionStartErrorCode::ActiveProfileRequired,
+                "game session start requires the same confirmed active profile"));
+        }
+        if (!persisted_confirmed_character_profile_id_ ||
+            !persisted_confirmed_character_id_ ||
+            *persisted_confirmed_character_profile_id_ != profile_id ||
+            *persisted_confirmed_character_id_ != character_id)
+        {
+            return std::unexpected(MakeGameSessionStartError(
+                GameSessionStartErrorCode::ActiveCharacterRequired,
+                "game session start requires the same confirmed active character"));
+        }
+
+        auto current_profile_pointer =
+            database_->Read(kPersistedActiveProfileKey);
+        auto current_character_pointer =
+            database_->Read(kPersistedActiveCharacterKey);
+        if (!current_profile_pointer || !current_character_pointer)
+        {
+            const bool exhausted =
+                (!current_profile_pointer &&
+                 current_profile_pointer.error().code ==
+                     persistence::SaveDatabaseErrorCode::LimitExceeded) ||
+                (!current_character_pointer &&
+                 current_character_pointer.error().code ==
+                     persistence::SaveDatabaseErrorCode::LimitExceeded);
+            return std::unexpected(MakeGameSessionStartError(
+                exhausted ? GameSessionStartErrorCode::ResourceExhausted
+                          : GameSessionStartErrorCode::StorageFailure,
+                exhausted ? "game session start allocation failed"
+                          : "game session checkpoint storage failed"));
+        }
+        const auto decoded_profile = *current_profile_pointer
+                                         ? DecodePersistedActiveProfile(
+                                               **current_profile_pointer)
+                                         : std::nullopt;
+        const auto decoded_character = *current_character_pointer
+                                           ? DecodePersistedActiveCharacter(
+                                                 **current_character_pointer)
+                                           : std::nullopt;
+        if (!*current_profile_pointer || !*current_character_pointer ||
+            !decoded_profile || !decoded_character ||
+            *decoded_profile != profile_id ||
+            decoded_character->first != profile_id ||
+            decoded_character->second != character_id ||
+            (**current_profile_pointer).revision !=
+                persisted_confirmed_profile_revision_ ||
+            (**current_character_pointer).revision !=
+                persisted_confirmed_character_revision_)
+        {
+            return std::unexpected(MakeGameSessionStartError(
+                GameSessionStartErrorCode::RevisionConflict,
+                "game session start observed changed persisted state"));
+        }
+
+        auto profile = profiles_->Read(profile_id);
+        if (!profile)
+        {
+            const bool exhausted = profile.error().code ==
+                                   profiles::ProfileCatalogErrorCode::ResourceExhausted;
+            return std::unexpected(MakeGameSessionStartError(
+                exhausted ? GameSessionStartErrorCode::ResourceExhausted
+                          : GameSessionStartErrorCode::StorageFailure,
+                exhausted ? "game session start allocation failed"
+                          : "game session checkpoint storage failed"));
+        }
+        if (!*profile)
+        {
+            return std::unexpected(MakeGameSessionStartError(
+                GameSessionStartErrorCode::ProfileNotFound,
+                "game session start requires an existing profile"));
+        }
+
+        auto character = characters_->Read(profile_id, character_id);
+        if (!character)
+        {
+            const bool exhausted = character.error().code ==
+                                   profiles::CharacterCatalogErrorCode::ResourceExhausted;
+            return std::unexpected(MakeGameSessionStartError(
+                exhausted ? GameSessionStartErrorCode::ResourceExhausted
+                          : GameSessionStartErrorCode::StorageFailure,
+                exhausted ? "game session start allocation failed"
+                          : "game session checkpoint storage failed"));
+        }
+        if (!*character)
+        {
+            return std::unexpected(MakeGameSessionStartError(
+                GameSessionStartErrorCode::CharacterNotFound,
+                "game session start requires an existing character"));
+        }
+
+        const std::string checkpoint_key =
+            GameSessionCheckpointKey(profile_id, character_id);
+        auto existing = database_->Read(checkpoint_key);
+        if (!existing)
+        {
+            const bool exhausted = existing.error().code ==
+                                   persistence::SaveDatabaseErrorCode::LimitExceeded;
+            return std::unexpected(MakeGameSessionStartError(
+                exhausted ? GameSessionStartErrorCode::ResourceExhausted
+                          : GameSessionStartErrorCode::StorageFailure,
+                exhausted ? "game session start allocation failed"
+                          : "game session checkpoint storage failed"));
+        }
+        if (*existing)
+        {
+            const auto decoded = DecodeGameSessionCheckpoint(**existing);
+            if (!decoded || decoded->first != profile_id ||
+                decoded->second != character_id)
+            {
+                return std::unexpected(MakeGameSessionStartError(
+                    GameSessionStartErrorCode::RevisionConflict,
+                    "game session start observed changed persisted state"));
+            }
+            return {};
+        }
+
+        std::array mutation{
+            persistence::SaveMutation::Put(
+                checkpoint_key, kGameSessionCheckpointSchemaVersion,
+                EncodeGameSessionCheckpoint(profile_id, character_id),
+                persistence::SaveWriteCondition::MustBeAbsent()),
+        };
+        const auto committed = database_->Commit(mutation);
+        if (!committed)
+        {
+            switch (committed.error().code)
+            {
+            case persistence::SaveDatabaseErrorCode::PreconditionFailed:
+                return std::unexpected(MakeGameSessionStartError(
+                    GameSessionStartErrorCode::RevisionConflict,
+                    "game session start observed changed persisted state"));
+            case persistence::SaveDatabaseErrorCode::LimitExceeded:
+                return std::unexpected(MakeGameSessionStartError(
+                    GameSessionStartErrorCode::StorageLimitExceeded,
+                    "game session checkpoint exceeds native storage limits"));
+            default:
+                return std::unexpected(MakeGameSessionStartError(
+                    GameSessionStartErrorCode::StorageFailure,
+                    "game session checkpoint storage failed"));
+            }
+        }
+        return {};
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected(MakeGameSessionStartError(
+            GameSessionStartErrorCode::ResourceExhausted,
+            "game session start allocation failed"));
     }
 }
 } // namespace omega::app

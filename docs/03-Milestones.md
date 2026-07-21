@@ -1255,11 +1255,17 @@ simulation. E-0106 adds the explicit empty-catalog `CreateFirstProfile` transiti
 project ID/name, transactional persistence, preloaded empty/one-profile presentations, and no
 automatic active selection; a later Primary selects it session-locally. E-0108 routes valid
 nonempty or explicitly creatable exact-empty startup snapshots into Profiles through one shared live
-and replay planner, while malformed or unsupported snapshots fail closed to Main. Persistent
-active-profile confirmation and persistence, general profile mutation UI, campaign schemas, and the
-independently evidenced Omega Strain payload mapping remain in progress. No PS2 memory-card device
-or emulator savestate is part of the shipping-runtime design, and the synthetic shell is not a
-retail-fidelity claim.
+and replay planner, while malformed or unsupported snapshots fail closed to Main. E-0109 makes
+profile selection an explicit durable confirmation, and E-0111 retains the separate project-owned
+profile diagnostic marker. E-0112 adds a profile-scoped `CharacterCatalog`, explicit Characters
+creation and selection, a durable active-character pointer invalidated by profile switches, and a
+character-owned diagnostic-session marker. Production enters DiagnosticPlay only after both
+per-launch identities resolve and both durable revisions validate. The implemented zero-to-one path
+uses one fixed `DIAGNOSTIC CHARACTER` record and deliberately assigns no appearance, body, class,
+skill, equipment, inventory, progression, or retail slot semantics. General profile/character
+mutation UI, retail campaign/save schemas, and the independently evidenced Omega Strain payload
+mapping remain in progress. No PS2 memory-card device or emulator savestate is part of the
+shipping-runtime design, and the synthetic shell is not a retail-fidelity claim.
 
 E-0086 also supplies a synthetic-verified, analysis-only front-end HOG topology scanner. Its
 path-free fixed schema can measure recursive container depth, approved public format/category

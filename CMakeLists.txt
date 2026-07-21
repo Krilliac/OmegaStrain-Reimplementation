@@ -57,6 +57,7 @@ target_include_directories(omega_persistence PUBLIC native/include)
 target_compile_features(omega_persistence PUBLIC cxx_std_23)
 
 add_library(omega_profiles STATIC
+    native/src/profiles/character_catalog.cpp
     native/src/profiles/profile_catalog.cpp
 )
 target_include_directories(omega_profiles PUBLIC native/include)
@@ -1240,6 +1241,32 @@ if(BUILD_TESTING)
     # directory flushes whose Windows Debug latency varies substantially on hosted runners.
     set_tests_properties(omega_profile_catalog_tests PROPERTIES TIMEOUT 30)
 
+    add_executable(omega_character_catalog_tests
+        native/tests/character_catalog_tests.cpp
+    )
+    target_link_libraries(omega_character_catalog_tests PRIVATE omega_profiles)
+    if(MSVC)
+        target_compile_options(omega_character_catalog_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_character_catalog_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_character_catalog_tests
+        COMMAND omega_character_catalog_tests)
+    set_tests_properties(omega_character_catalog_tests PROPERTIES TIMEOUT 30)
+
     add_executable(omega_par_text_envelope_tests
         native/tests/par_text_envelope_decoder_tests.cpp
     )
@@ -1318,6 +1345,34 @@ if(BUILD_TESTING)
         # The generated rollback/reopen matrix performs many intentionally durable
         # snapshot publications; Windows filesystem flush latency can exceed 10 seconds.
         set_tests_properties(omega_native_persistence_tests PROPERTIES TIMEOUT 30)
+
+        add_executable(omega_native_character_session_tests
+            native/tests/native_character_session_tests.cpp
+        )
+        target_link_libraries(omega_native_character_session_tests
+            PRIVATE omega_native_persistence omega_profiles)
+        if(MSVC)
+            target_compile_options(omega_native_character_session_tests PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_native_character_session_tests PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+        add_test(NAME omega_native_character_session_tests
+            COMMAND omega_native_character_session_tests)
+        set_tests_properties(omega_native_character_session_tests
+            PROPERTIES TIMEOUT 30)
     endif()
 
     if(TARGET openomega)
@@ -1633,6 +1688,34 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_front_end_tests COMMAND omega_front_end_tests)
     set_tests_properties(omega_front_end_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_character_front_end_flow_tests
+        native/tests/character_front_end_flow_tests.cpp
+    )
+    target_link_libraries(omega_character_front_end_flow_tests
+        PRIVATE omega_app_core)
+    if(MSVC)
+        target_compile_options(omega_character_front_end_flow_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_character_front_end_flow_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_character_front_end_flow_tests
+        COMMAND omega_character_front_end_flow_tests)
+    set_tests_properties(omega_character_front_end_flow_tests
+        PROPERTIES TIMEOUT 5)
 
     add_executable(omega_diagnostic_actor_marker_tests
         native/tests/diagnostic_actor_marker_tests.cpp
