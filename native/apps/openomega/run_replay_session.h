@@ -23,9 +23,13 @@ inline constexpr std::uint32_t kDebugMoveForwardAction = 2U;
 inline constexpr std::uint32_t kDebugMoveBackwardAction = 3U;
 inline constexpr std::uint32_t kDebugMoveLeftAction = 4U;
 inline constexpr std::uint32_t kDebugMoveRightAction = 5U;
+inline constexpr std::uint32_t kDebugFireAction = 8U;
+inline constexpr std::uint32_t kDebugTargetAction = 9U;
 
-// While the menu is modal, the shared up/down edges navigate instead of moving the diagnostic
-// entity. Keep that intentional alias coupled to the front-end contract at compile time.
+// While the menu is modal, shared movement actions navigate instead of moving
+// the diagnostic entity; fire/target become contextual select/back through the
+// common front-end projector. Keep the up/down IDs coupled to the direct
+// reducer contract at compile time.
 static_assert(kDebugMoveForwardAction == kFrontEndPreviousAction);
 static_assert(kDebugMoveBackwardAction == kFrontEndNextAction);
 

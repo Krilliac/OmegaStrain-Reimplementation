@@ -66,9 +66,11 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     middle-to-final references, and 365,840 ordered Q/P final references with zero errors. Payload
     bytes, topology, vertex attributes, usage-code meaning, and material binding remain unassigned.
 15. Split SDL input from the GPU host into the app-owned, non-hot-reloadable `SdlInputService`. Its
-    `PumpEvents` owns the process-global event pump, while the service owns the gamepad subsystem
-    and one primary `SDL_Gamepad`; accepts button events only from that instance; resets only
-    gamepad controls when it disconnects; and promotes the next available device. `SdlGpuHost` now
+    `PumpEvents` owns the process-global event pump and always accepts keyboard/mouse input, while
+    gamepad discovery is disabled by default. The exact runtime setting
+    `input.gamepad_enabled=true` opts into at most one primary `SDL_Gamepad`; only then are controller
+    button events accepted, disconnect state reset, and the next available device promoted. No
+    gamepad is required. `SdlGpuHost` now
     owns video/render resources only. Deterministic headless virtual-gamepad coverage exercises
     attach, button edges, disconnect reconciliation, and promotion. The single-primary rule is
     synthetic shell policy, not inferred retail behavior.
@@ -1381,13 +1383,14 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     compatibility path, not a general mixer, full PSS grammar, perceptual-sync proof, frame-exact
     retail timing claim, or non-Windows end-to-end playback claim. Proprietary inputs and private
     validation artifacts remain outside version control.
-80. E-0103 adds a separate project-owned cancel edge to the current native front end. Keyboard
+80. E-0103 originally added a separate project-owned cancel edge to the native front end. Keyboard
     Backspace and gamepad East publish logical action 7; Escape and gamepad Back remain global quit
     controls. Cancel is inert on Main and returns Profiles, DiagnosticPlay, Controls, and
     AssetTopology to their matching Main rows without publishing a profile command. It has priority
     over simultaneous primary and navigation edges. Live capture and replay route the same action,
     while terminal input continues to resolve before front-end reduction. The host binding table is
-    now 19 physical bindings over seven logical actions. Exhaustive generated reducer coverage,
+    19 physical bindings over seven logical actions at that slice. Exhaustive generated reducer
+    coverage,
     focused replay tests, and the direct SDL/GPU capture smoke exercise the slice. This is
     project-authored shell policy and establishes no retail control, menu-graph, timing, or fidelity
     claim; private and proprietary inputs were not used.
@@ -1545,26 +1548,37 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     save, checkpoint, gameplay, continuation, world-state, memory-card, emulator, or parity claim.
 
 88. E-0112 completes one project-owned native bootstrap from profile confirmation through character
-    creation/selection into DiagnosticPlay. `CharacterCatalog` owns profile-scoped metadata beneath
+    creation/selection and a BriefingRoom/mission-selection surface into DiagnosticPlay.
+    `CharacterCatalog` owns profile-scoped metadata beneath
     `profiles/<profile-id>/characters/<character-id>/metadata`; every operation validates the parent
     profile and bounded listing spends its marker budget before parsing. Production profile
     confirmation prepares a bounded Characters model and GPU card before publishing the selected
     profile. Exact empty state permits one fixed `DIAGNOSTIC CHARACTER` creation without implicit
     selection. A later Primary confirms the chosen character with the schema-1 48-byte `OOACTCHR`
-    pointer. Profile switching atomically updates `profiles/active` and invalidates
+    pointer and opens BriefingRoom. Profile switching atomically updates `profiles/active` and
+    invalidates
     `profiles/active-character`, including an absence precondition that rejects an interfering raw
     pointer rather than leaving cross-profile state.
 
-    Start Diagnostic requires both per-launch confirmations, revalidates both pointer revisions and
-    catalog records, and writes or reuses the schema-1 48-byte `OOGAMECP` marker at the canonical
-    character-owned diagnostic-session key before state publication or simulation. Reopen validates
+    Mission activation from BriefingRoom requires both per-launch confirmations, revalidates both
+    pointer revisions and catalog records, and writes or reuses the schema-1 48-byte `OOGAMECP`
+    marker at the canonical character-owned diagnostic-session key before DiagnosticPlay state
+    publication or simulation. Cancel returns BriefingRoom to Characters, while the DiagnosticPlay
+    menu edge returns to BriefingRoom. Reopen validates
     all four identities/records but activates neither session value automatically. Generated tests
-    cover catalog boundaries, pure creation/selection reduction, interference, corruption, profile
-    switching, durable reopen, and idempotent session preparation. A separate owner-only manual run
+    cover catalog boundaries, pure creation/selection/briefing reduction, interference, corruption,
+    profile switching, durable reopen, and idempotent session preparation. A separate owner-only
+    manual run
     traversed create, select, start, close, reopen, reselect, and restart into the existing MINSK
     diagnostic topology and actor marker; proprietary inputs and observations remained outside Git.
-    This is not retail character customization, appearance, loadout, campaign, mission, scene,
-    checkpoint, world-state, save, or behavioral parity.
+    Keyboard/mouse operation requires no controller: W/A/S/D and arrows navigate/move;
+    Return, keypad Enter, and F1 select; Space/left mouse select or fire; Escape/Backspace cancel;
+    T/held right mouse target in play, with right mouse acting as menu back; and F10 quits. The 26
+    physical bindings cover nine logical actions; `--set=input.gamepad_enabled=true` explicitly
+    opts into gamepad aliases, which are disabled by default. The
+    briefing card selects only the startup-bound diagnostic content. This is not retail character
+    customization, appearance, loadout, combat, campaign, mission catalog, scene, checkpoint,
+    world-state, save, or behavioral parity.
 
 ## Disc observations
 
@@ -1587,8 +1601,9 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
 ## Next focused pass
 
 1. Publish E-0112 through protected-main CI and validate the exact merged tree. Preserve the working
-   profile -> character -> session route while replacing only independently evidenced pieces of the
-   current diagnostic topology/marker view with native level, actor, camera, and control behavior.
+   profile -> character -> BriefingRoom/mission selector -> session route while replacing only
+   independently evidenced pieces of the current diagnostic topology/marker view with native level,
+   actor, camera, and control behavior.
    Keep the project schemas explicit, transactional, and independent of PS2 save representation;
    do not infer retail customization, mission, world, or save behavior from the bootstrap itself.
 2. Treat E-0099 as runnable-tool and configuration-initialization readiness only. Before any new

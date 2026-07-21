@@ -264,6 +264,8 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
         return "Profiles";
     case omega::app::FrontEndMode::Characters:
         return "Characters";
+    case omega::app::FrontEndMode::BriefingRoom:
+        return "BriefingRoom";
     case omega::app::FrontEndMode::DiagnosticPlay:
         return "DiagnosticPlay";
     case omega::app::FrontEndMode::Controls:

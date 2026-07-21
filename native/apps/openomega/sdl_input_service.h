@@ -19,15 +19,18 @@ struct InputPumpResult
     bool quit_requested = false;
 };
 
-// Non-hot-reloadable main-thread SDL event and primary-gamepad owner. This leaf borrows the
-// process-global platform lifetime, which must outlive it.
+// Non-hot-reloadable main-thread SDL event owner with opt-in primary-gamepad
+// support. This leaf borrows the process-global platform lifetime, which must
+// outlive it.
 class SdlInputService final
 {
 public:
-    // [main thread, startup] Initializes SDL's gamepad subsystem and selects the first openable
-    // attached gamepad. Having no attached or openable gamepad is not a startup failure.
+    // [main thread, startup] Keyboard/mouse-only construction is the default and
+    // does not initialize SDL's gamepad subsystem. When explicitly enabled, the
+    // service initializes that subsystem and selects the first openable attached
+    // gamepad. Having no attached or openable gamepad is not a startup failure.
     [[nodiscard]] static std::expected<SdlInputService, std::string> Create(
-        const SdlPlatformService& platform);
+        const SdlPlatformService& platform, bool gamepad_enabled = false);
 
     // [main thread, before the platform service is destroyed]
     ~SdlInputService();

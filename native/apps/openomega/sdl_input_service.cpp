@@ -113,17 +113,22 @@ struct SdlInputService::Impl
     }
 
     bool subsystem_initialized = false;
+    bool gamepad_enabled = false;
     SDL_Gamepad* gamepad = nullptr;
     SDL_JoystickID gamepad_id = 0;
 };
 
 std::expected<SdlInputService, std::string> SdlInputService::Create(
-    const SdlPlatformService& platform)
+    const SdlPlatformService& platform, const bool gamepad_enabled)
 {
     if (!platform.ready())
         return std::unexpected("SDL platform service is not ready");
 
     auto impl = std::make_unique<Impl>();
+    impl->gamepad_enabled = gamepad_enabled;
+    if (!gamepad_enabled)
+        return SdlInputService(std::move(impl));
+
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD))
         return std::unexpected(SdlError("SDL_InitSubSystem(gamepad)"));
     impl->subsystem_initialized = true;
@@ -157,11 +162,14 @@ InputPumpResult SdlInputService::PumpEvents(
         {
             input.ResetAllControls();
         }
-        else if (event.type == SDL_EVENT_GAMEPAD_ADDED && impl_->gamepad == nullptr)
+        else if (impl_->gamepad_enabled &&
+                 event.type == SDL_EVENT_GAMEPAD_ADDED &&
+                 impl_->gamepad == nullptr)
         {
             impl_->OpenFirstAvailable(&log);
         }
-        else if (event.type == SDL_EVENT_GAMEPAD_REMOVED && impl_->gamepad != nullptr &&
+        else if (impl_->gamepad_enabled &&
+                 event.type == SDL_EVENT_GAMEPAD_REMOVED && impl_->gamepad != nullptr &&
                  event.gdevice.which == impl_->gamepad_id)
         {
             const SDL_JoystickID removed_id = impl_->gamepad_id;

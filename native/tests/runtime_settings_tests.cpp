@@ -83,10 +83,11 @@ int RuntimeSettingsFailureCount()
                       omega::runtime::kDefaultSimulationStep &&
                   defaults->frame.max_steps_per_frame ==
                       omega::runtime::kDefaultMaxStepsPerFrame &&
-                  defaults->frame.max_frame_delta ==
-                      omega::runtime::kDefaultMaxFrameDelta &&
-                  defaults->max_input_events_per_frame ==
-                      omega::runtime::kDefaultMaxInputEventsPerFrame,
+                   defaults->frame.max_frame_delta ==
+                       omega::runtime::kDefaultMaxFrameDelta &&
+                   defaults->max_input_events_per_frame ==
+                       omega::runtime::kDefaultMaxInputEventsPerFrame &&
+                   !defaults->gamepad_enabled,
             "the empty store resolves to explicit synthetic-shell defaults");
     }
 
@@ -98,7 +99,8 @@ int RuntimeSettingsFailureCount()
         "frame.simulation_step_ns = 1000000\n"
         "frame.max_steps_per_frame = 3\n"
         "frame.max_delta_ns = 5000000\n"
-        "input.max_events_per_frame = 41\n");
+        "input.max_events_per_frame = 41\n"
+        "input.gamepad_enabled = true\n");
     Check(configured.has_value(), "a complete runtime configuration parses");
     if (configured)
     {
@@ -109,7 +111,8 @@ int RuntimeSettingsFailureCount()
                   resolved->frame.simulation_step == std::chrono::milliseconds{1} &&
                   resolved->frame.max_steps_per_frame == 3U &&
                   resolved->frame.max_frame_delta == std::chrono::milliseconds{5} &&
-                  resolved->max_input_events_per_frame == 41U,
+                  resolved->max_input_events_per_frame == 41U &&
+                  resolved->gamepad_enabled,
             "known keys resolve without clamping or hidden defaults");
     }
 
@@ -147,6 +150,15 @@ int RuntimeSettingsFailureCount()
         CheckInputFreeError(omega::runtime::ResolveRuntimeSettings(*bad_integer),
             "input.max_events_per_frame: config integer value must be a canonical base-10 int64",
             "typed setting diagnostics retain strict parsing without raw values");
+    }
+    auto bad_gamepad = omega::runtime::ParseConfigText(
+        "input.gamepad_enabled = PrivateUser-SecretVault-raw-secret\n");
+    Check(bad_gamepad.has_value(), "private gamepad setting fixture parses");
+    if (bad_gamepad)
+    {
+        CheckInputFreeError(omega::runtime::ResolveRuntimeSettings(*bad_gamepad),
+            "input.gamepad_enabled: config boolean value must be exactly 'true' or 'false'",
+            "gamepad opt-in rejects non-boolean values without echoing private input");
     }
 
     using omega::runtime::ContentLaunchProfileErrorCode;

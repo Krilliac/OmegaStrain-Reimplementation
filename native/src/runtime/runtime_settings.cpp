@@ -13,7 +13,7 @@ namespace omega::runtime
 {
 namespace
 {
-constexpr std::array<std::string_view, 10> kKnownSettings{
+constexpr std::array<std::string_view, 11> kKnownSettings{
     "log.minimum_severity",
     "log.ring_capacity",
     "jobs.worker_count",
@@ -22,6 +22,7 @@ constexpr std::array<std::string_view, 10> kKnownSettings{
     "frame.max_steps_per_frame",
     "frame.max_delta_ns",
     "input.max_events_per_frame",
+    "input.gamepad_enabled",
     "content.data_root",
     "content.level_code",
 };
@@ -308,6 +309,11 @@ std::expected<RuntimeSettings, std::string> ResolveRuntimeSettings(const ConfigS
     if (!input_events)
         return std::unexpected(input_events.error());
     settings.max_input_events_per_frame = static_cast<std::size_t>(*input_events);
+
+    auto gamepad_enabled = config.GetBool("input.gamepad_enabled");
+    if (!gamepad_enabled)
+        return std::unexpected("input.gamepad_enabled: " + gamepad_enabled.error());
+    settings.gamepad_enabled = gamepad_enabled->value_or(false);
     return settings;
 }
 

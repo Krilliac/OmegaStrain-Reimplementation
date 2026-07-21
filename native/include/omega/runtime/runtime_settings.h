@@ -42,6 +42,9 @@ struct RuntimeSettings
         .max_frame_delta = kDefaultMaxFrameDelta,
     };
     std::size_t max_input_events_per_frame = kDefaultMaxInputEventsPerFrame;
+    // Controller discovery is opt-in. Keyboard and mouse remain the complete
+    // default host path even when SDL gamepad support is unavailable.
+    bool gamepad_enabled = false;
 };
 
 struct ContentLaunchProfile

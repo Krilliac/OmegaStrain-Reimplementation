@@ -281,19 +281,27 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             front_end_capabilities_.requires_active_character_for_diagnostic_play,
     };
     FrontEndCommand front_end_command{};
+    const bool gameplay_input_context =
+        !front_end_state_ ||
+        front_end_state_->mode == FrontEndMode::DiagnosticPlay;
     if (front_end_state_)
     {
         const FrontEndReduction front_end = ReduceFrontEnd(*front_end_state_,
-            FrontEndInputEdges{
-                .primary_pressed =
-                    replay_frame->input().WasPressed(kFrontEndPrimaryAction),
-                .previous_pressed =
-                    replay_frame->input().WasPressed(kFrontEndPreviousAction),
-                .next_pressed =
-                    replay_frame->input().WasPressed(kFrontEndNextAction),
-                .cancel_pressed =
-                    replay_frame->input().WasPressed(kFrontEndCancelAction),
-            },
+            ResolveFrontEndInputEdges(front_end_state_->mode,
+                FrontEndInputEdges{
+                    .primary_pressed = replay_frame->input().WasPressed(
+                        kFrontEndPrimaryAction),
+                    .previous_pressed = replay_frame->input().WasPressed(
+                        kFrontEndPreviousAction),
+                    .next_pressed = replay_frame->input().WasPressed(
+                        kFrontEndNextAction),
+                    .cancel_pressed = replay_frame->input().WasPressed(
+                        kFrontEndCancelAction),
+                },
+                replay_frame->input().WasPressed(kDebugMoveLeftAction),
+                replay_frame->input().WasPressed(kDebugMoveRightAction),
+                replay_frame->input().WasPressed(kDebugFireAction),
+                replay_frame->input().WasPressed(kDebugTargetAction)),
             front_end_visible_profile_slots_, front_end_capabilities,
             front_end_active_profile_is_confirmed_,
             front_end_active_visible_character_slots_,
@@ -382,7 +390,8 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
     const runtime::FramePlan plan = scheduler_->BeginFrame(effective_elapsed);
 
     simulation::SimulationStepInput simulation_input{};
-    if (simulation_allowed && debug_locomotion_entity_)
+    if (simulation_allowed && gameplay_input_context &&
+        debug_locomotion_entity_)
     {
         const auto translation = gameplay::PlanDebugLocomotionStep(
             gameplay::DigitalMoveCommand{
