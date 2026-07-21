@@ -5,10 +5,20 @@
 
 ## Decision
 
-Accept an opening movie only through the explicit `--opening-movie=PATH` launch option. The native
-runtime does not search for media, persist the supplied path, or include it in diagnostics.
+Accept an opening movie only through one of two mutually exclusive launch options:
+`--opening-movie=PATH` for an external file, or `--opening-movie-member=NAME` for one exact member
+of the fixed `ZMEDIA/ZMOVIES.HOG` game-data archive. The archive-backed route uses the frozen
+`GameDataService` and a one-component `SourceLocator`; it indexes only the top-level HOG directory
+and reads only the explicitly named payload. It does not enumerate candidates, search other
+archives, apply a filename fallback, or infer an automatic intro member. Neither selector is
+persisted or included in diagnostics.
 
-Inspect the external MPEG-2 Program Stream through bounded, renderer-neutral descriptors. Borrowed
+Both inputs become the same identity-free, move-only `OpeningMovieSource` before media inspection.
+It owns at most 512 MiB and retains no host path, archive path, or member name. The app consumes that
+owner exactly once. Missing, malformed, oversized, unavailable, or decoder-rejected archive-backed
+input logs only a fixed category and fails open to the persistence-derived Profiles surface.
+
+Inspect the selected MPEG-2 Program Stream through bounded, renderer-neutral descriptors. Borrowed
 video payload ranges are fed incrementally to a narrow Windows Media Foundation H.262 decoder. The
 decoder publishes owned NV12 frames; the app converts due frames to opaque RGBA8 and updates one
 stable SDL GPU texture in place. Non-Windows builds retain the same public boundary through a
@@ -41,7 +51,7 @@ it does not independently establish the custom field meanings, tag-1 PCM16LE map
 interpretation, four-byte selector handling, or channel-block order. Those semantics remain
 provisional pending a sanitized metadata check and independent behavioral comparison.
 
-External movie playback is mutually exclusive with capture and capture replay. This decision adds
+Opening-movie playback is mutually exclusive with capture and capture replay. This decision adds
 only opening-movie PCM presentation; it does not establish a general audio mixer, support other PSS
 audio variants, or claim retail audiovisual timing parity.
 
@@ -50,7 +60,7 @@ audio variants, or claim retail audiovisual timing parity.
 - The runtime remains a clean-room native implementation and links no PS2 execution or emulator
   code.
 - Explicit caller selection keeps proprietary inputs outside discovery, configuration, saves, and
-  version control.
+  version control; automatic intro selection remains blocked on private owner-side observation.
 - Hard parser, input, frame, output, and queue ceilings bound hostile or malformed media.
 - A platform decoder behind a generic media boundary avoids importing Windows types into app,
   runtime, gameplay, or renderer interfaces.
@@ -71,8 +81,8 @@ audio variants, or claim retail audiovisual timing parity.
 - The main/render thread owns player calls, PCM decode/refill, audio control, and GPU uploads. Media
   Foundation and COM teardown occurs on the creating thread. The SDL callback may consume only the
   fixed ring and lock-free counters.
-- Capture and replay reject `--opening-movie` during launch-option validation rather than silently
-  changing deterministic run semantics.
+- Capture and replay reject both opening-movie selectors during launch-option validation rather
+  than silently changing deterministic run semantics. The two selectors also reject each other.
 - PSS inspection and PCM deinterleave remain platform-neutral media code with no SDL types. SDL
   playback remains an app/platform leaf, and Windows Media Foundation remains the only production
   H.262 decoder. Therefore non-Windows builds do not claim end-to-end movie decode or presentation.
@@ -87,8 +97,10 @@ audio variants, or claim retail audiovisual timing parity.
 
 ## Validation
 
-- Synthetic MPEG-PS, elementary-stream, PSS PCM plan/deinterleave, H.262, decoder-state, NV12
-  conversion, opening-audio queue/drain/discard, isolated audio-clock and audio-fault policy,
+- Synthetic archive-member lookup (including mixed case, missing/malformed input, and a sparse
+  512 MiB plus one byte member), move-only ownership, path/owned-source rejection parity, MPEG-PS,
+  elementary-stream, PSS PCM plan/deinterleave, H.262, decoder-state, NV12 conversion,
+  opening-audio queue/drain/discard, isolated audio-clock and audio-fault policy,
   boot-reducer, launch
   isolation, texture-update, dependency-policy, and public-tree tests run in CI. The PSS PCM
   fixtures validate implemented boundaries and self-consistency, not independent format provenance.
@@ -98,9 +110,10 @@ audio variants, or claim retail audiovisual timing parity.
   actual app services. It covers natural EOS into Main plus next-frame navigation, primary skip at
   zero, two, and five advances, modal zero-simulation behavior, playback/texture/draw/audio
   containment, real queue-rejection and control faults raised after the pre-render health sample,
-  one-shot fault re-baselining, and path-free categorical failure logging. It bypasses
-  `OpeningMoviePlayer::Create`
-  and the production decoder, so it does not establish owned-stream decode, Media Foundation
+  one-shot fault re-baselining, and path/member-free categorical failure logging. A separate owned
+  malformed-source case exercises production `OpeningMoviePlayer::Create` failure and proves the
+  empty-persistence route remains on Profiles without publishing movie resources. Generated
+  playback injection still bypasses production decode, so it does not establish Media Foundation
   teardown, finite-source PCM or hardware-backlog drain, perceptual synchronization, retail timing,
   or repeated owner validation.
 - Private validation may confirm full-stream audiovisual presentation, skip, drain, menu transition,

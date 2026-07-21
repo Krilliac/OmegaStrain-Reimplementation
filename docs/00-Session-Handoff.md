@@ -1596,6 +1596,21 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     provenance, or an atomic filesystem snapshot. No owner-corpus run is recorded. This is not retail
     validity, semantic decoding, font/widget/layout/binding/rendering evidence, a retail menu
     reconstruction, or PCSX2 parity.
+90. E-0114 adds the explicit `--opening-movie-member=NAME` launch route without selecting or
+    guessing an automatic intro. The option is mutually exclusive with `--opening-movie`, and both
+    selectors remain isolated from probe, capture, and replay. `GameDataService::Open` optionally
+    indexes and mounts fixed `ZMEDIA/ZMOVIES.HOG` without loading its multi-gigabyte payload;
+    `LoadOpeningMovieSource` routes one explicit normalized member through a one-component
+    `SourceLocator`, preflights its indexed range, and reads only that payload under the existing
+    512 MiB ceiling. The returned `OpeningMovieSource` owns no path or member identity, is
+    move-constructible but not copyable or move-assignable, and is consumed by the existing player.
+    Missing, malformed, oversized, unreadable, and decoder-rejected sources leave the native app on
+    the persistence-derived Profiles surface and emit only fixed categories. Generated fixtures
+    cover mixed-case exact lookup, missing member, absent/malformed archive, a sparse 512 MiB plus
+    one byte member rejected before payload allocation, path/owned-source parser rejection parity,
+    and owned-source creation failure with no movie resource or durable profile mutation. No
+    private input, owner data, member name, path, archive payload, emulator, or PCSX2 runtime was
+    accessed. Automatic launch-member selection remains blocked on private owner-side observation.
 
 ## Disc observations
 

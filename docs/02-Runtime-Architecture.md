@@ -59,12 +59,13 @@ and resetting the host; host destruction remains the fallback resource teardown.
 only video, window, GPU, and rendering resources; no SDL type crosses into the platform-neutral
 runtime or simulation libraries.
 
-Production opening-movie creation remains explicit-path-only, and the private test factory rejects
-simultaneous path and injected-playback sources before SDL startup. The narrow playback interface
-preserves the existing main-thread ownership and borrowed-frame lifetime contract. Generated
-injection validates app composition, GPU/audio/input integration, modal scheduler gating, front-end
-transition, cleanup, and log redaction while deliberately bypassing source inspection, production
-H.262/PSS decoding, and Media Foundation lifetime.
+Production opening-movie creation accepts exactly one explicit external path or one move-only owned
+source loaded from an explicitly named member of fixed `ZMEDIA/ZMOVIES.HOG`. The private test factory
+and public launch parser reject simultaneous source selections before SDL startup. The narrow
+playback interface preserves the existing main-thread ownership and borrowed-frame lifetime
+contract. Generated injection validates app composition, GPU/audio/input integration, modal
+scheduler gating, front-end transition, cleanup, and log redaction while deliberately bypassing
+source inspection, production H.262/PSS decoding, and Media Foundation lifetime.
 
 `GameDataService` is the implemented startup boundary. It accepts either an extracted directory or
 an owner-selected regular `.iso`, owns its VFS, freezes mounts during `Open()`, and returns only
@@ -77,6 +78,15 @@ offsets remain local to each call. The catalog names retain no assigned role, an
 TDX asset, placement, transform, visibility, or draw binding is asserted. The optional
 `AssetService` receives non-owning dependencies on the stable content and worker services and owns
 none of those dependencies.
+
+When fixed `ZMEDIA/ZMOVIES.HOG` is present, `GameDataService::Open` indexes its directory and mounts
+its entry ranges without loading the archive payload. `LoadOpeningMovieSource` builds one explicit
+`SourceLocator`, normalizes the caller's member through the same case-insensitive game-path rules,
+preflights the indexed range, and reads only that range. The per-call terminal input remains capped
+at 512 MiB; the immutable service-owned directory index is resident mount state rather than copied
+ancestor input. The returned `OpeningMovieSource` is move-only, owns no identity, and is consumed on
+the game/main thread by `OpeningMoviePlayer`. Missing or invalid optional movie data does not make
+the game-data service unavailable and cannot block the persistence-derived front end.
 
 `LevelManifestIR` also owns explicit `SourceLocator` values for the level's sibling `TEX.HOG` and
 `MAPTEX.HOG` texture sources. These locators preserve source provenance only; their order assigns no
@@ -2092,6 +2102,32 @@ generated fixtures are present but compilation and execution validation
 remain pending. This policy establishes no retail startup, menu, profile, save, active-profile
 persistence, campaign, checkpoint, PS2, memory-card, savestate, emulator, proprietary-input, or
 behavioral-parity semantics.
+
+### E-0112 explicit archive-backed opening-movie source
+
+`LaunchOptions` owns either an optional external movie path or an optional exact archive member
+name. Parsing preserves the selected value without filesystem access, rejects duplicate, empty,
+path-plus-member, probe, capture, and replay combinations with fixed value-free diagnostics, and
+does not require a direct `--data-root` because configuration may supply the effective root later.
+If no effective game-data service exists, or archive/member loading fails, `main` prints only the
+stable `GameDataErrorCodeName` category and continues without a movie.
+
+The archive selector is fixed to `ZMEDIA/ZMOVIES.HOG`; caller input can choose only its one terminal
+member. `GameDataService::Open` treats the archive as optional, indexes its bounded HOG directory,
+and mounts member ranges into the frozen VFS. `LoadOpeningMovieSource` creates a one-component
+`SourceLocator`, applies the existing normalized case-insensitive lookup, and preflights the indexed
+terminal size before the VFS allocates or reads it. It never loads the complete multi-gigabyte
+archive. The terminal payload must be at most 512 MiB and becomes one `OpeningMovieSource` with no
+path, member, archive, or decoder identity. The type is move-constructible but neither copyable nor
+move-assignable; `OmegaApp` consumes it into the existing `OpeningMoviePlayer` creation path.
+
+Synthetic tests use only generated HOG and media bytes. They cover exact and mixed-case selection,
+missing members, absent and malformed optional archives, one sparse member exactly one byte above
+the 512 MiB cap, move-only handoff, identical path/owned-source parser rejection categories, and an
+owned malformed-source app creation failure that retains Profiles, an empty durable catalog, and no
+movie resource. Diagnostics assert that private-looking member sentinels and the fixed archive path
+do not escape. Automatic launch-member selection remains deliberately absent: it requires private
+owner-side observation and may not be guessed or inferred from public repository structure.
 
 ### E-0109 project-owned active-profile confirmation
 

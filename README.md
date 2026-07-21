@@ -63,6 +63,15 @@ Studio's historical engine source or internal toolchain.
   grammar remains a project-defined provisional compatibility hypothesis: generated fixtures prove
   implementation boundaries, and the recorded owner-stream smoke proves only that one stream passed
   them, not the field meanings or deinterleave semantics independently.
+- E-0112 adds a second explicit selector, `--opening-movie-member=NAME`, without adding automatic
+  intro discovery. It resolves only that case-insensitive exact member from fixed
+  `ZMEDIA/ZMOVIES.HOG` through the frozen `GameDataService`/`SourceLocator` boundary. The service
+  indexes the top-level directory without loading the multi-gigabyte archive, reads only the
+  selected payload under the unchanged 512 MiB cap, and hands an identity-free move-only
+  `OpeningMovieSource` to the existing player. Path and member selectors reject each other and both
+  remain isolated from probe/capture/replay. Missing, malformed, oversized, unreadable, or rejected
+  input emits no path/member identity and fails open to Profiles. Selecting the automatic launch
+  member remains deferred until private owner-side observation; no member is guessed here.
 - E-0104 adds an opt-in generated-playback acceptance smoke at the `OmegaApp` boundary. Generated
   RGBA and silent PCM traverse the actual SDL GPU host, dummy-driver SDL audio service, event-input
   path, boot reducer, scheduler gate, and synthetic front end. Natural EOS reaches Main and a fresh
@@ -1435,6 +1444,7 @@ ctest --preset msvc-debug
 .\build\msvc\products\sdk\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
 .\build\msvc\products\game\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --probe-only
 .\build\msvc\products\game\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
+.\build\msvc\products\game\Debug\openomega.exe --data-root=.\private\extracted-disc --opening-movie-member=NAME
 python -B .\tools\probe_native_levels.py .\build\msvc\products\game\Debug\openomega.exe .\private\extracted-disc --aggregate-only
 .\build\msvc\products\game\Debug\openomega.exe --frames=120
 .\build\msvc\products\game\Debug\openomega.exe --frames=120 --capture-run
@@ -1460,6 +1470,10 @@ all-or-error `LevelContentIR` and opens an inventory-only `LevelTextureStore` wi
 window. The store is retained only after the existing content and debug-image gates succeed. No
 `LevelTextureStore` payload is loaded or used for display expansion, material binding, GPU upload, or
 rendering; the rendered path uploads only the existing project-generated diagnostic RGBA8 image.
+`--opening-movie=PATH` selects one external movie, while `--opening-movie-member=NAME` selects only
+the named member of `ZMEDIA/ZMOVIES.HOG` below the effective data root. These options are mutually
+exclusive and are rejected with probe, capture, or replay. The archive-backed route performs no
+member discovery or fallback; callers must supply a name learned outside the public repository.
 The spatial meshes and role-free material catalogs are decoded under one shared budget while each
 common/cell archive is traversed once; their parallel manifest order asserts no mesh-to-material
 binding. The current MINSK view is a deterministic synthetic
