@@ -7,6 +7,7 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string_view>
 
 namespace omega::app {
@@ -31,6 +32,9 @@ enum class OpeningMoviePlayerErrorCode : std::uint8_t {
   ProgramStreamRejected,
   VideoStreamRejected,
   H262StreamRejected,
+  AudioStreamRejected,
+  AudioDecodeFailed,
+  AudioNotReady,
   DecoderUnavailable,
   DecoderFailed,
   FrameExtentChanged,
@@ -63,6 +67,12 @@ enum class OpeningMoviePlayerErrorCode : std::uint8_t {
     return "opening movie video stream was rejected";
   case OpeningMoviePlayerErrorCode::H262StreamRejected:
     return "opening movie H.262 stream was rejected";
+  case OpeningMoviePlayerErrorCode::AudioStreamRejected:
+    return "opening movie PCM stream was rejected";
+  case OpeningMoviePlayerErrorCode::AudioDecodeFailed:
+    return "opening movie PCM decode failed";
+  case OpeningMoviePlayerErrorCode::AudioNotReady:
+    return "opening movie PCM is not ready before first video presentation";
   case OpeningMoviePlayerErrorCode::DecoderUnavailable:
     return "opening movie decoder is unavailable";
   case OpeningMoviePlayerErrorCode::DecoderFailed:
@@ -121,8 +131,8 @@ public:
   ~OpeningMoviePlayer();
 
   // [creating game/main thread, startup] Privately reads exactly the explicit
-  // external path under kOpeningMovieMaximumSourceBytes, validates its MPEG-PS
-  // and H.262 structure, and creates the platform decoder. Errors are
+  // external path under kOpeningMovieMaximumSourceBytes, validates its MPEG-PS,
+  // H.262 video, and block-interleaved PCM structure, and creates the platform decoder. Errors are
   // categorical and never echo the path.
   [[nodiscard]] static std::expected<OpeningMoviePlayer,
                                      OpeningMoviePlayerError>
@@ -135,6 +145,15 @@ public:
   // the player Failed; later calls return the identical categorical error.
   [[nodiscard]] std::expected<OpeningMoviePlayerUpdate, OpeningMoviePlayerError>
   Advance(std::chrono::nanoseconds elapsed);
+
+  // [creating game/main thread] After the first video frame has been published, decodes up to the
+  // caller's frame-aligned stereo capacity into host-endian signed PCM16. The returned count is in
+  // stereo frames and may be smaller only at stream end. The player advances its audio cursor only
+  // for samples written successfully; no allocation occurs.
+  [[nodiscard]] std::expected<std::uint64_t, OpeningMoviePlayerError>
+  ReadAudioFrames(std::span<std::int16_t> interleaved_samples);
+  // [creating game/main thread] True once every validated PCM frame has been returned.
+  [[nodiscard]] bool audio_finished() const noexcept;
 
   // [creating game/main thread]
   [[nodiscard]] OpeningMoviePlayerStatus status() const noexcept;

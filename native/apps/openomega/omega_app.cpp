@@ -19,6 +19,16 @@
 
 namespace omega::app
 {
+namespace
+{
+// Refill when the 4,096-frame ring has at least this much space. The queued lead therefore stays
+// between roughly 53 and 85 ms at 48 kHz during steady playback.
+constexpr std::uint64_t kOpeningMovieAudioRefillFrames = 1'536U;
+constexpr std::uint64_t kNanosecondsPerSecond = 1'000'000'000U;
+static_assert(kOpeningMovieAudioRefillFrames <=
+              SdlAudioService::kOpeningMovieQueueCapacityFrames);
+} // namespace
+
 std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore config,
     const runtime::RuntimeSettings& settings, runtime::ContentStartupState content,
     NativePersistence native_persistence, const bool debug_device,
@@ -799,6 +809,7 @@ OmegaApp::OmegaApp(
 
 OmegaApp::~OmegaApp() noexcept
 {
+    (void)ContainOpeningMovieAudio();
     opening_movie_draw_list_ = {};
     opening_movie_player_.reset();
     diagnostic_asset_topology_draw_list_ = {};
@@ -861,6 +872,19 @@ OmegaApp::~OmegaApp() noexcept
     front_end_texture_ = {};
     diagnostic_texture_ = {};
 }
+
+bool OmegaApp::ContainOpeningMovieAudio() noexcept
+{
+    std::fill(opening_movie_audio_scratch_.begin(), opening_movie_audio_scratch_.end(),
+        std::int16_t{0});
+    opening_movie_audio_clock_started_ = false;
+    opening_movie_audio_timeline_baseline_ = 0U;
+    opening_movie_audio_timeline_applied_ = 0U;
+    opening_movie_audio_nanosecond_remainder_ = 0U;
+    opening_movie_audio_session_generation_ = 0U;
+    return audio_ == nullptr || audio_->DiscardOpeningMovieAudio();
+}
+
 OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
 
 std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
@@ -964,6 +988,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
     RunResult result;
     bool running = true;
     auto previous_frame = Clock::now();
+    AudioServiceSnapshot audio_fault_baseline = audio_->Snapshot();
     while (running && (frame_limit < 0 || result.rendered_frames < frame_limit))
     {
         const InputPumpResult events = sdl_input_->PumpEvents(*input_, *log_);
@@ -973,6 +998,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             const auto captured = capture_session->AppendInput(input_snapshot);
             if (!captured)
             {
+                (void)ContainOpeningMovieAudio();
                 jobs_->WaitForIdle();
                 return RunLoopResult{
                     .result = result,
@@ -998,6 +1024,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                     host_quit_requested, logical_quit_pressed);
                 if (!marked)
                 {
+                    (void)ContainOpeningMovieAudio();
                     jobs_->WaitForIdle();
                     return RunLoopResult{
                         .result = result,
@@ -1026,6 +1053,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             const auto captured = capture_session->AppendElapsed(elapsed);
             if (!captured)
             {
+                (void)ContainOpeningMovieAudio();
                 jobs_->WaitForIdle();
                 return RunLoopResult{
                     .result = result,
@@ -1044,47 +1072,186 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             bool source_completed = false;
             if (!primary_pressed)
             {
-                if (opening_movie_player_ == nullptr)
+                AudioServiceSnapshot movie_audio = audio_->Snapshot();
+                if (movie_audio.callback_failures > audio_fault_baseline.callback_failures ||
+                    movie_audio.opening_movie_control_failures >
+                        audio_fault_baseline.opening_movie_control_failures ||
+                    movie_audio.opening_movie_underrun_frames >
+                        audio_fault_baseline.opening_movie_underrun_frames)
+                {
+                    log_->Warning("opening_movie",
+                        "opening movie audio playback reported a callback, control, or underrun "
+                        "failure");
+                    source_failed = true;
+                }
+                else if (opening_movie_player_ == nullptr)
                 {
                     source_failed = true;
                 }
                 else
                 {
-                    auto movie_update = opening_movie_player_->Advance(elapsed);
-                    if (!movie_update)
+                    std::chrono::nanoseconds presentation_elapsed{0};
+                    if (opening_movie_audio_clock_started_)
                     {
-                        log_->Warning("opening_movie", movie_update.error().message);
-                        source_failed = true;
-                    }
-                    else
-                    {
-                        source_completed = movie_update->status ==
-                            OpeningMoviePlayerStatus::Completed;
-                        if (movie_update->frame_updated)
+                        if (movie_audio.opening_movie_session_generation !=
+                                opening_movie_audio_session_generation_ ||
+                            movie_audio.opening_movie_timeline_frames <
+                                opening_movie_audio_timeline_baseline_)
                         {
-                            if (movie_update->current_frame == nullptr)
+                            log_->Warning("opening_movie",
+                                "opening movie audio timeline generation changed unexpectedly");
+                            source_failed = true;
+                        }
+                        else
+                        {
+                            const std::uint64_t timeline_frames =
+                                movie_audio.opening_movie_timeline_frames -
+                                opening_movie_audio_timeline_baseline_;
+                            if (timeline_frames < opening_movie_audio_timeline_applied_)
                             {
                                 log_->Warning("opening_movie",
-                                    "opening movie published an empty frame update");
+                                    "opening movie audio timeline moved backwards");
                                 source_failed = true;
                             }
                             else
                             {
-                                const media::Rgba8VideoFrame& frame =
-                                    *movie_update->current_frame;
-                                auto updated = host_->UpdateRgba8Texture(
-                                    opening_movie_texture_,
-                                    runtime::Rgba8TextureUploadView{
-                                        .width = frame.width,
-                                        .height = frame.height,
-                                        .pixels = frame.pixels,
-                                    });
-                                if (!updated)
+                                const std::uint64_t delta_frames =
+                                    timeline_frames - opening_movie_audio_timeline_applied_;
+                                if (delta_frames >
+                                    (std::numeric_limits<std::uint64_t>::max() -
+                                        opening_movie_audio_nanosecond_remainder_) /
+                                        kNanosecondsPerSecond)
                                 {
                                     log_->Warning("opening_movie",
-                                        "opening movie presentation texture update failed");
+                                        "opening movie audio timeline exceeded its bounded clock");
                                     source_failed = true;
                                 }
+                                else
+                                {
+                                    const std::uint64_t numerator =
+                                        delta_frames * kNanosecondsPerSecond +
+                                        opening_movie_audio_nanosecond_remainder_;
+                                    const std::uint64_t nanoseconds = numerator /
+                                        static_cast<std::uint64_t>(SdlAudioService::kSampleRate);
+                                    if (nanoseconds > static_cast<std::uint64_t>(
+                                            std::numeric_limits<
+                                                std::chrono::nanoseconds::rep>::max()))
+                                    {
+                                        log_->Warning("opening_movie",
+                                            "opening movie audio clock conversion overflowed");
+                                        source_failed = true;
+                                    }
+                                    else
+                                    {
+                                        opening_movie_audio_timeline_applied_ = timeline_frames;
+                                        opening_movie_audio_nanosecond_remainder_ = numerator %
+                                            static_cast<std::uint64_t>(
+                                                SdlAudioService::kSampleRate);
+                                        presentation_elapsed = std::chrono::nanoseconds{
+                                            static_cast<std::chrono::nanoseconds::rep>(
+                                                nanoseconds)};
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (!source_failed)
+                    {
+                        auto movie_update = opening_movie_player_->Advance(presentation_elapsed);
+                        if (!movie_update)
+                        {
+                            log_->Warning("opening_movie", movie_update.error().message);
+                            source_failed = true;
+                        }
+                        else
+                        {
+                            const bool video_completed = movie_update->status ==
+                                OpeningMoviePlayerStatus::Completed;
+                            if (movie_update->frame_updated)
+                            {
+                                if (movie_update->current_frame == nullptr)
+                                {
+                                    log_->Warning("opening_movie",
+                                        "opening movie published an empty frame update");
+                                    source_failed = true;
+                                }
+                                else
+                                {
+                                    const media::Rgba8VideoFrame& frame =
+                                        *movie_update->current_frame;
+                                    auto updated = host_->UpdateRgba8Texture(
+                                        opening_movie_texture_,
+                                        runtime::Rgba8TextureUploadView{
+                                            .width = frame.width,
+                                            .height = frame.height,
+                                            .pixels = frame.pixels,
+                                        });
+                                    if (!updated)
+                                    {
+                                        log_->Warning("opening_movie",
+                                            "opening movie presentation texture update failed");
+                                        source_failed = true;
+                                    }
+                                }
+                            }
+
+                            if (!source_failed && movie_update->current_frame != nullptr &&
+                                !opening_movie_player_->audio_finished())
+                            {
+                                const std::uint64_t available_frames =
+                                    audio_->OpeningMovieAvailableFrames();
+                                if (available_frames >= kOpeningMovieAudioRefillFrames)
+                                {
+                                    const auto output = std::span<std::int16_t>(
+                                        opening_movie_audio_scratch_)
+                                                            .first(static_cast<std::size_t>(
+                                                                available_frames *
+                                                                SdlAudioService::kChannelCount));
+                                    auto decoded =
+                                        opening_movie_player_->ReadAudioFrames(output);
+                                    if (!decoded)
+                                    {
+                                        log_->Warning("opening_movie", decoded.error().message);
+                                        source_failed = true;
+                                    }
+                                    else if (*decoded != 0U)
+                                    {
+                                        const auto samples = output.first(
+                                            static_cast<std::size_t>(
+                                                *decoded * SdlAudioService::kChannelCount));
+                                        const AudioServiceSnapshot before_queue =
+                                            audio_->Snapshot();
+                                        if (!audio_->QueueOpeningMoviePcm16(samples,
+                                                opening_movie_player_->audio_finished()))
+                                        {
+                                            log_->Warning("opening_movie",
+                                                "opening movie audio queue rejected a bounded "
+                                                "refill");
+                                            source_failed = true;
+                                        }
+                                        else if (!opening_movie_audio_clock_started_)
+                                        {
+                                            const AudioServiceSnapshot started =
+                                                audio_->Snapshot();
+                                            opening_movie_audio_clock_started_ = true;
+                                            opening_movie_audio_timeline_baseline_ =
+                                                before_queue.opening_movie_timeline_frames;
+                                            opening_movie_audio_timeline_applied_ = 0U;
+                                            opening_movie_audio_nanosecond_remainder_ = 0U;
+                                            opening_movie_audio_session_generation_ =
+                                                started.opening_movie_session_generation;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!source_failed && video_completed &&
+                                opening_movie_player_->audio_finished())
+                            {
+                                const AudioServiceSnapshot audio = audio_->Snapshot();
+                                source_completed = audio.opening_movie_queued_frames == 0U &&
+                                    !audio.opening_movie_active;
                             }
                         }
                     }
@@ -1107,6 +1274,16 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             boot_sequence_state_ = boot.state;
             if (boot.entered_front_end)
             {
+                const bool contained = ContainOpeningMovieAudio();
+                if (!contained)
+                {
+                    log_->Warning("opening_movie",
+                        "opening movie audio discard failed during front-end transition");
+                }
+                else
+                {
+                    audio_fault_baseline = audio_->Snapshot();
+                }
                 opening_movie_player_.reset();
                 opening_movie_draw_list_ = {};
                 if (opening_movie_texture_.valid())
@@ -1146,6 +1323,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         if (plan.simulation_steps >
             std::numeric_limits<std::uint64_t>::max() - result.planned_simulation_steps)
         {
+            (void)ContainOpeningMovieAudio();
             jobs_->WaitForIdle();
             constexpr std::string_view error = "run-local simulation step counter exhausted";
             log_->Error("simulation", error);
@@ -1184,6 +1362,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 });
             if (!planned_translation)
             {
+                (void)ContainOpeningMovieAudio();
                 jobs_->WaitForIdle();
                 constexpr std::string_view error = "debug locomotion planning failed";
                 log_->Error("simulation", error);
@@ -1204,6 +1383,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             if (simulation_->AdvanceOneStep(simulation_input) !=
                 simulation::SimulationStepResult::Advanced)
             {
+                (void)ContainOpeningMovieAudio();
                 jobs_->WaitForIdle();
                 constexpr std::string_view error =
                     "simulation world representation exhausted";
@@ -1240,6 +1420,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         auto rendered = host_->RenderFrame(render_packet);
         if (!rendered)
         {
+            (void)ContainOpeningMovieAudio();
             jobs_->WaitForIdle();
             log_->Error("render", rendered.error());
             return RunLoopResult{
@@ -1250,12 +1431,18 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         }
         ++result.rendered_frames;
 
-        if (audio_->Snapshot().callback_failures != 0U)
+        const AudioServiceSnapshot audio_health = audio_->Snapshot();
+        if (audio_health.callback_failures > audio_fault_baseline.callback_failures ||
+            audio_health.opening_movie_control_failures >
+                audio_fault_baseline.opening_movie_control_failures)
         {
+            const bool contained = ContainOpeningMovieAudio();
             jobs_->WaitForIdle();
             constexpr std::string_view error =
-                "audio callback failed to provide playback data";
+                "audio playback callback or control operation failed";
             log_->Error("audio", error);
+            if (!contained)
+                log_->Error("audio", "audio containment also reported a control failure");
             return RunLoopResult{
                 .result = result,
                 .operational_error = std::string(error),
@@ -1264,11 +1451,15 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         }
     }
 
+    const bool contained = ContainOpeningMovieAudio();
     jobs_->WaitForIdle();
     const AudioServiceSnapshot audio = audio_->Snapshot();
-    if (audio.callback_failures != 0U)
+    if (!contained || audio.callback_failures > audio_fault_baseline.callback_failures ||
+        audio.opening_movie_control_failures >
+            audio_fault_baseline.opening_movie_control_failures)
     {
-        constexpr std::string_view error = "audio callback failed to provide playback data";
+        constexpr std::string_view error =
+            "audio playback callback, control, or containment operation failed";
         log_->Error("audio", error);
         return RunLoopResult{
             .result = result,
