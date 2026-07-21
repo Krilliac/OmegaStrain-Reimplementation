@@ -32,7 +32,7 @@ class WindowsCiTimeoutContractTests(unittest.TestCase):
         )
         self.assertEqual(sdl_input_timeout, 15)
         self.assertEqual(profile_catalog_timeout, 30)
-        self.assertEqual(native_persistence_timeout, 30)
+        self.assertEqual(native_persistence_timeout, 60)
 
         timeout_constants = self._package_timeout_constants()
         self.assertEqual(
