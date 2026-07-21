@@ -18,6 +18,19 @@ def hash_file(path: Path) -> str:
     return digest.hexdigest().upper()
 
 
+def manifest_sort_key(relative_posix: str) -> tuple[str, str]:
+    """Return a total-order sort key for a repository-relative POSIX path.
+
+    Ordering is case-insensitive first (stable, human-friendly grouping), then
+    breaks ties by the exact original path. Using the case-folded value alone is
+    not a total order: two members differing only in case collide, after which a
+    stable sort preserves filesystem-walk order, which varies by OS. The second
+    component makes the order fully determined by the tree contents, so the same
+    tree yields byte-identical manifests on every machine.
+    """
+    return (relative_posix.lower(), relative_posix)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", type=Path)
@@ -31,7 +44,10 @@ def main() -> int:
     if not root.is_dir():
         parser.error(f"root is not a directory: {root}")
 
-    files = sorted((path for path in root.rglob("*") if path.is_file()), key=lambda path: path.relative_to(root).as_posix().lower())
+    files = sorted(
+        (path for path in root.rglob("*") if path.is_file()),
+        key=lambda path: manifest_sort_key(path.relative_to(root).as_posix()),
+    )
     manifest.parent.mkdir(parents=True, exist_ok=True)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
 
