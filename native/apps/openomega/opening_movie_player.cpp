@@ -1,4 +1,5 @@
 #include "opening_movie_player.h"
+#include "opening_movie_player_error_mapping.h"
 #include "opening_movie_safety.h"
 
 #include "omega/media/media_foundation_h262_decoder.h"
@@ -106,19 +107,7 @@ Convert90KhzTo100ns(const std::optional<std::uint64_t> timestamp) noexcept {
 
 [[nodiscard]] Error MapDecoderCreationError(
     const media::MediaFoundationH262DecoderError &error) noexcept {
-  using DecoderCode = media::MediaFoundationH262DecoderErrorCode;
-  switch (error.code) {
-  case DecoderCode::UnsupportedPlatform:
-  case DecoderCode::InitializationFailed:
-  case DecoderCode::DecoderUnavailable:
-  case DecoderCode::MediaTypeRejected:
-  case DecoderCode::OutputTypeUnavailable:
-    return MakeError(ErrorCode::DecoderUnavailable);
-  case DecoderCode::AllocationFailed:
-    return MakeError(ErrorCode::AllocationFailed);
-  default:
-    return MakeError(ErrorCode::DecoderFailed);
-  }
+  return MakeError(detail::MapOpeningMovieDecoderCreationError(error.code));
 }
 
 [[nodiscard]] Error MapDecoderRuntimeError(
