@@ -48,12 +48,13 @@ if ($Resume) {
 }
 
 $arguments += @('--', $isoPath)
-$maximumCommandLineLength = Get-OmegaMaximumWindowsCommandLineLength
-# The maximum already excludes CreateProcessW's terminating NUL. Reserve the always-quoted
-# executable frame plus the one separator before Start-Process's flattened argument line.
+$maximumStartProcessContentLength = Get-OmegaMaximumWindowsStartProcessContentLength
+# The maximum excludes CreateProcessW's terminating NUL and retains the Windows PowerShell 5.1
+# adapter margin. Reserve the always-quoted executable frame plus the one separator before
+# Start-Process's flattened argument line.
 $encodedExecutableLength = Measure-OmegaWindowsStartProcessFilePath $pcsx2Exe `
-    -MaximumEncodedLength $maximumCommandLineLength
-$maximumArgumentLineLength = $maximumCommandLineLength - $encodedExecutableLength - 1
+    -MaximumEncodedLength $maximumStartProcessContentLength
+$maximumArgumentLineLength = $maximumStartProcessContentLength - $encodedExecutableLength - 1
 if ($maximumArgumentLineLength -lt 0) {
     throw 'PCSX2 executable path exceeds the bounded Windows launch limit.'
 }
