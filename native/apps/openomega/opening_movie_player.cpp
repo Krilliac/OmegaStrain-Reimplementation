@@ -98,12 +98,7 @@ ReadSource(const std::filesystem::path &path) {
 
 [[nodiscard]] Error MapDecoderRuntimeError(
     const media::MediaFoundationH262DecoderError &error) noexcept {
-  if (error.code == media::MediaFoundationH262DecoderErrorCode::WrongThread)
-    return MakeError(ErrorCode::WrongThread);
-  if (error.code ==
-      media::MediaFoundationH262DecoderErrorCode::AllocationFailed)
-    return MakeError(ErrorCode::AllocationFailed);
-  return MakeError(ErrorCode::DecoderFailed);
+  return MakeError(detail::MapOpeningMovieDecoderRuntimeError(error.code));
 }
 
 struct QueuedNv12Frame {
