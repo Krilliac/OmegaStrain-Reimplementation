@@ -141,6 +141,14 @@ struct OmegaAppTestAccess final
         return app.active_profile_id_;
     }
 
+    [[nodiscard]] static std::optional<profiles::ProfileId>
+    PersistedConfirmedProfile(const OmegaApp& app) noexcept
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        return app.native_persistence_->persisted_confirmed_profile_id();
+    }
+
     [[nodiscard]] static bool ArmFirstProfileTimestamp(
         OmegaApp& app, const std::uint64_t timestamp) noexcept
     {
@@ -212,6 +220,11 @@ constexpr FrontEndState kProfilesFirst{
 constexpr FrontEndState kReturnedProfilesRow{
     .mode = FrontEndMode::Main,
     .selected_main_row = FrontEndMainRow::Profiles,
+    .selected_profile_slot = FrontEndProfileSlot::First,
+};
+constexpr FrontEndState kMainStart{
+    .mode = FrontEndMode::Main,
+    .selected_main_row = FrontEndMainRow::StartDiagnostic,
     .selected_profile_slot = FrontEndProfileSlot::First,
 };
 
@@ -1249,9 +1262,10 @@ void CheckPersistenceBackedMovieProfileFlow(
                       creation_timestamp &&
                   created_profile->metadata.modified_unix_milliseconds ==
                       creation_timestamp &&
-                  created_profile->metadata_revision == 1U,
+                  created_profile->metadata_revision == 1U &&
+                  !OmegaAppTestAccess::PersistedConfirmedProfile(*app),
             context,
-            "only the explicit post-movie create edge durably publishes fixed-ID PROFILE 1 without activation");
+            "only the explicit post-movie create edge durably publishes fixed-ID PROFILE 1 without activation or a durable confirmation");
 
         const bool create_released = PushKey(SDL_SCANCODE_F1, false) &&
             RunOneModalFrameWithExactDraws(*app, 3U, context);
@@ -1263,15 +1277,59 @@ void CheckPersistenceBackedMovieProfileFlow(
             context,
             "the explicit create release is inert and leaves PROFILE 1 unselected");
 
+        // The created profile is still unconfirmed, so the post-movie front end
+        // must refuse diagnostic entry and route back to the surface that can
+        // satisfy the gate. RunOneModalFrameWithExactDraws proves each of these
+        // frames simulates nothing and allocates no GPU resource.
+        const bool unconfirmed_cancelled = PushKey(SDL_SCANCODE_BACKSPACE, true) &&
+            RunOneModalFrameWithExactDraws(*app, 3U, context) &&
+            PushKey(SDL_SCANCODE_BACKSPACE, false) &&
+            RunOneModalFrameWithExactDraws(*app, 3U, context);
+        Check(unconfirmed_cancelled &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kReturnedProfilesRow &&
+                  !OmegaAppTestAccess::ActiveProfile(*app),
+            context,
+            "Cancel leaves the unconfirmed post-movie Profiles surface for its Main row");
+
+        const bool unconfirmed_navigated = PushKey(SDL_SCANCODE_UP, true) &&
+            RunOneModalFrameWithExactDraws(*app, 3U, context) &&
+            PushKey(SDL_SCANCODE_UP, false) &&
+            RunOneModalFrameWithExactDraws(*app, 3U, context);
+        Check(unconfirmed_navigated &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kMainStart &&
+                  !OmegaAppTestAccess::ActiveProfile(*app),
+            context,
+            "the unconfirmed post-movie front end selects its START DIAGNOSTIC row");
+
+        const bool unconfirmed_redirected = PushKey(SDL_SCANCODE_F1, true) &&
+            RunOneModalFrameWithExactDraws(*app, 3U, context);
+        Check(unconfirmed_redirected &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  !OmegaAppTestAccess::ActiveProfile(*app) &&
+                  !OmegaAppTestAccess::PersistedConfirmedProfile(*app) &&
+                  OmegaAppTestAccess::ProfileCatalogCount(*app) ==
+                      std::optional<std::size_t>{1U},
+            context,
+            "an unconfirmed Start Diagnostic edge opens the unmarked Profiles surface without simulation, activation, durable confirmation, or catalog mutation");
+
+        const bool redirect_released = PushKey(SDL_SCANCODE_F1, false) &&
+            RunOneModalFrameWithExactDraws(*app, 3U, context);
+        Check(redirect_released &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst,
+            context,
+            "the redirected post-movie entry edge releases before the confirming press");
+
         const bool select_pressed = PushKey(SDL_SCANCODE_F1, true) &&
             RunOneModalFrameWithExactDraws(*app, 3U, context);
         Check(select_pressed &&
                   OmegaAppTestAccess::FrontEnd(*app) == kReturnedProfilesRow &&
                   OmegaAppTestAccess::ActiveProfile(*app) == *first_profile_id &&
+                  OmegaAppTestAccess::PersistedConfirmedProfile(*app) ==
+                      *first_profile_id &&
                   OmegaAppTestAccess::ProfileCatalogCount(*app) ==
                       std::optional<std::size_t>{1U},
             context,
-            "a later distinct Primary edge explicitly activates PROFILE 1 and returns to Main");
+            "a later distinct Primary edge durably confirms PROFILE 1, activates it, and returns to Main");
 
         const bool select_released = PushKey(SDL_SCANCODE_F1, false) &&
             RunOneModalFrameWithExactDraws(*app, 3U, context);
@@ -1280,10 +1338,32 @@ void CheckPersistenceBackedMovieProfileFlow(
                   OmegaAppTestAccess::ActiveProfile(*app) == *first_profile_id,
             context,
             "the explicit selection release preserves the active profile and Main route");
+
+        // Re-entering Profiles with a resolvable confirmation must pick the
+        // preloaded selected-plus-active list: one more fixed draw than the
+        // unmarked surface, and still no texture upload.
+        const bool marked_profiles = PushKey(SDL_SCANCODE_F1, true) &&
+            RunOneModalFrameWithExactDraws(*app, 4U, context);
+        Check(marked_profiles &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  OmegaAppTestAccess::ActiveProfile(*app) == *first_profile_id &&
+                  OmegaAppTestAccess::PersistedConfirmedProfile(*app) ==
+                      *first_profile_id,
+            context,
+            "the confirmed post-movie Profiles surface submits the exact four-command selected-plus-active list without any texture upload");
+
+        const bool marked_released = PushKey(SDL_SCANCODE_F1, false) &&
+            RunOneModalFrameWithExactDraws(*app, 4U, context);
+        Check(marked_released &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  OmegaAppTestAccess::ActiveProfile(*app) == *first_profile_id,
+            context,
+            "the marked post-movie Profiles surface persists across its release frame");
     }
 
     auto reopened = NativePersistence::Bootstrap(directory.path());
     Check(reopened && reopened->startup_profiles().size() == 1U &&
+              reopened->persisted_confirmed_profile_id() == first_profile_id &&
               reopened->startup_profiles()[0].id == *first_profile_id &&
               reopened->startup_profiles()[0].metadata.display_name ==
                   omega::app::kFrontEndFirstProfileDisplayName &&
