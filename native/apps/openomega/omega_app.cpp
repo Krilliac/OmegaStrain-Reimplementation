@@ -36,6 +36,10 @@ static_assert(kOpeningMovieAudioClockRateHz ==
 constexpr profiles::ProfileId kFirstProfileId = profiles::ProfileId::FromBytes(
     std::array<std::uint8_t, 16U>{0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
                                    0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U});
+constexpr profiles::CharacterId kFirstCharacterId =
+    profiles::CharacterId::FromBytes(
+        std::array<std::uint8_t, 16U>{0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+                                      0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U});
 constexpr std::array<std::byte, 4U> kDiagnosticActorMarkerRgba8{
     std::byte{255U}, std::byte{64U}, std::byte{224U}, std::byte{255U}};
 } // namespace
@@ -1036,11 +1040,14 @@ OmegaApp::OmegaApp(
               .can_create_first_profile = first_profile_presentation_.has_value(),
           })),
       can_create_first_profile_(first_profile_presentation_.has_value()),
+      can_create_first_character_(false),
       // native_persistence_ is the first declared member, so it is already
       // initialized here. ConfirmActiveProfile is the only way to publish
       // active_profile_id_, so a composition without persistence has no
       // authorization source and must not be gated against one.
-      requires_active_profile_for_diagnostic_play_(native_persistence_ != nullptr)
+      requires_active_profile_for_diagnostic_play_(native_persistence_ != nullptr),
+      requires_active_character_for_diagnostic_play_(
+          native_persistence_ != nullptr)
 {
 }
 
@@ -1065,6 +1072,8 @@ OmegaApp::~OmegaApp() noexcept
     diagnostic_asset_topology_draw_list_ = {};
     diagnostic_controls_draw_list_ = {};
     diagnostic_actor_draw_list_ = {};
+    ReleaseCharacterPresentation(first_character_presentation_);
+    ReleaseCharacterPresentation(character_presentation_);
     const auto clear_front_end_draw_lists = [](FrontEndPresentation& presentation) noexcept
     {
         if (presentation.profile_active_draw_lists)
@@ -1154,6 +1163,173 @@ OmegaApp::~OmegaApp() noexcept
     front_end_presentation_.main_texture = {};
     diagnostic_actor_marker_texture_ = {};
     diagnostic_texture_ = {};
+}
+
+std::expected<OmegaApp::CharacterPresentation, std::string>
+OmegaApp::BuildCharacterPresentation(
+    const FrontEndCharacterStartupModel& model,
+    const FrontEndCapabilities capabilities)
+{
+    if (host_ == nullptr || !diagnostic_texture_.valid())
+    {
+        return std::unexpected(
+            std::string{"character presentation requires the live GPU host"});
+    }
+
+    constexpr runtime::RenderSourceRectQ16 full_source{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    constexpr runtime::RenderTargetRectQ16 full_target{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    constexpr runtime::RenderTargetRectQ16 menu_target{
+        .left = 2048U,
+        .top = 2048U,
+        .right = 26624U,
+        .bottom = 15872U,
+    };
+    constexpr runtime::RenderSourceRectQ16 selection_source{
+        .left = 0U,
+        .top = 0U,
+        .right = 512U,
+        .bottom = 512U,
+    };
+    constexpr std::array selection_targets{
+        runtime::RenderTargetRectQ16{
+            .left = 3584U,
+            .top = 7424U,
+            .right = 4352U,
+            .bottom = 8960U,
+        },
+        runtime::RenderTargetRectQ16{
+            .left = 3584U,
+            .top = 9344U,
+            .right = 4352U,
+            .bottom = 10880U,
+        },
+        runtime::RenderTargetRectQ16{
+            .left = 3584U,
+            .top = 11264U,
+            .right = 4352U,
+            .bottom = 12800U,
+        },
+    };
+    static_assert(selection_targets.size() == kFrontEndVisibleCharacters);
+
+    const runtime::DebugImage image =
+        BuildProjectFrontEndCharactersImage(model, capabilities);
+    auto uploaded = host_->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+        .width = image.width,
+        .height = image.height,
+        .pixels = image.pixels(),
+    });
+    if (!uploaded)
+    {
+        return std::unexpected(
+            "SDL/GPU front-end characters texture upload: " +
+            uploaded.error());
+    }
+
+    CharacterPresentation presentation;
+    presentation.texture = *uploaded;
+    std::array<runtime::RenderTextureBlitCommand, 3U> commands{
+        runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_texture_,
+            .source = full_source,
+            .destination = full_target,
+            .fit_mode = runtime::RenderTextureFitMode::Contain,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        },
+        runtime::RenderTextureBlitCommand{
+            .texture = presentation.texture,
+            .source = full_source,
+            .destination = menu_target,
+            .fit_mode = runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        },
+        {},
+    };
+
+    const auto fail_after_upload = [&](std::string message)
+        -> std::expected<CharacterPresentation, std::string>
+    {
+        static_cast<void>(host_->ReleaseTexture(presentation.texture));
+        presentation.texture = {};
+        return std::unexpected(std::move(message));
+    };
+
+    auto base = runtime::RenderDrawList::Create(
+        std::span<const runtime::RenderTextureBlitCommand>{commands.data(), 2U});
+    if (!base)
+    {
+        return fail_after_upload(
+            "SDL/GPU front-end characters draw-list creation failed");
+    }
+    presentation.draw_list = std::move(*base);
+
+    for (std::size_t slot = 0U; slot < selection_targets.size(); ++slot)
+    {
+        commands[2U] = runtime::RenderTextureBlitCommand{
+            .texture = presentation.texture,
+            .source = selection_source,
+            .destination = selection_targets[slot],
+            .fit_mode = runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        };
+        auto selected = runtime::RenderDrawList::Create(commands);
+        if (!selected)
+        {
+            return fail_after_upload(
+                "SDL/GPU front-end character selection draw-list creation failed");
+        }
+        presentation.selection_draw_lists[slot] = std::move(*selected);
+    }
+    return presentation;
+}
+
+void OmegaApp::ReleaseCharacterPresentation(
+    std::optional<CharacterPresentation>& presentation) noexcept
+{
+    if (!presentation)
+        return;
+    for (runtime::RenderDrawList& draw_list :
+         presentation->selection_draw_lists)
+    {
+        draw_list = {};
+    }
+    presentation->draw_list = {};
+    const runtime::RenderTextureHandle texture = presentation->texture;
+    presentation->texture = {};
+    presentation.reset();
+    if (host_ == nullptr || !texture.valid())
+        return;
+
+    bool release_failed = false;
+    try
+    {
+        release_failed = !host_->ReleaseTexture(texture);
+    }
+    catch (...)
+    {
+        release_failed = true;
+    }
+    if (release_failed && log_ != nullptr)
+    {
+        try
+        {
+            log_->Warning("front-end",
+                "character texture release failed; GPU host cleanup will retry");
+        }
+        catch (...)
+        {
+        }
+    }
 }
 
 bool OmegaApp::ContainOpeningMovieAudio() noexcept
@@ -1652,7 +1828,9 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                         .cancel_pressed = input_snapshot.WasPressed(kFrontEndCancelAction),
                     },
                     front_end_startup_model_.visible_profiles,
-                    CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed());
+                    CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
+                    front_end_character_startup_model_.visible_characters,
+                    ActiveCharacterIsConfirmed());
             // The command is applied, and therefore persisted, before its state
             // is published. A failed command leaves the prior front-end state and
             // the prior activation in place.
@@ -1671,7 +1849,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         }
         const bool simulation_allowed =
             !movie_was_active && FrontEndAllowsSimulation(front_end_state_,
-                                     CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed());
+                                     CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
+                                     ActiveCharacterIsConfirmed());
         const std::chrono::nanoseconds effective_elapsed = simulation_allowed
             ? elapsed
             : std::chrono::nanoseconds::zero();
@@ -1756,7 +1935,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         const simulation::SimulationState simulation_snapshot = simulation_->Snapshot();
         const bool movie_is_active = IsBootSequenceActive(boot_sequence_state_);
         if (!movie_is_active && FrontEndAllowsSimulation(front_end_state_,
-                                    CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed()))
+                                    CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
+                                    ActiveCharacterIsConfirmed()))
         {
             auto refreshed_actor_draw_list = RefreshDiagnosticActorDrawList();
             if (!refreshed_actor_draw_list)
@@ -2008,15 +2188,125 @@ std::expected<void, std::string> OmegaApp::CreateFirstProfile()
     }
 }
 
+std::expected<void, std::string> OmegaApp::CreateFirstCharacter()
+{
+    if (!can_create_first_character_ || !character_presentation_ ||
+        !first_character_presentation_ || native_persistence_ == nullptr ||
+        !ActiveProfileIsConfirmed() ||
+        front_end_character_startup_model_.total_characters != 0U ||
+        front_end_character_startup_model_.visible_characters != 0U)
+    {
+        return std::unexpected(
+            std::string{"first character creation is not available"});
+    }
+
+    auto live_characters = native_persistence_->characters().List(
+        *active_profile_id_);
+    if (!live_characters)
+    {
+        return std::unexpected(
+            "first character catalog check failed: " +
+            std::string(profiles::CharacterCatalogErrorCodeName(
+                live_characters.error().code)));
+    }
+    if (!live_characters->empty())
+    {
+        return std::unexpected(
+            std::string{"first character creation requires an empty catalog"});
+    }
+
+    const auto elapsed = std::chrono::system_clock::now().time_since_epoch();
+    if (elapsed < std::chrono::system_clock::duration::zero())
+    {
+        return std::unexpected(
+            std::string{"system clock precedes the supported UTC epoch"});
+    }
+    const auto milliseconds =
+        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    if (milliseconds < 0)
+    {
+        return std::unexpected(
+            std::string{"system clock precedes the supported UTC epoch"});
+    }
+    const std::uint64_t timestamp =
+        static_cast<std::uint64_t>(milliseconds);
+    if (timestamp > profiles::kCharacterTimestampMaxUnixMilliseconds)
+    {
+        return std::unexpected(
+            std::string{"system clock exceeds the supported UTC range"});
+    }
+
+    try
+    {
+        std::array prospective_characters{
+            profiles::CharacterSummary{
+                .id = kFirstCharacterId,
+                .metadata = profiles::CharacterMetadata{
+                    .display_name =
+                        std::string{kFrontEndFirstCharacterDisplayName},
+                    .created_unix_milliseconds = timestamp,
+                    .modified_unix_milliseconds = timestamp,
+                },
+                .metadata_revision = 1U,
+            },
+        };
+        const auto projected_model =
+            MakeFrontEndCharacterStartupModel(prospective_characters);
+        if (!projected_model)
+        {
+            return std::unexpected(
+                std::string{"first character projection failed"});
+        }
+
+        auto created = native_persistence_->characters().Create(
+            *active_profile_id_, kFirstCharacterId,
+            std::move(prospective_characters[0].metadata));
+        if (!created)
+        {
+            return std::unexpected(
+                "first character creation failed: " +
+                std::string(profiles::CharacterCatalogErrorCodeName(
+                    created.error().code)));
+        }
+
+        static_assert(std::is_nothrow_swappable_v<CharacterPresentation>);
+        std::swap(*character_presentation_,
+                  *first_character_presentation_);
+        // The preview now owns the obsolete empty card. Release it immediately
+        // so reselecting this or another profile does not carry a third
+        // character texture into the next transactional presentation build.
+        ReleaseCharacterPresentation(first_character_presentation_);
+        front_end_character_startup_model_ = *projected_model;
+        can_create_first_character_ = false;
+        return {};
+    }
+    catch (const std::exception&)
+    {
+        return std::unexpected(
+            std::string{"first character preparation failed"});
+    }
+    catch (...)
+    {
+        return std::unexpected(
+            std::string{"first character preparation failed"});
+    }
+}
+
 FrontEndCapabilities OmegaApp::CurrentFrontEndCapabilities() const noexcept
 {
     const bool active_profile_is_confirmed = ActiveProfileIsConfirmed();
+    const bool active_character_is_confirmed = ActiveCharacterIsConfirmed();
     return FrontEndCapabilities{
         .can_create_first_profile = can_create_first_profile_,
         .can_start_diagnostic_campaign =
-            native_persistence_ == nullptr || active_profile_is_confirmed,
+            native_persistence_ == nullptr ||
+            (active_profile_is_confirmed && active_character_is_confirmed),
         .requires_active_profile_for_diagnostic_play =
             requires_active_profile_for_diagnostic_play_,
+        .supports_character_selection = native_persistence_ != nullptr,
+        .can_create_first_character = can_create_first_character_,
+        .requires_active_character_for_diagnostic_play =
+            requires_active_character_for_diagnostic_play_,
     };
 }
 
@@ -2024,6 +2314,13 @@ bool OmegaApp::ActiveProfileIsConfirmed() const noexcept
 {
     return FrontEndHasConfirmedActiveProfile(
         front_end_startup_model_, active_profile_id_);
+}
+
+bool OmegaApp::ActiveCharacterIsConfirmed() const noexcept
+{
+    return ActiveProfileIsConfirmed() &&
+           FrontEndHasConfirmedActiveCharacter(
+               front_end_character_startup_model_, active_character_id_);
 }
 
 std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
@@ -2037,6 +2334,52 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
                 std::string{"first profile command selected an invalid slot"});
         }
         return CreateFirstProfile();
+    }
+    if (command.type == FrontEndCommandType::CreateFirstCharacter)
+    {
+        if (command.character_slot != FrontEndCharacterSlot::First)
+        {
+            return std::unexpected(std::string{
+                "first character command selected an invalid slot"});
+        }
+        return CreateFirstCharacter();
+    }
+    if (command.type == FrontEndCommandType::SetActiveCharacter)
+    {
+        constexpr std::string_view confirmation_failure_prefix =
+            "active character confirmation failed: ";
+        const auto confirmation_failure = [confirmation_failure_prefix](
+                                              const ActiveCharacterConfirmationErrorCode code) {
+            return std::string(confirmation_failure_prefix) +
+                   std::string(ActiveCharacterConfirmationErrorCodeName(code));
+        };
+        if (native_persistence_ == nullptr || !ActiveProfileIsConfirmed())
+        {
+            return std::unexpected(confirmation_failure(
+                ActiveCharacterConfirmationErrorCode::ActiveProfileRequired));
+        }
+        const std::size_t slot =
+            static_cast<std::size_t>(command.character_slot);
+        if (slot >= kFrontEndVisibleCharacters ||
+            slot >= front_end_character_startup_model_.visible_characters ||
+            slot >= front_end_character_startup_model_.total_characters)
+        {
+            return std::unexpected(confirmation_failure(
+                ActiveCharacterConfirmationErrorCode::CharacterNotFound));
+        }
+        const auto& character_id =
+            front_end_character_startup_model_.characters[slot].id;
+        if (!character_id)
+        {
+            return std::unexpected(confirmation_failure(
+                ActiveCharacterConfirmationErrorCode::CharacterNotFound));
+        }
+        auto confirmed = native_persistence_->ConfirmActiveCharacter(
+            *active_profile_id_, *character_id);
+        if (!confirmed)
+            return std::unexpected(confirmation_failure(confirmed.error().code));
+        active_character_id_ = *character_id;
+        return {};
     }
     if (command.type == FrontEndCommandType::StartDiagnosticCampaign)
     {
@@ -2053,22 +2396,27 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
             return {};
 
         constexpr std::string_view start_failure_prefix =
-            "diagnostic campaign start failed: ";
+            "game session start failed: ";
         const auto start_failure = [start_failure_prefix](
-                                       const DiagnosticCampaignStartErrorCode code) {
+                                       const GameSessionStartErrorCode code) {
             return std::string(start_failure_prefix) +
-                   std::string(DiagnosticCampaignStartErrorCodeName(code));
+                   std::string(GameSessionStartErrorCodeName(code));
         };
         if (!ActiveProfileIsConfirmed())
         {
             return std::unexpected(start_failure(
-                DiagnosticCampaignStartErrorCode::ActiveProfileRequired));
+                GameSessionStartErrorCode::ActiveProfileRequired));
+        }
+        if (!ActiveCharacterIsConfirmed())
+        {
+            return std::unexpected(start_failure(
+                GameSessionStartErrorCode::ActiveCharacterRequired));
         }
 
         // ActiveProfileIsConfirmed resolves this same identity against the
         // current bounded startup model on the serialized game thread.
-        auto prepared = native_persistence_->PrepareDiagnosticCampaignStart(
-            *active_profile_id_);
+        auto prepared = native_persistence_->PrepareGameSessionStart(
+            *active_profile_id_, *active_character_id_);
         if (!prepared)
             return std::unexpected(start_failure(prepared.error().code));
         return {};
@@ -2099,11 +2447,90 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
             ActiveProfileConfirmationErrorCode::ProfileNotFound));
     }
 
+    auto live_characters = native_persistence_->characters().ListBounded(
+        *profile_id, kFrontEndMaximumCharacters);
+    if (!live_characters)
+    {
+        return std::unexpected(
+            "character catalog selection failed: " +
+            std::string(profiles::CharacterCatalogErrorCodeName(
+                live_characters.error().code)));
+    }
+    const auto projected_characters =
+        MakeFrontEndCharacterStartupModel(*live_characters);
+    if (!projected_characters)
+    {
+        return std::unexpected(
+            "character projection failed: " +
+            std::string(FrontEndModelErrorMessage(
+                projected_characters.error())));
+    }
+
+    const bool can_create_first_character =
+        projected_characters->total_characters == 0U;
+    auto built_character_presentation = BuildCharacterPresentation(
+        *projected_characters,
+        FrontEndCapabilities{
+            .supports_character_selection = true,
+            .can_create_first_character = can_create_first_character,
+        });
+    if (!built_character_presentation)
+        return std::unexpected(built_character_presentation.error());
+    std::optional<CharacterPresentation> next_character_presentation{
+        std::in_place, std::move(*built_character_presentation)};
+
+    std::optional<CharacterPresentation> next_first_character_presentation;
+    if (can_create_first_character)
+    {
+        const std::array preview_characters{
+            profiles::CharacterSummary{
+                .id = kFirstCharacterId,
+                .metadata = profiles::CharacterMetadata{
+                    .display_name =
+                        std::string{kFrontEndFirstCharacterDisplayName},
+                    .created_unix_milliseconds = 0U,
+                    .modified_unix_milliseconds = 0U,
+                },
+                .metadata_revision = 1U,
+            },
+        };
+        const auto preview_model =
+            MakeFrontEndCharacterStartupModel(preview_characters);
+        if (!preview_model)
+        {
+            ReleaseCharacterPresentation(next_character_presentation);
+            return std::unexpected(
+                std::string{"first character preview projection failed"});
+        }
+        auto built_preview = BuildCharacterPresentation(
+            *preview_model,
+            FrontEndCapabilities{.supports_character_selection = true});
+        if (!built_preview)
+        {
+            ReleaseCharacterPresentation(next_character_presentation);
+            return std::unexpected(built_preview.error());
+        }
+        next_first_character_presentation.emplace(
+            std::move(*built_preview));
+    }
+
     auto confirmed = native_persistence_->ConfirmActiveProfile(*profile_id);
     if (!confirmed)
+    {
+        ReleaseCharacterPresentation(next_first_character_presentation);
+        ReleaseCharacterPresentation(next_character_presentation);
         return std::unexpected(confirmation_failure(confirmed.error().code));
+    }
 
+    ReleaseCharacterPresentation(first_character_presentation_);
+    ReleaseCharacterPresentation(character_presentation_);
+    character_presentation_ = std::move(next_character_presentation);
+    first_character_presentation_ =
+        std::move(next_first_character_presentation);
+    front_end_character_startup_model_ = *projected_characters;
+    can_create_first_character_ = can_create_first_character;
     active_profile_id_ = *profile_id;
+    active_character_id_.reset();
     return {};
 }
 
@@ -2163,7 +2590,9 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
 const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcept
 {
     const FrontEndView view = BuildFrontEndView(
-        front_end_state_, content_stage_, front_end_startup_model_, active_profile_id_);
+        front_end_state_, content_stage_, front_end_startup_model_,
+        active_profile_id_, front_end_character_startup_model_,
+        active_character_id_);
     const std::size_t selected_main_row = static_cast<std::size_t>(view.selected_main_row);
     if (selected_main_row >= front_end_presentation_.main_draw_lists.size())
         return front_end_presentation_.main_draw_lists.front();
@@ -2198,6 +2627,20 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
         }
         return front_end_presentation_.profiles_draw_list;
     }
+    case FrontEndMode::Characters:
+    {
+        if (!character_presentation_)
+            return front_end_presentation_.main_draw_lists.front();
+        const std::size_t character_slot =
+            static_cast<std::size_t>(view.selected_character_slot);
+        if (character_slot < view.characters.visible_characters &&
+            character_slot <
+                character_presentation_->selection_draw_lists.size())
+        {
+            return character_presentation_->selection_draw_lists[character_slot];
+        }
+        return character_presentation_->draw_list;
+    }
     case FrontEndMode::Controls:
         return diagnostic_controls_draw_list_;
     case FrontEndMode::AssetTopology:
@@ -2231,5 +2674,10 @@ int OmegaApp::audio_channel_count() const noexcept
 std::optional<profiles::ProfileId> OmegaApp::active_profile_id() const noexcept
 {
     return active_profile_id_;
+}
+
+std::optional<profiles::CharacterId> OmegaApp::active_character_id() const noexcept
+{
+    return active_character_id_;
 }
 } // namespace omega::app

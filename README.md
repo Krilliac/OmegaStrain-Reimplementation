@@ -186,6 +186,26 @@ Studio's historical engine source or internal toolchain.
   remains pending. This is a project-generated diagnostic launch marker, not a retail/PS2 campaign,
   save, checkpoint, gameplay, continuation, world-state, memory-card, emulator, owner-input, or
   parity claim.
+- E-0112 adds the first complete project-owned profile-to-character-to-session path. A stateless
+  `CharacterCatalog` stores bounded metadata at
+  `profiles/<profile-id>/characters/<character-id>/metadata` and validates the parent profile on
+  every operation. Explicit profile confirmation now prepares and opens a Characters surface.
+  Primary on its exact empty state creates fixed native ID
+  `00000000000000000000000000000001` named `DIAGNOSTIC CHARACTER` but does not select it; a later
+  release and Primary edge confirms it through the 48-byte `OOACTCHR` active-character pointer.
+  Switching profiles atomically replaces the profile pointer and invalidates the character pointer.
+  Start Diagnostic remains inert until both per-launch identities resolve against their bounded
+  models, then `PrepareGameSessionStart` validates both durable revisions and writes or reuses the
+  48-byte `OOGAMECP` marker at the character-owned diagnostic-session key before publishing
+  DiagnosticPlay. Capture/replay retain bounded commands and identity-free confirmation mirrors;
+  neither owns persistence or a catalog view. The production database uses the existing hard 4,096
+  record and 255-byte key ceilings because the canonical session key exceeds the standalone 96-byte
+  default. Generated catalog, reducer, corruption, profile-switch, reopen, and session tests cover
+  the complete transactional boundary. A separate owner-only manual smoke reached the existing
+  MINSK diagnostic topology and actor marker through create, select, start, close, reopen, reselect,
+  and restart; no owner input or captured byte entered this tree. This is a functional native
+  bootstrap into the current diagnostic game view, not a retail character editor, appearance,
+  loadout, campaign, mission, scene, save, checkpoint, world-state, or parity claim.
 - E-0103 gives that project-owned front end a distinct cancel action without changing the global
   quit path. Backspace and gamepad East publish action 7; Escape and gamepad Back remain action 1
   quit controls. Cancel is inert on Main, otherwise returns Profiles, DiagnosticPlay, Controls, or

@@ -77,6 +77,7 @@ public:
     // [game/main thread; no concurrent use] Owned session value selected from
     // the bounded front-end model. Null means no explicit selection has occurred.
     [[nodiscard]] std::optional<profiles::ProfileId> active_profile_id() const noexcept;
+    [[nodiscard]] std::optional<profiles::CharacterId> active_character_id() const noexcept;
 
 private:
     friend struct detail::OmegaAppTestAccess;
@@ -130,6 +131,7 @@ private:
     [[nodiscard]] std::expected<void, std::string> ApplyFrontEndCommand(
         FrontEndCommand command);
     [[nodiscard]] std::expected<void, std::string> CreateFirstProfile();
+    [[nodiscard]] std::expected<void, std::string> CreateFirstCharacter();
     // [game/main thread; no concurrent use] Explicit capability inputs for the
     // bounded front-end reducer. No allocation, I/O, or persistence work occurs.
     [[nodiscard]] FrontEndCapabilities CurrentFrontEndCapabilities() const noexcept;
@@ -139,6 +141,7 @@ private:
     // no second selection value that could satisfy the gate on its own. No
     // allocation, I/O, or persistence work occurs.
     [[nodiscard]] bool ActiveProfileIsConfirmed() const noexcept;
+    [[nodiscard]] bool ActiveCharacterIsConfirmed() const noexcept;
     // [game/main/render thread; no concurrent use] Rebuilds only the fixed CPU
     // command value for the post-step diagnostic actor position. The marker
     // texture remains immutable and resident for the complete app lifetime.
@@ -167,6 +170,23 @@ private:
         // stack storage; construction and all allocation finish before Run.
         std::unique_ptr<ProfileActiveDrawListMatrix> profile_active_draw_lists;
     };
+
+    struct CharacterPresentation
+    {
+        runtime::RenderTextureHandle texture;
+        runtime::RenderDrawList draw_list;
+        std::array<runtime::RenderDrawList, kFrontEndVisibleCharacters>
+            selection_draw_lists;
+    };
+
+    // [game/main/render thread; no concurrent use] Builds a complete immutable
+    // character card. The returned texture remains host-owned and must be
+    // released through ReleaseCharacterPresentation.
+    [[nodiscard]] std::expected<CharacterPresentation, std::string>
+    BuildCharacterPresentation(const FrontEndCharacterStartupModel& model,
+                               FrontEndCapabilities capabilities);
+    void ReleaseCharacterPresentation(
+        std::optional<CharacterPresentation>& presentation) noexcept;
 
     OmegaApp(std::unique_ptr<NativePersistence> native_persistence,
         std::unique_ptr<runtime::ConfigStore> config,
@@ -256,23 +276,29 @@ private:
     // zero-to-one transition after a durable first-profile create.
     runtime::ContentStartupStage content_stage_ = runtime::ContentStartupStage::NoContent;
     FrontEndStartupModel front_end_startup_model_{};
+    FrontEndCharacterStartupModel front_end_character_startup_model_{};
+    std::optional<CharacterPresentation> character_presentation_;
+    std::optional<CharacterPresentation> first_character_presentation_;
     // Project-owned app-layer state. It has no renderer, database, or retail-data lifetime.
     FrontEndState front_end_state_;
     // Capability is consumed only after the durable create succeeds. Presence of
     // the alternate presentation alone cannot express this because it then owns
     // the old empty presentation until teardown.
     bool can_create_first_profile_ = false;
+    bool can_create_first_character_ = false;
     // Explicit confirmation-gate enablement. Production always composes a
     // persistence owner and enables it. A private composition without
     // persistence has no authorization source and uses the explicit synthetic,
     // persistence-free diagnostic-start path instead.
     bool requires_active_profile_for_diagnostic_play_ = false;
+    bool requires_active_character_for_diagnostic_play_ = false;
     // Explicit per-launch activation only. The corresponding confirmation is
     // persisted before this value is published, but startup never copies a durable
     // confirmation into session state or selects a profile implicitly. This value
     // is the app's single active-profile identity: the diagnostic-play gate and
     // the active-row cue are both derived from it against the current model.
     std::optional<profiles::ProfileId> active_profile_id_;
+    std::optional<profiles::CharacterId> active_character_id_;
     // Friend-only wall-clock seam. Production samples system_clock at the command
     // boundary; tests may provide one valid UTC millisecond value.
     std::optional<std::uint64_t> first_profile_timestamp_override_for_testing_;

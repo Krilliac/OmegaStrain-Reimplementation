@@ -262,6 +262,8 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
         return "Main";
     case omega::app::FrontEndMode::Profiles:
         return "Profiles";
+    case omega::app::FrontEndMode::Characters:
+        return "Characters";
     case omega::app::FrontEndMode::DiagnosticPlay:
         return "DiagnosticPlay";
     case omega::app::FrontEndMode::Controls:
@@ -316,7 +318,11 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     const omega::runtime::FrameSchedulerState capture_before,
     const omega::runtime::FrameSchedulerState capture_after,
     const std::size_t front_end_total_profile_count,
-    const std::uint8_t front_end_visible_profile_slots)
+    const std::uint8_t front_end_visible_profile_slots,
+    const std::array<std::uint8_t, omega::app::kFrontEndVisibleProfiles>&
+        front_end_visible_character_slots_by_profile,
+    const std::array<std::size_t, omega::app::kFrontEndVisibleProfiles>&
+        front_end_total_character_counts_by_profile)
 {
     auto traces = std::move(outcome).TakeTracePair();
     if (!traces)
@@ -342,6 +348,10 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     }
     config.front_end_visible_profile_slots = front_end_visible_profile_slots;
     config.front_end_total_profile_count = front_end_total_profile_count;
+    config.front_end_visible_character_slots_by_profile =
+        front_end_visible_character_slots_by_profile;
+    config.front_end_total_character_counts_by_profile =
+        front_end_total_character_counts_by_profile;
     config.front_end_capabilities.can_create_first_profile =
         front_end_visible_profile_slots == 0U &&
         front_end_total_profile_count == 0U;
@@ -352,6 +362,9 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     // durable confirmation, so only a replayed selection can open it.
     config.front_end_capabilities.can_start_diagnostic_campaign = true;
     config.front_end_capabilities.requires_active_profile_for_diagnostic_play = true;
+    config.front_end_capabilities.supports_character_selection = true;
+    config.front_end_capabilities.can_create_first_character = true;
+    config.front_end_capabilities.requires_active_character_for_diagnostic_play = true;
     config.initial_front_end_state = omega::app::PlanProjectFrontEndStartupState(
         static_cast<std::uint16_t>(front_end_total_profile_count),
         front_end_visible_profile_slots, config.front_end_capabilities);
@@ -567,6 +580,31 @@ int main(const int argc, char** argv)
     const std::size_t startup_profile_count = native_persistence->startup_profiles().size();
     const std::uint8_t front_end_visible_profile_slots = static_cast<std::uint8_t>(
         std::min(startup_profile_count, omega::app::kFrontEndVisibleProfiles));
+    std::array<std::uint8_t, omega::app::kFrontEndVisibleProfiles>
+        front_end_visible_character_slots_by_profile{};
+    std::array<std::size_t, omega::app::kFrontEndVisibleProfiles>
+        front_end_total_character_counts_by_profile{};
+    if (options->capture_run && options->replay_capture)
+    {
+        const auto startup_profiles = native_persistence->startup_profiles();
+        for (std::size_t slot = 0U; slot < front_end_visible_profile_slots; ++slot)
+        {
+            auto characters = native_persistence->characters().ListBounded(
+                startup_profiles[slot].id, omega::app::kFrontEndMaximumCharacters);
+            if (!characters)
+            {
+                std::cerr << "runtime capture replay: character snapshot unavailable ["
+                          << omega::profiles::CharacterCatalogErrorCodeName(
+                                 characters.error().code)
+                          << "]\n";
+                return EXIT_FAILURE;
+            }
+            front_end_total_character_counts_by_profile[slot] = characters->size();
+            front_end_visible_character_slots_by_profile[slot] =
+                static_cast<std::uint8_t>(std::min(
+                    characters->size(), omega::app::kFrontEndVisibleCharacters));
+        }
+    }
     std::cout << "OpenOmega native persistence: profiles=" << startup_profile_count << '\n';
 
     if (options->frame_limit == 0)
@@ -640,7 +678,9 @@ int main(const int argc, char** argv)
         }
         if (!ReplayFreshCapture(std::move(*capture), capture_result,
                 capture_before, capture_after, startup_profile_count,
-                front_end_visible_profile_slots))
+                front_end_visible_profile_slots,
+                front_end_visible_character_slots_by_profile,
+                front_end_total_character_counts_by_profile))
         {
             return EXIT_FAILURE;
         }

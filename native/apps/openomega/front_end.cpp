@@ -32,8 +32,7 @@ struct Glyph
     GlyphRows rows;
 };
 
-constexpr Glyph kFallbackGlyph{
-    '?', {{0b110U, 0b001U, 0b010U, 0b000U, 0b010U}}};
+constexpr Glyph kFallbackGlyph{'?', {{0b110U, 0b001U, 0b010U, 0b000U, 0b010U}}};
 
 constexpr Color kBackgroundColor{std::byte{8U}, std::byte{12U}, std::byte{24U}, std::byte{255U}};
 constexpr Color kCyanColor{std::byte{112U}, std::byte{220U}, std::byte{255U}, std::byte{255U}};
@@ -45,28 +44,50 @@ constexpr Color kAmberColor{std::byte{255U}, std::byte{196U}, std::byte{64U}, st
 // involved. This table is also the complete ASCII allow-list used by
 // profile-label projection.
 constexpr std::array<Glyph, 44U> kProjectGlyphs{{
-    {'A', {{0b010U, 0b101U, 0b111U, 0b101U, 0b101U}}}, {'B', {{0b110U, 0b101U, 0b110U, 0b101U, 0b110U}}},
-    {'C', {{0b011U, 0b100U, 0b100U, 0b100U, 0b011U}}}, {'D', {{0b110U, 0b101U, 0b101U, 0b101U, 0b110U}}},
-    {'E', {{0b111U, 0b100U, 0b110U, 0b100U, 0b111U}}}, {'F', {{0b111U, 0b100U, 0b110U, 0b100U, 0b100U}}},
-    {'G', {{0b011U, 0b100U, 0b101U, 0b101U, 0b011U}}}, {'H', {{0b101U, 0b101U, 0b111U, 0b101U, 0b101U}}},
-    {'I', {{0b111U, 0b010U, 0b010U, 0b010U, 0b111U}}}, {'J', {{0b001U, 0b001U, 0b001U, 0b101U, 0b010U}}},
-    {'K', {{0b101U, 0b101U, 0b110U, 0b101U, 0b101U}}}, {'L', {{0b100U, 0b100U, 0b100U, 0b100U, 0b111U}}},
-    {'M', {{0b101U, 0b111U, 0b111U, 0b101U, 0b101U}}}, {'N', {{0b101U, 0b111U, 0b111U, 0b111U, 0b101U}}},
-    {'O', {{0b010U, 0b101U, 0b101U, 0b101U, 0b010U}}}, {'P', {{0b110U, 0b101U, 0b110U, 0b100U, 0b100U}}},
-    {'Q', {{0b010U, 0b101U, 0b101U, 0b111U, 0b011U}}}, {'R', {{0b110U, 0b101U, 0b110U, 0b101U, 0b101U}}},
-    {'S', {{0b011U, 0b100U, 0b010U, 0b001U, 0b110U}}}, {'T', {{0b111U, 0b010U, 0b010U, 0b010U, 0b010U}}},
-    {'U', {{0b101U, 0b101U, 0b101U, 0b101U, 0b111U}}}, {'V', {{0b101U, 0b101U, 0b101U, 0b101U, 0b010U}}},
-    {'W', {{0b101U, 0b101U, 0b101U, 0b111U, 0b101U}}}, {'X', {{0b101U, 0b101U, 0b010U, 0b101U, 0b101U}}},
-    {'Y', {{0b101U, 0b101U, 0b010U, 0b010U, 0b010U}}}, {'Z', {{0b111U, 0b001U, 0b010U, 0b100U, 0b111U}}},
-    {'0', {{0b111U, 0b101U, 0b101U, 0b101U, 0b111U}}}, {'1', {{0b010U, 0b110U, 0b010U, 0b010U, 0b111U}}},
-    {'2', {{0b110U, 0b001U, 0b010U, 0b100U, 0b111U}}}, {'3', {{0b110U, 0b001U, 0b010U, 0b001U, 0b110U}}},
-    {'4', {{0b101U, 0b101U, 0b111U, 0b001U, 0b001U}}}, {'5', {{0b111U, 0b100U, 0b110U, 0b001U, 0b110U}}},
-    {'6', {{0b011U, 0b100U, 0b110U, 0b101U, 0b010U}}}, {'7', {{0b111U, 0b001U, 0b010U, 0b010U, 0b010U}}},
-    {'8', {{0b010U, 0b101U, 0b010U, 0b101U, 0b010U}}}, {'9', {{0b010U, 0b101U, 0b011U, 0b001U, 0b110U}}},
-    {'/', {{0b001U, 0b001U, 0b010U, 0b100U, 0b100U}}}, {'-', {{0b000U, 0b000U, 0b111U, 0b000U, 0b000U}}},
-    {'.', {{0b000U, 0b000U, 0b000U, 0b000U, 0b010U}}}, {'+', {{0b000U, 0b010U, 0b111U, 0b010U, 0b000U}}},
-    {'>', {{0b100U, 0b010U, 0b001U, 0b010U, 0b100U}}}, {'_', {{0b000U, 0b000U, 0b000U, 0b000U, 0b111U}}},
-    kFallbackGlyph, {' ', {{0b000U, 0b000U, 0b000U, 0b000U, 0b000U}}},
+    {'A', {{0b010U, 0b101U, 0b111U, 0b101U, 0b101U}}},
+    {'B', {{0b110U, 0b101U, 0b110U, 0b101U, 0b110U}}},
+    {'C', {{0b011U, 0b100U, 0b100U, 0b100U, 0b011U}}},
+    {'D', {{0b110U, 0b101U, 0b101U, 0b101U, 0b110U}}},
+    {'E', {{0b111U, 0b100U, 0b110U, 0b100U, 0b111U}}},
+    {'F', {{0b111U, 0b100U, 0b110U, 0b100U, 0b100U}}},
+    {'G', {{0b011U, 0b100U, 0b101U, 0b101U, 0b011U}}},
+    {'H', {{0b101U, 0b101U, 0b111U, 0b101U, 0b101U}}},
+    {'I', {{0b111U, 0b010U, 0b010U, 0b010U, 0b111U}}},
+    {'J', {{0b001U, 0b001U, 0b001U, 0b101U, 0b010U}}},
+    {'K', {{0b101U, 0b101U, 0b110U, 0b101U, 0b101U}}},
+    {'L', {{0b100U, 0b100U, 0b100U, 0b100U, 0b111U}}},
+    {'M', {{0b101U, 0b111U, 0b111U, 0b101U, 0b101U}}},
+    {'N', {{0b101U, 0b111U, 0b111U, 0b111U, 0b101U}}},
+    {'O', {{0b010U, 0b101U, 0b101U, 0b101U, 0b010U}}},
+    {'P', {{0b110U, 0b101U, 0b110U, 0b100U, 0b100U}}},
+    {'Q', {{0b010U, 0b101U, 0b101U, 0b111U, 0b011U}}},
+    {'R', {{0b110U, 0b101U, 0b110U, 0b101U, 0b101U}}},
+    {'S', {{0b011U, 0b100U, 0b010U, 0b001U, 0b110U}}},
+    {'T', {{0b111U, 0b010U, 0b010U, 0b010U, 0b010U}}},
+    {'U', {{0b101U, 0b101U, 0b101U, 0b101U, 0b111U}}},
+    {'V', {{0b101U, 0b101U, 0b101U, 0b101U, 0b010U}}},
+    {'W', {{0b101U, 0b101U, 0b101U, 0b111U, 0b101U}}},
+    {'X', {{0b101U, 0b101U, 0b010U, 0b101U, 0b101U}}},
+    {'Y', {{0b101U, 0b101U, 0b010U, 0b010U, 0b010U}}},
+    {'Z', {{0b111U, 0b001U, 0b010U, 0b100U, 0b111U}}},
+    {'0', {{0b111U, 0b101U, 0b101U, 0b101U, 0b111U}}},
+    {'1', {{0b010U, 0b110U, 0b010U, 0b010U, 0b111U}}},
+    {'2', {{0b110U, 0b001U, 0b010U, 0b100U, 0b111U}}},
+    {'3', {{0b110U, 0b001U, 0b010U, 0b001U, 0b110U}}},
+    {'4', {{0b101U, 0b101U, 0b111U, 0b001U, 0b001U}}},
+    {'5', {{0b111U, 0b100U, 0b110U, 0b001U, 0b110U}}},
+    {'6', {{0b011U, 0b100U, 0b110U, 0b101U, 0b010U}}},
+    {'7', {{0b111U, 0b001U, 0b010U, 0b010U, 0b010U}}},
+    {'8', {{0b010U, 0b101U, 0b010U, 0b101U, 0b010U}}},
+    {'9', {{0b010U, 0b101U, 0b011U, 0b001U, 0b110U}}},
+    {'/', {{0b001U, 0b001U, 0b010U, 0b100U, 0b100U}}},
+    {'-', {{0b000U, 0b000U, 0b111U, 0b000U, 0b000U}}},
+    {'.', {{0b000U, 0b000U, 0b000U, 0b000U, 0b010U}}},
+    {'+', {{0b000U, 0b010U, 0b111U, 0b010U, 0b000U}}},
+    {'>', {{0b100U, 0b010U, 0b001U, 0b010U, 0b100U}}},
+    {'_', {{0b000U, 0b000U, 0b000U, 0b000U, 0b111U}}},
+    kFallbackGlyph,
+    {' ', {{0b000U, 0b000U, 0b000U, 0b000U, 0b000U}}},
 }};
 
 static_assert(kBorderPixels * 2U < kFrontEndImageWidth);
@@ -389,6 +410,33 @@ std::expected<FrontEndStartupModel, FrontEndModelError> MakeFrontEndStartupModel
     return model;
 }
 
+std::expected<FrontEndCharacterStartupModel, FrontEndModelError> MakeFrontEndCharacterStartupModel(
+    const std::span<const profiles::CharacterSummary> summaries) noexcept
+{
+    if (summaries.size() > kFrontEndMaximumCharacters)
+        return std::unexpected(FrontEndModelError::TooManyCharacters);
+
+    for (std::size_t index = 1U; index < summaries.size(); ++index)
+    {
+        if (!(summaries[index - 1U].id < summaries[index].id))
+            return std::unexpected(FrontEndModelError::UnsortedCharacters);
+    }
+
+    FrontEndCharacterStartupModel model{
+        .total_characters = static_cast<std::uint16_t>(summaries.size()),
+        .visible_characters =
+            static_cast<std::uint8_t>(std::min<std::size_t>(summaries.size(), kFrontEndVisibleCharacters)),
+    };
+    for (std::size_t index = 0U; index < model.visible_characters; ++index)
+    {
+        model.characters[index] = FrontEndCharacter{
+            .id = summaries[index].id,
+            .label = ProjectLabel(summaries[index].metadata.display_name),
+        };
+    }
+    return model;
+}
+
 runtime::DebugImage BuildProjectFrontEndMainImage(const runtime::ContentStartupStage content_stage,
                                                   const std::uint16_t profile_count)
 {
@@ -469,6 +517,61 @@ runtime::DebugImage BuildProjectFrontEndProfilesImage(const FrontEndStartupModel
     {
         DrawLabel(image, "+", 12U, 61U);
         DrawUnsigned(image, static_cast<std::uint16_t>(profiles.total_profiles - profiles.visible_profiles), 16U, 61U);
+        DrawLabel(image, " MORE", 32U, 61U);
+        DrawLabel(image, "SELECT", 88U, 61U);
+    }
+    else
+    {
+        DrawLabel(image, "F1/ENTER SELECT", 12U, 61U);
+    }
+    return image;
+}
+
+runtime::DebugImage BuildProjectFrontEndCharactersImage(const FrontEndCharacterStartupModel &characters,
+                                                        const FrontEndCapabilities capabilities)
+{
+    runtime::DebugImage image = BuildDiagnosticCardBase();
+    DrawOpenOmegaHeader(image);
+    DrawLabel(image, "NATIVE CHARACTERS", 30U, 11U);
+
+    FillRectangle(image, 8U, 24U, 120U, 57U, kSlateColor);
+    if (characters.visible_characters == 0U || characters.total_characters == 0U)
+    {
+        if (capabilities.can_create_first_character)
+        {
+            DrawLabel(image, "CREATE CHARACTER", 16U, 32U);
+            DrawText(image, kFrontEndFirstCharacterDisplayName, 16U, 42U);
+        }
+        else
+        {
+            DrawLabel(image, "NO NATIVE CHARACTERS", 20U, 38U);
+        }
+    }
+    else
+    {
+        constexpr std::array label_rows{28U, 38U, 48U};
+        const std::size_t visible = std::min<std::size_t>(characters.visible_characters, kFrontEndVisibleCharacters);
+        for (std::size_t index = 0U; index < visible; ++index)
+        {
+            DrawLabel(image, characters.characters[index].label, 16U, label_rows[index]);
+            if (characters.characters[index].label.truncated)
+                DrawLabel(image, ">", 113U, label_rows[index]);
+        }
+    }
+
+    FillRectangle(image, 8U, 59U, 120U, 68U, kSlateColor);
+    if (characters.visible_characters == 0U || characters.total_characters == 0U)
+    {
+        if (capabilities.can_create_first_character)
+            DrawLabel(image, "F1/ENTER CREATE", 12U, 61U);
+        else
+            DrawLabel(image, "BACKSPACE RETURN", 12U, 61U);
+    }
+    else if (characters.total_characters > characters.visible_characters)
+    {
+        DrawLabel(image, "+", 12U, 61U);
+        DrawUnsigned(image, static_cast<std::uint16_t>(characters.total_characters - characters.visible_characters),
+                     16U, 61U);
         DrawLabel(image, " MORE", 32U, 61U);
         DrawLabel(image, "SELECT", 88U, 61U);
     }

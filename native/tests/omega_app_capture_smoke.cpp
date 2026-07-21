@@ -376,12 +376,26 @@ struct OmegaAppTestAccess final
         return app.active_profile_id_;
     }
 
+    [[nodiscard]] static std::optional<profiles::CharacterId> ActiveCharacter(
+        const OmegaApp& app) noexcept
+    {
+        return app.active_character_id_;
+    }
+
     [[nodiscard]] static std::optional<profiles::ProfileId>
     PersistedConfirmedProfile(const OmegaApp& app) noexcept
     {
         if (!app.native_persistence_)
             return std::nullopt;
         return app.native_persistence_->persisted_confirmed_profile_id();
+    }
+
+    [[nodiscard]] static std::optional<profiles::CharacterId>
+    PersistedConfirmedCharacter(const OmegaApp& app) noexcept
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        return app.native_persistence_->persisted_confirmed_character_id();
     }
 
     [[nodiscard]] static std::optional<std::uint64_t> PersistenceGeneration(
@@ -453,6 +467,30 @@ struct OmegaAppTestAccess final
         if (!app.native_persistence_)
             return std::nullopt;
         auto read = app.native_persistence_->profiles().Read(id);
+        if (!read || !*read)
+            return std::nullopt;
+        return std::move(**read);
+    }
+
+    [[nodiscard]] static std::optional<std::size_t> CharacterCatalogCount(
+        OmegaApp& app, const profiles::ProfileId profile_id)
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        auto listed = app.native_persistence_->characters().List(profile_id);
+        if (!listed)
+            return std::nullopt;
+        return listed->size();
+    }
+
+    [[nodiscard]] static std::optional<profiles::CharacterSummary> ReadCharacter(
+        OmegaApp& app, const profiles::ProfileId profile_id,
+        const profiles::CharacterId character_id)
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        auto read =
+            app.native_persistence_->characters().Read(profile_id, character_id);
         if (!read || !*read)
             return std::nullopt;
         return std::move(**read);
@@ -609,6 +647,73 @@ void Check(const bool condition, const std::string_view message)
            after.frame_submissions == before.frame_submissions + 1U &&
            after.blit_submissions == before.blit_submissions + 1U &&
            after.successful_blit_draws == before.successful_blit_draws + 3U &&
+           after.clear_submissions == before.clear_submissions &&
+           after.unavailable_swapchain_submissions ==
+               before.unavailable_swapchain_submissions &&
+           after.rejected_nondefault_texture_handles ==
+               before.rejected_nondefault_texture_handles;
+}
+
+// Character cards are built transactionally when a profile is selected. The
+// empty catalog needs both its current card and the preloaded first-character
+// card; creation swaps the preview into service and releases the obsolete empty
+// card. Keep those resource transitions explicit instead of treating them as
+// ordinary menu-only frames.
+[[nodiscard]] bool IsOneCharacterMenuSubmissionWithTextureDelta(
+    const omega::app::GpuHostSnapshot& before,
+    const omega::app::GpuHostSnapshot& after,
+    const std::uint64_t uploads, const std::uint64_t releases,
+    const std::uint64_t submitted_draws) noexcept
+{
+    constexpr std::uint64_t kCharacterCardLogicalBytes = 128ULL * 72ULL * 4ULL;
+    return after.successful_uploads == before.successful_uploads + uploads &&
+           after.successful_upload_logical_bytes ==
+               before.successful_upload_logical_bytes +
+                   uploads * kCharacterCardLogicalBytes &&
+           after.successful_updates == before.successful_updates &&
+           after.successful_update_logical_bytes ==
+               before.successful_update_logical_bytes &&
+           after.successful_releases == before.successful_releases + releases &&
+           after.textures.slot_capacity == before.textures.slot_capacity &&
+           after.textures.reserved_slots == before.textures.reserved_slots &&
+           after.textures.retired_slots == before.textures.retired_slots &&
+           after.textures.reserved_logical_bytes ==
+               before.textures.reserved_logical_bytes &&
+           after.textures.resident_slots + releases ==
+               before.textures.resident_slots + uploads &&
+           after.textures.resident_logical_bytes +
+                   releases * kCharacterCardLogicalBytes ==
+               before.textures.resident_logical_bytes +
+                   uploads * kCharacterCardLogicalBytes &&
+           after.frame_submissions == before.frame_submissions + 1U &&
+           after.blit_submissions == before.blit_submissions + 1U &&
+           after.successful_blit_draws ==
+               before.successful_blit_draws + submitted_draws &&
+           after.clear_submissions == before.clear_submissions &&
+           after.unavailable_swapchain_submissions ==
+               before.unavailable_swapchain_submissions &&
+           after.rejected_nondefault_texture_handles ==
+               before.rejected_nondefault_texture_handles;
+}
+
+[[nodiscard]] bool IsRejectedCharacterPreparationWithTextureDelta(
+    const omega::app::GpuHostSnapshot& before,
+    const omega::app::GpuHostSnapshot& after,
+    const std::uint64_t uploads, const std::uint64_t releases) noexcept
+{
+    constexpr std::uint64_t kCharacterCardLogicalBytes = 128ULL * 72ULL * 4ULL;
+    return after.successful_uploads == before.successful_uploads + uploads &&
+           after.successful_upload_logical_bytes ==
+               before.successful_upload_logical_bytes +
+                   uploads * kCharacterCardLogicalBytes &&
+           after.successful_updates == before.successful_updates &&
+           after.successful_update_logical_bytes ==
+               before.successful_update_logical_bytes &&
+           after.successful_releases == before.successful_releases + releases &&
+           after.textures == before.textures &&
+           after.frame_submissions == before.frame_submissions &&
+           after.blit_submissions == before.blit_submissions &&
+           after.successful_blit_draws == before.successful_blit_draws &&
            after.clear_submissions == before.clear_submissions &&
            after.unavailable_swapchain_submissions ==
                before.unavailable_swapchain_submissions &&
@@ -1402,10 +1507,12 @@ void CheckActiveProfileConfirmation(
         .selected_main_row = omega::app::FrontEndMainRow::Profiles,
         .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
     };
-    constexpr omega::app::FrontEndState kReturnedProfilesRow{
-        .mode = omega::app::FrontEndMode::Main,
+    constexpr omega::app::FrontEndState kCharactersFirst{
+        .mode = omega::app::FrontEndMode::Characters,
         .selected_main_row = omega::app::FrontEndMainRow::Profiles,
         .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+        .selected_character_slot =
+            omega::app::FrontEndCharacterSlot::First,
     };
     constexpr std::string_view kMissingFailure =
         "active profile confirmation failed: profile-not-found";
@@ -1469,10 +1576,14 @@ void CheckActiveProfileConfirmation(
                       std::optional<std::size_t>{73U} &&
                   Access::PersistedConfirmedProfile(*app) == profile_id &&
                   Access::ActiveProfile(*app) == profile_id &&
-                  Access::FrontEnd(*app) == kReturnedProfilesRow &&
-                  IsOneVisibleMenuSubmission(
-                      gpu_before, Access::GpuSnapshot(*app)),
-            "confirmation commits generation two and the 32-byte pointer before publishing session state and leaving Profiles without GPU mutation");
+                  Access::FrontEnd(*app) == kCharactersFirst &&
+                  !Access::ActiveCharacter(*app) &&
+                  !Access::PersistedConfirmedCharacter(*app) &&
+                  Access::CharacterCatalogCount(*app, *profile_id) ==
+                      std::optional<std::size_t>{0U} &&
+                  IsOneCharacterMenuSubmissionWithTextureDelta(
+                      gpu_before, Access::GpuSnapshot(*app), 2U, 0U, 2U),
+            "confirmation commits generation two and the 32-byte pointer before publishing Characters with the empty and first-character preview cards resident");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the generated successful confirmation edge releases");
     }
@@ -1512,10 +1623,14 @@ void CheckActiveProfileConfirmation(
                       std::optional<std::size_t>{73U} &&
                   Access::PersistedConfirmedProfile(*app) == profile_id &&
                   Access::ActiveProfile(*app) == profile_id &&
-                  Access::FrontEnd(*app) == kReturnedProfilesRow &&
-                  IsOneVisibleMenuSubmission(
-                      gpu_before, Access::GpuSnapshot(*app)),
-            "same-ID reconfirmation remains an explicit session activation without publishing another durable generation or touching GPU state");
+                  Access::FrontEnd(*app) == kCharactersFirst &&
+                  !Access::ActiveCharacter(*app) &&
+                  !Access::PersistedConfirmedCharacter(*app) &&
+                  Access::CharacterCatalogCount(*app, *profile_id) ==
+                      std::optional<std::size_t>{0U} &&
+                  IsOneCharacterMenuSubmissionWithTextureDelta(
+                      gpu_before, Access::GpuSnapshot(*app), 2U, 0U, 2U),
+            "same-ID reconfirmation remains a no-write session activation and rebuilds the two empty-catalog character cards before entering Characters");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the generated idempotent confirmation edge releases");
     }
@@ -1632,8 +1747,9 @@ void CheckActiveProfileConfirmation(
                   std::optional<std::size_t>{1U} &&
               Access::PersistenceLogicalValueBytes(*constrained_app) ==
                   std::optional<std::size_t>{41U} &&
-              Access::GpuSnapshot(*constrained_app) == gpu_before,
-        "capacity rejection preserves the prior Profiles state, unset session and durable values, generation-one database, exact GPU snapshot, and private fixed error");
+              IsRejectedCharacterPreparationWithTextureDelta(gpu_before,
+                  Access::GpuSnapshot(*constrained_app), 2U, 2U),
+        "capacity rejection releases both staged empty-catalog character cards and preserves the prior Profiles state, unset session and durable values, generation-one database, and private fixed error");
     Check(PushKey(SDL_SCANCODE_F1, false) &&
               constrained_app->Run(1).has_value(),
         "the generated capacity-rejected confirmation edge releases");
@@ -1646,9 +1762,11 @@ void CheckDiagnosticCampaignStart(
     using Access = omega::app::detail::OmegaAppTestAccess;
     const auto profile_id = omega::profiles::ProfileId::Parse(
         "10101010101010101010101010101010");
-    Check(profile_id.has_value(),
-        "the generated diagnostic-campaign profile ID parses");
-    if (!profile_id)
+    const auto character_id = omega::profiles::CharacterId::Parse(
+        "00000000000000000000000000000001");
+    Check(profile_id.has_value() && character_id.has_value(),
+        "the generated diagnostic-campaign profile and character IDs parse");
+    if (!profile_id || !character_id)
         return;
 
     constexpr omega::app::FrontEndState kProfilesFirst{
@@ -1660,6 +1778,13 @@ void CheckDiagnosticCampaignStart(
         .mode = omega::app::FrontEndMode::Main,
         .selected_main_row = omega::app::FrontEndMainRow::StartDiagnostic,
         .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+    };
+    constexpr omega::app::FrontEndState kCharactersFirst{
+        .mode = omega::app::FrontEndMode::Characters,
+        .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+        .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+        .selected_character_slot =
+            omega::app::FrontEndCharacterSlot::First,
     };
     constexpr omega::app::FrontEndState kDiagnosticPlay{
         .mode = omega::app::FrontEndMode::DiagnosticPlay,
@@ -1710,19 +1835,55 @@ void CheckDiagnosticCampaignStart(
         if (!app)
             return;
 
+        const auto gpu_before_profile = Access::GpuSnapshot(*app);
         Check(PushKey(SDL_SCANCODE_F1, true) &&
                   app->RunWithCapture(1).has_value() &&
                   Access::ActiveProfile(*app) == profile_id &&
+                  !Access::ActiveCharacter(*app) &&
+                  Access::FrontEnd(*app) == kCharactersFirst &&
                   Access::PersistenceGeneration(*app) ==
-                      std::optional<std::uint64_t>{2U},
-            "same-ID selection explicitly activates the generated session without another write");
+                      std::optional<std::uint64_t>{2U} &&
+                  IsOneCharacterMenuSubmissionWithTextureDelta(
+                      gpu_before_profile, Access::GpuSnapshot(*app), 2U, 0U, 2U),
+            "same-ID profile selection enters the empty Characters surface without another write and stages both character cards");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the diagnostic-campaign selection edge releases");
-        Check(PushKey(SDL_SCANCODE_W, true) && app->Run(1).has_value() &&
-                  Access::FrontEnd(*app) == kMainStartDiagnostic,
-            "previous navigation selects the generated Start Diagnostic row");
-        Check(PushKey(SDL_SCANCODE_W, false) && app->Run(1).has_value(),
-            "the diagnostic-campaign navigation edge releases");
+
+        const auto gpu_before_character_create = Access::GpuSnapshot(*app);
+        Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
+                  Access::FrontEnd(*app) == kCharactersFirst &&
+                  !Access::ActiveCharacter(*app) &&
+                  Access::CharacterCatalogCount(*app, *profile_id) ==
+                      std::optional<std::size_t>{1U} &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{3U} &&
+                  Access::PersistenceRecordCount(*app) ==
+                      std::optional<std::size_t>{3U} &&
+                  Access::PersistenceLogicalValueBytes(*app) ==
+                      std::optional<std::size_t>{125U} &&
+                  IsOneCharacterMenuSubmissionWithTextureDelta(
+                      gpu_before_character_create, Access::GpuSnapshot(*app),
+                      0U, 1U, 3U),
+            "character creation publishes its 52-byte marker, stays in Characters, and releases the obsolete empty card");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the generated character-creation edge releases");
+
+        const auto gpu_before_character_select = Access::GpuSnapshot(*app);
+        Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
+                  Access::FrontEnd(*app) == kMainStartDiagnostic &&
+                  Access::ActiveCharacter(*app) == character_id &&
+                  Access::PersistedConfirmedCharacter(*app) == character_id &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{4U} &&
+                  Access::PersistenceRecordCount(*app) ==
+                      std::optional<std::size_t>{4U} &&
+                  Access::PersistenceLogicalValueBytes(*app) ==
+                      std::optional<std::size_t>{173U} &&
+                  IsOneVisibleMenuSubmission(
+                      gpu_before_character_select, Access::GpuSnapshot(*app)),
+            "character selection commits its 48-byte active pointer and returns directly to Main/Start");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the generated character-selection edge releases");
 
         const omega::app::GpuHostSnapshot gpu_before = Access::GpuSnapshot(*app);
         const bool pushed = PushKey(SDL_SCANCODE_F1, true);
@@ -1734,15 +1895,17 @@ void CheckDiagnosticCampaignStart(
                   Access::FrontEnd(*app) == kDiagnosticPlay &&
                   Access::ActiveProfile(*app) == profile_id &&
                   Access::PersistedConfirmedProfile(*app) == profile_id &&
+                  Access::ActiveCharacter(*app) == character_id &&
+                  Access::PersistedConfirmedCharacter(*app) == character_id &&
                   Access::PersistenceGeneration(*app) ==
-                      std::optional<std::uint64_t>{3U} &&
+                      std::optional<std::uint64_t>{5U} &&
                   Access::PersistenceRecordCount(*app) ==
-                      std::optional<std::size_t>{3U} &&
+                      std::optional<std::size_t>{5U} &&
                   Access::PersistenceLogicalValueBytes(*app) ==
-                      std::optional<std::size_t>{105U} &&
+                      std::optional<std::size_t>{221U} &&
                   IsOneDiagnosticPlaySubmission(gpu_before,
                       Access::GpuSnapshot(*app)),
-            "diagnostic start commits the 32-byte project checkpoint before publishing DiagnosticPlay and rendering it");
+            "diagnostic start commits the 48-byte character-owned session checkpoint before publishing DiagnosticPlay and rendering it");
 
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the first generated diagnostic-start edge releases");
@@ -1763,10 +1926,12 @@ void CheckDiagnosticCampaignStart(
     }
 
     auto reopened = omega::app::NativePersistence::Bootstrap(database_root);
-    Check(reopened && reopened->database().generation() == 3U &&
-              reopened->database().record_count() == 3U &&
-              reopened->database().logical_value_bytes() == 105U,
-        "reopen validates the generated project diagnostic checkpoint and exact database totals");
+    Check(reopened && reopened->persisted_confirmed_profile_id() == profile_id &&
+              reopened->persisted_confirmed_character_id() == character_id &&
+              reopened->database().generation() == 5U &&
+              reopened->database().record_count() == 5U &&
+              reopened->database().logical_value_bytes() == 221U,
+        "reopen validates both durable identities, the character-owned session checkpoint, and exact database totals");
 
     const std::filesystem::path unconfirmed_root =
         fixture_root / "native-diagnostic-campaign-unconfirmed";
@@ -1836,14 +2001,14 @@ void CheckDiagnosticCampaignStart(
 
     const std::filesystem::path constrained_root =
         fixture_root / "native-diagnostic-campaign-capacity";
-    constexpr omega::persistence::SaveDatabaseLimits kTwoRecordLimit{
-        .max_records = 2U,
+    constexpr omega::persistence::SaveDatabaseLimits kFourRecordLimit{
+        .max_records = 4U,
     };
     {
         auto persistence = omega::app::NativePersistence::Bootstrap(
-            constrained_root, kTwoRecordLimit);
+            constrained_root, kFourRecordLimit);
         Check(persistence.has_value(),
-            "the two-record diagnostic-campaign database bootstraps");
+            "the four-record diagnostic-campaign database bootstraps");
         if (!persistence)
             return;
         const auto created = persistence->profiles().Create(*profile_id, metadata);
@@ -1852,14 +2017,27 @@ void CheckDiagnosticCampaignStart(
         if (!created)
             return;
         const auto confirmed = persistence->ConfirmActiveProfile(*profile_id);
-        Check(created && confirmed && persistence->database().record_count() == 2U,
-            "the capacity fixture fills its two records with profile and active pointer");
-        if (!created || !confirmed)
+        const auto character_created = persistence->characters().Create(
+            *profile_id, *character_id,
+            omega::profiles::CharacterMetadata{
+                .display_name =
+                    std::string{omega::app::kFrontEndFirstCharacterDisplayName},
+                .created_unix_milliseconds = 2U,
+                .modified_unix_milliseconds = 2U,
+            });
+        const auto character_confirmed =
+            persistence->ConfirmActiveCharacter(*profile_id, *character_id);
+        Check(created && confirmed && character_created && character_confirmed &&
+                  persistence->database().generation() == 4U &&
+                  persistence->database().record_count() == 4U &&
+                  persistence->database().logical_value_bytes() == 173U,
+            "the capacity fixture fills four records with profile, character, and both active pointers");
+        if (!created || !confirmed || !character_created || !character_confirmed)
             return;
     }
     {
         auto persistence = omega::app::NativePersistence::Bootstrap(
-            constrained_root, kTwoRecordLimit);
+            constrained_root, kFourRecordLimit);
         auto config = omega::runtime::ParseConfigText("");
         if (!persistence || !config)
         {
@@ -1871,12 +2049,26 @@ void CheckDiagnosticCampaignStart(
         Check(app.has_value(), "the constrained diagnostic-campaign app starts");
         if (!app)
             return;
+        const auto gpu_before_profile = Access::GpuSnapshot(*app);
         Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
-                  Access::ActiveProfile(*app) == profile_id,
-            "the constrained app explicitly reactivates its confirmed profile");
+                  Access::ActiveProfile(*app) == profile_id &&
+                  !Access::ActiveCharacter(*app) &&
+                  Access::PersistedConfirmedCharacter(*app) == character_id &&
+                  Access::FrontEnd(*app) == kCharactersFirst &&
+                  IsOneCharacterMenuSubmissionWithTextureDelta(
+                      gpu_before_profile, Access::GpuSnapshot(*app), 1U, 0U, 3U),
+            "the constrained app explicitly reactivates its profile and opens the existing character without rewriting durable state");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the constrained profile-selection edge releases");
-        Access::SetFrontEndState(*app, kMainStartDiagnostic);
+        Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
+                  Access::FrontEnd(*app) == kMainStartDiagnostic &&
+                  Access::ActiveCharacter(*app) == character_id &&
+                  Access::PersistedConfirmedCharacter(*app) == character_id &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{4U},
+            "the constrained app explicitly selects the already-confirmed character without another write");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the constrained character-selection edge releases");
         const omega::app::GpuHostSnapshot gpu_before = Access::GpuSnapshot(*app);
         const bool pushed = PushKey(SDL_SCANCODE_F1, true);
         auto rejected = app->RunWithCapture(1);
@@ -1895,14 +2087,16 @@ void CheckDiagnosticCampaignStart(
                   Access::FrontEnd(*app) == kMainStartDiagnostic &&
                   Access::ActiveProfile(*app) == profile_id &&
                   Access::PersistedConfirmedProfile(*app) == profile_id &&
+                  Access::ActiveCharacter(*app) == character_id &&
+                  Access::PersistedConfirmedCharacter(*app) == character_id &&
                   Access::PersistenceGeneration(*app) ==
-                      std::optional<std::uint64_t>{2U} &&
+                      std::optional<std::uint64_t>{4U} &&
                   Access::PersistenceRecordCount(*app) ==
-                      std::optional<std::size_t>{2U} &&
+                      std::optional<std::size_t>{4U} &&
                   Access::PersistenceLogicalValueBytes(*app) ==
-                      std::optional<std::size_t>{73U} &&
+                      std::optional<std::size_t>{173U} &&
                   Access::GpuSnapshot(*app) == gpu_before,
-            "checkpoint capacity failure preserves Main, active session, durable pointer, database totals, and exact GPU state");
+            "character-owned checkpoint capacity failure preserves Main, both active identities, database totals, and exact GPU state");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the rejected capacity diagnostic-start edge releases");
     }
@@ -1916,9 +2110,11 @@ void CheckExplicitFirstProfileCreation(
     constexpr std::uint64_t kCreationTimestamp = 1'725'000'000'123ULL;
     const auto first_profile_id = omega::profiles::ProfileId::Parse(
         "00000000000000000000000000000001");
-    Check(first_profile_id.has_value(),
-        "the project-owned first-profile ID fixture parses");
-    if (!first_profile_id)
+    const auto first_character_id = omega::profiles::CharacterId::Parse(
+        "00000000000000000000000000000001");
+    Check(first_profile_id.has_value() && first_character_id.has_value(),
+        "the project-owned first-profile and first-character IDs parse");
+    if (!first_profile_id || !first_character_id)
         return;
 
     const std::filesystem::path creation_root =
@@ -2070,12 +2266,15 @@ void CheckExplicitFirstProfileCreation(
             Check(release_frame && Access::FrontEnd(*app) == kProfilesFirst &&
                       !Access::ActiveProfile(*app),
                 "the creation key release is inert and leaves the new profile unselected");
+            const auto gpu_before_selection = Access::GpuSnapshot(*app);
             const bool selection_frame = PushKey(SDL_SCANCODE_F1, true) &&
                                          run_plain_frame();
-            constexpr omega::app::FrontEndState kReturnedProfilesRow{
-                .mode = omega::app::FrontEndMode::Main,
+            constexpr omega::app::FrontEndState kCharactersFirst{
+                .mode = omega::app::FrontEndMode::Characters,
                 .selected_main_row = omega::app::FrontEndMainRow::Profiles,
                 .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+                .selected_character_slot =
+                    omega::app::FrontEndCharacterSlot::First,
             };
             Check(selection_frame &&
                        Access::ActiveProfile(*app) == *first_profile_id &&
@@ -2086,21 +2285,116 @@ void CheckExplicitFirstProfileCreation(
                            std::optional<std::size_t>{2U} &&
                        Access::PersistenceLogicalValueBytes(*app) ==
                            std::optional<std::size_t>{73U} &&
-                       Access::FrontEnd(*app) == kReturnedProfilesRow &&
+                       Access::FrontEnd(*app) == kCharactersFirst &&
                        Access::ProfileCatalogCount(*app) ==
-                           std::optional<std::size_t>{1U},
-                "a second Primary after one release frame confirms and activates the durable first profile without catalog mutation");
+                           std::optional<std::size_t>{1U} &&
+                       Access::CharacterCatalogCount(*app, *first_profile_id) ==
+                           std::optional<std::size_t>{0U} &&
+                       !Access::ActiveCharacter(*app) &&
+                       !Access::PersistedConfirmedCharacter(*app) &&
+                       IsOneCharacterMenuSubmissionWithTextureDelta(
+                           gpu_before_selection, Access::GpuSnapshot(*app),
+                           2U, 0U, 2U),
+                "a second Primary confirms the durable first profile, enters empty Characters, and stages both character cards");
             Check(PushKey(SDL_SCANCODE_F1, false) && run_plain_frame(),
-                "the explicit first-profile selection key releases before teardown");
+                "the explicit first-profile selection key releases before character creation");
+
+            const auto gpu_before_character_create = Access::GpuSnapshot(*app);
+            const bool character_creation_frame =
+                PushKey(SDL_SCANCODE_F1, true) && run_plain_frame();
+            const auto created_character = Access::ReadCharacter(
+                *app, *first_profile_id, *first_character_id);
+            Check(character_creation_frame &&
+                      Access::FrontEnd(*app) == kCharactersFirst &&
+                      Access::CharacterCatalogCount(*app, *first_profile_id) ==
+                          std::optional<std::size_t>{1U} &&
+                      created_character &&
+                      created_character->id == *first_character_id &&
+                      created_character->metadata.display_name ==
+                          omega::app::kFrontEndFirstCharacterDisplayName &&
+                      created_character->metadata.created_unix_milliseconds ==
+                          created_character->metadata.modified_unix_milliseconds &&
+                      created_character->metadata_revision == 3U &&
+                      !Access::ActiveCharacter(*app) &&
+                      !Access::PersistedConfirmedCharacter(*app) &&
+                      Access::PersistenceGeneration(*app) ==
+                          std::optional<std::uint64_t>{3U} &&
+                      Access::PersistenceRecordCount(*app) ==
+                          std::optional<std::size_t>{3U} &&
+                      Access::PersistenceLogicalValueBytes(*app) ==
+                          std::optional<std::size_t>{125U} &&
+                      IsOneCharacterMenuSubmissionWithTextureDelta(
+                          gpu_before_character_create, Access::GpuSnapshot(*app),
+                          0U, 1U, 3U),
+                "Primary creates the fixed diagnostic character, keeps Characters modal, and releases the obsolete empty card");
+            Check(PushKey(SDL_SCANCODE_F1, false) && run_plain_frame(),
+                "the explicit first-character creation key releases");
+
+            const auto gpu_before_character_select = Access::GpuSnapshot(*app);
+            const bool character_selection_frame =
+                PushKey(SDL_SCANCODE_F1, true) && run_plain_frame();
+            constexpr omega::app::FrontEndState kMainStart{
+                .mode = omega::app::FrontEndMode::Main,
+                .selected_main_row =
+                    omega::app::FrontEndMainRow::StartDiagnostic,
+                .selected_profile_slot =
+                    omega::app::FrontEndProfileSlot::First,
+                .selected_character_slot =
+                    omega::app::FrontEndCharacterSlot::First,
+            };
+            Check(character_selection_frame &&
+                      Access::FrontEnd(*app) == kMainStart &&
+                      Access::ActiveCharacter(*app) == *first_character_id &&
+                      Access::PersistedConfirmedCharacter(*app) ==
+                          *first_character_id &&
+                      Access::PersistenceGeneration(*app) ==
+                          std::optional<std::uint64_t>{4U} &&
+                      Access::PersistenceRecordCount(*app) ==
+                          std::optional<std::size_t>{4U} &&
+                      Access::PersistenceLogicalValueBytes(*app) ==
+                          std::optional<std::size_t>{173U} &&
+                      IsOneVisibleMenuSubmission(
+                          gpu_before_character_select, Access::GpuSnapshot(*app)),
+                "Primary confirms the first character and lands directly on Main/Start");
+            Check(PushKey(SDL_SCANCODE_F1, false) && run_plain_frame(),
+                "the explicit first-character selection key releases");
+
+            const auto gpu_before_start = Access::GpuSnapshot(*app);
+            const bool start_frame =
+                PushKey(SDL_SCANCODE_F1, true) && run_plain_frame();
+            constexpr omega::app::FrontEndState kDiagnosticPlay{
+                .mode = omega::app::FrontEndMode::DiagnosticPlay,
+                .selected_main_row =
+                    omega::app::FrontEndMainRow::StartDiagnostic,
+                .selected_profile_slot =
+                    omega::app::FrontEndProfileSlot::First,
+                .selected_character_slot =
+                    omega::app::FrontEndCharacterSlot::First,
+            };
+            Check(start_frame && Access::FrontEnd(*app) == kDiagnosticPlay &&
+                      Access::ActiveProfile(*app) == *first_profile_id &&
+                      Access::ActiveCharacter(*app) == *first_character_id &&
+                      Access::PersistenceGeneration(*app) ==
+                          std::optional<std::uint64_t>{5U} &&
+                      Access::PersistenceRecordCount(*app) ==
+                          std::optional<std::size_t>{5U} &&
+                      Access::PersistenceLogicalValueBytes(*app) ==
+                          std::optional<std::size_t>{221U} &&
+                      IsOneDiagnosticPlaySubmission(
+                          gpu_before_start, Access::GpuSnapshot(*app)),
+                "Main/Start commits the character-owned diagnostic session and enters DiagnosticPlay");
+            Check(PushKey(SDL_SCANCODE_F1, false) && run_plain_frame(),
+                "the explicit diagnostic-start key releases before teardown");
         }
     }
 
     auto reopened = omega::app::NativePersistence::Bootstrap(creation_root);
     Check(reopened && reopened->startup_profiles().size() == 1U &&
                reopened->persisted_confirmed_profile_id() == first_profile_id &&
-               reopened->database().generation() == 2U &&
-               reopened->database().record_count() == 2U &&
-               reopened->database().logical_value_bytes() == 73U &&
+               reopened->persisted_confirmed_character_id() == first_character_id &&
+               reopened->database().generation() == 5U &&
+               reopened->database().record_count() == 5U &&
+               reopened->database().logical_value_bytes() == 221U &&
                reopened->startup_profiles()[0].id == *first_profile_id &&
               reopened->startup_profiles()[0].metadata.display_name ==
                   omega::app::kFrontEndFirstProfileDisplayName &&
@@ -2109,7 +2403,7 @@ void CheckExplicitFirstProfileCreation(
               reopened->startup_profiles()[0].metadata.modified_unix_milliseconds ==
                   kCreationTimestamp &&
               reopened->startup_profiles()[0].metadata_revision == 1U,
-        "reopening native persistence observes the fixed-ID PROFILE 1 metadata and its separate durable confirmation");
+        "reopening native persistence observes PROFILE 1, its fixed diagnostic character, both confirmations, and the character-owned session checkpoint");
 
     const std::filesystem::path constrained_root =
         fixture_root / "native-first-profile-preflight";
@@ -2138,6 +2432,132 @@ void CheckExplicitFirstProfileCreation(
         omega::app::NativePersistence::Bootstrap(constrained_root);
     Check(constrained_reopened && constrained_reopened->startup_profiles().empty(),
         "failed first-profile presentation preflight leaves the durable catalog empty");
+
+    // Regression for the transactional ordering used by profile reselection:
+    // after first-character creation only seven slots remain resident. A
+    // capacity-eight pool must admit the replacement card before releasing the
+    // old one, then return to seven without leaking the obsolete empty card.
+    const std::filesystem::path reselect_root =
+        fixture_root / "native-character-reselect-capacity-eight";
+    {
+        auto reselect_persistence =
+            omega::app::NativePersistence::Bootstrap(reselect_root);
+        if (reselect_persistence)
+        {
+            const auto created = reselect_persistence->profiles().Create(
+                *first_profile_id,
+                omega::profiles::ProfileMetadata{
+                    .display_name =
+                        std::string{omega::app::kFrontEndFirstProfileDisplayName},
+                    .created_unix_milliseconds = kCreationTimestamp,
+                    .modified_unix_milliseconds = kCreationTimestamp,
+                });
+            Check(created.has_value(),
+                "the capacity-eight reselect profile is created");
+        }
+        else
+        {
+            Check(false,
+                "the capacity-eight reselect database bootstraps");
+        }
+    }
+    auto reselect_persistence =
+        omega::app::NativePersistence::Bootstrap(reselect_root);
+    auto reselect_config = omega::runtime::ParseConfigText("");
+    constexpr omega::runtime::RenderTexturePoolConfig kCapacityEight{
+        .slot_capacity = 8U,
+    };
+    if (reselect_persistence && reselect_config)
+    {
+        auto reselect_app = Access::CreateWithPersistenceAndTextureConfig(
+            std::move(*reselect_config), settings,
+            omega::runtime::ContentStartupState{},
+            std::move(*reselect_persistence), false, kCapacityEight);
+        Check(reselect_app.has_value(),
+            "the existing-profile fixture starts in a capacity-eight pool");
+        if (reselect_app)
+        {
+            const auto run_reselect_frame = [&reselect_app]() {
+                auto run = reselect_app->Run(1);
+                return run && run->rendered_frames == 1 &&
+                       !run->quit_requested;
+            };
+            const auto startup_gpu = Access::GpuSnapshot(*reselect_app);
+            Check(startup_gpu.textures.slot_capacity == 8U &&
+                      startup_gpu.textures.resident_slots == 6U,
+                "the capacity-eight reselect fixture starts with six base textures");
+            Check(PushKey(SDL_SCANCODE_F1, true) && run_reselect_frame() &&
+                      Access::FrontEnd(*reselect_app) ==
+                          omega::app::FrontEndState{
+                              .mode = omega::app::FrontEndMode::Characters,
+                              .selected_main_row =
+                                  omega::app::FrontEndMainRow::Profiles,
+                          } &&
+                      Access::GpuSnapshot(*reselect_app)
+                              .textures.resident_slots == 8U,
+                "empty-profile selection exactly fills capacity eight with current and preview character cards");
+            Check(PushKey(SDL_SCANCODE_F1, false) && run_reselect_frame(),
+                "the capacity-eight profile-selection edge releases");
+            Check(PushKey(SDL_SCANCODE_F1, true) && run_reselect_frame() &&
+                      Access::CharacterCatalogCount(
+                          *reselect_app, *first_profile_id) ==
+                          std::optional<std::size_t>{1U} &&
+                      Access::GpuSnapshot(*reselect_app)
+                              .textures.resident_slots == 7U,
+                "first-character creation releases the obsolete empty card and restores one slot of headroom");
+            Check(PushKey(SDL_SCANCODE_F1, false) && run_reselect_frame(),
+                "the capacity-eight character-creation edge releases");
+            Check(PushKey(SDL_SCANCODE_F1, true) && run_reselect_frame() &&
+                      Access::ActiveCharacter(*reselect_app) ==
+                          *first_character_id,
+                "the capacity-eight fixture selects its first character");
+            Check(PushKey(SDL_SCANCODE_F1, false) && run_reselect_frame(),
+                "the capacity-eight character-selection edge releases");
+            Check(PushKey(SDL_SCANCODE_DOWN, true) && run_reselect_frame() &&
+                      Access::FrontEnd(*reselect_app).selected_main_row ==
+                          omega::app::FrontEndMainRow::Profiles,
+                "the capacity-eight fixture returns to the Profiles row");
+            Check(PushKey(SDL_SCANCODE_DOWN, false) && run_reselect_frame(),
+                "the capacity-eight Profiles navigation edge releases");
+            Check(PushKey(SDL_SCANCODE_F1, true) && run_reselect_frame() &&
+                      Access::FrontEnd(*reselect_app).mode ==
+                          omega::app::FrontEndMode::Profiles,
+                "the capacity-eight fixture reopens Profiles");
+            Check(PushKey(SDL_SCANCODE_F1, false) && run_reselect_frame(),
+                "the capacity-eight Profiles entry edge releases");
+
+            const auto gpu_before_reselect = Access::GpuSnapshot(*reselect_app);
+            Check(PushKey(SDL_SCANCODE_F1, true) && run_reselect_frame() &&
+                      Access::FrontEnd(*reselect_app).mode ==
+                          omega::app::FrontEndMode::Characters &&
+                      !Access::ActiveCharacter(*reselect_app) &&
+                      Access::PersistedConfirmedCharacter(*reselect_app) ==
+                          *first_character_id &&
+                      Access::PersistenceGeneration(*reselect_app) ==
+                          std::optional<std::uint64_t>{4U} &&
+                      Access::GpuSnapshot(*reselect_app)
+                              .textures.resident_slots == 7U &&
+                      IsOneCharacterMenuSubmissionWithTextureDelta(
+                          gpu_before_reselect, Access::GpuSnapshot(*reselect_app),
+                          1U, 1U, 3U),
+                "capacity-eight same-profile reselection stages one replacement card at the exact peak, releases the old card, and preserves durable state");
+            Check(PushKey(SDL_SCANCODE_F1, false) && run_reselect_frame(),
+                "the capacity-eight reselect edge releases");
+            Check(PushKey(SDL_SCANCODE_F1, true) && run_reselect_frame() &&
+                      Access::ActiveCharacter(*reselect_app) ==
+                          *first_character_id &&
+                      Access::FrontEnd(*reselect_app).selected_main_row ==
+                          omega::app::FrontEndMainRow::StartDiagnostic,
+                "the capacity-eight replacement character remains selectable");
+            Check(PushKey(SDL_SCANCODE_F1, false) && run_reselect_frame(),
+                "the capacity-eight replacement selection edge releases");
+        }
+    }
+    else
+    {
+        Check(false,
+            "the capacity-eight reselect fixture reopens with valid config");
+    }
 }
 
 void CheckComposedGeneratedMenuAcceptance(
@@ -2155,6 +2575,13 @@ void CheckComposedGeneratedMenuAcceptance(
         .mode = omega::app::FrontEndMode::Main,
         .selected_main_row = omega::app::FrontEndMainRow::Profiles,
         .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+    };
+    constexpr omega::app::FrontEndState kCharactersFirst{
+        .mode = omega::app::FrontEndMode::Characters,
+        .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+        .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+        .selected_character_slot =
+            omega::app::FrontEndCharacterSlot::First,
     };
     constexpr omega::app::FrontEndState kMainStart{
         .mode = omega::app::FrontEndMode::Main,
@@ -2213,11 +2640,13 @@ void CheckComposedGeneratedMenuAcceptance(
 
     const auto profile_id = omega::profiles::ProfileId::Parse(
         "00000000000000000000000000000001");
+    const auto character_id = omega::profiles::CharacterId::Parse(
+        "00000000000000000000000000000001");
     const std::filesystem::path database_root =
         fixture_root / "native-composed-menu-acceptance";
     auto persistence = omega::app::NativePersistence::Bootstrap(database_root);
     auto config = omega::runtime::ParseConfigText("");
-    Check(profile_id && persistence && config &&
+    Check(profile_id && character_id && persistence && config &&
               persistence->startup_profiles().empty() &&
               !persistence->persisted_confirmed_profile_id() &&
               persistence->database().generation() == 0U &&
@@ -2225,7 +2654,7 @@ void CheckComposedGeneratedMenuAcceptance(
               persistence->database().logical_value_bytes() == 0U,
         "the composed generated menu fixture starts from an exact zero-generation, "
         "zero-record, zero-byte database with no durable confirmation");
-    if (!profile_id || !persistence || !config)
+    if (!profile_id || !character_id || !persistence || !config)
         return;
 
     auto app = Access::CreateWithPersistence(std::move(*config), settings,
@@ -2429,8 +2858,12 @@ void CheckComposedGeneratedMenuAcceptance(
               !confirmed->failure() &&
               confirmed->result().planned_simulation_steps == 0U &&
               confirmed->result().executed_simulation_steps == 0U &&
-              Access::FrontEnd(*app) == kMainProfiles &&
+              Access::FrontEnd(*app) == kCharactersFirst &&
               Access::ActiveProfile(*app) == profile_id &&
+              !Access::ActiveCharacter(*app) &&
+              !Access::PersistedConfirmedCharacter(*app) &&
+              Access::CharacterCatalogCount(*app, *profile_id) ==
+                  std::optional<std::size_t>{0U} &&
               Access::PersistedConfirmedProfile(*app) == profile_id &&
               Access::PersistenceGeneration(*app) ==
                   std::optional<std::uint64_t>{2U} &&
@@ -2441,9 +2874,9 @@ void CheckComposedGeneratedMenuAcceptance(
               Access::SchedulerSnapshot(*app) == startup_scheduler &&
               SameSimulationState(
                   Access::SimulationSnapshot(*app), startup_simulation) &&
-              IsOneVisibleMenuSubmission(
-                  profile_entry_released_gpu, confirmed_gpu),
-        "the explicit Profiles confirmation durably confirms PROFILE 1 and returns to the visible Main/Profiles row without advancing simulation");
+              IsOneCharacterMenuSubmissionWithTextureDelta(
+                  profile_entry_released_gpu, confirmed_gpu, 2U, 0U, 2U),
+        "the explicit Profiles confirmation durably confirms PROFILE 1 and enters empty Characters with both cards resident without advancing simulation");
     if (!confirmed)
         return;
 
@@ -2452,11 +2885,33 @@ void CheckComposedGeneratedMenuAcceptance(
     const omega::app::GpuHostSnapshot confirmation_released_gpu =
         Access::GpuSnapshot(*app);
     Check(confirmation_release_queued && confirmation_released &&
-              Access::FrontEnd(*app) == kMainProfiles &&
+              Access::FrontEnd(*app) == kCharactersFirst &&
               Access::ActiveProfile(*app) == profile_id &&
-              IsOneVisibleMenuSubmission(
-                  confirmed_gpu, confirmation_released_gpu),
+              IsOneCharacterMenuSubmissionWithTextureDelta(
+                  confirmed_gpu, confirmation_released_gpu, 0U, 0U, 2U),
         "the confirming edge releases without republishing the durable pointer");
+
+    const bool confirmed_characters_cancel_queued =
+        PushKey(SDL_SCANCODE_BACKSPACE, true);
+    auto confirmed_characters_cancel = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot confirmed_characters_cancel_gpu =
+        Access::GpuSnapshot(*app);
+    Check(confirmed_characters_cancel_queued && confirmed_characters_cancel &&
+              Access::FrontEnd(*app) == kMainProfiles &&
+              IsOneVisibleMenuSubmission(
+                  confirmation_released_gpu, confirmed_characters_cancel_gpu),
+        "Cancel returns from Characters to Main/Profiles while preserving the confirmed profile");
+    const bool confirmed_characters_cancel_release_queued =
+        PushKey(SDL_SCANCODE_BACKSPACE, false);
+    auto confirmed_characters_cancel_released = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot confirmed_characters_main_gpu =
+        Access::GpuSnapshot(*app);
+    Check(confirmed_characters_cancel_release_queued &&
+              confirmed_characters_cancel_released &&
+              Access::FrontEnd(*app) == kMainProfiles &&
+              IsOneVisibleMenuSubmission(confirmed_characters_cancel_gpu,
+                  confirmed_characters_main_gpu),
+        "the Characters cancel edge releases on Main/Profiles");
 
     // Re-entering Profiles now that a confirmation resolves must select the
     // preloaded selected-plus-active list rather than the unmarked one.
@@ -2507,7 +2962,7 @@ void CheckComposedGeneratedMenuAcceptance(
               !DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
                   Access::FrontEndProfileSelectionDrawLists(*app)[0]) &&
               IsOneActiveProfileMenuSubmission(
-                  confirmation_released_gpu, marked_profiles_gpu),
+                  confirmed_characters_main_gpu, marked_profiles_gpu),
         "a confirmed Profiles surface submits the exact four-command selected-plus-active list, adding only the fixed active-row cue and uploading nothing");
 
     const bool marked_release_queued = PushKey(SDL_SCANCODE_F1, false);
@@ -2542,37 +2997,86 @@ void CheckComposedGeneratedMenuAcceptance(
               Access::FrontEnd(*app) == kMainProfiles,
         "the confirmed cancel release is inert");
 
-    const bool navigation_queued = PushKey(SDL_SCANCODE_UP, true);
-    auto navigated = app->RunWithCapture(1);
-    const omega::app::GpuHostSnapshot navigated_gpu = Access::GpuSnapshot(*app);
-    Check(navigation_queued && navigated &&
-              IsFreshPress(CapturedActionState(
-                  navigated, omega::app::kDebugMoveForwardAction)) &&
-              navigated->result().planned_simulation_steps == 0U &&
-              navigated->result().executed_simulation_steps == 0U &&
-              Access::FrontEnd(*app) == kMainStart &&
-              Access::SchedulerSnapshot(*app) == startup_scheduler &&
-              SameSimulationState(
-                  Access::SimulationSnapshot(*app), startup_simulation) &&
-              IsOneVisibleMenuSubmission(confirmed_main_gpu, navigated_gpu),
-        "a fresh action-2 press after confirmation selects the visible START DIAGNOSTIC row");
-    if (!navigated)
-        return;
+    const bool character_profiles_entry_queued = PushKey(SDL_SCANCODE_F1, true);
+    auto character_profiles_entry = app->RunWithCapture(1);
+    const auto character_profiles_entry_gpu = Access::GpuSnapshot(*app);
+    Check(character_profiles_entry_queued && character_profiles_entry &&
+              Access::FrontEnd(*app) == kProfilesFirst &&
+              IsOneActiveProfileMenuSubmission(
+                  confirmed_main_gpu, character_profiles_entry_gpu),
+        "the confirmed profile surface reopens before character selection");
+    Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+        "the character-flow Profiles entry edge releases");
+    const auto character_profiles_released_gpu = Access::GpuSnapshot(*app);
 
-    const bool navigation_release_queued = PushKey(SDL_SCANCODE_UP, false);
-    auto navigation_released = app->RunWithCapture(1);
+    const bool character_profile_queued = PushKey(SDL_SCANCODE_F1, true);
+    auto character_profile = app->RunWithCapture(1);
+    const auto character_profile_gpu = Access::GpuSnapshot(*app);
+    Check(character_profile_queued && character_profile &&
+              character_profile->result().planned_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kCharactersFirst &&
+              Access::ActiveProfile(*app) == profile_id &&
+              !Access::ActiveCharacter(*app) &&
+              Access::PersistenceGeneration(*app) ==
+                  std::optional<std::uint64_t>{2U} &&
+              IsOneCharacterMenuSubmissionWithTextureDelta(
+                  character_profiles_released_gpu, character_profile_gpu,
+                  2U, 2U, 2U),
+        "same-profile reselection transactionally replaces both empty-catalog cards and re-enters Characters without a persistence write");
+    Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+        "the character-flow profile-selection edge releases");
+
+    const auto gpu_before_character_create = Access::GpuSnapshot(*app);
+    const bool character_create_queued = PushKey(SDL_SCANCODE_F1, true);
+    auto character_created = app->RunWithCapture(1);
+    const auto character_created_gpu = Access::GpuSnapshot(*app);
+    Check(character_create_queued && character_created &&
+              character_created->result().planned_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kCharactersFirst &&
+              Access::CharacterCatalogCount(*app, *profile_id) ==
+                  std::optional<std::size_t>{1U} &&
+              Access::PersistenceGeneration(*app) ==
+                  std::optional<std::uint64_t>{3U} &&
+              Access::PersistenceRecordCount(*app) ==
+                  std::optional<std::size_t>{3U} &&
+              Access::PersistenceLogicalValueBytes(*app) ==
+                  std::optional<std::size_t>{125U} &&
+              IsOneCharacterMenuSubmissionWithTextureDelta(
+                  gpu_before_character_create, character_created_gpu,
+                  0U, 1U, 3U),
+        "character creation adds the 52-byte fixed marker and releases the obsolete empty card");
+    Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+        "the composed character-creation edge releases");
+
+    const auto gpu_before_character_select = Access::GpuSnapshot(*app);
+    const bool character_select_queued = PushKey(SDL_SCANCODE_F1, true);
+    auto character_selected = app->RunWithCapture(1);
+    const auto character_selected_gpu = Access::GpuSnapshot(*app);
+    Check(character_select_queued && character_selected &&
+              character_selected->result().planned_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kMainStart &&
+              Access::ActiveCharacter(*app) == character_id &&
+              Access::PersistedConfirmedCharacter(*app) == character_id &&
+              Access::PersistenceGeneration(*app) ==
+                  std::optional<std::uint64_t>{4U} &&
+              Access::PersistenceRecordCount(*app) ==
+                  std::optional<std::size_t>{4U} &&
+              Access::PersistenceLogicalValueBytes(*app) ==
+                  std::optional<std::size_t>{173U} &&
+              IsOneVisibleMenuSubmission(
+                  gpu_before_character_select, character_selected_gpu),
+        "character selection commits its 48-byte active pointer and lands on visible Main/Start");
+    const bool character_select_release_queued = PushKey(SDL_SCANCODE_F1, false);
+    auto character_select_released = app->RunWithCapture(1);
     const omega::app::GpuHostSnapshot navigation_released_gpu =
         Access::GpuSnapshot(*app);
-    Check(navigation_release_queued && navigation_released &&
-              IsRelease(CapturedActionState(
-                  navigation_released, omega::app::kDebugMoveForwardAction)) &&
-              navigation_released->result().planned_simulation_steps == 0U &&
-              navigation_released->result().executed_simulation_steps == 0U &&
+    Check(character_select_release_queued && character_select_released &&
               Access::FrontEnd(*app) == kMainStart &&
               Access::SchedulerSnapshot(*app) == startup_scheduler &&
-              IsOneVisibleMenuSubmission(navigated_gpu, navigation_released_gpu),
-        "the navigation release emits the action-2 release edge and preserves START DIAGNOSTIC with the frozen modal scheduler");
-    if (!navigation_released)
+              IsOneVisibleMenuSubmission(
+                  character_selected_gpu, navigation_released_gpu),
+        "the character-selection release preserves Main/Start with the modal scheduler frozen");
+    if (!character_select_released)
         return;
 
     const bool play_queued =
@@ -2607,12 +3111,15 @@ void CheckComposedGeneratedMenuAcceptance(
               play->result().planned_simulation_steps == 1U &&
               play->result().executed_simulation_steps == 1U &&
               Access::FrontEnd(*app) == kDiagnosticPlay &&
+              Access::ActiveProfile(*app) == profile_id &&
+              Access::ActiveCharacter(*app) == character_id &&
+              Access::PersistedConfirmedCharacter(*app) == character_id &&
               Access::PersistenceGeneration(*app) ==
-                  std::optional<std::uint64_t>{3U} &&
+                  std::optional<std::uint64_t>{5U} &&
               Access::PersistenceRecordCount(*app) ==
-                  std::optional<std::size_t>{3U} &&
+                  std::optional<std::size_t>{5U} &&
               Access::PersistenceLogicalValueBytes(*app) ==
-                  std::optional<std::size_t>{105U} &&
+                  std::optional<std::size_t>{221U} &&
               play_simulation.completed_steps == 1U &&
               play_simulation.simulated_time == settings.frame.simulation_step &&
               play_simulation.alive_entities == 1U && play_position &&
@@ -2620,9 +3127,19 @@ void CheckComposedGeneratedMenuAcceptance(
               marker_command_is_visible &&
               DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
                   actor_draw_list) &&
-              SameTextureResidency(startup_gpu, play_gpu) &&
+              play_gpu.successful_uploads == startup_gpu.successful_uploads + 4U &&
+              play_gpu.successful_upload_logical_bytes ==
+                  startup_gpu.successful_upload_logical_bytes +
+                      kFrontEndCardLogicalBytes * 4U &&
+              play_gpu.successful_releases ==
+                  startup_gpu.successful_releases + 3U &&
+              play_gpu.textures.resident_slots ==
+                  startup_gpu.textures.resident_slots + 1U &&
+              play_gpu.textures.resident_logical_bytes ==
+                  startup_gpu.textures.resident_logical_bytes +
+                      kFrontEndCardLogicalBytes &&
               IsOneDiagnosticPlaySubmission(navigation_released_gpu, play_gpu),
-        "a confirmed Primary commits the exact 32-byte checkpoint before entering DiagnosticPlay, advances exactly one generated simulation step, and submits the visible positive-Z actor marker without GPU resource churn");
+        "a profile-and-character-confirmed Primary commits the 48-byte character-owned checkpoint, enters DiagnosticPlay, advances one generated simulation step, and retains exactly one live character card");
     if (!play)
         return;
 
@@ -2668,12 +3185,14 @@ void CheckComposedGeneratedMenuAcceptance(
               Access::FrontEnd(*app) == kMainStart &&
               Access::ActiveProfile(*app) == profile_id &&
               Access::PersistedConfirmedProfile(*app) == profile_id &&
+              Access::ActiveCharacter(*app) == character_id &&
+              Access::PersistedConfirmedCharacter(*app) == character_id &&
               Access::PersistenceGeneration(*app) ==
-                  std::optional<std::uint64_t>{3U} &&
+                  std::optional<std::uint64_t>{5U} &&
               Access::PersistenceRecordCount(*app) ==
-                  std::optional<std::size_t>{3U} &&
+                  std::optional<std::size_t>{5U} &&
               Access::PersistenceLogicalValueBytes(*app) ==
-                  std::optional<std::size_t>{105U} &&
+                  std::optional<std::size_t>{221U} &&
               Access::SchedulerSnapshot(*app) == play_scheduler &&
               SameSimulationState(
                   Access::SimulationSnapshot(*app), play_simulation) &&
@@ -2736,17 +3255,19 @@ void CheckComposedGeneratedMenuAcceptance(
               Access::FrontEnd(*app) == kProfilesFirst &&
               Access::ActiveProfile(*app) == profile_id &&
               Access::PersistedConfirmedProfile(*app) == profile_id &&
+              Access::ActiveCharacter(*app) == character_id &&
+              Access::PersistedConfirmedCharacter(*app) == character_id &&
               Access::PersistenceGeneration(*app) ==
-                  std::optional<std::uint64_t>{3U} &&
+                  std::optional<std::uint64_t>{5U} &&
               Access::PersistenceRecordCount(*app) ==
-                  std::optional<std::size_t>{3U} &&
+                  std::optional<std::size_t>{5U} &&
               Access::PersistenceLogicalValueBytes(*app) ==
-                  std::optional<std::size_t>{105U} &&
+                  std::optional<std::size_t>{221U} &&
               Access::SchedulerSnapshot(*app) == play_scheduler &&
               SameSimulationState(
                   Access::SimulationSnapshot(*app), play_simulation) &&
               Access::GpuSnapshot(*app) == stale_profiles_released_gpu,
-        "a rejected confirmation publishes one bounded private error and leaves the reducer's projected Profiles transition, the prior activation, the durable pointer, and the exact GPU snapshot unpublished");
+        "a rejected confirmation publishes one bounded private error and leaves Profiles, both prior activations, both durable pointers, and the exact GPU snapshot unpublished");
 
     Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
         "the composed acceptance releases its failing confirmation edge before teardown");
@@ -2985,6 +3506,8 @@ int main()
             {
                 const auto selected_id = omega::profiles::ProfileId::Parse(
                     "00000000000000000000000000000002");
+                const auto character_id = omega::profiles::CharacterId::Parse(
+                    "00000000000000000000000000000001");
                 const auto run_plain_profile_frame = [&profile_app]() {
                     auto run = profile_app->Run(1);
                     return run && run->rendered_frames == 1 &&
@@ -3071,12 +3594,19 @@ int main()
                 Check(PushKey(SDL_SCANCODE_F1, true),
                     "a fresh explicit profile-selection edge enters alone");
                 auto selected = profile_app->RunWithCapture(1);
-                const omega::app::FrontEndState returned_profiles_row{
+                const omega::app::FrontEndState characters_first{
+                    .mode = omega::app::FrontEndMode::Characters,
+                    .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+                    .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+                    .selected_character_slot =
+                        omega::app::FrontEndCharacterSlot::First,
+                };
+                const omega::app::FrontEndState legacy_returned_profiles_row{
                     .mode = omega::app::FrontEndMode::Main,
                     .selected_main_row = omega::app::FrontEndMainRow::Profiles,
                     .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
                 };
-                Check(selected && selected_id &&
+                Check(selected && selected_id && character_id &&
                           selected->completion() ==
                               omega::app::RunCaptureCompletion::FrameLimitReached &&
                           omega::app::detail::OmegaAppTestAccess::ActiveProfile(
@@ -3090,13 +3620,22 @@ int main()
                           omega::app::detail::OmegaAppTestAccess::PersistenceLogicalValueBytes(
                               *profile_app) == std::optional<std::size_t>{207U} &&
                           omega::app::detail::OmegaAppTestAccess::FrontEnd(
-                              *profile_app) == returned_profiles_row &&
+                              *profile_app) == characters_first &&
+                          !omega::app::detail::OmegaAppTestAccess::ActiveCharacter(
+                              *profile_app) &&
+                          !omega::app::detail::OmegaAppTestAccess::PersistedConfirmedCharacter(
+                              *profile_app) &&
+                          omega::app::detail::OmegaAppTestAccess::CharacterCatalogCount(
+                              *profile_app, *selected_id) ==
+                              std::optional<std::size_t>{0U} &&
                           omega::app::detail::OmegaAppTestAccess::ProfileCatalogCount(
                               *profile_app) == std::optional<std::size_t>{4U} &&
-                          IsOneVisibleMenuSubmission(gpu_before_selection,
+                          IsOneCharacterMenuSubmissionWithTextureDelta(
+                              gpu_before_selection,
                               omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
-                                  *profile_app)),
-                    "a fresh primary edge commits the highlighted existing ID before session publication without catalog or GPU mutation");
+                                  *profile_app),
+                              2U, 0U, 2U),
+                    "a fresh primary edge commits the highlighted existing ID and opens empty Characters with both cards resident");
 
                 auto replay_traces = selected
                                          ? std::move(*selected).TakeTracePair()
@@ -3121,13 +3660,105 @@ int main()
                                                  .type = omega::app::FrontEndCommandType::SetActiveProfile,
                                                  .profile_slot = omega::app::FrontEndProfileSlot::Second,
                                              } &&
-                                         replay->front_end_state() == returned_profiles_row;
+                                         replay->front_end_state() ==
+                                             legacy_returned_profiles_row;
                     }
                 }
                 Check(replay_matches,
                     "the unchanged capture schema deterministically replays the same bounded selection command");
                 Check(PushKey(SDL_SCANCODE_F1, false) && run_plain_profile_frame(),
-                    "the explicit profile-selection key releases before app teardown");
+                    "the explicit profile-selection key releases before character creation");
+
+                const auto gpu_before_character_create =
+                    omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
+                        *profile_app);
+                Check(PushKey(SDL_SCANCODE_F1, true) &&
+                          run_plain_profile_frame() && selected_id &&
+                          omega::app::detail::OmegaAppTestAccess::FrontEnd(
+                              *profile_app) == characters_first &&
+                          omega::app::detail::OmegaAppTestAccess::CharacterCatalogCount(
+                              *profile_app, *selected_id) ==
+                              std::optional<std::size_t>{1U} &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceGeneration(
+                              *profile_app) == std::optional<std::uint64_t>{6U} &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceRecordCount(
+                              *profile_app) == std::optional<std::size_t>{6U} &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceLogicalValueBytes(
+                              *profile_app) == std::optional<std::size_t>{259U} &&
+                          IsOneCharacterMenuSubmissionWithTextureDelta(
+                              gpu_before_character_create,
+                              omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
+                                  *profile_app),
+                              0U, 1U, 3U),
+                    "the selected second profile creates its fixed character and releases the obsolete empty card");
+                Check(PushKey(SDL_SCANCODE_F1, false) &&
+                          run_plain_profile_frame(),
+                    "the four-profile character-creation edge releases");
+
+                const auto gpu_before_character_select =
+                    omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
+                        *profile_app);
+                const omega::app::FrontEndState main_start{
+                    .mode = omega::app::FrontEndMode::Main,
+                    .selected_main_row =
+                        omega::app::FrontEndMainRow::StartDiagnostic,
+                    .selected_profile_slot =
+                        omega::app::FrontEndProfileSlot::First,
+                    .selected_character_slot =
+                        omega::app::FrontEndCharacterSlot::First,
+                };
+                Check(PushKey(SDL_SCANCODE_F1, true) &&
+                          run_plain_profile_frame() && character_id &&
+                          omega::app::detail::OmegaAppTestAccess::FrontEnd(
+                              *profile_app) == main_start &&
+                          omega::app::detail::OmegaAppTestAccess::ActiveCharacter(
+                              *profile_app) == character_id &&
+                          omega::app::detail::OmegaAppTestAccess::PersistedConfirmedCharacter(
+                              *profile_app) == character_id &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceGeneration(
+                              *profile_app) == std::optional<std::uint64_t>{7U} &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceRecordCount(
+                              *profile_app) == std::optional<std::size_t>{7U} &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceLogicalValueBytes(
+                              *profile_app) == std::optional<std::size_t>{307U} &&
+                          IsOneVisibleMenuSubmission(
+                              gpu_before_character_select,
+                              omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
+                                  *profile_app)),
+                    "the four-profile character selection commits its pointer and lands on Main/Start");
+                Check(PushKey(SDL_SCANCODE_F1, false) &&
+                          run_plain_profile_frame(),
+                    "the four-profile character-selection edge releases");
+
+                const auto gpu_before_start =
+                    omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
+                        *profile_app);
+                const omega::app::FrontEndState diagnostic_play{
+                    .mode = omega::app::FrontEndMode::DiagnosticPlay,
+                    .selected_main_row =
+                        omega::app::FrontEndMainRow::StartDiagnostic,
+                    .selected_profile_slot =
+                        omega::app::FrontEndProfileSlot::First,
+                    .selected_character_slot =
+                        omega::app::FrontEndCharacterSlot::First,
+                };
+                Check(PushKey(SDL_SCANCODE_F1, true) &&
+                          run_plain_profile_frame() &&
+                          omega::app::detail::OmegaAppTestAccess::FrontEnd(
+                              *profile_app) == diagnostic_play &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceGeneration(
+                              *profile_app) == std::optional<std::uint64_t>{8U} &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceRecordCount(
+                              *profile_app) == std::optional<std::size_t>{8U} &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceLogicalValueBytes(
+                              *profile_app) == std::optional<std::size_t>{355U} &&
+                          IsOneDiagnosticPlaySubmission(gpu_before_start,
+                              omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
+                                  *profile_app)),
+                    "the four-profile native path commits its character-owned session and enters DiagnosticPlay");
+                Check(PushKey(SDL_SCANCODE_F1, false) &&
+                          run_plain_profile_frame(),
+                    "the four-profile diagnostic-start edge releases before teardown");
             }
         }
     }

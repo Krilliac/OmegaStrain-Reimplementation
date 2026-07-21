@@ -7,6 +7,7 @@
 #include "omega/runtime/run_capture_replay.h"
 #include "omega/simulation/simulation_world.h"
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -46,14 +47,22 @@ struct RunReplaySessionConfig
     // creation closed unless both published counts began empty. Replay may advance
     // the logical zero model to one; it performs no catalog or persistence work.
     std::size_t front_end_total_profile_count = 0U;
-    // Both commands default closed. Create additionally gates first-profile
-    // creation against both startup counts before any frame reaches the pure
-    // reducer. Diagnostic-start capability is replay context supplied by the
-    // caller; replay publishes the typed command but performs no persistence.
+    // Caller-owned profile-scoped character snapshots, indexed by the bounded
+    // visible profile slot. Each visible count is clamped by the pure reducer to
+    // its three character positions. Replay may advance an empty selected entry
+    // to one; neither array retains a profile/character identity or catalog view.
+    std::array<std::uint8_t, kFrontEndVisibleProfiles>
+        front_end_visible_character_slots_by_profile{};
+    std::array<std::size_t, kFrontEndVisibleProfiles>
+        front_end_total_character_counts_by_profile{};
+    // Command capabilities default closed. First-profile creation is gated by
+    // both profile counts, and first-character creation is gated by the selected
+    // profile's character counts. Diagnostic-start capability is replay context
+    // supplied by the caller; replay publishes commands but performs no persistence.
     FrontEndCapabilities front_end_capabilities{};
     // Replay authorization is intentionally not configurable: every new session
-    // begins unconfirmed, and only its replayed SetActiveProfile command can
-    // open the identity-free mirror.
+    // begins unconfirmed, and only replayed SetActiveProfile/SetActiveCharacter
+    // commands can open their corresponding identity-free mirrors.
     friend constexpr bool operator==(
         const RunReplaySessionConfig&, const RunReplaySessionConfig&) noexcept = default;
 };
@@ -267,6 +276,11 @@ public:
     // no identifier of its own, so it can never name, invent, or resolve a
     // profile. A moved-from or inert session reports the closed default.
     [[nodiscard]] bool front_end_active_profile_is_confirmed() const noexcept;
+    // [game thread; no concurrent use] Replay-local character authorization
+    // mirror. It opens only after an accepted SetActiveCharacter command while
+    // the profile mirror is open. It owns no character identity, and a moved-from
+    // or inert session reports the closed default.
+    [[nodiscard]] bool front_end_active_character_is_confirmed() const noexcept;
 
 private:
     RunReplaySession(runtime::FrameScheduler&& scheduler,
@@ -276,6 +290,10 @@ private:
         std::optional<FrontEndState> front_end_state,
         std::uint8_t front_end_visible_profile_slots,
         std::size_t front_end_total_profile_count,
+        std::array<std::uint8_t, kFrontEndVisibleProfiles>
+            front_end_visible_character_slots_by_profile,
+        std::array<std::size_t, kFrontEndVisibleProfiles>
+            front_end_total_character_counts_by_profile,
         FrontEndCapabilities front_end_capabilities) noexcept;
     void NormalizeInert() noexcept;
 
@@ -286,8 +304,17 @@ private:
     std::optional<FrontEndState> front_end_state_;
     std::uint8_t front_end_visible_profile_slots_ = 0U;
     std::size_t front_end_total_profile_count_ = 0U;
+    std::array<std::uint8_t, kFrontEndVisibleProfiles>
+        front_end_visible_character_slots_by_profile_{};
+    std::array<std::size_t, kFrontEndVisibleProfiles>
+        front_end_total_character_counts_by_profile_{};
+    // Bounded startup-model position only; this is not a profile identity.
+    std::optional<FrontEndProfileSlot> front_end_active_profile_slot_;
+    std::uint8_t front_end_active_visible_character_slots_ = 0U;
+    std::size_t front_end_active_total_character_count_ = 0U;
     FrontEndCapabilities front_end_capabilities_{};
     bool front_end_active_profile_is_confirmed_ = false;
+    bool front_end_active_character_is_confirmed_ = false;
     RunReplaySessionState state_ = RunReplaySessionState::Inert;
 };
 } // namespace omega::app
