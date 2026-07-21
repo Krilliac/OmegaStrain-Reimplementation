@@ -345,6 +345,12 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     config.front_end_capabilities.can_create_first_profile =
         front_end_visible_profile_slots == 0U &&
         front_end_total_profile_count == 0U;
+    // This path always follows a capture from a persistence-backed app, which
+    // always enables the gate, so replay must enable it too or it would diverge
+    // from the run it is checking. The replay-local mirror stays closed here for
+    // the same reason the app's session activation does: startup never copies a
+    // durable confirmation, so only a replayed selection can open it.
+    config.front_end_capabilities.requires_active_profile_for_diagnostic_play = true;
     config.initial_front_end_state = omega::app::PlanProjectFrontEndStartupState(
         static_cast<std::uint16_t>(front_end_total_profile_count),
         front_end_visible_profile_slots, config.front_end_capabilities);
