@@ -18,6 +18,13 @@ enum class BootSequencePhase : std::uint8_t
     Failed = 3U,
 };
 
+enum class BootSequenceCompletionCause : std::uint8_t
+{
+    None = 0U,
+    SourceCompleted = 1U,
+    SafetyTimeout = 2U,
+};
+
 struct BootSequenceConfig
 {
     std::uint64_t duration_ticks = 0U;
@@ -53,6 +60,10 @@ struct BootSequenceInput
 struct BootSequenceReduction
 {
     BootSequenceState state{};
+    // Distinguishes normal decoder/source completion from the independent
+    // safety deadline on the exact transition frame. Non-completion terminal
+    // paths and later stable reductions report None.
+    BootSequenceCompletionCause completion_cause = BootSequenceCompletionCause::None;
     // A primary edge observed while a valid sequence was active is never
     // forwarded into the front end on the same frame.
     bool primary_consumed = false;
@@ -163,6 +174,7 @@ struct BootSequenceReduction
                     .position_ticks = state.duration_ticks,
                     .duration_ticks = state.duration_ticks,
                 },
+            .completion_cause = BootSequenceCompletionCause::SourceCompleted,
             .entered_front_end = true,
         };
     }
@@ -180,6 +192,7 @@ struct BootSequenceReduction
                     .position_ticks = state.duration_ticks,
                     .duration_ticks = state.duration_ticks,
                 },
+            .completion_cause = BootSequenceCompletionCause::SafetyTimeout,
             .entered_front_end = true,
         };
     }
@@ -203,4 +216,5 @@ static_assert(std::is_standard_layout_v<BootSequenceInput>);
 static_assert(std::is_trivially_copyable_v<BootSequenceReduction>);
 static_assert(std::is_standard_layout_v<BootSequenceReduction>);
 static_assert(sizeof(BootSequencePhase) == 1U);
+static_assert(sizeof(BootSequenceCompletionCause) == 1U);
 } // namespace omega::app
