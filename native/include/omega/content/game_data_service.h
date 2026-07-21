@@ -53,6 +53,8 @@ enum class GameDataErrorCode
 struct GameDataError
 {
     GameDataErrorCode code = GameDataErrorCode::InvalidConfiguration;
+    // Never contains an owner-supplied host filesystem path or a lower-level VFS diagnostic.
+    // Validated project-relative identifiers may be named where they are needed for recovery.
     std::string message;
     std::optional<asset::DecodeError> decode_error;
 };
@@ -76,7 +78,8 @@ struct GameDataServiceConfig
 class GameDataService final
 {
 public:
-    // [game thread] Validates and freezes one owner-supplied NTSC-U retail data tree.
+    // [game thread] Validates and freezes one owner-supplied NTSC-U retail data tree. Failure
+    // diagnostics never interpolate the supplied root or lower-level host filesystem details.
     [[nodiscard]] static std::expected<GameDataService, GameDataError> Open(
         GameDataServiceConfig config);
 

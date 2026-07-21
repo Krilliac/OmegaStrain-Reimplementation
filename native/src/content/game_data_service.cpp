@@ -697,7 +697,7 @@ std::expected<GameDataService, GameDataError> GameDataService::Open(
     auto mounted = impl->files.MountDirectory(impl->config.root);
     if (!mounted)
         return std::unexpected(Error(GameDataErrorCode::MountFailed,
-            "unable to mount game-data root: " + mounted.error()));
+            "unable to mount game-data root"));
     impl->files.Freeze();
 
     if (!impl->files.Contains("SYSTEM.CNF"))
@@ -707,7 +707,7 @@ std::expected<GameDataService, GameDataError> GameDataService::Open(
         "SYSTEM.CNF", impl->config.maximum_system_config_bytes);
     if (!system_config)
         return std::unexpected(Error(GameDataErrorCode::ReadFailed,
-            "unable to read SYSTEM.CNF: " + system_config.error()));
+            "unable to read SYSTEM.CNF"));
     auto validated = ValidateSystemConfig(*system_config);
     if (!validated)
         return std::unexpected(validated.error());
@@ -955,12 +955,12 @@ std::expected<asset::LevelManifestIR, GameDataError> GameDataService::LoadLevelM
     auto pop_bytes = impl_->files.Read(pop_path, impl_->config.maximum_pop_bytes);
     if (!pop_bytes)
         return std::unexpected(Error(GameDataErrorCode::ReadFailed,
-            "unable to read level DATA.POP: " + pop_bytes.error()));
+            "unable to read level DATA.POP"));
     auto data_hog_bytes = impl_->files.Read(
         data_hog_path, impl_->config.maximum_data_hog_bytes);
     if (!data_hog_bytes)
         return std::unexpected(Error(GameDataErrorCode::ReadFailed,
-            "unable to read level DATA.HOG: " + data_hog_bytes.error()));
+            "unable to read level DATA.HOG"));
 
     auto data_hog = archive::HogArchive::FromBytes(std::move(*data_hog_bytes));
     if (!data_hog)
@@ -1004,7 +1004,7 @@ std::expected<asset::LevelSpatialIR, GameDataError> GameDataService::LoadLevelSp
     auto source_bytes = impl_->files.Read(*source_path, impl_->config.maximum_data_hog_bytes);
     if (!source_bytes)
         return std::unexpected(Error(GameDataErrorCode::ReadFailed,
-            "unable to read level archive source: " + source_bytes.error()));
+            "unable to read level archive source"));
     auto source_input = budget.ConsumeInput(source_bytes->size(), "level archive source");
     if (!source_input)
         return std::unexpected(DecodeFailure(
@@ -1129,7 +1129,7 @@ GameDataService::LoadLevelMaterialCatalogs(const asset::LevelManifestIR& manifes
     auto source_bytes = impl_->files.Read(*source_path, impl_->config.maximum_data_hog_bytes);
     if (!source_bytes)
         return std::unexpected(Error(GameDataErrorCode::ReadFailed,
-            "unable to read level archive source: " + source_bytes.error()));
+            "unable to read level archive source"));
     auto source_input = budget.ConsumeInput(source_bytes->size(), "level archive source");
     if (!source_input)
         return std::unexpected(DecodeFailure(
@@ -1254,7 +1254,7 @@ std::expected<asset::LevelContentIR, GameDataError> GameDataService::LoadLevelCo
     auto source_bytes = impl_->files.Read(*source_path, impl_->config.maximum_data_hog_bytes);
     if (!source_bytes)
         return std::unexpected(Error(GameDataErrorCode::ReadFailed,
-            "unable to read level archive source: " + source_bytes.error()));
+            "unable to read level archive source"));
     auto source_input = budget.ConsumeInput(source_bytes->size(), "level archive source");
     if (!source_input)
         return std::unexpected(DecodeFailure(
