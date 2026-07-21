@@ -13,6 +13,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools import check_public_tree as gate  # noqa: E402
 
 
+# These sets intentionally duplicate the exact public-tree policy. Adding or
+# removing an entry is a security-sensitive contract change that should require
+# an explicit review of both the gate and this regression matrix.
+EXPECTED_BLOCKED_EXTENSIONS = frozenset(
+    """
+    .7z .a .avi .bin .bmp .cbs .chd .col .cso .dds .dll .elf .erom .exe
+    .flac .gif .glb .gltf .gz .hog .img .irx .iso .jpeg .jpg .key .ktx .lib
+    .lpd .map .max .mec .mkv .mp3 .mp4 .nvm .ogg .p12 .p2s .par .pdb .pem
+    .pfx .png .pop .pss .psu .rar .resym .rom .rom0 .rom1 .rom2 .sav .ska
+    .skas .skl .skm .so .sps .sys .tar .tdx .tga .vag .vpk .vum .wav .webm
+    .webp .xps .xz .zip
+    """.split()
+)
+EXPECTED_SENSITIVE_NAMES = frozenset(
+    """
+    .env credentials.json id_dsa id_ecdsa id_ed25519 id_rsa secrets.json
+    """.split()
+)
+
+
 class PublicTreeGateTests(unittest.TestCase):
     @staticmethod
     def invoke_main() -> tuple[int, str, str]:
@@ -142,6 +162,87 @@ class PublicTreeGateTests(unittest.TestCase):
                     any(
                         "retail executable name" in error
                         for error in self.errors(near_miss)
+                    )
+                )
+
+    def test_every_payload_extension_is_pinned_and_enforced_case_insensitively(self) -> None:
+        self.assertEqual(len(EXPECTED_BLOCKED_EXTENSIONS), 73)
+        self.assertEqual(EXPECTED_BLOCKED_EXTENSIONS, gate.BLOCKED_EXTENSIONS)
+        self.assertTrue(
+            all(
+                extension.startswith(".") and extension == extension.lower()
+                for extension in gate.BLOCKED_EXTENSIONS
+            )
+        )
+
+        for extension in sorted(EXPECTED_BLOCKED_EXTENSIONS):
+            blocked_paths = (
+                f"fixture{extension}",
+                f"nested/dotted.directory/fixture{extension.upper()}",
+            )
+            for path in blocked_paths:
+                with self.subTest(extension=extension, path=path):
+                    matches = [
+                        error
+                        for error in self.errors(path)
+                        if "blocked retail/payload extension" in error
+                    ]
+                    self.assertEqual(
+                        matches,
+                        [f"blocked retail/payload extension: {path}"],
+                    )
+
+            near_miss = f"fixture{extension}x"
+            with self.subTest(extension=extension, path=near_miss):
+                self.assertFalse(
+                    any(
+                        "blocked retail/payload extension" in error
+                        for error in self.errors(near_miss)
+                    )
+                )
+
+    def test_every_sensitive_name_is_pinned_and_enforced_case_insensitively(self) -> None:
+        self.assertEqual(len(EXPECTED_SENSITIVE_NAMES), 7)
+        self.assertEqual(EXPECTED_SENSITIVE_NAMES, gate.SENSITIVE_NAMES)
+        self.assertTrue(all(name == name.lower() for name in gate.SENSITIVE_NAMES))
+
+        for name in sorted(EXPECTED_SENSITIVE_NAMES):
+            blocked_paths = (f"nested/{name}", f"nested/{name.upper()}")
+            for path in blocked_paths:
+                with self.subTest(name=name, path=path):
+                    matches = [
+                        error
+                        for error in self.errors(path)
+                        if "sensitive filename" in error
+                    ]
+                    self.assertEqual(
+                        matches,
+                        [f"sensitive filename requires explicit policy review: {path}"],
+                    )
+
+            near_miss = f"nested/safe-{name}"
+            with self.subTest(name=name, path=near_miss):
+                self.assertFalse(
+                    any(
+                        "sensitive filename" in error
+                        for error in self.errors(near_miss)
+                    )
+                )
+
+        for env_variant in (".env.local", ".ENV.PRODUCTION"):
+            with self.subTest(env_variant=env_variant):
+                self.assertTrue(
+                    any(
+                        "sensitive filename" in error
+                        for error in self.errors(f"nested/{env_variant}")
+                    )
+                )
+        for env_near_miss in ("env", ".envx", ".environment", "safe-.env"):
+            with self.subTest(env_near_miss=env_near_miss):
+                self.assertFalse(
+                    any(
+                        "sensitive filename" in error
+                        for error in self.errors(f"nested/{env_near_miss}")
                     )
                 )
 
