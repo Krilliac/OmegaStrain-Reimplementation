@@ -50,6 +50,7 @@ cmake --preset msvc
 cmake --build --preset msvc-debug
 ctest --preset msvc-debug
 python -B tools/check_public_tree.py
+python -B tools/check_evidence_ledger.py
 ```
 
 Format decoders need three validation layers:
