@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -234,6 +235,35 @@ void Check(const bool condition, const std::string_view message)
         state.selected_main_row = next_rows[row_byte];
     }
     return FrontEndReduction{.state = state};
+}
+
+// Independent gate oracle. It states the two documented gate deviations as
+// post-conditions over the table oracle above instead of calling any production
+// gate helper, so a production gate regression cannot hide inside it.
+[[nodiscard]] constexpr FrontEndReduction ReferenceReduceWithGate(
+    const FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots,
+    const FrontEndCapabilities capabilities, const bool active_profile_is_confirmed) noexcept
+{
+    const auto mode_byte = static_cast<std::uint8_t>(state.mode);
+    const auto row_byte = static_cast<std::uint8_t>(state.selected_main_row);
+    const auto profile_slot_byte = static_cast<std::uint8_t>(state.selected_profile_slot);
+    const bool state_is_valid = mode_byte <= 4U && row_byte <= 3U && profile_slot_byte <= 2U;
+    const bool gate_is_open =
+        !capabilities.requires_active_profile_for_diagnostic_play || active_profile_is_confirmed;
+    if (state_is_valid && !gate_is_open)
+    {
+        if (mode_byte == 2U)
+            return FrontEndReduction{.state = omega::app::InitialFrontEndState()};
+        if (mode_byte == 0U && row_byte == 0U && input.primary_pressed && !input.cancel_pressed)
+        {
+            return FrontEndReduction{.state = FrontEndState{
+                                         .mode = FrontEndMode::Profiles,
+                                         .selected_main_row = FrontEndMainRow::Profiles,
+                                         .selected_profile_slot = FrontEndProfileSlot::First,
+                                     }};
+        }
+    }
+    return ReferenceReduce(state, input, visible_profile_slots, capabilities);
 }
 
 [[nodiscard]] std::uint64_t Fnv1a64(const std::span<const std::byte> bytes) noexcept
@@ -819,6 +849,219 @@ void CheckReducerAndViewContract()
           "profile snapshot");
 }
 
+// The gate's only authorization input is an already-confirmed identifier
+// resolved against the bounded model, so these checks never construct a second
+// selection value: production has none to construct.
+void CheckActiveProfileGateContract()
+{
+    const std::array summaries{Summary(1U, "ALPHA"), Summary(2U, "BETA"), Summary(3U, "GAMMA"),
+                               Summary(4U, "DELTA")};
+    const auto built = omega::app::MakeFrontEndStartupModel(summaries);
+    Check(built.has_value(), "the gate fixture builds a four-profile bounded model");
+    if (!built)
+        return;
+    const FrontEndStartupModel model = *built;
+
+    const std::optional<ProfileId> first = summaries[0].id;
+    const std::optional<ProfileId> second = summaries[1].id;
+    const std::optional<ProfileId> third = summaries[2].id;
+    const std::optional<ProfileId> beyond_visible = summaries[3].id;
+    const std::optional<ProfileId> uncatalogued = Summary(9U, "OMEGA").id;
+
+    Check(omega::app::FrontEndConfirmedProfileSlot(model, first) == FrontEndProfileSlot::First &&
+              omega::app::FrontEndConfirmedProfileSlot(model, second) == FrontEndProfileSlot::Second &&
+              omega::app::FrontEndConfirmedProfileSlot(model, third) == FrontEndProfileSlot::Third,
+          "every visible position resolves the identifier the model actually holds");
+    Check(!omega::app::FrontEndConfirmedProfileSlot(model, std::nullopt) &&
+              !omega::app::FrontEndConfirmedProfileSlot(model, beyond_visible) &&
+              !omega::app::FrontEndConfirmedProfileSlot(model, uncatalogued),
+          "an absent, invisible, or uncatalogued identifier resolves to no position");
+
+    FrontEndStartupModel shrunk = model;
+    shrunk.visible_profiles = 1U;
+    Check(omega::app::FrontEndConfirmedProfileSlot(shrunk, first) == FrontEndProfileSlot::First &&
+              !omega::app::FrontEndConfirmedProfileSlot(shrunk, second) &&
+              !omega::app::FrontEndConfirmedProfileSlot(shrunk, third),
+          "a position outside the current visible count is stale and resolves to nothing");
+
+    FrontEndStartupModel emptied = model;
+    emptied.total_profiles = 0U;
+    Check(!omega::app::FrontEndConfirmedProfileSlot(emptied, first) &&
+              !omega::app::FrontEndConfirmedProfileSlot(emptied, second),
+          "a zero total count leaves every retained position stale");
+
+    FrontEndStartupModel unpopulated = model;
+    unpopulated.profiles[1].id.reset();
+    Check(!omega::app::FrontEndConfirmedProfileSlot(unpopulated, second) &&
+              omega::app::FrontEndConfirmedProfileSlot(unpopulated, third) == FrontEndProfileSlot::Third,
+          "an unpopulated position resolves nothing without disturbing its neighbours");
+
+    FrontEndStartupModel adversarial = model;
+    adversarial.visible_profiles = 0xffU;
+    adversarial.total_profiles = 0xffffU;
+    Check(omega::app::FrontEndConfirmedProfileSlot(adversarial, third) == FrontEndProfileSlot::Third &&
+              !omega::app::FrontEndConfirmedProfileSlot(adversarial, beyond_visible),
+          "adversarial counts cannot resolve past the three fixed positions");
+
+    constexpr FrontEndCapabilities gate_enabled{.requires_active_profile_for_diagnostic_play = true};
+    Check(omega::app::FrontEndSatisfiesDiagnosticPlayGate({}, false) &&
+              omega::app::FrontEndSatisfiesDiagnosticPlayGate({}, true) &&
+              !omega::app::FrontEndSatisfiesDiagnosticPlayGate(gate_enabled, false) &&
+              omega::app::FrontEndSatisfiesDiagnosticPlayGate(gate_enabled, true),
+          "the default capability leaves the gate open and the explicit capability closes it");
+    Check(omega::app::FrontEndHasConfirmedActiveProfile(model, second) &&
+              !omega::app::FrontEndHasConfirmedActiveProfile(model, beyond_visible) &&
+              !omega::app::FrontEndHasConfirmedActiveProfile(model, std::nullopt),
+          "the only gate input is a confirmed identifier the model still resolves");
+
+    constexpr FrontEndState diagnostic_play{
+        .mode = FrontEndMode::DiagnosticPlay,
+        .selected_main_row = FrontEndMainRow::StartDiagnostic,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+    Check(omega::app::FrontEndAllowsSimulation(diagnostic_play) &&
+              omega::app::FrontEndAllowsSimulation(diagnostic_play, {}, false) &&
+              !omega::app::FrontEndAllowsSimulation(diagnostic_play, gate_enabled, false) &&
+              omega::app::FrontEndAllowsSimulation(diagnostic_play, gate_enabled, true),
+          "simulation stays legacy by default and requires a confirmation once gated");
+
+    bool unconfirmed_diagnostic_fails_closed = true;
+    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
+    {
+        unconfirmed_diagnostic_fails_closed =
+            unconfirmed_diagnostic_fails_closed &&
+            omega::app::ReduceFrontEnd(diagnostic_play, InputFromMask(mask), 3U, gate_enabled, false) ==
+                FrontEndReduction{.state = omega::app::InitialFrontEndState()};
+    }
+    Check(unconfirmed_diagnostic_fails_closed,
+          "an already-entered diagnostic play fails closed on every edge once its "
+          "confirmation stops resolving");
+
+    constexpr FrontEndState main_start_diagnostic{
+        .mode = FrontEndMode::Main,
+        .selected_main_row = FrontEndMainRow::StartDiagnostic,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+    Check(omega::app::ReduceFrontEnd(main_start_diagnostic, FrontEndInputEdges{.primary_pressed = true}, 3U,
+              gate_enabled, false) ==
+              FrontEndReduction{.state = FrontEndState{
+                                    .mode = FrontEndMode::Profiles,
+                                    .selected_main_row = FrontEndMainRow::Profiles,
+                                    .selected_profile_slot = FrontEndProfileSlot::First,
+                                }},
+          "the unsatisfied diagnostic row opens the Profiles surface and publishes no command");
+    Check(omega::app::ReduceFrontEnd(main_start_diagnostic, FrontEndInputEdges{.primary_pressed = true}, 3U,
+              gate_enabled, true) ==
+              FrontEndReduction{.state = diagnostic_play},
+          "a confirmation restores the exact legacy diagnostic entry");
+
+    constexpr FrontEndState profiles_second{
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::Second,
+    };
+    Check(omega::app::ReduceFrontEnd(profiles_second, FrontEndInputEdges{.primary_pressed = true}, 3U,
+              gate_enabled, false)
+                  .command == FrontEndCommand{
+                                  .type = FrontEndCommandType::SetActiveProfile,
+                                  .profile_slot = FrontEndProfileSlot::Second,
+                              },
+          "the closed gate never blocks the selection that can open it");
+
+    constexpr FrontEndCapabilities creation_and_gate{
+        .can_create_first_profile = true,
+        .requires_active_profile_for_diagnostic_play = true,
+    };
+    constexpr FrontEndState empty_profiles{
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+    bool creation_never_activates = true;
+    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
+    {
+        const FrontEndReduction reduced =
+            omega::app::ReduceFrontEnd(empty_profiles, InputFromMask(mask), 0U, creation_and_gate, false);
+        creation_never_activates = creation_never_activates &&
+                                   reduced.command.type != FrontEndCommandType::SetActiveProfile &&
+                                   !omega::app::FrontEndAllowsSimulation(reduced.state, creation_and_gate, false);
+    }
+    Check(creation_never_activates,
+          "creating the first profile publishes no activation and cannot open the "
+          "gate by itself");
+
+    const auto one_profile = omega::app::MakeFrontEndStartupModel(std::span{summaries}.first(1U));
+    Check(one_profile && !omega::app::FrontEndHasConfirmedActiveProfile(*one_profile, std::nullopt) &&
+              omega::app::FrontEndHasConfirmedActiveProfile(*one_profile, first),
+          "the post-create model still requires an explicit confirmation before it "
+          "can satisfy the gate");
+
+    bool gated_matches_oracle = true;
+    bool confirmed_gate_is_inert = true;
+    constexpr std::array<std::uint8_t, 6U> profile_counts{0U, 1U, 2U, 3U, 4U, 0xffU};
+    for (std::uint32_t mode = 0U; mode <= 5U; ++mode)
+    {
+        for (std::uint32_t row = 0U; row <= 4U; ++row)
+        {
+            for (std::uint32_t profile_slot = 0U; profile_slot <= 3U; ++profile_slot)
+            {
+                const FrontEndState state{
+                    .mode = static_cast<FrontEndMode>(mode),
+                    .selected_main_row = static_cast<FrontEndMainRow>(row),
+                    .selected_profile_slot = static_cast<FrontEndProfileSlot>(profile_slot),
+                };
+                for (const std::uint8_t profile_count : profile_counts)
+                {
+                    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
+                    {
+                        const FrontEndInputEdges input = InputFromMask(mask);
+                        gated_matches_oracle =
+                            gated_matches_oracle &&
+                            omega::app::ReduceFrontEnd(state, input, profile_count, gate_enabled, false) ==
+                                ReferenceReduceWithGate(state, input, profile_count, gate_enabled, false) &&
+                            omega::app::ReduceFrontEnd(state, input, profile_count, creation_and_gate, false) ==
+                                ReferenceReduceWithGate(state, input, profile_count, creation_and_gate, false);
+                        confirmed_gate_is_inert =
+                            confirmed_gate_is_inert &&
+                            omega::app::ReduceFrontEnd(state, input, profile_count, gate_enabled, true) ==
+                                omega::app::ReduceFrontEnd(state, input, profile_count) &&
+                            omega::app::ReduceFrontEnd(state, input, profile_count, {}, true) ==
+                                omega::app::ReduceFrontEnd(state, input, profile_count);
+                    }
+                }
+            }
+        }
+    }
+    Check(gated_matches_oracle,
+          "all 11520 gated mode/row/slot/count/edge combinations match the "
+          "independent gate oracle with and without first-profile creation");
+    Check(confirmed_gate_is_inert,
+          "a satisfied gate and an unconsulted confirmation both reproduce the exact "
+          "legacy reduction");
+
+    const auto active_view = omega::app::BuildFrontEndView(profiles_second, ContentStartupStage::NoContent, model,
+                                                           second);
+    Check(active_view.active_profile_slot == FrontEndProfileSlot::Second && active_view.profiles == model,
+          "the view publishes the position its own model resolves for the confirmed "
+          "identifier");
+    Check(!omega::app::BuildFrontEndView(profiles_second, ContentStartupStage::NoContent, model, beyond_visible)
+               .active_profile_slot &&
+              !omega::app::BuildFrontEndView(profiles_second, ContentStartupStage::NoContent, shrunk, second)
+                   .active_profile_slot &&
+              !omega::app::BuildFrontEndView(profiles_second, ContentStartupStage::NoContent, model)
+                   .active_profile_slot,
+          "an unresolvable identifier and the default request both leave the active "
+          "row unmarked");
+    Check(omega::app::BuildFrontEndView(
+              FrontEndState{
+                  .mode = static_cast<FrontEndMode>(0xffU),
+                  .selected_main_row = static_cast<FrontEndMainRow>(0xffU),
+              },
+              ContentStartupStage::NoContent, model, third)
+                  .active_profile_slot == FrontEndProfileSlot::Third,
+          "an invalid state fails closed without discarding the resolved active row");
+}
+
 void CheckRasterContract()
 {
     FrontEndStartupModel one_profile{
@@ -972,6 +1215,7 @@ int main()
     CheckModelContract();
     CheckStartupStatePlannerContract();
     CheckReducerAndViewContract();
+    CheckActiveProfileGateContract();
     CheckRasterContract();
 
     if (failures != 0)
