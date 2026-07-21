@@ -123,6 +123,48 @@ enum class FrontEndModelError : std::uint8_t
 [[nodiscard]] std::expected<FrontEndStartupModel, FrontEndModelError> MakeFrontEndStartupModel(
     std::span<const profiles::ProfileSummary> summaries) noexcept;
 
+// [any thread; reentrant] Resolves the bounded startup-model position that
+// currently holds an already-confirmed active profile. The durable confirmation
+// remains the only authorization source; this helper never confirms, selects,
+// or invents one. It fails closed for an absent identifier, for an identifier
+// the model does not hold, for an unpopulated position, and for every position
+// outside the current visible/total counts, so a stale identifier can never
+// resolve to a position the model no longer presents. The result is a
+// project-owned presentation position, not a retail save slot or persistent
+// identifier. No allocation, I/O, catalog access, or persistence work occurs.
+[[nodiscard]] constexpr std::optional<FrontEndProfileSlot> FrontEndConfirmedProfileSlot(
+    const FrontEndStartupModel &profiles,
+    const std::optional<profiles::ProfileId> &confirmed_profile_id) noexcept
+{
+    if (!confirmed_profile_id.has_value())
+        return std::nullopt;
+
+    std::size_t bounded_slots = profiles.profiles.size();
+    if (static_cast<std::size_t>(profiles.visible_profiles) < bounded_slots)
+        bounded_slots = static_cast<std::size_t>(profiles.visible_profiles);
+    if (static_cast<std::size_t>(profiles.total_profiles) < bounded_slots)
+        bounded_slots = static_cast<std::size_t>(profiles.total_profiles);
+
+    for (std::size_t slot = 0U; slot < bounded_slots; ++slot)
+    {
+        const std::optional<profiles::ProfileId> &candidate = profiles.profiles[slot].id;
+        if (candidate.has_value() && *candidate == *confirmed_profile_id)
+            return static_cast<FrontEndProfileSlot>(slot);
+    }
+    return std::nullopt;
+}
+
+// [any thread; reentrant] True when an already-confirmed identifier still
+// resolves against the caller-owned bounded model. This is the only supported
+// input to the explicit diagnostic-play gate below, so the gate can never be
+// satisfied by a position the model does not currently present.
+[[nodiscard]] constexpr bool FrontEndHasConfirmedActiveProfile(
+    const FrontEndStartupModel &profiles,
+    const std::optional<profiles::ProfileId> &confirmed_profile_id) noexcept
+{
+    return FrontEndConfirmedProfileSlot(profiles, confirmed_profile_id).has_value();
+}
+
 // Small owned app-layer value. It has no service, platform, renderer, database,
 // or retail-data lifetime. The default remains the safe DiagnosticPlay state
 // used by legacy nonmodal replay.
@@ -153,14 +195,33 @@ enum class FrontEndCommandType : std::uint8_t
 };
 
 // Capability inputs default closed so existing callers retain their exact
-// behavior until persistence explicitly advertises first-profile creation.
+// behavior until persistence explicitly advertises first-profile creation and
+// until a caller explicitly opts into the gated diagnostic entry.
 struct FrontEndCapabilities
 {
     bool can_create_first_profile = false;
+    // Default closed. When a caller enables it, diagnostic play requires an
+    // already-confirmed active profile that the current bounded model still
+    // resolves; every caller that leaves it closed keeps the unguarded
+    // diagnostic entry byte-for-byte.
+    bool requires_active_profile_for_diagnostic_play = false;
 
     friend constexpr bool operator==(const FrontEndCapabilities &,
                                      const FrontEndCapabilities &) noexcept = default;
 };
+
+// [any thread; reentrant] True when the explicit diagnostic-play gate is
+// satisfied. The default capability leaves the gate open, so callers that do
+// not opt in observe the exact legacy result without supplying a confirmation.
+// The caller must derive `active_profile_is_confirmed` with
+// FrontEndHasConfirmedActiveProfile: this predicate deliberately holds no
+// identity of its own and therefore cannot be satisfied by a second, separately
+// mutable selection. No allocation, I/O, or catalog access occurs.
+[[nodiscard]] constexpr bool FrontEndSatisfiesDiagnosticPlayGate(
+    const FrontEndCapabilities capabilities, const bool active_profile_is_confirmed) noexcept
+{
+    return !capabilities.requires_active_profile_for_diagnostic_play || active_profile_is_confirmed;
+}
 
 // Fully owned reducer publication. SetActiveProfile carries only one of the
 // three bounded startup-model positions. CreateFirstProfile carries no caller
@@ -190,6 +251,11 @@ struct FrontEndView
     FrontEndProfileSlot selected_profile_slot = FrontEndProfileSlot::First;
     runtime::ContentStartupStage content_stage = runtime::ContentStartupStage::NoContent;
     FrontEndStartupModel profiles{};
+    // Presentation-only position of the already-confirmed active profile,
+    // resolved from the confirmed identifier against `profiles`. It is empty
+    // whenever nothing is confirmed or the model no longer holds the confirmed
+    // identifier, so the view can never mark a row the model does not present.
+    std::optional<FrontEndProfileSlot> active_profile_slot{};
 
     friend constexpr bool operator==(const FrontEndView &, const FrontEndView &) noexcept = default;
 };
@@ -262,13 +328,27 @@ struct FrontEndView
 // capability preserves the legacy empty return transition byte-for-byte.
 // Out-of-range slots retain that legacy return transition. Empty
 // selection/navigation is otherwise inert. Simultaneous navigation edges are
-// neutral, and navigation is press-edge-only and clamps at both bounds. No
-// allocation, I/O, catalog access, or persistence mutation occurs.
+// neutral, and navigation is press-edge-only and clamps at both bounds.
+//
+// The confirmation participates only through the explicit diagnostic-play gate,
+// and `active_profile_is_confirmed` must be derived with
+// FrontEndHasConfirmedActiveProfile. With the default capability it cannot
+// change any result. With the gate enabled and nothing confirmed, an already
+// entered DiagnosticPlay state fails closed to the initial front end before any
+// edge is considered, and the Main diagnostic row opens the Profiles surface
+// that can satisfy the gate instead of starting diagnostic play. That redirect
+// publishes no command, so the gate can never itself confirm, select, or create
+// a profile. No allocation, I/O, catalog access, or persistence mutation occurs.
 [[nodiscard]] constexpr FrontEndReduction ReduceFrontEnd(
     FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots,
-    const FrontEndCapabilities capabilities = {}) noexcept
+    const FrontEndCapabilities capabilities = {}, const bool active_profile_is_confirmed = false) noexcept
 {
     if (!IsValidFrontEndState(state))
+        return FrontEndReduction{.state = InitialFrontEndState()};
+
+    const bool diagnostic_play_is_permitted =
+        FrontEndSatisfiesDiagnosticPlayGate(capabilities, active_profile_is_confirmed);
+    if (!diagnostic_play_is_permitted && state.mode == FrontEndMode::DiagnosticPlay)
         return FrontEndReduction{.state = InitialFrontEndState()};
 
     if (input.cancel_pressed)
@@ -362,6 +442,12 @@ struct FrontEndView
         switch (state.selected_main_row)
         {
         case FrontEndMainRow::StartDiagnostic:
+            if (!diagnostic_play_is_permitted)
+            {
+                state.mode = FrontEndMode::Profiles;
+                state.selected_main_row = FrontEndMainRow::Profiles;
+                break;
+            }
             state.mode = FrontEndMode::DiagnosticPlay;
             break;
         case FrontEndMainRow::Profiles:
@@ -414,18 +500,27 @@ struct FrontEndView
 }
 
 // [any thread; reentrant] Simulation is enabled only by a fully valid
-// DiagnosticPlay state.
-[[nodiscard]] constexpr bool FrontEndAllowsSimulation(const FrontEndState state) noexcept
+// DiagnosticPlay state that also satisfies the explicit diagnostic-play gate.
+// The default capability leaves the gate open, so callers that do not opt in
+// keep the exact legacy result without supplying a confirmation.
+[[nodiscard]] constexpr bool FrontEndAllowsSimulation(const FrontEndState state,
+                                                      const FrontEndCapabilities capabilities = {},
+                                                      const bool active_profile_is_confirmed = false) noexcept
 {
-    return IsValidFrontEndState(state) && state.mode == FrontEndMode::DiagnosticPlay;
+    return IsValidFrontEndState(state) && state.mode == FrontEndMode::DiagnosticPlay &&
+           FrontEndSatisfiesDiagnosticPlayGate(capabilities, active_profile_is_confirmed);
 }
 
 // [any thread; reentrant] Normalizes invalid state to InitialFrontEndState and
-// copies only fixed values. The returned view has no borrowed lifetime and
-// performs no allocation or I/O.
-[[nodiscard]] constexpr FrontEndView BuildFrontEndView(const FrontEndState state,
-                                                       const runtime::ContentStartupStage content_stage,
-                                                       const FrontEndStartupModel &profiles) noexcept
+// copies only fixed values. The published active-profile position is resolved
+// from the confirmed identifier against the same model the view carries, so the
+// view holds no independently mutable second identity and an unresolvable
+// identifier simply leaves the position empty. The returned view has no
+// borrowed lifetime and performs no allocation or I/O.
+[[nodiscard]] constexpr FrontEndView BuildFrontEndView(
+    const FrontEndState state, const runtime::ContentStartupStage content_stage,
+    const FrontEndStartupModel &profiles,
+    const std::optional<profiles::ProfileId> &confirmed_profile_id = std::nullopt) noexcept
 {
     const FrontEndState normalized = IsValidFrontEndState(state) ? state : InitialFrontEndState();
     const runtime::ContentStartupStage normalized_stage =
@@ -439,6 +534,7 @@ struct FrontEndView
         .selected_profile_slot = normalized.selected_profile_slot,
         .content_stage = normalized_stage,
         .profiles = profiles,
+        .active_profile_slot = FrontEndConfirmedProfileSlot(profiles, confirmed_profile_id),
     };
 }
 
@@ -479,6 +575,6 @@ static_assert(sizeof(FrontEndMode) == 1U);
 static_assert(sizeof(FrontEndMainRow) == 1U);
 static_assert(sizeof(FrontEndProfileSlot) == 1U);
 static_assert(sizeof(FrontEndCommandType) == 1U);
-static_assert(sizeof(FrontEndCapabilities) == 1U);
+static_assert(sizeof(FrontEndCapabilities) == 2U);
 static_assert(sizeof(FrontEndModelError) == 1U);
 } // namespace omega::app
