@@ -18,14 +18,14 @@ event, timing, control flow, or retail behavior.
 
 ## Aggregate contract
 
-The schema-version-2 document contains:
+The schema-version-3 document contains:
 
 - totals for root and nested archive occurrences, member occurrences, approved
   and other members, and same-basename groups/pairs;
-- fixed counts for the approved public suffixes `.col`, `.gui`, `.hog`, `.pop`,
-  `.ska`, `.skas`, `.skl`, `.skm`, `.so`, `.tbl`, `.tdx`, `.txt`, `.vag`, and
-  `.vum`;
-- fixed category counts for animation, audio, collision, container, gui,
+- fixed counts for the approved public suffixes `.col`, `.gui`, `.hog`, `.ie`,
+  `.pop`, `.ska`, `.skas`, `.skl`, `.skm`, `.so`, `.tbl`, `.tdx`, `.txt`,
+  `.vag`, and `.vum`;
+- fixed category counts for animation, audio, collision, container, gui, ie,
   material, mesh, scene, script, skeleton, table, text, and texture;
 - archive-depth counts for depths zero through sixteen;
 - exact-root, exact-nested, and zero-padded-nested HOG extent families;
@@ -33,6 +33,11 @@ The schema-version-2 document contains:
   `other`; and
 - counts for every unordered pair of approved suffixes that shares a normalized
   sibling basename. Basenames themselves are never emitted.
+
+Sibling pairs are counted within each visited HOG directory, including nested
+HOGs, and then reduced to one report-wide total per fixed pair key. The report
+does not identify the archive, member, basename, or depth that contributed a
+pair, and co-occurrence does not establish a binding or semantic relationship.
 
 Top-level HOGs must end at their logical extent. Nested HOG members may either
 end exactly or contain only zero padding after the logical extent. A nonzero
@@ -48,10 +53,14 @@ tail is malformed.
   extent buckets, and every unordered pair key that combines `.gui` with an
   approved sibling suffix (for example `.gui+.tdx`). The `gui` label echoes the
   suffix only; it asserts no menu role, layout, lookup rule, render binding, or
-  other retail semantics. No other suffix was promoted: menu-adjacent-sounding
-  suffixes such as `.fnt` and `.ie` deliberately remain in the `other` bucket
-  because the tracked evidence does not justify freezing them into the public
-  vocabulary.
+  other retail semantics. No other suffix was promoted in version 2.
+- Schema version 3: `.ie` was promoted out of `other` into the frozen public
+  vocabulary as its own suffix count and neutral `ie` category. This adds the
+  `.ie` extension count, the `ie` category count, the `ie` per-category extent
+  buckets, and every unordered pair key that combines `.ie` with an approved
+  sibling suffix, including `.gui+.ie`. The `ie` label only echoes the suffix;
+  it assigns no format, menu, layout, lookup, render, or binding semantics.
+  `.fnt` remains in `other`.
 
 ## Limits and failure behavior
 
@@ -71,10 +80,11 @@ count; it does not print the path or parser exception.
 
 Public tests construct exact and zero-padded nested HOGs in memory. They cover
 recursive filesystem discovery, approved and other classification, depth and
-extent distributions, sibling-basename extension pairs, malformed offsets,
-invalid and colliding names, top-level padding, nesting, entry/name/size limits,
-fixed bucket boundaries, deterministic JSON, and identity-free error output.
-No owner input or proprietary byte is required by the tests.
+extent distributions, a nested `.gui+.ie` sibling-basename pair, malformed
+offsets, invalid and colliding names, top-level padding, nesting,
+entry/name/size limits, fixed bucket boundaries, deterministic JSON, and
+identity-free error output. No owner input or proprietary byte is required by
+the tests.
 
 ## Related evidence collection
 

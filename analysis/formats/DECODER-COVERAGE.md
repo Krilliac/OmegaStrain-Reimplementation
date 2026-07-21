@@ -197,14 +197,14 @@ collection that would produce it.
 3. **Optionally measure `.bnk/.gun`.** The same collector accepts these two suffixes only when
    explicitly requested. They remain `aggregate_scanner_only` until a sanitized owner result is
    tracked and still gain no audio, weapon, or menu semantics from their names.
-4. **Sibling same-basename pairing only after a structural result warrants it.**
-   `FRONTEND-TOPOLOGY.md`'s frozen schema already computes "every unordered pair of approved
-   suffixes that shares a normalized sibling basename," but only across the approved vocabulary.
-   Missing evidence: whether `.gui`, `.fnt`, or `.ie` members ever co-locate (same basename) with
-   `.tdx`, `.vum`, or `.txt` members — a structural co-location signal that would still assert zero
-   semantics. Collection: only if a separately reviewed topology question warrants extending the
-   approved vocabulary for `.fnt`/`.ie`, reuse the existing pair-key machinery in
-   `tools/measure_frontend_hog_topology.py`; do not duplicate it or treat a pairing as a binding.
+4. **Treat sibling same-basename pairing only as aggregate topology.**
+   `FRONTEND-TOPOLOGY.md`'s schema version 3 computes every unordered pair of approved suffixes that
+   shares a normalized sibling basename. Its frozen vocabulary now includes `.gui` and `.ie`, so
+   `.gui+.ie` and each suffix's pair keys with `.tdx`, `.vum`, and `.txt` are always present. Matches
+   from root and nested HOG directories reduce to report-wide counts without archive, depth, member,
+   or basename identity. No sanitized owner result is tracked, so actual co-location remains missing
+   evidence; a nonzero count would still establish no binding or semantics. `.fnt` remains outside
+   this pair vocabulary unless a separately reviewed topology question warrants another schema bump.
 5. **Keep opening-movie capability separate from suffix-wide `.pss` parity.** The native path can
    present bounded H.262 video and one narrow block-interleaved PCM shape from an explicitly
    selected MPEG-PS input. Missing evidence includes accepted-shape coverage across retail members,

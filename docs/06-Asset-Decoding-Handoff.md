@@ -13,8 +13,9 @@ a regression. See `docs/01-Clean-Room-Method.md` and `analysis/evidence/ledger.j
 
 ## State this workstream is handing over
 
-- `.gui` is now a first-class category in the front-end HOG topology scanner (schema_version 2);
-  `.fnt`/`.ie` stay in `other`. See `tools/measure_frontend_hog_topology.py` and
+- `.gui` and `.ie` are now neutral first-class categories in the front-end HOG topology scanner
+  (schema_version 3), with `.gui+.ie` in the fixed aggregate sibling-pair vocabulary; `.fnt` stays
+  in `other`. See `tools/measure_frontend_hog_topology.py` and
   `analysis/formats/FRONTEND-TOPOLOGY.md`.
 - The front-end evidence for `.gui`/`.fnt`/`.ie` is audited in
   `analysis/formats/FRONTEND-EVIDENCE-AUDIT.md`. The original broad semantic-decoder gate remains

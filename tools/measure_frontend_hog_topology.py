@@ -31,6 +31,7 @@ APPROVED_EXTENSION_CATEGORIES = {
     ".col": "collision",
     ".gui": "gui",
     ".hog": "container",
+    ".ie": "ie",
     ".pop": "scene",
     ".ska": "animation",
     ".skas": "animation",
@@ -222,7 +223,7 @@ class Aggregate:
     def document(self) -> dict[str, object]:
         totals = {key: int(self.totals[key]) for key in TOTAL_FIELDS}
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "scope": (
                 "fixed-vocabulary aggregate recursive HOG containment only; no paths, "
                 "member names, hashes, offsets, payload bytes, raw suffixes, "

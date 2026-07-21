@@ -1602,13 +1602,14 @@ E-0101 later supersedes only the implementation-status statements with three nar
 project-defined hypotheses; it does not establish their retail provenance or add semantic front-end
 IR.
 
-- **`.gui` topology promotion (schema_version 2).** `tools/measure_frontend_hog_topology.py`
-  now promotes only the `.gui` member suffix out of `other` into its own frozen public aggregate
-  category `gui`; `.fnt` and `.ie` deliberately stay in `other`. The `gui` label echoes the suffix
-  only and asserts no menu role, layout, lookup, timing, or render semantics. Output remains
-  fixed-schema aggregate, deterministic, and path-free; caller `DecodeLimits` may only tighten fixed
-  hard ceilings. Focused tests 14/14; full Python tooling discovery 251/251; native-dependency gate
-  211; public-tree gate, compile-all, JSONL parse, and `git diff --check` all pass.
+- **`.gui`/`.ie` topology vocabulary (schema_version 3).**
+  `tools/measure_frontend_hog_topology.py` now gives both suffixes neutral frozen public aggregate
+  categories and includes `.gui+.ie` in the fixed sibling-pair key set; `.fnt` stays in `other`.
+  Labels and pair counts assert no menu role, layout, lookup, timing, render, or binding semantics.
+  Output remains fixed-schema aggregate, deterministic, and path-free; caller `ScanLimits` may only
+  tighten fixed hard ceilings. Synthetic schema-version-3 coverage verifies nested pairing,
+  cross-archive isolation, deterministic output, and the fixed path-free failure document. No
+  owner-corpus topology result is tracked or claimed.
 - **Front-end evidence audit** — `analysis/formats/FRONTEND-EVIDENCE-AUDIT.md`. A four-tier table
   (confirmed / aggregate-only / hypothesis / missing) for `.gui`/`.fnt`/`.ie` and front-end
   containers, derived only from tracked files. Key confirmed facts: these are HOG member suffixes,
