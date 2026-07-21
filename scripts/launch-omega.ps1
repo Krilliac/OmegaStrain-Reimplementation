@@ -7,6 +7,8 @@ param(
     [switch]$DryRun
 )
 
+. (Join-Path $PSScriptRoot 'windows-command-line.ps1')
+
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
 $pcsx2Exe = Join-Path $workspaceRoot 'third_party\pcsx2\bin\pcsx2-qtx64-avx2.exe'
 $dataPath = Join-Path $workspaceRoot 'runtime\data'
@@ -26,8 +28,8 @@ $logPath = Join-Path $logDir ("omega-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHm
 $arguments = @(
     $(if ($SlowBoot) { '-slowboot' } else { '-fastboot' }),
     '-nofullscreen',
-    '-datapath', ('"{0}"' -f $dataPath),
-    '-logfile', ('"{0}"' -f $logPath)
+    '-datapath', $dataPath,
+    '-logfile', $logPath
 )
 
 if ($Debugger) {
@@ -35,21 +37,28 @@ if ($Debugger) {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($GameArgs)) {
-    if ($GameArgs.Contains('"')) {
-        throw 'GameArgs cannot contain a double quote.'
-    }
-    $arguments += @('-gameargs', ('"{0}"' -f $GameArgs))
+    $arguments += @('-gameargs', $GameArgs)
 }
 
 if ($Resume) {
     if (-not (Test-Path -LiteralPath $resumeState)) {
         throw "Resume state is missing: $resumeState"
     }
-    $arguments += @('-statefile', ('"{0}"' -f $resumeState))
+    $arguments += @('-statefile', $resumeState)
 }
 
-$arguments += @('--', ('"{0}"' -f $isoPath))
-$argumentLine = $arguments -join ' '
+$arguments += @('--', $isoPath)
+$maximumCommandLineLength = Get-OmegaMaximumWindowsCommandLineLength
+$encodedExecutable = ConvertTo-OmegaWindowsCommandLineArgument $pcsx2Exe `
+    -MaximumEncodedLength $maximumCommandLineLength
+$maximumArgumentLineLength = $maximumCommandLineLength - $encodedExecutable.Length - 1
+if ($maximumArgumentLineLength -lt 0) {
+    throw 'PCSX2 executable path exceeds the bounded Windows launch limit.'
+}
+# Windows PowerShell flattens Start-Process ArgumentList. Supply one fully encoded line so each
+# logical value, especially PCSX2's nested -gameargs payload, survives CreateProcess parsing.
+$argumentLine = Join-OmegaWindowsCommandLineArguments $arguments `
+    -MaximumLength $maximumArgumentLineLength
 
 if ($DryRun) {
     [pscustomobject]@{
