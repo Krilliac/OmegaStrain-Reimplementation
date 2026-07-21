@@ -7,6 +7,37 @@ function Get-OmegaMaximumWindowsCommandLineLength {
     return 32766
 }
 
+function Measure-OmegaWindowsStartProcessFilePath {
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        [string]$FilePath,
+
+        [ValidateRange(0, 32766)]
+        [int]$MaximumEncodedLength = 32766
+    )
+
+    # Start-Process supplies FilePath separately, but its Windows process construction frames the
+    # executable as argv[0]. Always reserving both quotes is exact for that construction and remains
+    # conservative when ShellExecute can omit them. Quotes cannot occur in a valid Windows path.
+    foreach ($character in $FilePath.ToCharArray()) {
+        if ($character -eq [char]0) {
+            throw 'Windows executable paths cannot contain NUL.'
+        }
+        if ($character -eq [char]34) {
+            throw 'Windows executable paths cannot contain a double quote.'
+        }
+    }
+
+    [long]$encodedLength = [long]$FilePath.Length + 2
+    if ($encodedLength -gt $MaximumEncodedLength) {
+        throw 'Executable path exceeds the bounded Windows launch limit.'
+    }
+    return [int]$encodedLength
+}
+
 function ConvertTo-OmegaWindowsCommandLineArgument {
     [CmdletBinding()]
     [OutputType([string])]
@@ -19,6 +50,10 @@ function ConvertTo-OmegaWindowsCommandLineArgument {
         [int]$MaximumEncodedLength = 32766
     )
 
+    if ($Argument.Length -gt $MaximumEncodedLength) {
+        throw 'Windows command-line argument exceeds the bounded launch limit.'
+    }
+
     $requiresQuoting = $Argument.Length -eq 0
     foreach ($character in $Argument.ToCharArray()) {
         if ($character -eq [char]0) {
@@ -30,9 +65,6 @@ function ConvertTo-OmegaWindowsCommandLineArgument {
     }
 
     if (-not $requiresQuoting) {
-        if ($Argument.Length -gt $MaximumEncodedLength) {
-            throw 'Windows command-line argument exceeds the bounded launch limit.'
-        }
         return $Argument
     }
 
