@@ -82,30 +82,36 @@ public:
     [[nodiscard]] std::optional<std::string_view> GetString(std::string_view key) const noexcept;
 
     // [any thread; reentrant] Absent keys succeed with an empty optional; a present value
-    // that is not exactly "true" or "false" is an error.
+    // that is not exactly "true" or "false" is an error. Diagnostics never interpolate the
+    // requested key or stored value.
     [[nodiscard]] std::expected<std::optional<bool>, std::string> GetBool(
         std::string_view key) const;
 
     // [any thread; reentrant] Absent keys succeed with an empty optional; a present value
     // must be a full-match canonical base-10 int64 (optional '-', no '+', no leading zeros,
-    // no "-0") within range, otherwise an error.
+    // no "-0") within range, otherwise an error. Diagnostics never interpolate the requested
+    // key or stored value.
     [[nodiscard]] std::expected<std::optional<std::int64_t>, std::string> GetInt64(
         std::string_view key) const;
 
-    // [any thread; reentrant] Like GetString, but an absent key is an error.
+    // [any thread; reentrant] Like GetString, but an absent key is an error whose diagnostic
+    // does not interpolate the requested key.
     [[nodiscard]] std::expected<std::string, std::string> RequireString(
         std::string_view key) const;
 
-    // [any thread; reentrant] Like GetBool, but an absent key is an error.
+    // [any thread; reentrant] Like GetBool, but an absent key is an error whose diagnostic
+    // does not interpolate the requested key.
     [[nodiscard]] std::expected<bool, std::string> RequireBool(std::string_view key) const;
 
-    // [any thread; reentrant] Like GetInt64, but an absent key is an error.
+    // [any thread; reentrant] Like GetInt64, but an absent key is an error whose diagnostic
+    // does not interpolate the requested key.
     [[nodiscard]] std::expected<std::int64_t, std::string> RequireInt64(
         std::string_view key) const;
 
     // [game thread] Replaces or adds one entry after validating key and value with the same
     // rules as parsed text, including SP/HTAB trimming before validation, budgets, and
-    // storage. New keys count against the entry budget; replacements do not grow it.
+    // storage. New keys count against the entry budget; replacements do not grow it. Failure
+    // diagnostics never interpolate the supplied key or value.
     // Concurrent readers are not synchronized against this mutation.
     [[nodiscard]] std::expected<void, std::string> ApplyOverride(
         std::string_view key, std::string_view value);
@@ -124,6 +130,7 @@ private:
 
 // [game thread] Bounded file loader: reads at most limits.max_input_bytes + 1 bytes so an
 // oversize file is rejected without an unbounded read, then delegates to ParseConfigText.
+// File and parser diagnostics never interpolate the source path, raw key, or raw value.
 [[nodiscard]] std::expected<ConfigStore, std::string> LoadConfigFile(
     const std::filesystem::path& path, const ConfigLimits& limits = ConfigLimits{});
 } // namespace omega::runtime

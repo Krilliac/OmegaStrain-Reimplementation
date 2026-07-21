@@ -855,9 +855,11 @@ Studio's historical engine source or internal toolchain.
   hosts. An explicit `--config` bypasses discovery and inspection. A missing default is silent;
   a regular default is loaded before validated `--set` overrides; and a reported final-entry
   symlink, dangling symlink, directory, or other non-regular type is rejected without following
-  it. Config file failures use only fixed explicit/default profile labels and never disclose the
-  source filesystem path. Discovery performs no normalization, canonicalization, token expansion,
-  write, directory creation, migration, or success-path printing. This slice does not claim
+  it. Configuration failures use fixed explicit/default/`--set` source categories and never
+  disclose a source filesystem path, user-controlled key, or raw value. Parser diagnostics retain
+  only structural line and budget information; typed runtime diagnostics may name only a
+  compile-time-known public setting. Discovery performs no normalization, canonicalization, token
+  expansion, write, directory creation, migration, or success-path printing. This slice does not claim
   rejection of symlinked parents, add a picker or startup dialog, choose a default level, or
   inspect private content.
   Serialized local validation passed: focused and full MSVC builds completed cleanly; direct
@@ -867,7 +869,10 @@ Studio's historical engine source or internal toolchain.
   compile-all passed; and the staged public-tree gate checked 247 indexed text blobs. On Windows,
   the non-missing inspection-error oracle was explicitly skipped
   because MSVC maps the available invalid and overlong candidates to not-found. Commit, DCO,
-  publication, and exact-main validation remain unclaimed.
+  publication, and exact-main validation remain unclaimed. The later non-reflective diagnostic
+  hardening passed scoped diff checks, the 244-file dependency gate, the 411-blob public-tree gate,
+  Python compile-all, and all 298 tooling tests. Its C++ build, process contract, and CTest remain
+  delegated to the serialized integration lane because local preflight was `CAUTION`.
 - E-0076 adds one app-private, stateless startup-failure dialog adapter for the already-fatal
   pre-SDL runtime-configuration, runtime-settings, content-launch-profile, and content-startup
   paths. Main preserves each exact stderr line and exit code, flushes stderr, then best-effort calls
@@ -1205,9 +1210,11 @@ looks for one host-family default: `%LOCALAPPDATA%/OpenOmega/openomega.cfg` on W
 `$HOME/.config/openomega/openomega.cfg` when `HOME` is absolute. Missing, empty, or relative
 required roots produce no candidate. A missing default profile is equivalent to the empty store;
 the final entry must be a reported regular file and is never followed when reported as a symlink.
-Config file failures use fixed explicit/default profile labels without printing the source path.
-No profile directory or file is created. `--set=KEY=VALUE` applies one validated command-line
-override per key. Current keys are
+Configuration failures use fixed explicit/default/`--set` source categories without printing the
+source path, a user-controlled key, or a raw value. Structural parser diagnostics may report a line
+number or fixed budget, and typed errors may name a compile-time-known public setting. No profile
+directory or file is created. `--set=KEY=VALUE` applies one validated command-line override per key.
+Current keys are
 `log.minimum_severity`, `log.ring_capacity`, `jobs.worker_count`, `jobs.max_pending_jobs`,
 `frame.simulation_step_ns`, `frame.max_steps_per_frame`, `frame.max_delta_ns`,
 `input.max_events_per_frame`, `content.data_root`, and `content.level_code`. The content root plus

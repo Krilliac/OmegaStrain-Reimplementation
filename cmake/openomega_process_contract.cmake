@@ -218,9 +218,36 @@ set(explicit_empty_config "${process_working_directory}/explicit-empty.cfg")
 file(WRITE "${explicit_empty_config}" "")
 set(missing_explicit_config
     "${process_working_directory}/PrivateUser-SecretVault-missing-explicit.cfg")
+set(malformed_private_config
+    "${process_working_directory}/PrivateUser-SecretVault-malformed.cfg")
+file(WRITE "${malformed_private_config}"
+    "PrivateUser.SecretVault = C:/Users/PrivateUser/SecretVault/raw-secret-malformed\n")
+set(duplicate_private_config
+    "${process_working_directory}/PrivateUser-SecretVault-duplicate.cfg")
+file(WRITE "${duplicate_private_config}"
+    "privateuser.secretvault = PrivateUser-first-secret\n"
+    "privateuser.secretvault = SecretVault-second-secret\n")
+set(private_integer_config
+    "${process_working_directory}/PrivateUser-SecretVault-integer.cfg")
+file(WRITE "${private_integer_config}"
+    "jobs.worker_count = C:/Users/PrivateUser/SecretVault/raw-secret-integer\n")
+set(private_severity_config
+    "${process_working_directory}/PrivateUser-SecretVault-severity.cfg")
+file(WRITE "${private_severity_config}"
+    "log.minimum_severity = PrivateUser-SecretVault-raw-secret-severity\n")
+set(private_unknown_config
+    "${process_working_directory}/PrivateUser-SecretVault-unknown.cfg")
+file(WRITE "${private_unknown_config}"
+    "privateuser.secretvault = PrivateUser-SecretVault-raw-secret-unknown\n")
 set(openomega_forbidden_diagnostic_fragments
     "PrivateUser"
     "SecretVault"
+    "privateuser"
+    "secretvault"
+    "raw-secret"
+    "C:/Users/"
+    "secret-configured-root"
+    "secret-invalid-level"
     "synthetic-runtime-profiles"
     "${missing_explicit_config}"
     "${default_profile}"
@@ -300,6 +327,55 @@ run_openomega_case(explicit_config_bypasses_malformed_default TRUE
 run_openomega_case(explicit_missing_remains_fatal FALSE ""
     "runtime configuration explicit profile: unable to open config file\n"
     "--config=${missing_explicit_config}" --frames=0
+)
+run_openomega_case(explicit_malformed_key_is_private FALSE ""
+    "runtime configuration explicit profile: config line 1: config key contains a byte outside [a-z0-9_.]\n"
+    "--config=${malformed_private_config}" --frames=0
+)
+run_openomega_case(explicit_duplicate_key_is_private FALSE ""
+    "runtime configuration explicit profile: config line 2 duplicates an earlier key\n"
+    "--config=${duplicate_private_config}" --frames=0
+)
+run_openomega_case(explicit_integer_value_is_private FALSE ""
+    "runtime configuration: jobs.worker_count: config integer value must be a canonical base-10 int64\n"
+    "--config=${private_integer_config}" --frames=0
+)
+run_openomega_case(explicit_unsupported_value_is_private FALSE ""
+    "runtime configuration: log.minimum_severity must be one of trace, debug, info, warning, or error\n"
+    "--config=${private_severity_config}" --frames=0
+)
+run_openomega_case(explicit_unknown_key_is_private FALSE ""
+    "runtime configuration: unknown runtime setting\n"
+    "--config=${private_unknown_config}" --frames=0
+)
+run_openomega_case(set_malformed_key_is_private FALSE ""
+    "--set override: config override: config key contains a byte outside [a-z0-9_.]\n"
+    "--config=${explicit_empty_config}"
+    "--set=PrivateUser.SecretVault=C:/Users/PrivateUser/SecretVault/raw-secret-set"
+    --frames=0
+)
+run_openomega_case(set_integer_value_is_private FALSE ""
+    "runtime configuration: jobs.worker_count: config integer value must be a canonical base-10 int64\n"
+    "--config=${explicit_empty_config}"
+    "--set=jobs.worker_count=C:/Users/PrivateUser/SecretVault/raw-secret-set"
+    --frames=0
+)
+run_openomega_case(set_unsupported_value_is_private FALSE ""
+    "runtime configuration: log.minimum_severity must be one of trace, debug, info, warning, or error\n"
+    "--config=${explicit_empty_config}"
+    "--set=log.minimum_severity=PrivateUser-SecretVault-raw-secret-set"
+    --frames=0
+)
+run_openomega_case(set_unknown_key_is_private FALSE ""
+    "runtime configuration: unknown runtime setting\n"
+    "--config=${explicit_empty_config}"
+    "--set=privateuser.secretvault=PrivateUser-SecretVault-raw-secret-set"
+    --frames=0
+)
+run_openomega_case(set_duplicate_key_is_private FALSE ""
+    "--set key may be specified only once\n${openomega_usage}"
+    "--set=privateuser.secretvault=PrivateUser-first-secret"
+    "--set=privateuser.secretvault=SecretVault-second-secret"
 )
 
 if(WIN32)

@@ -344,12 +344,12 @@ int RuntimeConfigDiscoveryFailureCount()
         "an explicit oversized profile remains fatal without disclosing its path");
 
     omega::runtime::LaunchOptions invalid_override;
-    invalid_override.config_overrides.push_back({.key = "Bad", .value = "value"});
+    invalid_override.config_overrides.push_back(
+        {.key = "PrivateUser.SecretVault", .value = "raw-secret-value"});
     CheckError(omega::runtime::LoadRuntimeConfig(invalid_override, valid_default),
-        "--set=Bad: config override: config key contains a byte outside "
+        "--set override: config override: config key contains a byte outside "
         "[a-z0-9_.]",
-        "--set diagnostics remain source-neutral after a default profile "
-        "is loaded");
+        "--set diagnostics omit raw key and value text after a default profile is loaded");
 
     std::filesystem::remove_all(test_root, file_error);
     Check(!file_error, "the synthetic default-profile test root is removed");

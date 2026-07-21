@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -49,6 +50,14 @@ void Check(const bool condition, const std::string_view message)
 {
     return omega::app::BuildStartupFailureDialogText(
         {.stage = stage, .category = category, .detail = detail});
+}
+
+[[nodiscard]] bool WriteTextFile(
+    const std::filesystem::path& path, const std::string_view text)
+{
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.write(text.data(), static_cast<std::streamsize>(text.size()));
+    return output.good();
 }
 
 void TestStageLabelsAndFallbacks()
@@ -193,9 +202,14 @@ void TestOwnershipAndIndependence()
           "independent build returns its own exact text");
 }
 
-void CheckRuntimeConfigurationPrivacyProjection(
-    const std::expected<omega::runtime::ConfigStore, std::string>& result,
-    const std::string_view expected_detail, const std::filesystem::path& private_path,
+template<typename T>
+void CheckRuntimePrivacyProjection(
+    const std::expected<T, std::string>& result,
+    const omega::app::StartupFailureStage stage,
+    const std::string_view stage_label,
+    const std::string_view category,
+    const std::string_view expected_detail,
+    const std::filesystem::path& private_path,
     const std::string_view context)
 {
     Check(!result, context);
@@ -203,18 +217,22 @@ void CheckRuntimeConfigurationPrivacyProjection(
         return;
 
     Check(result.error() == expected_detail, context);
-    const std::string dialog = Text(Build(
-        omega::app::StartupFailureStage::RuntimeConfiguration,
-        "runtime-configuration", result.error()));
-    Check(dialog == ExpectedText(
-                        "runtime configuration", "runtime-configuration", expected_detail),
-        "runtime configuration detail reaches the dialog projection unchanged");
+    const std::string dialog = Text(Build(stage, category, result.error()));
+    Check(dialog == ExpectedText(stage_label, category, expected_detail),
+        "fixed runtime detail reaches the dialog projection unchanged");
     Check(dialog.find(private_path.string()) == std::string::npos,
-        "runtime configuration dialogs omit the complete source path");
-    Check(dialog.find("PrivateUser") == std::string::npos,
-        "runtime configuration dialogs omit the synthetic user identity");
-    Check(dialog.find("SecretVault") == std::string::npos,
-        "runtime configuration dialogs omit the synthetic private directory");
+        "runtime privacy dialogs omit the complete source path");
+    constexpr std::array forbidden{
+        std::string_view("PrivateUser"),
+        std::string_view("SecretVault"),
+        std::string_view("privateuser"),
+        std::string_view("secretvault"),
+        std::string_view("raw-secret"),
+        std::string_view("C:/Users/"),
+    };
+    for (const std::string_view fragment : forbidden)
+        Check(dialog.find(fragment) == std::string::npos,
+            "runtime privacy dialogs omit raw config fragments");
 }
 
 void TestRuntimeConfigurationPrivacyProjection()
@@ -232,8 +250,10 @@ void TestRuntimeConfigurationPrivacyProjection()
     const auto missing_explicit = root / "missing-explicit.cfg";
     omega::runtime::LaunchOptions explicit_options;
     explicit_options.config_path = missing_explicit;
-    CheckRuntimeConfigurationPrivacyProjection(
+    CheckRuntimePrivacyProjection(
         omega::runtime::LoadRuntimeConfig(explicit_options),
+        omega::app::StartupFailureStage::RuntimeConfiguration,
+        "runtime configuration", "runtime-configuration",
         "runtime configuration explicit profile: unable to open config file",
         missing_explicit,
         "an explicit config error is available for dialog projection");
@@ -241,11 +261,197 @@ void TestRuntimeConfigurationPrivacyProjection()
     const auto nonregular_default = root / "default-profile.cfg";
     std::filesystem::create_directory(nonregular_default, file_error);
     Check(!file_error, "the non-regular dialog privacy fixture is created");
-    CheckRuntimeConfigurationPrivacyProjection(
+    CheckRuntimePrivacyProjection(
         omega::runtime::LoadRuntimeConfig({}, nonregular_default),
+        omega::app::StartupFailureStage::RuntimeConfiguration,
+        "runtime configuration", "runtime-configuration",
         "runtime configuration default profile: config path is not a regular file",
         nonregular_default,
         "a default config error is available for dialog projection");
+
+    const auto malformed_profile = root / "PrivateUser-SecretVault-malformed.cfg";
+    Check(WriteTextFile(malformed_profile,
+              "PrivateUser.SecretVault = C:/Users/PrivateUser/SecretVault/raw-secret\n"),
+        "the malformed private dialog profile is written");
+    omega::runtime::LaunchOptions malformed_options;
+    malformed_options.config_path = malformed_profile;
+    CheckRuntimePrivacyProjection(
+        omega::runtime::LoadRuntimeConfig(malformed_options),
+        omega::app::StartupFailureStage::RuntimeConfiguration,
+        "runtime configuration", "runtime-configuration",
+        "runtime configuration explicit profile: config line 1: config key contains a byte outside [a-z0-9_.]",
+        malformed_profile,
+        "malformed file key and value are absent from the dialog");
+
+    const auto duplicate_profile = root / "PrivateUser-SecretVault-duplicate.cfg";
+    Check(WriteTextFile(duplicate_profile,
+              "privateuser.secretvault = PrivateUser-first-secret\n"
+              "privateuser.secretvault = SecretVault-second-secret\n"),
+        "the duplicate private dialog profile is written");
+    omega::runtime::LaunchOptions duplicate_options;
+    duplicate_options.config_path = duplicate_profile;
+    CheckRuntimePrivacyProjection(
+        omega::runtime::LoadRuntimeConfig(duplicate_options),
+        omega::app::StartupFailureStage::RuntimeConfiguration,
+        "runtime configuration", "runtime-configuration",
+        "runtime configuration explicit profile: config line 2 duplicates an earlier key",
+        duplicate_profile,
+        "duplicate file key and values are absent from the dialog");
+
+    const auto integer_profile = root / "PrivateUser-SecretVault-integer.cfg";
+    Check(WriteTextFile(integer_profile,
+              "jobs.worker_count = C:/Users/PrivateUser/SecretVault/raw-secret-integer\n"),
+        "the private integer dialog profile is written");
+    omega::runtime::LaunchOptions integer_options;
+    integer_options.config_path = integer_profile;
+    auto integer_config = omega::runtime::LoadRuntimeConfig(integer_options);
+    Check(integer_config.has_value(), "the private integer dialog profile loads");
+    if (integer_config)
+    {
+        CheckRuntimePrivacyProjection(
+            omega::runtime::ResolveRuntimeSettings(*integer_config),
+            omega::app::StartupFailureStage::RuntimeSettings,
+            "runtime settings", "runtime-settings",
+            "jobs.worker_count: config integer value must be a canonical base-10 int64",
+            integer_profile,
+            "invalid file integer values are absent from the dialog");
+    }
+
+    const auto severity_profile = root / "PrivateUser-SecretVault-severity.cfg";
+    Check(WriteTextFile(severity_profile,
+              "log.minimum_severity = PrivateUser-SecretVault-raw-secret-severity\n"),
+        "the private unsupported-value dialog profile is written");
+    omega::runtime::LaunchOptions severity_options;
+    severity_options.config_path = severity_profile;
+    auto severity_config = omega::runtime::LoadRuntimeConfig(severity_options);
+    Check(severity_config.has_value(), "the private unsupported-value dialog profile loads");
+    if (severity_config)
+    {
+        CheckRuntimePrivacyProjection(
+            omega::runtime::ResolveRuntimeSettings(*severity_config),
+            omega::app::StartupFailureStage::RuntimeSettings,
+            "runtime settings", "runtime-settings",
+            "log.minimum_severity must be one of trace, debug, info, warning, or error",
+            severity_profile,
+            "unsupported file values are absent from the dialog");
+    }
+
+    const auto unknown_profile = root / "PrivateUser-SecretVault-unknown.cfg";
+    Check(WriteTextFile(unknown_profile,
+              "privateuser.secretvault = PrivateUser-SecretVault-raw-secret-unknown\n"),
+        "the private unknown-setting dialog profile is written");
+    omega::runtime::LaunchOptions unknown_options;
+    unknown_options.config_path = unknown_profile;
+    auto unknown_config = omega::runtime::LoadRuntimeConfig(unknown_options);
+    Check(unknown_config.has_value(), "the private unknown-setting dialog profile loads");
+    if (unknown_config)
+    {
+        CheckRuntimePrivacyProjection(
+            omega::runtime::ResolveRuntimeSettings(*unknown_config),
+            omega::app::StartupFailureStage::RuntimeSettings,
+            "runtime settings", "runtime-settings",
+            "unknown runtime setting",
+            unknown_profile,
+            "unknown file key and value are absent from the dialog");
+    }
+
+    const auto boolean_profile = root / "PrivateUser-SecretVault-boolean.cfg";
+    Check(WriteTextFile(boolean_profile,
+              "privateuser.flag = C:/Users/PrivateUser/SecretVault/raw-secret-boolean\n"),
+        "the private boolean dialog profile is written");
+    omega::runtime::LaunchOptions boolean_options;
+    boolean_options.config_path = boolean_profile;
+    auto boolean_config = omega::runtime::LoadRuntimeConfig(boolean_options);
+    Check(boolean_config.has_value(), "the private boolean dialog profile loads");
+    if (boolean_config)
+    {
+        CheckRuntimePrivacyProjection(
+            boolean_config->GetBool("privateuser.flag"),
+            omega::app::StartupFailureStage::RuntimeSettings,
+            "runtime settings", "runtime-settings",
+            "config boolean value must be exactly 'true' or 'false'",
+            boolean_profile,
+            "invalid file boolean values are absent from the dialog projection");
+    }
+
+    omega::runtime::LaunchOptions malformed_override;
+    malformed_override.config_overrides.push_back(
+        {.key = "PrivateUser.SecretVault", .value = "raw-secret-override"});
+    CheckRuntimePrivacyProjection(
+        omega::runtime::LoadRuntimeConfig(malformed_override),
+        omega::app::StartupFailureStage::RuntimeConfiguration,
+        "runtime configuration", "runtime-configuration",
+        "--set override: config override: config key contains a byte outside [a-z0-9_.]",
+        root,
+        "malformed --set key and value are absent from the dialog");
+
+    omega::runtime::LaunchOptions boolean_override;
+    boolean_override.config_overrides.push_back(
+        {.key = "privateuser.flag",
+            .value = "C:/Users/PrivateUser/SecretVault/raw-secret-boolean-override"});
+    auto boolean_override_config = omega::runtime::LoadRuntimeConfig(boolean_override);
+    Check(boolean_override_config.has_value(), "the private boolean --set dialog fixture loads");
+    if (boolean_override_config)
+    {
+        CheckRuntimePrivacyProjection(
+            boolean_override_config->GetBool("privateuser.flag"),
+            omega::app::StartupFailureStage::RuntimeSettings,
+            "runtime settings", "runtime-settings",
+            "config boolean value must be exactly 'true' or 'false'",
+            root,
+            "invalid --set boolean values are absent from the dialog projection");
+    }
+
+    omega::runtime::LaunchOptions integer_override;
+    integer_override.config_overrides.push_back(
+        {.key = "jobs.worker_count",
+            .value = "C:/Users/PrivateUser/SecretVault/raw-secret-override"});
+    auto integer_override_config = omega::runtime::LoadRuntimeConfig(integer_override);
+    Check(integer_override_config.has_value(), "the private integer --set dialog fixture loads");
+    if (integer_override_config)
+    {
+        CheckRuntimePrivacyProjection(
+            omega::runtime::ResolveRuntimeSettings(*integer_override_config),
+            omega::app::StartupFailureStage::RuntimeSettings,
+            "runtime settings", "runtime-settings",
+            "jobs.worker_count: config integer value must be a canonical base-10 int64",
+            root,
+            "invalid --set integer values are absent from the dialog");
+    }
+
+    omega::runtime::LaunchOptions severity_override;
+    severity_override.config_overrides.push_back(
+        {.key = "log.minimum_severity",
+            .value = "PrivateUser-SecretVault-raw-secret-severity-override"});
+    auto severity_override_config = omega::runtime::LoadRuntimeConfig(severity_override);
+    Check(severity_override_config.has_value(),
+        "the private unsupported-value --set dialog fixture loads");
+    if (severity_override_config)
+    {
+        CheckRuntimePrivacyProjection(
+            omega::runtime::ResolveRuntimeSettings(*severity_override_config),
+            omega::app::StartupFailureStage::RuntimeSettings,
+            "runtime settings", "runtime-settings",
+            "log.minimum_severity must be one of trace, debug, info, warning, or error",
+            root,
+            "unsupported --set values are absent from the dialog");
+    }
+
+    omega::runtime::LaunchOptions unknown_override;
+    unknown_override.config_overrides.push_back(
+        {.key = "privateuser.secretvault", .value = "PrivateUser-SecretVault-raw-secret"});
+    auto unknown_override_config = omega::runtime::LoadRuntimeConfig(unknown_override);
+    Check(unknown_override_config.has_value(), "the private unknown --set dialog fixture loads");
+    if (unknown_override_config)
+    {
+        CheckRuntimePrivacyProjection(
+            omega::runtime::ResolveRuntimeSettings(*unknown_override_config),
+            omega::app::StartupFailureStage::RuntimeSettings,
+            "runtime settings", "runtime-settings",
+            "unknown runtime setting",
+            root,
+            "unknown --set key and value are absent from the dialog");
+    }
 
     std::filesystem::remove_all(root, file_error);
     Check(!file_error, "the dialog privacy fixture root is removed");

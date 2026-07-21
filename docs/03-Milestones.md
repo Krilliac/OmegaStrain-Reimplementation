@@ -905,10 +905,11 @@ captures only relevant environment values after successful parsing/help and only
 `--config`; Windows uses the wide environment representation. Explicit config bypasses default
 inspection. A missing default is the empty store, a regular default uses the bounded loader, and a
 reported final-entry symlink, dangling symlink, directory, or other non-regular type is rejected
-without following. This does not claim rejection of parent symlinks or all reparse points. Default
-and explicit config file failures now use fixed categorical labels without disclosing their source
-filesystem paths. Values remain below `--set`, E-0074 validation, and atomic direct CLI selection.
-Discovery performs no normalization, canonicalization, expansion, write, creation, migration, path
+without following. This does not claim rejection of parent symlinks or all reparse points.
+Configuration failures now use fixed explicit/default/`--set` categories without disclosing source
+paths, user-controlled keys, or raw values; only structural line/budget data and compile-time-known
+public setting labels remain. Values remain below `--set`, E-0074 validation, and atomic direct CLI
+selection. Discovery performs no normalization, canonicalization, expansion, write, creation, migration, path
 success output, picker, dialog, default-level choice, private-content access, retail inference, or
 emulator comparison. Serialized local validation passed: focused and full MSVC builds completed cleanly;
 direct `omega_core_tests` and the exact process contract passed; default, opt-in GPU, and restored
@@ -917,7 +918,10 @@ registrations; the dependency gate checked 160 native files; all 209 tooling tes
 compile-all passed; and the staged public-tree gate checked 247 indexed text blobs. On Windows, the
 non-missing inspection-error oracle was explicitly skipped
 because MSVC maps the available invalid and overlong candidates to not-found. Commit, DCO,
-publication, and exact-main validation remain unclaimed.
+publication, and exact-main validation remain unclaimed. The later non-reflective diagnostic
+hardening passed scoped diff checks, the 244-file dependency gate, the 411-blob public-tree gate,
+Python compile-all, and all 298 tooling tests. Its C++ build, process contract, and CTest remain
+delegated to the serialized integration lane because local preflight was `CAUTION`.
 
 E-0076 adds a stateless, app-private startup-failure dialog for the already-fatal pre-SDL
 runtime-configuration, runtime-settings, content-launch-profile, and content-startup paths. Exact
