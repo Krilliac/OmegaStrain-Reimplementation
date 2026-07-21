@@ -1418,6 +1418,28 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     aggregate logical bytes. No new owner-corpus run or private input was used, and no animation,
     skeleton, timing, channel, transform, compression, payload, runtime, or retail-behavior
     semantics are established.
+83. E-0106 adds the first explicit profile-creation action to the project-owned native shell without
+    introducing an automatic default. In the exact empty Profiles state, an enabled Primary edge
+    publishes `CreateFirstProfile`, stays in Profiles, and asks `OmegaApp` to create fixed
+    project-owned ID `00000000000000000000000000000001` with display name `PROFILE 1`.
+    Production samples `system_clock` at that command boundary and supplies bounded UTC
+    milliseconds; a friend-only one-shot timestamp seam makes generated validation deterministic.
+    `ProfileCatalog::Create` performs the transactional `MustBeAbsent` write. Every allocation,
+    catalog check, model projection, rasterization, texture upload, and draw-list creation occurs
+    before that durable mutation: empty and one-profile presentations are both preloaded, and
+    success is followed only by a no-throw whole-presentation swap plus fixed model state. The
+    active profile remains unset; only a later released-and-pressed Primary edge publishes the
+    ordinary First-slot selection. Fresh replay receives the original total and visible counts,
+    models the successful logical zero-to-one transition once, and touches no persistence, profile
+    identifier, clock, renderer, or GPU resource. Reopening native persistence observes the created
+    record, while a four-slot texture-pool fixture rejects startup during alternate-presentation
+    preflight and leaves the catalog empty. Serialized full MSVC Debug and Release builds completed
+    with zero warnings or errors; Debug CTest passed 63/63 and Release CTest passed 64/64 including
+    the package contract; direct Debug and Release `omega_app_capture_smoke`, focused front-end and
+    replay tests, and ten isolated Release `openomega --frames=2` runs passed. This confirms only
+    project-owned native profile-shell behavior. It assigns no retail or PS2 profile, save,
+    campaign, checkpoint, memory-card, savestate, emulator,
+    or behavioral-parity semantics, and no proprietary or owner input was used.
 
 ## Disc observations
 
@@ -1439,12 +1461,16 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
 
 ## Next focused pass
 
-1. Define the next profile-owned campaign/checkpoint schema only from independently corroborated
-   evidence, and decide any persistent active-profile policy separately from E-0096's session-only
-   selection. Preserve process/package isolation by redirecting persistence in tests. Build the
-   separately evidenced Omega Strain payload mapper over the now-bounded standard card codecs;
-   never make a PS2 memory-card device, guest RAM, or emulator savestate part of the shipping
-   runtime.
+1. Add the next visible project-owned runtime step as a bounded diagnostic actor overlay: preload
+   one generated marker texture, map the existing synthetic `Position3` X/Z values into a fixed Q16
+   viewport with explicit clamping, compose it over DiagnosticPlay without frame-time resource
+   mutation, and require capture/replay to publish the same final marker rectangle. Treat that map
+   strictly as native debug policy, not retail camera, placement, collision, level, or player
+   semantics. Define any later profile-owned campaign/checkpoint schema only from independently
+   corroborated evidence, and decide persistent active-profile policy separately from E-0096/E-0106
+   session-only selection. Preserve process/package isolation in persistence tests. Build the
+   separately evidenced Omega Strain payload mapper over the bounded standard card codecs; never
+   make a PS2 memory-card device, guest RAM, or emulator savestate part of the shipping runtime.
 2. Treat E-0099 as runnable-tool and configuration-initialization readiness only. Before any new
    observation, prepare a fresh neutral-menu savestate under the enforced modes and run the private
    producer's synthetic contract and security checks outside every OpenOmega worktree. Then collect

@@ -425,7 +425,8 @@ runtime::DebugImage BuildProjectFrontEndMainImage(const runtime::ContentStartupS
     return image;
 }
 
-runtime::DebugImage BuildProjectFrontEndProfilesImage(const FrontEndStartupModel &profiles)
+runtime::DebugImage BuildProjectFrontEndProfilesImage(const FrontEndStartupModel &profiles,
+                                                      const FrontEndCapabilities capabilities)
 {
     runtime::DebugImage image = BuildDiagnosticCardBase();
     DrawOpenOmegaHeader(image);
@@ -434,7 +435,15 @@ runtime::DebugImage BuildProjectFrontEndProfilesImage(const FrontEndStartupModel
     FillRectangle(image, 8U, 24U, 120U, 57U, kSlateColor);
     if (profiles.visible_profiles == 0U || profiles.total_profiles == 0U)
     {
-        DrawLabel(image, "NO NATIVE PROFILES", 28U, 38U);
+        if (capabilities.can_create_first_profile)
+        {
+            DrawLabel(image, "CREATE PROFILE", 16U, 32U);
+            DrawText(image, kFrontEndFirstProfileDisplayName, 16U, 42U);
+        }
+        else
+        {
+            DrawLabel(image, "NO NATIVE PROFILES", 28U, 38U);
+        }
     }
     else
     {
@@ -451,7 +460,10 @@ runtime::DebugImage BuildProjectFrontEndProfilesImage(const FrontEndStartupModel
     FillRectangle(image, 8U, 59U, 120U, 68U, kSlateColor);
     if (profiles.visible_profiles == 0U || profiles.total_profiles == 0U)
     {
-        DrawLabel(image, "F1/ENTER RETURN", 12U, 61U);
+        if (capabilities.can_create_first_profile)
+            DrawLabel(image, "F1/ENTER CREATE", 12U, 61U);
+        else
+            DrawLabel(image, "F1/ENTER RETURN", 12U, 61U);
     }
     else if (profiles.total_profiles > profiles.visible_profiles)
     {

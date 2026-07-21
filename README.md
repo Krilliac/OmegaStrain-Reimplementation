@@ -104,13 +104,17 @@ Studio's historical engine source or internal toolchain.
   and an operating-system-held exclusive lifetime lock. Synthetic tests cover reopen, torn-newest
   fallback, missing-established-slot rejection, post-recovery commit, hard-link containment,
   namespace anchoring, both-slot corruption, future-version rejection, and competing owners.
-  The native profile catalog and app-owned startup composition are implemented without an implicit
+  The native profile catalog and app-owned startup composition never create or select an implicit
   default profile. E-0089 snapshots at most 1,024 already-existing profiles before SDL startup and
   projects at most three sorted names into a fixed project font. E-0096 also copies those three IDs
-  into the immutable startup model and lets an explicit project-owned Profiles action select one as
-  session-only `OmegaApp` state. Selection never creates, updates, or persists a profile and performs
-  no frame-time catalog access. Main, Profiles, Controls, and AssetTopology cards, markers, and draw
-  lists remain startup-owned; only DiagnosticPlay advances simulation. This synthetic shell
+  into the owned bounded front-end model and lets an explicit project-owned Profiles action select
+  one as session-only `OmegaApp` state. E-0106 adds one explicit zero-to-one transition: Primary on
+  an empty Profiles screen creates fixed project profile `00000000000000000000000000000001` named
+  `PROFILE 1` through the transactional catalog, but leaves the active profile unset until a later
+  Primary edge selects it. Complete empty and one-profile GPU presentations are preloaded before
+  the transaction, so the successful durable commit is followed only by a no-throw presentation
+  swap. Main, Profiles, Controls, and AssetTopology remain modal; only DiagnosticPlay advances
+  simulation. This synthetic shell
   establishes no retail art, layout, input, save policy, behavior, or fidelity. The standalone
   `omega_ps2_compat` layer now recognizes strict standard 8 MiB logical/raw card envelopes, reads
   one explicitly selected top-level directory as ordered opaque files, and creates a new
@@ -1221,7 +1225,9 @@ or emulator savestates. Non-probe startup opens the platform-native `OpenOmega/n
 directory and validates a deterministic profile catalog before platform creation; `--frames=0`
 therefore bootstraps persistence, while `--probe-only` never touches it. A fresh database contains
 two checksummed generation-zero snapshots and an empty process-lock file. Profiles use bounded,
-versioned `profiles/<32-lower-hex-id>/metadata` records and no default profile is created or selected.
+versioned `profiles/<32-lower-hex-id>/metadata` records. Startup never automatically creates or
+selects a default profile; creation occurs only after the explicit empty-Profiles Primary action,
+and that new profile remains unselected until a later Primary action.
 Windows uses `%LOCALAPPDATA%/OpenOmega/native-save`, macOS uses
 `$HOME/Library/Application Support/OpenOmega/native-save`, and XDG hosts use
 `$XDG_DATA_HOME/openomega/native-save` or `$HOME/.local/share/openomega/native-save`.

@@ -30,6 +30,10 @@ inline constexpr std::size_t kFrontEndLabelCells = 24U;
 inline constexpr std::size_t kFrontEndMainRowCount = 4U;
 inline constexpr std::uint32_t kFrontEndImageWidth = 128U;
 inline constexpr std::uint32_t kFrontEndImageHeight = 72U;
+// Project-owned first-profile metadata. It is intentionally independent of
+// retail save naming and is the only display name published by the bounded
+// first-profile command.
+inline constexpr std::string_view kFrontEndFirstProfileDisplayName = "PROFILE 1";
 
 enum class FrontEndMode : std::uint8_t
 {
@@ -81,9 +85,10 @@ struct FrontEndProfile
     friend constexpr bool operator==(const FrontEndProfile &, const FrontEndProfile &) noexcept = default;
 };
 
-// Immutable bounded snapshot copied from the ID-sorted native catalog before
-// SDL startup. It contains no borrowed string, catalog, database, or renderer
-// lifetime and defines no implicit or default active profile.
+// Owned bounded model initialized from the ID-sorted native catalog before SDL
+// startup. The app may replace the exact zero model with its one-profile model
+// after the durable first-profile create. It contains no borrowed string,
+// catalog, database, or renderer lifetime and defines no implicit active profile.
 struct FrontEndStartupModel
 {
     std::uint16_t total_profiles = 0U;
@@ -144,11 +149,24 @@ enum class FrontEndCommandType : std::uint8_t
 {
     None = 0U,
     SetActiveProfile = 1U,
+    CreateFirstProfile = 2U,
+};
+
+// Capability inputs default closed so existing callers retain their exact
+// behavior until persistence explicitly advertises first-profile creation.
+struct FrontEndCapabilities
+{
+    bool can_create_first_profile = false;
+
+    friend constexpr bool operator==(const FrontEndCapabilities &,
+                                     const FrontEndCapabilities &) noexcept = default;
 };
 
 // Fully owned reducer publication. SetActiveProfile carries only one of the
-// three bounded startup-model positions; it never carries a catalog view or
-// performs persistence work.
+// three bounded startup-model positions. CreateFirstProfile carries no caller
+// data: its project-owned display name is kFrontEndFirstProfileDisplayName and
+// its slot remains First. Neither command carries a catalog view or performs
+// persistence work.
 struct FrontEndCommand
 {
     FrontEndCommandType type = FrontEndCommandType::None;
@@ -209,12 +227,16 @@ struct FrontEndView
 // it is inert on Main and returns every other mode to its corresponding Main
 // row without publishing a command. Primary has priority over navigation. A
 // selectable Profiles slot publishes one typed command and returns to its Main
-// row; an empty or out-of-range slot publishes no command and retains the
-// existing return transition. Empty selection/navigation is otherwise inert. Simultaneous
-// navigation edges are neutral, and navigation is press-edge-only and clamps at
-// both bounds. No allocation, I/O, catalog access, or persistence mutation occurs.
+// row. When the catalog is empty and the explicit capability is enabled,
+// Primary publishes CreateFirstProfile and remains in Profiles; the default
+// capability preserves the legacy empty return transition byte-for-byte.
+// Out-of-range slots retain that legacy return transition. Empty
+// selection/navigation is otherwise inert. Simultaneous navigation edges are
+// neutral, and navigation is press-edge-only and clamps at both bounds. No
+// allocation, I/O, catalog access, or persistence mutation occurs.
 [[nodiscard]] constexpr FrontEndReduction ReduceFrontEnd(
-    FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots) noexcept
+    FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots,
+    const FrontEndCapabilities capabilities = {}) noexcept
 {
     if (!IsValidFrontEndState(state))
         return FrontEndReduction{.state = InitialFrontEndState()};
@@ -259,6 +281,16 @@ struct FrontEndView
         switch (state.mode)
         {
         case FrontEndMode::Profiles:
+            if (selectable_profiles == 0U && capabilities.can_create_first_profile)
+            {
+                return FrontEndReduction{
+                    .state = state,
+                    .command = FrontEndCommand{
+                        .type = FrontEndCommandType::CreateFirstProfile,
+                        .profile_slot = FrontEndProfileSlot::First,
+                    },
+                };
+            }
             if (!profile_slot_is_selectable)
             {
                 return FrontEndReduction{.state = FrontEndState{
@@ -385,7 +417,8 @@ struct FrontEndView
 // asset, or emulator data.
 [[nodiscard]] runtime::DebugImage BuildProjectFrontEndMainImage(runtime::ContentStartupStage content_stage,
                                                                 std::uint16_t profile_count);
-[[nodiscard]] runtime::DebugImage BuildProjectFrontEndProfilesImage(const FrontEndStartupModel &profiles);
+[[nodiscard]] runtime::DebugImage BuildProjectFrontEndProfilesImage(
+    const FrontEndStartupModel &profiles, FrontEndCapabilities capabilities = {});
 [[nodiscard]] runtime::DebugImage BuildProjectFrontEndDiagnosticPlayImage();
 [[nodiscard]] runtime::DebugImage BuildProjectFrontEndControlsImage();
 
@@ -404,6 +437,8 @@ static_assert(std::is_trivially_copyable_v<FrontEndState>);
 static_assert(std::is_standard_layout_v<FrontEndState>);
 static_assert(std::is_trivially_copyable_v<FrontEndInputEdges>);
 static_assert(std::is_standard_layout_v<FrontEndInputEdges>);
+static_assert(std::is_trivially_copyable_v<FrontEndCapabilities>);
+static_assert(std::is_standard_layout_v<FrontEndCapabilities>);
 static_assert(std::is_trivially_copyable_v<FrontEndCommand>);
 static_assert(std::is_standard_layout_v<FrontEndCommand>);
 static_assert(std::is_trivially_copyable_v<FrontEndReduction>);
@@ -414,5 +449,6 @@ static_assert(sizeof(FrontEndMode) == 1U);
 static_assert(sizeof(FrontEndMainRow) == 1U);
 static_assert(sizeof(FrontEndProfileSlot) == 1U);
 static_assert(sizeof(FrontEndCommandType) == 1U);
+static_assert(sizeof(FrontEndCapabilities) == 1U);
 static_assert(sizeof(FrontEndModelError) == 1U);
 } // namespace omega::app

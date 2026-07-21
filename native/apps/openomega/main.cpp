@@ -264,6 +264,7 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     const omega::app::RunResult capture_result,
     const omega::runtime::FrameSchedulerState capture_before,
     const omega::runtime::FrameSchedulerState capture_after,
+    const std::size_t front_end_total_profile_count,
     const std::uint8_t front_end_visible_profile_slots)
 {
     auto traces = std::move(outcome).TakeTracePair();
@@ -285,6 +286,10 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
         traces->input_trace().actions(), debug_locomotion_actions);
     config.initial_front_end_state = omega::app::InitialFrontEndState();
     config.front_end_visible_profile_slots = front_end_visible_profile_slots;
+    config.front_end_total_profile_count = front_end_total_profile_count;
+    config.front_end_capabilities.can_create_first_profile =
+        front_end_visible_profile_slots == 0U &&
+        front_end_total_profile_count == 0U;
     auto created = omega::app::RunReplaySession::Create(std::move(*traces), config);
     if (!created)
     {
@@ -563,7 +568,8 @@ int main(const int argc, char** argv)
             return EXIT_FAILURE;
         }
         if (!ReplayFreshCapture(std::move(*capture), capture_result,
-                capture_before, capture_after, front_end_visible_profile_slots))
+                capture_before, capture_after, startup_profile_count,
+                front_end_visible_profile_slots))
         {
             return EXIT_FAILURE;
         }

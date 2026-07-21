@@ -11,10 +11,12 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -29,6 +31,9 @@ static_assert(kOpeningMovieAudioRefillFrames <=
               SdlAudioService::kOpeningMovieQueueCapacityFrames);
 static_assert(kOpeningMovieAudioClockRateHz ==
               static_cast<std::uint64_t>(SdlAudioService::kSampleRate));
+constexpr profiles::ProfileId kFirstProfileId = profiles::ProfileId::FromBytes(
+    std::array<std::uint8_t, 16U>{0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+                                  0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U});
 } // namespace
 
 std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore config,
@@ -438,8 +443,8 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     static_assert(kFrontEndVisibleProfiles <= kFrontEndMainRowCount);
 
     runtime::RenderTextureHandle diagnostic_texture;
-    runtime::RenderTextureHandle front_end_texture;
-    runtime::RenderTextureHandle front_end_profiles_texture;
+    FrontEndPresentation front_end_presentation;
+    std::optional<FrontEndPresentation> first_profile_presentation;
     runtime::RenderTextureHandle diagnostic_controls_texture;
     runtime::RenderTextureHandle diagnostic_asset_topology_texture;
     runtime::RenderTextureHandle diagnostic_asset_transfer_texture;
@@ -488,103 +493,154 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     auto diagnostic_hidden_draw_list = std::move(*created_hidden_draw_list);
     const std::size_t diagnostic_base_command_count = diagnostic_command_count;
 
-    const runtime::DebugImage menu_image =
-        BuildProjectFrontEndMainImage(content_stage, front_end_startup_model.total_profiles);
-    auto uploaded_menu = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
-        .width = menu_image.width,
-        .height = menu_image.height,
-        .pixels = menu_image.pixels(),
-    });
-    if (!uploaded_menu)
+    const auto build_front_end_presentation =
+        [&](const FrontEndStartupModel& model,
+            const FrontEndCapabilities capabilities)
+        -> std::expected<FrontEndPresentation, std::string>
     {
-        const std::string error = "SDL/GPU front-end main texture upload: " + uploaded_menu.error();
-        log->Error("startup", error);
-        return std::unexpected(error);
-    }
-    front_end_texture = *uploaded_menu;
-    diagnostic_commands[diagnostic_command_count++] = runtime::RenderTextureBlitCommand{
-        .texture = front_end_texture,
-        .source = full_source,
-        .destination = menu_target,
-        .fit_mode = runtime::RenderTextureFitMode::Stretch,
-        .filter_mode = runtime::RenderTextureFilterMode::Nearest,
-    };
-
-    std::array<runtime::RenderDrawList, kFrontEndMainRowCount> front_end_main_draw_lists;
-    for (std::size_t row = 0U; row < menu_selection_targets.size(); ++row)
-    {
-        diagnostic_commands[diagnostic_command_count] = runtime::RenderTextureBlitCommand{
-            .texture = front_end_texture,
-            .source = menu_selection_source,
-            .destination = menu_selection_targets[row],
-            .fit_mode = runtime::RenderTextureFitMode::Stretch,
-            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
-        };
-        auto created_visible_draw_list = runtime::RenderDrawList::Create(
-            std::span<const runtime::RenderTextureBlitCommand>{
-                diagnostic_commands.data(), diagnostic_command_count + 1U});
-        if (!created_visible_draw_list)
+        FrontEndPresentation presentation;
+        const runtime::DebugImage menu_image =
+            BuildProjectFrontEndMainImage(content_stage, model.total_profiles);
+        auto uploaded_menu = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+            .width = menu_image.width,
+            .height = menu_image.height,
+            .pixels = menu_image.pixels(),
+        });
+        if (!uploaded_menu)
         {
-            constexpr std::string_view error = "SDL/GPU front-end main draw-list creation failed";
-            log->Error("startup", error);
-            return std::unexpected(std::string(error));
+            return std::unexpected(
+                "SDL/GPU front-end main texture upload: " + uploaded_menu.error());
         }
-        front_end_main_draw_lists[row] = std::move(*created_visible_draw_list);
-    }
+        presentation.main_texture = *uploaded_menu;
+        diagnostic_commands[diagnostic_base_command_count] =
+            runtime::RenderTextureBlitCommand{
+                .texture = presentation.main_texture,
+                .source = full_source,
+                .destination = menu_target,
+                .fit_mode = runtime::RenderTextureFitMode::Stretch,
+                .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+            };
 
-    const runtime::DebugImage profiles_image = BuildProjectFrontEndProfilesImage(front_end_startup_model);
-    auto uploaded_profiles = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
-        .width = profiles_image.width,
-        .height = profiles_image.height,
-        .pixels = profiles_image.pixels(),
-    });
-    if (!uploaded_profiles)
-    {
-        const std::string error = "SDL/GPU front-end profiles texture upload: " + uploaded_profiles.error();
-        log->Error("startup", error);
-        return std::unexpected(error);
-    }
-    front_end_profiles_texture = *uploaded_profiles;
-    diagnostic_commands[diagnostic_base_command_count] = runtime::RenderTextureBlitCommand{
-        .texture = front_end_profiles_texture,
-        .source = full_source,
-        .destination = menu_target,
-        .fit_mode = runtime::RenderTextureFitMode::Stretch,
-        .filter_mode = runtime::RenderTextureFilterMode::Nearest,
-    };
-    auto created_profiles_draw_list =
-        runtime::RenderDrawList::Create(std::span<const runtime::RenderTextureBlitCommand>{
-            diagnostic_commands.data(), diagnostic_base_command_count + 1U});
-    if (!created_profiles_draw_list)
-    {
-        constexpr std::string_view error = "SDL/GPU front-end profiles draw-list creation failed";
-        log->Error("startup", error);
-        return std::unexpected(std::string(error));
-    }
-    auto front_end_profiles_draw_list = std::move(*created_profiles_draw_list);
+        for (std::size_t row = 0U; row < menu_selection_targets.size(); ++row)
+        {
+            diagnostic_commands[diagnostic_base_command_count + 1U] =
+                runtime::RenderTextureBlitCommand{
+                    .texture = presentation.main_texture,
+                    .source = menu_selection_source,
+                    .destination = menu_selection_targets[row],
+                    .fit_mode = runtime::RenderTextureFitMode::Stretch,
+                    .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+                };
+            auto created_draw_list = runtime::RenderDrawList::Create(
+                std::span<const runtime::RenderTextureBlitCommand>{
+                    diagnostic_commands.data(), diagnostic_base_command_count + 2U});
+            if (!created_draw_list)
+            {
+                return std::unexpected(
+                    std::string{"SDL/GPU front-end main draw-list creation failed"});
+            }
+            presentation.main_draw_lists[row] = std::move(*created_draw_list);
+        }
 
-    std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>
-        front_end_profile_selection_draw_lists;
-    for (std::size_t slot = 0U; slot < front_end_profile_selection_draw_lists.size(); ++slot)
-    {
-        diagnostic_commands[diagnostic_base_command_count + 1U] = runtime::RenderTextureBlitCommand{
-            .texture = front_end_profiles_texture,
-            .source = profile_selection_source,
-            .destination = menu_selection_targets[slot],
-            .fit_mode = runtime::RenderTextureFitMode::Stretch,
-            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
-        };
-        auto created_selection_draw_list = runtime::RenderDrawList::Create(
+        const runtime::DebugImage profiles_image =
+            BuildProjectFrontEndProfilesImage(model, capabilities);
+        auto uploaded_profiles = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+            .width = profiles_image.width,
+            .height = profiles_image.height,
+            .pixels = profiles_image.pixels(),
+        });
+        if (!uploaded_profiles)
+        {
+            return std::unexpected(
+                "SDL/GPU front-end profiles texture upload: " + uploaded_profiles.error());
+        }
+        presentation.profiles_texture = *uploaded_profiles;
+        diagnostic_commands[diagnostic_base_command_count] =
+            runtime::RenderTextureBlitCommand{
+                .texture = presentation.profiles_texture,
+                .source = full_source,
+                .destination = menu_target,
+                .fit_mode = runtime::RenderTextureFitMode::Stretch,
+                .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+            };
+        auto created_profiles_draw_list = runtime::RenderDrawList::Create(
             std::span<const runtime::RenderTextureBlitCommand>{
-                diagnostic_commands.data(), diagnostic_base_command_count + 2U});
-        if (!created_selection_draw_list)
+                diagnostic_commands.data(), diagnostic_base_command_count + 1U});
+        if (!created_profiles_draw_list)
+        {
+            return std::unexpected(
+                std::string{"SDL/GPU front-end profiles draw-list creation failed"});
+        }
+        presentation.profiles_draw_list = std::move(*created_profiles_draw_list);
+
+        for (std::size_t slot = 0U;
+             slot < presentation.profile_selection_draw_lists.size(); ++slot)
+        {
+            diagnostic_commands[diagnostic_base_command_count + 1U] =
+                runtime::RenderTextureBlitCommand{
+                    .texture = presentation.profiles_texture,
+                    .source = profile_selection_source,
+                    .destination = menu_selection_targets[slot],
+                    .fit_mode = runtime::RenderTextureFitMode::Stretch,
+                    .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+                };
+            auto created_draw_list = runtime::RenderDrawList::Create(
+                std::span<const runtime::RenderTextureBlitCommand>{
+                    diagnostic_commands.data(), diagnostic_base_command_count + 2U});
+            if (!created_draw_list)
+            {
+                return std::unexpected(std::string{
+                    "SDL/GPU front-end profile selection draw-list creation failed"});
+            }
+            presentation.profile_selection_draw_lists[slot] =
+                std::move(*created_draw_list);
+        }
+        return presentation;
+    };
+
+    const bool can_create_first_profile = native_persistence != nullptr &&
+        front_end_startup_model.total_profiles == 0U;
+    auto created_front_end_presentation = build_front_end_presentation(
+        front_end_startup_model,
+        FrontEndCapabilities{.can_create_first_profile = can_create_first_profile});
+    if (!created_front_end_presentation)
+    {
+        log->Error("startup", created_front_end_presentation.error());
+        return std::unexpected(std::move(created_front_end_presentation.error()));
+    }
+    front_end_presentation = std::move(*created_front_end_presentation);
+
+    if (can_create_first_profile)
+    {
+        const std::array preview_profiles{
+            profiles::ProfileSummary{
+                .id = kFirstProfileId,
+                .metadata = profiles::ProfileMetadata{
+                    .display_name = std::string{kFrontEndFirstProfileDisplayName},
+                    .created_unix_milliseconds = 0U,
+                    .modified_unix_milliseconds = 0U,
+                },
+                .metadata_revision = 1U,
+            },
+        };
+        const auto preview_model = MakeFrontEndStartupModel(preview_profiles);
+        if (!preview_model)
         {
             constexpr std::string_view error =
-                "SDL/GPU front-end profile selection draw-list creation failed";
+                "front-end first-profile preview model creation failed";
             log->Error("startup", error);
-            return std::unexpected(std::string(error));
+            return std::unexpected(std::string{error});
         }
-        front_end_profile_selection_draw_lists[slot] = std::move(*created_selection_draw_list);
+        auto created_first_profile_presentation =
+            build_front_end_presentation(*preview_model, {});
+        if (!created_first_profile_presentation)
+        {
+            log->Error("startup", created_first_profile_presentation.error());
+            return std::unexpected(
+                std::move(created_first_profile_presentation.error()));
+        }
+        first_profile_presentation =
+            std::move(*created_first_profile_presentation);
     }
 
     const runtime::DebugImage controls_image = BuildProjectFrontEndControlsImage();
@@ -797,10 +853,10 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                     std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
                     std::move(opening_movie_player), opening_movie_texture,
                     std::move(opening_movie_draw_list), boot_sequence_state, diagnostic_texture,
-                    front_end_texture, front_end_profiles_texture, diagnostic_controls_texture,
+                    std::move(front_end_presentation),
+                    std::move(first_profile_presentation), diagnostic_controls_texture,
                     diagnostic_asset_topology_texture, diagnostic_asset_transfer_texture,
-                    std::move(diagnostic_hidden_draw_list), std::move(front_end_main_draw_lists),
-                    std::move(front_end_profiles_draw_list), std::move(front_end_profile_selection_draw_lists),
+                    std::move(diagnostic_hidden_draw_list),
                     std::move(diagnostic_controls_draw_list),
                     std::move(diagnostic_asset_topology_draw_list), content_stage, front_end_startup_model);
 }
@@ -818,15 +874,13 @@ OmegaApp::OmegaApp(
     const runtime::RenderTextureHandle opening_movie_texture,
     runtime::RenderDrawList opening_movie_draw_list,
     const BootSequenceState boot_sequence_state,
-    const runtime::RenderTextureHandle diagnostic_texture, const runtime::RenderTextureHandle front_end_texture,
-    const runtime::RenderTextureHandle front_end_profiles_texture,
+    const runtime::RenderTextureHandle diagnostic_texture,
+    FrontEndPresentation front_end_presentation,
+    std::optional<FrontEndPresentation> first_profile_presentation,
     const runtime::RenderTextureHandle diagnostic_controls_texture,
     const runtime::RenderTextureHandle diagnostic_asset_topology_texture,
     const runtime::RenderTextureHandle diagnostic_asset_transfer_texture,
     runtime::RenderDrawList diagnostic_hidden_draw_list,
-    std::array<runtime::RenderDrawList, kFrontEndMainRowCount> front_end_main_draw_lists,
-    runtime::RenderDrawList front_end_profiles_draw_list,
-    std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles> front_end_profile_selection_draw_lists,
     runtime::RenderDrawList diagnostic_controls_draw_list,
     runtime::RenderDrawList diagnostic_asset_topology_draw_list, const runtime::ContentStartupStage content_stage,
     const FrontEndStartupModel front_end_startup_model) noexcept
@@ -839,19 +893,17 @@ OmegaApp::OmegaApp(
       opening_movie_texture_(opening_movie_texture),
       opening_movie_draw_list_(std::move(opening_movie_draw_list)),
       boot_sequence_state_(boot_sequence_state), diagnostic_texture_(diagnostic_texture),
-      front_end_texture_(front_end_texture),
-      front_end_profiles_texture_(front_end_profiles_texture),
+      front_end_presentation_(std::move(front_end_presentation)),
+      first_profile_presentation_(std::move(first_profile_presentation)),
       diagnostic_controls_texture_(diagnostic_controls_texture),
       diagnostic_asset_topology_texture_(diagnostic_asset_topology_texture),
       diagnostic_asset_transfer_texture_(diagnostic_asset_transfer_texture),
       diagnostic_hidden_draw_list_(std::move(diagnostic_hidden_draw_list)),
-      front_end_main_draw_lists_(std::move(front_end_main_draw_lists)),
-      front_end_profiles_draw_list_(std::move(front_end_profiles_draw_list)),
-      front_end_profile_selection_draw_lists_(std::move(front_end_profile_selection_draw_lists)),
       diagnostic_controls_draw_list_(std::move(diagnostic_controls_draw_list)),
       diagnostic_asset_topology_draw_list_(std::move(diagnostic_asset_topology_draw_list)),
       content_stage_(content_stage), front_end_startup_model_(front_end_startup_model),
-      front_end_state_(InitialFrontEndState())
+      front_end_state_(InitialFrontEndState()),
+      can_create_first_profile_(first_profile_presentation_.has_value())
 {
 }
 
@@ -875,11 +927,18 @@ OmegaApp::~OmegaApp() noexcept
     opening_movie_player_.reset();
     diagnostic_asset_topology_draw_list_ = {};
     diagnostic_controls_draw_list_ = {};
-    for (runtime::RenderDrawList& draw_list : front_end_profile_selection_draw_lists_)
-        draw_list = {};
-    front_end_profiles_draw_list_ = {};
-    for (runtime::RenderDrawList &draw_list : front_end_main_draw_lists_)
-        draw_list = {};
+    const auto clear_front_end_draw_lists = [](FrontEndPresentation& presentation) noexcept
+    {
+        for (runtime::RenderDrawList& draw_list :
+             presentation.profile_selection_draw_lists)
+            draw_list = {};
+        presentation.profiles_draw_list = {};
+        for (runtime::RenderDrawList& draw_list : presentation.main_draw_lists)
+            draw_list = {};
+    };
+    if (first_profile_presentation_)
+        clear_front_end_draw_lists(*first_profile_presentation_);
+    clear_front_end_draw_lists(front_end_presentation_);
     diagnostic_hidden_draw_list_ = {};
 
     const auto release_texture = [this](const runtime::RenderTextureHandle texture,
@@ -921,16 +980,29 @@ OmegaApp::~OmegaApp() noexcept
                                                         "host cleanup will retry");
     release_texture(diagnostic_controls_texture_, "diagnostic controls texture release failed; SDL/GPU host "
                                                   "cleanup will retry");
-    release_texture(front_end_profiles_texture_, "front-end profiles texture release failed; SDL/GPU host "
-                                                 "cleanup will retry");
-    release_texture(front_end_texture_, "front-end main texture release failed; SDL/GPU host cleanup will retry");
+    if (first_profile_presentation_)
+    {
+        release_texture(first_profile_presentation_->profiles_texture,
+            "inactive front-end profiles texture release failed; SDL/GPU host cleanup will retry");
+        release_texture(first_profile_presentation_->main_texture,
+            "inactive front-end main texture release failed; SDL/GPU host cleanup will retry");
+    }
+    release_texture(front_end_presentation_.profiles_texture,
+        "front-end profiles texture release failed; SDL/GPU host cleanup will retry");
+    release_texture(front_end_presentation_.main_texture,
+        "front-end main texture release failed; SDL/GPU host cleanup will retry");
     release_texture(diagnostic_texture_, "diagnostic texture release failed; SDL/GPU host cleanup will retry");
     opening_movie_texture_ = {};
     diagnostic_asset_topology_texture_ = {};
     diagnostic_asset_transfer_texture_ = {};
     diagnostic_controls_texture_ = {};
-    front_end_profiles_texture_ = {};
-    front_end_texture_ = {};
+    if (first_profile_presentation_)
+    {
+        first_profile_presentation_->profiles_texture = {};
+        first_profile_presentation_->main_texture = {};
+    }
+    front_end_presentation_.profiles_texture = {};
+    front_end_presentation_.main_texture = {};
     diagnostic_texture_ = {};
 }
 
@@ -1429,9 +1501,22 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                         .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
                         .cancel_pressed = input_snapshot.WasPressed(kFrontEndCancelAction),
                     },
-                    front_end_startup_model_.visible_profiles);
+                    front_end_startup_model_.visible_profiles,
+                    FrontEndCapabilities{
+                        .can_create_first_profile = can_create_first_profile_,
+                    });
             front_end_state_ = front_end.state;
-            ApplyFrontEndCommand(front_end.command);
+            auto applied = ApplyFrontEndCommand(front_end.command);
+            if (!applied)
+            {
+                jobs_->WaitForIdle();
+                log_->Error("profiles", applied.error());
+                return RunLoopResult{
+                    .result = result,
+                    .operational_error = std::move(applied.error()),
+                    .capture_error = std::nullopt,
+                };
+            }
         }
         const bool simulation_allowed =
             !movie_was_active && FrontEndAllowsSimulation(front_end_state_);
@@ -1648,42 +1733,159 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
     };
 }
 
-void OmegaApp::ApplyFrontEndCommand(const FrontEndCommand command) noexcept
+std::expected<void, std::string> OmegaApp::CreateFirstProfile()
 {
+    if (!can_create_first_profile_ || !first_profile_presentation_ ||
+        native_persistence_ == nullptr ||
+        front_end_startup_model_.total_profiles != 0U ||
+        front_end_startup_model_.visible_profiles != 0U)
+    {
+        return std::unexpected(
+            std::string{"first profile creation is not available"});
+    }
+
+    auto live_profiles = native_persistence_->profiles().List();
+    if (!live_profiles)
+    {
+        return std::unexpected(
+            "first profile catalog check failed: " +
+            std::string(profiles::ProfileCatalogErrorCodeName(
+                live_profiles.error().code)));
+    }
+    if (!live_profiles->empty())
+    {
+        return std::unexpected(
+            std::string{"first profile creation requires an empty catalog"});
+    }
+
+    std::uint64_t timestamp = 0U;
+    if (first_profile_timestamp_override_for_testing_)
+    {
+        timestamp = *first_profile_timestamp_override_for_testing_;
+        first_profile_timestamp_override_for_testing_.reset();
+    }
+    else
+    {
+        const auto elapsed = std::chrono::system_clock::now().time_since_epoch();
+        if (elapsed < std::chrono::system_clock::duration::zero())
+        {
+            return std::unexpected(
+                std::string{"system clock precedes the supported UTC epoch"});
+        }
+        const auto milliseconds =
+            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+        if (milliseconds < 0)
+        {
+            return std::unexpected(
+                std::string{"system clock precedes the supported UTC epoch"});
+        }
+        timestamp = static_cast<std::uint64_t>(milliseconds);
+    }
+    if (timestamp > profiles::kProfileTimestampMaxUnixMilliseconds)
+    {
+        return std::unexpected(
+            std::string{"system clock exceeds the supported UTC range"});
+    }
+
+    try
+    {
+        std::array prospective_profiles{
+            profiles::ProfileSummary{
+                .id = kFirstProfileId,
+                .metadata = profiles::ProfileMetadata{
+                    .display_name = std::string{kFrontEndFirstProfileDisplayName},
+                    .created_unix_milliseconds = timestamp,
+                    .modified_unix_milliseconds = timestamp,
+                },
+                .metadata_revision = 1U,
+            },
+        };
+        const auto projected_model =
+            MakeFrontEndStartupModel(prospective_profiles);
+        if (!projected_model)
+        {
+            return std::unexpected(
+                std::string{"first profile projection failed"});
+        }
+
+        auto created = native_persistence_->profiles().Create(
+            kFirstProfileId, std::move(prospective_profiles[0].metadata));
+        if (!created)
+        {
+            return std::unexpected(
+                "first profile creation failed: " +
+                std::string(profiles::ProfileCatalogErrorCodeName(
+                    created.error().code)));
+        }
+
+        // Every potentially failing allocation, catalog read, and GPU operation
+        // completed before the durable mutation. These fixed-value swaps cannot
+        // strand the database and visible presentation in different states.
+        static_assert(std::is_nothrow_swappable_v<FrontEndPresentation>);
+        std::swap(front_end_presentation_, *first_profile_presentation_);
+        front_end_startup_model_ = *projected_model;
+        can_create_first_profile_ = false;
+        return {};
+    }
+    catch (const std::exception&)
+    {
+        return std::unexpected(
+            std::string{"first profile preparation failed"});
+    }
+    catch (...)
+    {
+        return std::unexpected(
+            std::string{"first profile preparation failed"});
+    }
+}
+
+std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
+    const FrontEndCommand command)
+{
+    if (command.type == FrontEndCommandType::CreateFirstProfile)
+    {
+        if (command.profile_slot != FrontEndProfileSlot::First)
+        {
+            return std::unexpected(
+                std::string{"first profile command selected an invalid slot"});
+        }
+        return CreateFirstProfile();
+    }
     if (command.type != FrontEndCommandType::SetActiveProfile)
-        return;
+        return {};
 
     const std::size_t slot = static_cast<std::size_t>(command.profile_slot);
     if (slot >= kFrontEndVisibleProfiles || slot >= front_end_startup_model_.visible_profiles ||
         slot >= front_end_startup_model_.total_profiles)
-        return;
+        return {};
 
     const std::optional<profiles::ProfileId>& profile_id = front_end_startup_model_.profiles[slot].id;
     if (!profile_id)
-        return;
+        return {};
     active_profile_id_ = *profile_id;
+    return {};
 }
 
 const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcept
 {
     const FrontEndView view = BuildFrontEndView(front_end_state_, content_stage_, front_end_startup_model_);
     const std::size_t selected_main_row = static_cast<std::size_t>(view.selected_main_row);
-    if (selected_main_row >= front_end_main_draw_lists_.size())
-        return front_end_main_draw_lists_.front();
+    if (selected_main_row >= front_end_presentation_.main_draw_lists.size())
+        return front_end_presentation_.main_draw_lists.front();
 
     switch (view.mode)
     {
     case FrontEndMode::Main:
-        return front_end_main_draw_lists_[selected_main_row];
+        return front_end_presentation_.main_draw_lists[selected_main_row];
     case FrontEndMode::Profiles:
     {
         const std::size_t profile_slot = static_cast<std::size_t>(view.selected_profile_slot);
         if (profile_slot < view.profiles.visible_profiles &&
-            profile_slot < front_end_profile_selection_draw_lists_.size())
+            profile_slot < front_end_presentation_.profile_selection_draw_lists.size())
         {
-            return front_end_profile_selection_draw_lists_[profile_slot];
+            return front_end_presentation_.profile_selection_draw_lists[profile_slot];
         }
-        return front_end_profiles_draw_list_;
+        return front_end_presentation_.profiles_draw_list;
     }
     case FrontEndMode::Controls:
         return diagnostic_controls_draw_list_;
@@ -1692,7 +1894,7 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
     case FrontEndMode::DiagnosticPlay:
         return diagnostic_hidden_draw_list_;
     }
-    return front_end_main_draw_lists_.front();
+    return front_end_presentation_.main_draw_lists.front();
 }
 
 std::string_view OmegaApp::driver_name() const noexcept

@@ -41,6 +41,13 @@ struct RunReplaySessionConfig
     // three clamp to the bounded displayed slots. This is replay configuration,
     // not captured schema, profile identity, or persistence state.
     std::uint8_t front_end_visible_profile_slots = 0U;
+    // Startup snapshot cardinality used only to keep replay-owned first-profile
+    // creation closed unless both published counts began empty. Replay may advance
+    // the logical zero model to one; it performs no catalog or persistence work.
+    std::size_t front_end_total_profile_count = 0U;
+    // Default closed preserves legacy replay. Create gates this capability against
+    // both startup counts before any frame can reach the pure reducer.
+    FrontEndCapabilities front_end_capabilities{};
 
     friend constexpr bool operator==(
         const RunReplaySessionConfig&, const RunReplaySessionConfig&) noexcept = default;
@@ -252,7 +259,9 @@ private:
         runtime::RunCaptureReplaySession&& replay,
         std::optional<simulation::EntityId> debug_locomotion_entity,
         std::optional<FrontEndState> front_end_state,
-        std::uint8_t front_end_visible_profile_slots) noexcept;
+        std::uint8_t front_end_visible_profile_slots,
+        std::size_t front_end_total_profile_count,
+        FrontEndCapabilities front_end_capabilities) noexcept;
     void NormalizeInert() noexcept;
 
     std::optional<runtime::FrameScheduler> scheduler_;
@@ -261,6 +270,8 @@ private:
     std::optional<simulation::EntityId> debug_locomotion_entity_;
     std::optional<FrontEndState> front_end_state_;
     std::uint8_t front_end_visible_profile_slots_ = 0U;
+    std::size_t front_end_total_profile_count_ = 0U;
+    FrontEndCapabilities front_end_capabilities_{};
     RunReplaySessionState state_ = RunReplaySessionState::Inert;
 };
 } // namespace omega::app

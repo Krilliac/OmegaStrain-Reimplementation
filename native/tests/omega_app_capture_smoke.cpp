@@ -76,6 +76,19 @@ struct OmegaAppTestAccess final
             std::make_unique<NativePersistence>(std::move(persistence)), debug_device, {});
     }
 
+    [[nodiscard]] static std::expected<OmegaApp, std::string>
+    CreateWithPersistenceAndTextureConfig(
+        runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
+        runtime::ContentStartupState content, NativePersistence persistence,
+        const bool debug_device,
+        const runtime::RenderTexturePoolConfig texture_config)
+    {
+        return OmegaApp::CreateWithTextureConfig(std::move(config), settings,
+            std::move(content),
+            std::make_unique<NativePersistence>(std::move(persistence)),
+            debug_device, texture_config);
+    }
+
     [[nodiscard]] static bool InstallUnownedDiagnosticDraw(OmegaApp& app)
     {
         constexpr runtime::RenderTextureHandle unowned_texture{
@@ -108,10 +121,12 @@ struct OmegaAppTestAccess final
         if (!created)
             return false;
         app.diagnostic_hidden_draw_list_ = *created;
-        for (runtime::RenderDrawList& draw_list : app.front_end_main_draw_lists_)
+        for (runtime::RenderDrawList& draw_list :
+             app.front_end_presentation_.main_draw_lists)
             draw_list = *created;
-        app.front_end_profiles_draw_list_ = *created;
-        for (runtime::RenderDrawList& draw_list : app.front_end_profile_selection_draw_lists_)
+        app.front_end_presentation_.profiles_draw_list = *created;
+        for (runtime::RenderDrawList& draw_list :
+             app.front_end_presentation_.profile_selection_draw_lists)
             draw_list = *created;
         app.diagnostic_controls_draw_list_ = *created;
         app.diagnostic_asset_topology_draw_list_ = *created;
@@ -121,10 +136,12 @@ struct OmegaAppTestAccess final
     static void ClearDiagnosticDraw(OmegaApp& app) noexcept
     {
         app.diagnostic_hidden_draw_list_ = {};
-        for (runtime::RenderDrawList& draw_list : app.front_end_main_draw_lists_)
+        for (runtime::RenderDrawList& draw_list :
+             app.front_end_presentation_.main_draw_lists)
             draw_list = {};
-        app.front_end_profiles_draw_list_ = {};
-        for (runtime::RenderDrawList& draw_list : app.front_end_profile_selection_draw_lists_)
+        app.front_end_presentation_.profiles_draw_list = {};
+        for (runtime::RenderDrawList& draw_list :
+             app.front_end_presentation_.profile_selection_draw_lists)
             draw_list = {};
         app.diagnostic_controls_draw_list_ = {};
         app.diagnostic_asset_topology_draw_list_ = {};
@@ -159,13 +176,25 @@ struct OmegaAppTestAccess final
     [[nodiscard]] static runtime::RenderTextureHandle FrontEndTexture(
         const OmegaApp& app) noexcept
     {
-        return app.front_end_texture_;
+        return app.front_end_presentation_.main_texture;
     }
 
     [[nodiscard]] static runtime::RenderTextureHandle FrontEndProfilesTexture(
         const OmegaApp& app) noexcept
     {
-        return app.front_end_profiles_texture_;
+        return app.front_end_presentation_.profiles_texture;
+    }
+
+    [[nodiscard]] static std::optional<
+        std::array<runtime::RenderTextureHandle, 2U>>
+    InactiveFrontEndTextures(const OmegaApp& app) noexcept
+    {
+        if (!app.first_profile_presentation_)
+            return std::nullopt;
+        return std::array{
+            app.first_profile_presentation_->main_texture,
+            app.first_profile_presentation_->profiles_texture,
+        };
     }
 
     [[nodiscard]] static runtime::RenderTextureHandle DiagnosticControlsTexture(
@@ -196,20 +225,20 @@ struct OmegaAppTestAccess final
         kFrontEndMainRowCount>& FrontEndMainDrawLists(
         const OmegaApp& app) noexcept
     {
-        return app.front_end_main_draw_lists_;
+        return app.front_end_presentation_.main_draw_lists;
     }
 
     [[nodiscard]] static const runtime::RenderDrawList& FrontEndProfilesDrawList(
         const OmegaApp& app) noexcept
     {
-        return app.front_end_profiles_draw_list_;
+        return app.front_end_presentation_.profiles_draw_list;
     }
 
     [[nodiscard]] static const std::array<runtime::RenderDrawList,
         kFrontEndVisibleProfiles>& FrontEndProfileSelectionDrawLists(
         const OmegaApp& app) noexcept
     {
-        return app.front_end_profile_selection_draw_lists_;
+        return app.front_end_presentation_.profile_selection_draw_lists;
     }
 
     [[nodiscard]] static const runtime::RenderDrawList& DiagnosticControlsDrawList(
@@ -254,6 +283,24 @@ struct OmegaAppTestAccess final
         return app.active_profile_id_;
     }
 
+    [[nodiscard]] static bool CanCreateFirstProfile(
+        const OmegaApp& app) noexcept
+    {
+        return app.can_create_first_profile_;
+    }
+
+    [[nodiscard]] static bool ArmFirstProfileTimestamp(
+        OmegaApp& app, const std::uint64_t timestamp) noexcept
+    {
+        if (timestamp > profiles::kProfileTimestampMaxUnixMilliseconds ||
+            app.first_profile_timestamp_override_for_testing_)
+        {
+            return false;
+        }
+        app.first_profile_timestamp_override_for_testing_ = timestamp;
+        return true;
+    }
+
     [[nodiscard]] static std::optional<std::size_t> ProfileCatalogCount(
         OmegaApp& app)
     {
@@ -263,6 +310,17 @@ struct OmegaAppTestAccess final
         if (!listed)
             return std::nullopt;
         return listed->size();
+    }
+
+    [[nodiscard]] static std::optional<profiles::ProfileSummary> ReadProfile(
+        OmegaApp& app, const profiles::ProfileId id)
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        auto read = app.native_persistence_->profiles().Read(id);
+        if (!read || !*read)
+            return std::nullopt;
+        return std::move(**read);
     }
 
     [[nodiscard]] static std::optional<simulation::Position3>
@@ -1144,6 +1202,231 @@ void CheckPackedTransferUploadBudgetFallback(omega::app::OmegaApp& app,
     event.key.down = down;
     return SDL_PushEvent(&event);
 }
+
+void CheckExplicitFirstProfileCreation(
+    const std::filesystem::path& fixture_root,
+    const omega::runtime::RuntimeSettings& settings)
+{
+    using Access = omega::app::detail::OmegaAppTestAccess;
+    constexpr std::uint64_t kCreationTimestamp = 1'725'000'000'123ULL;
+    const auto first_profile_id = omega::profiles::ProfileId::Parse(
+        "00000000000000000000000000000001");
+    Check(first_profile_id.has_value(),
+        "the project-owned first-profile ID fixture parses");
+    if (!first_profile_id)
+        return;
+
+    const std::filesystem::path creation_root =
+        fixture_root / "native-explicit-first-profile";
+    auto persistence = omega::app::NativePersistence::Bootstrap(creation_root);
+    auto config = omega::runtime::ParseConfigText("");
+    std::optional<std::vector<omega::profiles::ProfileSummary>> initial_profiles;
+    if (persistence)
+    {
+        auto listed = persistence->profiles().List();
+        if (listed)
+            initial_profiles = std::move(*listed);
+    }
+    Check(persistence && config && persistence->startup_profiles().empty() &&
+              initial_profiles && initial_profiles->empty(),
+        "a fresh temporary native-persistence database starts with an exact empty catalog");
+
+    if (persistence && config && initial_profiles && initial_profiles->empty())
+    {
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            omega::runtime::ContentStartupState{}, std::move(*persistence), false);
+        Check(app.has_value(),
+            "an empty durable catalog starts with its first-profile presentation preloaded");
+        if (app)
+        {
+            constexpr std::uint64_t kFrontEndCardLogicalBytes =
+                128ULL * 72ULL * 4ULL;
+            constexpr std::uint64_t kTopologyLogicalBytes = 96ULL * 32ULL * 4ULL;
+            constexpr std::uint64_t kPreloadedLogicalBytes =
+                kFrontEndCardLogicalBytes * 6ULL + kTopologyLogicalBytes;
+            const auto initial_model = Access::FrontEndModel(*app);
+            const auto initial_gpu = Access::GpuSnapshot(*app);
+            const std::array initial_active_textures{
+                Access::FrontEndTexture(*app),
+                Access::FrontEndProfilesTexture(*app),
+            };
+            const auto initial_inactive_textures =
+                Access::InactiveFrontEndTextures(*app);
+            const bool preload_handles_are_distinct =
+                initial_inactive_textures && initial_active_textures[0].valid() &&
+                initial_active_textures[1].valid() &&
+                (*initial_inactive_textures)[0].valid() &&
+                (*initial_inactive_textures)[1].valid() &&
+                initial_active_textures[0] != initial_active_textures[1] &&
+                initial_active_textures[0] != (*initial_inactive_textures)[0] &&
+                initial_active_textures[0] != (*initial_inactive_textures)[1] &&
+                initial_active_textures[1] != (*initial_inactive_textures)[0] &&
+                initial_active_textures[1] != (*initial_inactive_textures)[1] &&
+                (*initial_inactive_textures)[0] != (*initial_inactive_textures)[1];
+            Check(initial_model == omega::app::FrontEndStartupModel{} &&
+                      Access::CanCreateFirstProfile(*app) &&
+                      !Access::ActiveProfile(*app) &&
+                      Access::ProfileCatalogCount(*app) ==
+                          std::optional<std::size_t>{0U} &&
+                      preload_handles_are_distinct &&
+                      initial_gpu.successful_uploads == 7U &&
+                      initial_gpu.successful_upload_logical_bytes ==
+                          kPreloadedLogicalBytes &&
+                      initial_gpu.textures.resident_slots == 7U &&
+                      initial_gpu.textures.resident_logical_bytes ==
+                          kPreloadedLogicalBytes,
+                "empty startup retains distinct complete empty and one-profile GPU presentations before mutation");
+
+            const auto run_plain_frame = [&app]() {
+                auto run = app->Run(1);
+                return run && run->input_frames == 1U &&
+                       run->rendered_frames == 1 && !run->quit_requested;
+            };
+            const bool entered_profiles =
+                PushKey(SDL_SCANCODE_DOWN, true) && run_plain_frame() &&
+                PushKey(SDL_SCANCODE_DOWN, false) && run_plain_frame() &&
+                PushKey(SDL_SCANCODE_F1, true) && run_plain_frame() &&
+                PushKey(SDL_SCANCODE_F1, false) && run_plain_frame();
+            constexpr omega::app::FrontEndState kProfilesFirst{
+                .mode = omega::app::FrontEndMode::Profiles,
+                .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+                .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+            };
+            Check(entered_profiles && Access::FrontEnd(*app) == kProfilesFirst,
+                "fresh logical edges navigate Main row one into the empty Profiles screen");
+
+            const bool timestamp_armed = Access::ArmFirstProfileTimestamp(
+                *app, kCreationTimestamp);
+            const auto gpu_before_create = Access::GpuSnapshot(*app);
+            const std::array active_textures_before_create{
+                Access::FrontEndTexture(*app),
+                Access::FrontEndProfilesTexture(*app),
+            };
+            const auto inactive_textures_before_create =
+                Access::InactiveFrontEndTextures(*app);
+            const auto scheduler_before_create =
+                Access::SchedulerSnapshot(*app);
+            const auto simulation_before_create =
+                Access::SimulationSnapshot(*app);
+            const bool creation_queued = PushKey(SDL_SCANCODE_F1, true);
+            auto creation_capture = app->RunWithCapture(1);
+            const auto gpu_after_create = Access::GpuSnapshot(*app);
+            const auto simulation_after_create =
+                Access::SimulationSnapshot(*app);
+            const auto created_model = Access::FrontEndModel(*app);
+            const auto created_record = Access::ReadProfile(*app, *first_profile_id);
+            const std::array active_textures_after_create{
+                Access::FrontEndTexture(*app),
+                Access::FrontEndProfilesTexture(*app),
+            };
+            const auto inactive_textures_after_create =
+                Access::InactiveFrontEndTextures(*app);
+            const bool presentations_swapped =
+                inactive_textures_before_create && inactive_textures_after_create &&
+                active_textures_after_create == *inactive_textures_before_create &&
+                *inactive_textures_after_create == active_textures_before_create;
+            const std::string_view projected_name{
+                created_model.profiles[0].label.cells.data(),
+                created_model.profiles[0].label.length};
+            Check(timestamp_armed && creation_queued && creation_capture &&
+                      creation_capture->completion() ==
+                          omega::app::RunCaptureCompletion::FrameLimitReached &&
+                      creation_capture->result().input_frames == 1U &&
+                      creation_capture->result().rendered_frames == 1 &&
+                      creation_capture->result().planned_simulation_steps == 0U &&
+                      creation_capture->result().executed_simulation_steps == 0U &&
+                      creation_capture->scheduler_state_before() ==
+                          scheduler_before_create &&
+                      creation_capture->scheduler_state_after() ==
+                          scheduler_before_create &&
+                      Access::SchedulerSnapshot(*app) == scheduler_before_create &&
+                      SameSimulationState(
+                          simulation_before_create, simulation_after_create) &&
+                      Access::FrontEnd(*app) == kProfilesFirst &&
+                      !Access::CanCreateFirstProfile(*app) &&
+                      !Access::ActiveProfile(*app) &&
+                      Access::ProfileCatalogCount(*app) ==
+                          std::optional<std::size_t>{1U} &&
+                      created_model.total_profiles == 1U &&
+                      created_model.visible_profiles == 1U &&
+                      created_model.profiles[0].id == *first_profile_id &&
+                      projected_name == omega::app::kFrontEndFirstProfileDisplayName &&
+                      created_record && created_record->id == *first_profile_id &&
+                      created_record->metadata.display_name ==
+                          omega::app::kFrontEndFirstProfileDisplayName &&
+                      created_record->metadata.created_unix_milliseconds ==
+                          kCreationTimestamp &&
+                      created_record->metadata.modified_unix_milliseconds ==
+                          kCreationTimestamp &&
+                      created_record->metadata_revision == 1U &&
+                      presentations_swapped &&
+                      IsOneVisibleMenuSubmission(
+                          gpu_before_create, gpu_after_create),
+                "captured Primary creates one PROFILE 1 durably, stays modal with frozen simulation, swaps the preloaded presentation, and performs no command-time GPU allocation");
+
+            const bool release_frame = PushKey(SDL_SCANCODE_F1, false) &&
+                                       run_plain_frame();
+            Check(release_frame && Access::FrontEnd(*app) == kProfilesFirst &&
+                      !Access::ActiveProfile(*app),
+                "the creation key release is inert and leaves the new profile unselected");
+            const bool selection_frame = PushKey(SDL_SCANCODE_F1, true) &&
+                                         run_plain_frame();
+            constexpr omega::app::FrontEndState kReturnedProfilesRow{
+                .mode = omega::app::FrontEndMode::Main,
+                .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+                .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+            };
+            Check(selection_frame &&
+                      Access::ActiveProfile(*app) == *first_profile_id &&
+                      Access::FrontEnd(*app) == kReturnedProfilesRow &&
+                      Access::ProfileCatalogCount(*app) ==
+                          std::optional<std::size_t>{1U},
+                "a second Primary after one release frame selects the durable first profile without another mutation");
+            Check(PushKey(SDL_SCANCODE_F1, false) && run_plain_frame(),
+                "the explicit first-profile selection key releases before teardown");
+        }
+    }
+
+    auto reopened = omega::app::NativePersistence::Bootstrap(creation_root);
+    Check(reopened && reopened->startup_profiles().size() == 1U &&
+              reopened->startup_profiles()[0].id == *first_profile_id &&
+              reopened->startup_profiles()[0].metadata.display_name ==
+                  omega::app::kFrontEndFirstProfileDisplayName &&
+              reopened->startup_profiles()[0].metadata.created_unix_milliseconds ==
+                  kCreationTimestamp &&
+              reopened->startup_profiles()[0].metadata.modified_unix_milliseconds ==
+                  kCreationTimestamp &&
+              reopened->startup_profiles()[0].metadata_revision == 1U,
+        "reopening native persistence observes exactly one fixed-ID PROFILE 1 record with the deterministic timestamps");
+
+    const std::filesystem::path constrained_root =
+        fixture_root / "native-first-profile-preflight";
+    auto constrained_persistence =
+        omega::app::NativePersistence::Bootstrap(constrained_root);
+    auto constrained_config = omega::runtime::ParseConfigText("");
+    bool startup_rejected_exactly = false;
+    if (constrained_persistence && constrained_config &&
+        constrained_persistence->startup_profiles().empty())
+    {
+        constexpr omega::runtime::RenderTexturePoolConfig kTightTexturePool{
+            .slot_capacity = 4U,
+        };
+        auto rejected = Access::CreateWithPersistenceAndTextureConfig(
+            std::move(*constrained_config), settings,
+            omega::runtime::ContentStartupState{},
+            std::move(*constrained_persistence), false, kTightTexturePool);
+        startup_rejected_exactly =
+            !rejected &&
+            rejected.error() ==
+                "SDL/GPU front-end profiles texture upload: render texture reserve: slot-capacity-exceeded";
+    }
+    Check(startup_rejected_exactly,
+        "a four-slot texture pool rejects startup while preloading the complete first-profile presentation");
+    auto constrained_reopened =
+        omega::app::NativePersistence::Bootstrap(constrained_root);
+    Check(constrained_reopened && constrained_reopened->startup_profiles().empty(),
+        "failed first-profile presentation preflight leaves the durable catalog empty");
+}
 } // namespace
 
 int main()
@@ -1268,6 +1551,8 @@ int main()
                     "DataMounted retains the synthetic 96x32 topology and exactly 159,744 resident bytes");
             }
         }
+
+        CheckExplicitFirstProfileCreation(generated_content.root(), settings);
 
         const std::filesystem::path profile_database_root =
             generated_content.root() / "native-profile-front-end";

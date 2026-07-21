@@ -16,9 +16,10 @@
 
 namespace
 {
-using omega::app::FrontEndInputEdges;
+using omega::app::FrontEndCapabilities;
 using omega::app::FrontEndCommand;
 using omega::app::FrontEndCommandType;
+using omega::app::FrontEndInputEdges;
 using omega::app::FrontEndLabel;
 using omega::app::FrontEndMainRow;
 using omega::app::FrontEndMode;
@@ -86,7 +87,8 @@ void Check(const bool condition, const std::string_view message)
 // Independent table-style oracle. It deliberately does not call a production
 // validity helper or use production navigation arithmetic.
 [[nodiscard]] constexpr FrontEndReduction ReferenceReduce(
-    FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots) noexcept
+    FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots,
+    const FrontEndCapabilities capabilities = {}) noexcept
 {
     const auto mode_byte = static_cast<std::uint8_t>(state.mode);
     const auto row_byte = static_cast<std::uint8_t>(state.selected_main_row);
@@ -123,6 +125,16 @@ void Check(const bool condition, const std::string_view message)
     {
         if (state.mode == FrontEndMode::Profiles)
         {
+            if (selectable_profiles == 0U && capabilities.can_create_first_profile)
+            {
+                return FrontEndReduction{
+                    .state = state,
+                    .command = FrontEndCommand{
+                        .type = FrontEndCommandType::CreateFirstProfile,
+                        .profile_slot = FrontEndProfileSlot::First,
+                    },
+                };
+            }
             if (!profile_slot_is_selectable)
             {
                 return FrontEndReduction{.state = FrontEndState{
@@ -381,7 +393,15 @@ void CheckReducerAndViewContract()
     static_assert(omega::app::kFrontEndNextAction == 3U);
     static_assert(omega::app::kFrontEndCancelAction == 7U);
     static_assert(omega::app::kFrontEndMainRowCount == 4U);
+    static_assert(omega::app::kFrontEndFirstProfileDisplayName == "PROFILE 1");
+    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::None) == 0U);
+    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::SetActiveProfile) == 1U);
+    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::CreateFirstProfile) == 2U);
+    static_assert(std::is_trivially_copyable_v<FrontEndCapabilities>);
+    static_assert(FrontEndCapabilities{} == FrontEndCapabilities{.can_create_first_profile = false});
     static_assert(noexcept(omega::app::ReduceFrontEnd({}, {}, 0U)));
+    static_assert(noexcept(omega::app::ReduceFrontEnd(
+        {}, {}, 0U, FrontEndCapabilities{.can_create_first_profile = true})));
     static_assert(noexcept(omega::app::FrontEndAllowsSimulation({})));
     static_assert(noexcept(omega::app::BuildFrontEndView(
         std::declval<FrontEndState>(), ContentStartupStage::NoContent,
@@ -402,7 +422,8 @@ void CheckReducerAndViewContract()
           "explicit startup opens Main while the default remains legacy "
           "DiagnosticPlay");
 
-    bool exhaustive_matches = true;
+    bool exhaustive_disabled_matches = true;
+    bool exhaustive_enabled_matches = true;
     bool exhaustive_gate_matches = true;
     constexpr std::array<std::uint8_t, 6U> profile_counts{0U, 1U, 2U, 3U, 4U, 0xffU};
     for (std::uint32_t mode = 0U; mode <= 0xffU; ++mode)
@@ -420,19 +441,30 @@ void CheckReducerAndViewContract()
             {
                 for (std::uint8_t mask = 0U; mask < 16U; ++mask)
                 {
-                    exhaustive_matches = exhaustive_matches &&
-                                         omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count) ==
-                                             ReferenceReduce(state, InputFromMask(mask), profile_count);
+                    exhaustive_disabled_matches =
+                        exhaustive_disabled_matches &&
+                        omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count) ==
+                            ReferenceReduce(state, InputFromMask(mask), profile_count);
+                    constexpr FrontEndCapabilities enabled{.can_create_first_profile = true};
+                    exhaustive_enabled_matches =
+                        exhaustive_enabled_matches &&
+                        omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count, enabled) ==
+                            ReferenceReduce(state, InputFromMask(mask), profile_count, enabled);
                 }
             }
         }
     }
-    Check(exhaustive_matches, "all 6291456 mode/row/count/edge combinations match "
-                              "the independent reducer oracle");
+    Check(exhaustive_disabled_matches,
+          "all 6291456 mode/row/count/edge combinations with the default-disabled "
+          "capability match the independent reducer oracle");
+    Check(exhaustive_enabled_matches,
+          "all 6291456 mode/row/count/edge combinations with first-profile "
+          "creation enabled match the independent reducer oracle");
     Check(exhaustive_gate_matches, "all 65536 byte-representable states allow "
                                    "simulation only in valid DiagnosticPlay");
 
-    bool exhaustive_slot_matches = true;
+    bool exhaustive_slot_disabled_matches = true;
+    bool exhaustive_slot_enabled_matches = true;
     bool exhaustive_slot_gate_matches = true;
     for (std::uint32_t mode = 0U; mode <= 4U; ++mode)
     {
@@ -452,17 +484,26 @@ void CheckReducerAndViewContract()
                 {
                     for (std::uint8_t mask = 0U; mask < 16U; ++mask)
                     {
-                        exhaustive_slot_matches = exhaustive_slot_matches &&
-                                                  omega::app::ReduceFrontEnd(
-                                                      state, InputFromMask(mask), profile_count) ==
-                                                      ReferenceReduce(state, InputFromMask(mask), profile_count);
+                        exhaustive_slot_disabled_matches =
+                            exhaustive_slot_disabled_matches &&
+                            omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count) ==
+                                ReferenceReduce(state, InputFromMask(mask), profile_count);
+                        constexpr FrontEndCapabilities enabled{.can_create_first_profile = true};
+                        exhaustive_slot_enabled_matches =
+                            exhaustive_slot_enabled_matches &&
+                            omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count, enabled) ==
+                                ReferenceReduce(state, InputFromMask(mask), profile_count, enabled);
                     }
                 }
             }
         }
     }
-    Check(exhaustive_slot_matches,
-          "all 491520 valid-mode/row and byte-slot/count/edge combinations match the independent oracle");
+    Check(exhaustive_slot_disabled_matches,
+          "all 491520 valid-mode/row and byte-slot/count/edge combinations with "
+          "the default-disabled capability match the independent oracle");
+    Check(exhaustive_slot_enabled_matches,
+          "all 491520 valid-mode/row and byte-slot/count/edge combinations with "
+          "first-profile creation enabled match the independent oracle");
     Check(exhaustive_slot_gate_matches,
           "every byte-representable profile slot gates simulation only when the complete state is valid");
 
@@ -577,6 +618,40 @@ void CheckReducerAndViewContract()
     Check(empty_is_fail_closed,
           "all empty-profile action combinations publish no command; navigation is inert and primary or cancel returns");
 
+    constexpr FrontEndCapabilities creation_enabled{.can_create_first_profile = true};
+    bool creatable_empty_edges_are_exact = true;
+    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
+    {
+        const FrontEndReduction reduced =
+            omega::app::ReduceFrontEnd(empty_profiles, InputFromMask(mask), 0U, creation_enabled);
+        FrontEndReduction expected{.state = empty_profiles};
+        if ((mask & 8U) != 0U)
+        {
+            expected.state = FrontEndState{
+                .mode = FrontEndMode::Main,
+                .selected_main_row = FrontEndMainRow::Profiles,
+                .selected_profile_slot = FrontEndProfileSlot::First,
+            };
+        }
+        else if ((mask & 1U) != 0U)
+        {
+            expected.command = FrontEndCommand{
+                .type = FrontEndCommandType::CreateFirstProfile,
+                .profile_slot = FrontEndProfileSlot::First,
+            };
+        }
+        creatable_empty_edges_are_exact = creatable_empty_edges_are_exact && reduced == expected;
+    }
+    Check(creatable_empty_edges_are_exact,
+          "empty creation is press-edge-only, remains in Profiles, outranks "
+          "navigation, and remains subordinate to cancel");
+
+    const FrontEndReduction create_edge = omega::app::ReduceFrontEnd(
+        empty_profiles, FrontEndInputEdges{.primary_pressed = true}, 0U, creation_enabled);
+    Check(create_edge.command.type == FrontEndCommandType::CreateFirstProfile &&
+              omega::app::ReduceFrontEnd(create_edge.state, {}, 0U, creation_enabled).command == FrontEndCommand{},
+          "a held primary level cannot republish creation without another routed press edge");
+
     Check(omega::app::ReduceFrontEnd(
               FrontEndState{
                   .mode = FrontEndMode::Profiles,
@@ -641,6 +716,15 @@ void CheckReducerAndViewContract()
 
 void CheckRasterContract()
 {
+    FrontEndStartupModel one_profile{
+        .total_profiles = 1U,
+        .visible_profiles = 1U,
+    };
+    one_profile.profiles[0].label.length =
+        static_cast<std::uint8_t>(omega::app::kFrontEndFirstProfileDisplayName.size());
+    std::ranges::copy(omega::app::kFrontEndFirstProfileDisplayName,
+                      one_profile.profiles[0].label.cells.begin());
+
     FrontEndStartupModel profiles{
         .total_profiles = 5U,
         .visible_profiles = 3U,
@@ -654,15 +738,33 @@ void CheckRasterContract()
     profiles.profiles[2].label.truncated = true;
 
     const DebugImage main_none = omega::app::BuildProjectFrontEndMainImage(ContentStartupStage::NoContent, 0U);
+    const DebugImage main_count_one =
+        omega::app::BuildProjectFrontEndMainImage(ContentStartupStage::NoContent, 1U);
     const DebugImage main_data = omega::app::BuildProjectFrontEndMainImage(ContentStartupStage::DataMounted, 3U);
     const DebugImage main_level = omega::app::BuildProjectFrontEndMainImage(ContentStartupStage::LevelContent, 1'024U);
     const DebugImage empty_profiles = omega::app::BuildProjectFrontEndProfilesImage({});
+    const DebugImage capability_disabled_empty = omega::app::BuildProjectFrontEndProfilesImage(
+        {}, FrontEndCapabilities{.can_create_first_profile = false});
+    const DebugImage creatable_empty = omega::app::BuildProjectFrontEndProfilesImage(
+        {}, FrontEndCapabilities{.can_create_first_profile = true});
+    const DebugImage one_profile_card = omega::app::BuildProjectFrontEndProfilesImage(one_profile);
     const DebugImage populated_profiles = omega::app::BuildProjectFrontEndProfilesImage(profiles);
     const DebugImage diagnostic = omega::app::BuildProjectFrontEndDiagnosticPlayImage();
     const DebugImage controls = omega::app::BuildProjectFrontEndControlsImage();
 
-    const std::array<const DebugImage *, 7U> cards{&main_none,          &main_data,  &main_level, &empty_profiles,
-                                                   &populated_profiles, &diagnostic, &controls};
+    const std::array<const DebugImage *, 11U> cards{
+        &main_none,
+        &main_count_one,
+        &main_data,
+        &main_level,
+        &empty_profiles,
+        &capability_disabled_empty,
+        &creatable_empty,
+        &one_profile_card,
+        &populated_profiles,
+        &diagnostic,
+        &controls,
+    };
     Check(std::ranges::all_of(cards, [](const DebugImage *image) { return IsOpaqueCard(*image); }),
           "all project front-end cards are tightly packed opaque 128x72 RGBA8 "
           "images");
@@ -676,13 +778,22 @@ void CheckRasterContract()
               PixelAt(main_data, 41U, 22U) == kCyanColor &&
               PixelAt(main_level, 42U, 23U) == kBackgroundColor,
         "content-stage probes independently distinguish NONE, DATA, and LEVEL labels");
+    Check(PixelAt(main_none, 104U, 22U) == kCyanColor &&
+              PixelAt(main_count_one, 104U, 22U) == kBackgroundColor &&
+              PixelAt(main_count_one, 105U, 22U) == kCyanColor,
+          "the count-one probe independently distinguishes the fixed one-digit profile count");
     Check(PixelAt(empty_profiles, 8U, 24U) == kSlateColor &&
               PixelAt(empty_profiles, 28U, 38U) == kCyanColor &&
               PixelAt(empty_profiles, 8U, 59U) == kSlateColor &&
+              PixelAt(creatable_empty, 17U, 32U) == kCyanColor &&
+              PixelAt(creatable_empty, 16U, 42U) == kCyanColor &&
+              PixelAt(one_profile_card, 16U, 28U) == kCyanColor &&
               PixelAt(populated_profiles, 17U, 28U) == kCyanColor &&
               PixelAt(populated_profiles, 113U, 48U) == kCyanColor,
-          "profile-card probes cover empty/populated panels and the scalar-safe "
-          "truncation marker");
+          "profile-card probes cover legacy-empty, creatable-empty, one-profile, "
+          "populated, and scalar-safe truncation paths");
+    Check(capability_disabled_empty.rgba8_pixels == empty_profiles.rgba8_pixels,
+          "an explicitly disabled creation capability preserves every legacy empty-card byte");
     Check(PixelAt(diagnostic, 8U, 34U) == kSlateColor &&
               PixelAt(diagnostic, 36U, 40U) == kCyanColor &&
               PixelAt(controls, 8U, 24U) == kSlateColor &&
@@ -714,6 +825,25 @@ void CheckRasterContract()
     };
     Check(hashes == expected_hashes, "all complete project front-end cards match "
                                      "their independently frozen hashes");
+
+    const std::array new_hashes{
+        Fnv1a64(main_count_one.pixels()),
+        Fnv1a64(creatable_empty.pixels()),
+        Fnv1a64(one_profile_card.pixels()),
+    };
+    std::cout << "first-profile card FNV-1a-64:";
+    for (const std::uint64_t hash : new_hashes)
+    {
+        std::cout << " 0x" << std::hex << std::setfill('0') << std::setw(16) << hash;
+    }
+    std::cout << std::dec << '\n';
+    constexpr std::array<std::uint64_t, 3U> expected_new_hashes{
+        0x28017f7f880b223aULL,
+        0xca45b40c018f0de6ULL,
+        0x6889eb81d787f146ULL,
+    };
+    Check(new_hashes == expected_new_hashes,
+          "count-one, creatable-empty, and one-profile cards match their independently frozen hashes");
 
     const auto topology_first = omega::app::BuildProjectFrontEndAssetTopologyImage();
     const auto topology_second = omega::app::BuildProjectFrontEndAssetTopologyImage();

@@ -120,10 +120,17 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
             RunReplayErrorCode::ReplayCreateFailed, replay.error()));
     }
 
+    FrontEndCapabilities front_end_capabilities = config.front_end_capabilities;
+    front_end_capabilities.can_create_first_profile =
+        front_end_capabilities.can_create_first_profile &&
+        config.front_end_visible_profile_slots == 0U &&
+        config.front_end_total_profile_count == 0U;
+
     RunReplaySession session(
         std::move(*scheduler), std::move(*world), std::move(*replay),
         debug_locomotion_entity, config.initial_front_end_state,
-        config.front_end_visible_profile_slots);
+        config.front_end_visible_profile_slots,
+        config.front_end_total_profile_count, front_end_capabilities);
     return std::expected<RunReplaySession, RunReplayError>{std::move(session)};
 }
 
@@ -132,13 +139,17 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
     runtime::RunCaptureReplaySession&& replay,
     const std::optional<simulation::EntityId> debug_locomotion_entity,
     const std::optional<FrontEndState> front_end_state,
-    const std::uint8_t front_end_visible_profile_slots) noexcept
+    const std::uint8_t front_end_visible_profile_slots,
+    const std::size_t front_end_total_profile_count,
+    const FrontEndCapabilities front_end_capabilities) noexcept
     : scheduler_(std::in_place, std::move(scheduler)),
       simulation_(std::in_place, std::move(simulation)),
       replay_(std::in_place, std::move(replay)),
       debug_locomotion_entity_(debug_locomotion_entity),
       front_end_state_(front_end_state),
       front_end_visible_profile_slots_(front_end_visible_profile_slots),
+      front_end_total_profile_count_(front_end_total_profile_count),
+      front_end_capabilities_(front_end_capabilities),
       state_(replay_->complete()
                  ? RunReplaySessionState::Complete
                  : RunReplaySessionState::Ready)
@@ -155,6 +166,10 @@ RunReplaySession::RunReplaySession(RunReplaySession&& other) noexcept
           other.front_end_state_, std::nullopt)),
       front_end_visible_profile_slots_(std::exchange(
           other.front_end_visible_profile_slots_, std::uint8_t{0U})),
+      front_end_total_profile_count_(std::exchange(
+          other.front_end_total_profile_count_, std::size_t{0U})),
+      front_end_capabilities_(std::exchange(
+          other.front_end_capabilities_, FrontEndCapabilities{})),
       state_(std::exchange(other.state_, RunReplaySessionState::Inert))
 {
     other.NormalizeInert();
@@ -166,6 +181,8 @@ void RunReplaySession::NormalizeInert() noexcept
     debug_locomotion_entity_.reset();
     front_end_state_.reset();
     front_end_visible_profile_slots_ = 0U;
+    front_end_total_profile_count_ = 0U;
+    front_end_capabilities_ = {};
     simulation_.reset();
     scheduler_.reset();
     state_ = RunReplaySessionState::Inert;
@@ -202,6 +219,12 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
     FrontEndCommand front_end_command{};
     if (front_end_state_)
     {
+        const FrontEndCapabilities front_end_capabilities{
+            .can_create_first_profile =
+                front_end_capabilities_.can_create_first_profile &&
+                front_end_visible_profile_slots_ == 0U &&
+                front_end_total_profile_count_ == 0U,
+        };
         const FrontEndReduction front_end = ReduceFrontEnd(*front_end_state_,
             FrontEndInputEdges{
                 .primary_pressed =
@@ -213,9 +236,17 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
                 .cancel_pressed =
                     replay_frame->input().WasPressed(kFrontEndCancelAction),
             },
-            front_end_visible_profile_slots_);
+            front_end_visible_profile_slots_, front_end_capabilities);
         *front_end_state_ = front_end.state;
         front_end_command = front_end.command;
+        if (front_end_command.type == FrontEndCommandType::CreateFirstProfile)
+        {
+            // Replay models the successful bounded command only. No identifier,
+            // clock, persistence owner, catalog, renderer, or GPU work is touched.
+            front_end_visible_profile_slots_ = 1U;
+            front_end_total_profile_count_ = 1U;
+            front_end_capabilities_.can_create_first_profile = false;
+        }
     }
     const bool simulation_allowed = !front_end_state_ ||
                                     FrontEndAllowsSimulation(
