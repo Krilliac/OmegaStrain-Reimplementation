@@ -20,6 +20,44 @@ inline constexpr std::uint64_t kMediaFoundationH262MaximumFrameBytes =
     static_cast<std::uint64_t>(kMediaFoundationH262MaximumWidth) *
     kMediaFoundationH262MaximumHeight * 3U / 2U;
 
+namespace detail {
+inline constexpr std::uint64_t kMediaFoundationTicksPerSecond = 10'000'000ULL;
+inline constexpr std::uint32_t
+    kMediaFoundationH262MaximumConsecutiveFormatChanges = 16U;
+
+// Internal policy helpers kept here so the platform-independent test target can
+// verify the exact cadence and output-progress invariants without requiring an
+// installed MPEG-2 Media Foundation transform.
+[[nodiscard]] constexpr bool MediaFoundationH262FrameRateHasPositiveCadence(
+    const std::uint32_t numerator, const std::uint32_t denominator) noexcept {
+  return numerator != 0U && denominator != 0U &&
+         static_cast<std::uint64_t>(numerator) <=
+             kMediaFoundationTicksPerSecond * denominator;
+}
+
+class MediaFoundationH262OutputProgress final {
+public:
+  [[nodiscard]] constexpr bool RecordFormatChangeWithoutOutput() noexcept {
+    if (consecutive_format_changes_ >=
+        kMediaFoundationH262MaximumConsecutiveFormatChanges) {
+      return false;
+    }
+    ++consecutive_format_changes_;
+    return true;
+  }
+
+  constexpr void RecordOutput() noexcept { consecutive_format_changes_ = 0U; }
+
+  [[nodiscard]] constexpr std::uint32_t
+  consecutive_format_changes() const noexcept {
+    return consecutive_format_changes_;
+  }
+
+private:
+  std::uint32_t consecutive_format_changes_ = 0U;
+};
+} // namespace detail
+
 struct MediaFoundationH262DecoderLimits {
   std::uint64_t maximum_input_chunk_bytes = 1ULL * 1024ULL * 1024ULL;
   std::uint64_t maximum_total_input_bytes =

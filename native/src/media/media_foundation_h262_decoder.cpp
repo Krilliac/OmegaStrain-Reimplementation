@@ -57,6 +57,12 @@ ValidateConfiguration(const H262SequenceHeaderFacts &sequence,
     return MakeError(ErrorCode::InvalidConfiguration, 0,
                      "NV12 decoding requires even H.262 dimensions");
   }
+  if (!detail::MediaFoundationH262FrameRateHasPositiveCadence(
+          sequence.frame_rate_numerator, sequence.frame_rate_denominator)) {
+    return MakeError(
+        ErrorCode::InvalidConfiguration, 0,
+        "H.262 frame rate cannot produce a positive 100ns duration");
+  }
   if (limits.maximum_input_chunk_bytes == 0U ||
       limits.maximum_total_input_bytes == 0U ||
       limits.maximum_output_bytes_per_call == 0U ||
@@ -246,6 +252,12 @@ ReadOutputFormat(IMFMediaType &type, const H262SequenceHeaderFacts &fallback,
         MakeError(ErrorCode::UnsupportedOutputLayout, 0,
                   "decoder published an unsupported NV12 layout"));
   }
+  if (!detail::MediaFoundationH262FrameRateHasPositiveCadence(
+          frame_rate_numerator, frame_rate_denominator)) {
+    return std::unexpected(MakeError(
+        ErrorCode::UnsupportedOutputLayout, 0,
+        "decoder published a frame rate with no positive 100ns duration"));
+  }
   const std::uint64_t frame_bytes =
       static_cast<std::uint64_t>(width) * height * 3U / 2U;
   if (frame_bytes == 0U ||
@@ -274,6 +286,7 @@ SelectNv12OutputType(IMFTransform &transform, const DWORD output_stream_id,
                      const H262SequenceHeaderFacts &sequence,
                      const MediaFoundationH262DecoderLimits &limits) {
   HRESULT last_result = MF_E_INVALIDMEDIATYPE;
+  std::optional<Error> best_error;
   for (DWORD index = 0U; index < kMaximumOutputTypes; ++index) {
     ComPtr<IMFMediaType> type;
     const HRESULT available = transform.GetOutputAvailableType(
@@ -292,8 +305,10 @@ SelectNv12OutputType(IMFTransform &transform, const DWORD output_stream_id,
       continue;
     }
     auto format = ReadOutputFormat(*type.Get(), sequence, limits);
-    if (!format)
-      return std::unexpected(std::move(format.error()));
+    if (!format) {
+      best_error = std::move(format.error());
+      continue;
+    }
 
     HRESULT result = transform.SetOutputType(output_stream_id, type.Get(),
                                              MFT_SET_TYPE_TEST_ONLY);
@@ -302,7 +317,12 @@ SelectNv12OutputType(IMFTransform &transform, const DWORD output_stream_id,
     if (SUCCEEDED(result))
       return OutputSelection{.type = std::move(type), .format = *format};
     last_result = result;
+    best_error =
+        HresultError(ErrorCode::OutputTypeUnavailable, result,
+                     "decoder rejected an advertised NV12 output type");
   }
+  if (best_error)
+    return std::unexpected(std::move(*best_error));
   return std::unexpected(
       HresultError(ErrorCode::OutputTypeUnavailable, last_result,
                    "decoder exposes no accepted NV12 output type"));
@@ -405,7 +425,7 @@ public:
 
   void Reconfigure(const std::uint32_t numerator,
                    const std::uint32_t denominator) noexcept {
-    step_numerator_ = 10'000'000ULL * denominator;
+    step_numerator_ = detail::kMediaFoundationTicksPerSecond * denominator;
     step_denominator_ = numerator;
     remainder_ = 0U;
   }
@@ -682,21 +702,23 @@ struct MediaFoundationH262Decoder::Impl {
 
     std::uint64_t output_bytes = 0U;
     auto append_from_sample = [&](IMFSample &sample) -> std::optional<Error> {
-      auto frame = CopyNv12Frame(sample, output_format, clock);
-      if (!frame)
-        return Poison(std::move(frame.error()));
-      const std::uint64_t frame_bytes = frame->pixels.size();
       if (frames.size() >= limits.maximum_frames_per_call ||
           decoded_frame_count >= limits.maximum_total_frames) {
         return Poison(
             MakeError(ErrorCode::FrameLimitExceeded, 0,
                       "decoded frame count exceeds a configured limit"));
       }
+      const std::uint64_t frame_bytes =
+          static_cast<std::uint64_t>(output_format.width) *
+          output_format.height * 3U / 2U;
       if (frame_bytes > limits.maximum_output_bytes_per_call - output_bytes) {
         return Poison(
             MakeError(ErrorCode::OutputLimitExceeded, 0,
                       "decoded frame bytes exceed the per-call output limit"));
       }
+      auto frame = CopyNv12Frame(sample, output_format, clock);
+      if (!frame)
+        return Poison(std::move(frame.error()));
       try {
         frames.push_back(std::move(*frame));
       } catch (const std::bad_alloc &) {
@@ -708,6 +730,7 @@ struct MediaFoundationH262Decoder::Impl {
       }
       output_bytes += frame_bytes;
       ++decoded_frame_count;
+      output_progress.RecordOutput();
       return std::nullopt;
     };
 
@@ -780,6 +803,12 @@ struct MediaFoundationH262Decoder::Impl {
       }
       if (result == MF_E_TRANSFORM_STREAM_CHANGE ||
           output.dwStatus == MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE) {
+        if (!output_progress.RecordFormatChangeWithoutOutput()) {
+          return std::unexpected(Poison(MakeError(
+              ErrorCode::TransformFailure, 0,
+              "MPEG-2 decoder exceeded the consecutive output format-change "
+              "limit without producing a frame")));
+        }
         auto selection = SelectNv12OutputType(
             *transform.Get(), output_stream_id, sequence, limits);
         if (!selection) {
@@ -832,6 +861,7 @@ struct MediaFoundationH262Decoder::Impl {
   bool output_stream_ended = false;
   std::uint64_t accepted_input_bytes = 0U;
   std::uint64_t decoded_frame_count = 0U;
+  detail::MediaFoundationH262OutputProgress output_progress;
   ComPtr<IMFTransform> transform;
   DWORD input_stream_id = 0U;
   DWORD output_stream_id = 0U;
@@ -1041,7 +1071,8 @@ MediaFoundationH262DecodeResult MediaFoundationH262Decoder::Drain() {
       SendMessage(*impl_->transform.Get(), MFT_MESSAGE_NOTIFY_END_OF_STREAM,
                   static_cast<ULONG_PTR>(impl_->input_stream_id));
   if (SUCCEEDED(result))
-    result = SendMessage(*impl_->transform.Get(), MFT_MESSAGE_COMMAND_DRAIN);
+    result = SendMessage(*impl_->transform.Get(), MFT_MESSAGE_COMMAND_DRAIN,
+                         static_cast<ULONG_PTR>(impl_->input_stream_id));
   if (FAILED(result)) {
     return std::unexpected(
         impl_->Poison(HresultError(ErrorCode::TransformFailure, result,
