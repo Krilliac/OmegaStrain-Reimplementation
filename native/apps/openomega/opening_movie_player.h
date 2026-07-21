@@ -141,15 +141,17 @@ public:
   // [creating game/main thread] Advances the project-owned playback clock,
   // incrementally feeds bounded PES payload slices, and publishes the newest
   // decoded frame due at that clock. Advance(0ns) transitions Ready to Playing
-  // and may publish the first frame. Any unexpected result permanently marks
-  // the player Failed; later calls return the identical categorical error.
+  // and may publish the first frame. WrongThread and MovedFrom are non-mutating
+  // boundary errors; errors reached after those checks permanently mark the
+  // player Failed, and later calls return the identical categorical error.
   [[nodiscard]] std::expected<OpeningMoviePlayerUpdate, OpeningMoviePlayerError>
   Advance(std::chrono::nanoseconds elapsed);
 
   // [creating game/main thread] After the first video frame has been published, decodes up to the
   // caller's frame-aligned stereo capacity into host-endian signed PCM16. The returned count is in
   // stereo frames and may be smaller only at stream end. The player advances its audio cursor only
-  // for samples written successfully; no allocation occurs.
+  // for samples written successfully; no allocation occurs. WrongThread and MovedFrom are the same
+  // non-mutating boundary errors described for Advance.
   [[nodiscard]] std::expected<std::uint64_t, OpeningMoviePlayerError>
   ReadAudioFrames(std::span<std::int16_t> interleaved_samples);
   // [creating game/main thread] True once every validated PCM frame has been returned.
