@@ -415,6 +415,61 @@ class PublicTreeGateTests(unittest.TestCase):
                     )
                 )
 
+    def test_serialized_owner_home_paths_are_blocked_after_separator_unescaping(self) -> None:
+        drive = b"C:"
+        escaped_leaks = (
+            drive + rb"\\Users\\alice\\private.json",
+            b'const char* path = "' + drive + rb"\\Users\\bob\\private.bin" + b'";',
+            drive + rb"\\\\Users\\\\carol\\\\nested.txt",
+        )
+        for leak in escaped_leaks:
+            with self.subTest(leak=leak):
+                self.assertTrue(
+                    any(
+                        "owner-home path" in error
+                        for error in self.errors("serialized.txt", leak)
+                    )
+                )
+
+    def test_shared_system_and_lexical_home_segments_are_not_blocked(self) -> None:
+        self.assertEqual(
+            gate.NON_OWNER_HOME_SEGMENTS,
+            frozenset({".", "..", "all", "default", "guest", "public", "shared"}),
+        )
+        drive = b"C:"
+        safe_paths = (
+            drive + rb"\Users\Public\Documents",
+            drive + rb"\Users\Default\AppData",
+            drive + rb"\Users\Default User\AppData",
+            drive + rb"\Users\All Users\Application Data",
+            b"/Users" + b"/Shared/Library",
+            b"/home" + b"/../etc",
+        )
+        for safe in safe_paths:
+            with self.subTest(safe=safe):
+                self.assertFalse(
+                    any(
+                        "owner-home path" in error
+                        for error in self.errors("docs/note.md", safe)
+                    )
+                )
+
+    def test_real_owner_path_after_an_exempt_home_path_is_still_blocked(self) -> None:
+        drive = b"C:"
+        text = (
+            drive
+            + rb"\Users\Public\Documents"
+            + b" then "
+            + drive
+            + rb"\Users\alice\private"
+        )
+        self.assertTrue(
+            any(
+                "owner-home path" in error
+                for error in self.errors("docs/note.md", text)
+            )
+        )
+
     def test_generic_home_placeholders_are_not_blocked(self) -> None:
         for safe in (
             b"documented under <user>/OpenOmega",
