@@ -38,6 +38,9 @@ a regression. See `docs/01-Clean-Room-Method.md` and `analysis/evidence/ledger.j
 - Ledger entry `E-0101` records the FNT/GUI/IE passive-descriptor boundary and keeps owner-corpus
   acceptance, UI/font semantics, consumer bindings, runtime integration, and retail parity
   explicitly unclaimed.
+- Ledger entry `E-0113` records the separate native HOG-member coverage command for those passive
+  descriptors. Its schema-version-1 acceptance/rejection totals are project-passive coverage only;
+  no owner-corpus result or semantic promotion is recorded.
 - Ledger entry `E-0102` records the bounded private-stream PCM planner/deinterleaver and its native
   opening-movie SDL presentation path. That path presents one external stream which passes a
   project-defined provisional MPEG-PS/H.262/PCM compatibility shape; it does not independently
@@ -48,13 +51,16 @@ a regression. See `docs/01-Clean-Room-Method.md` and `analysis/evidence/ledger.j
 
 ### 1. Evidence collection to unblock semantic front-end decoding (highest priority)
 
-The bounded size-only collector is implemented and synthetically verified; see
+The bounded size-only collector and the separate E-0113 passive-acceptance command are implemented;
+see
 `tools/measure_member_structural_fingerprint.py`,
-`analysis/formats/MEMBER-STRUCTURAL-FINGERPRINT.md`, and ledger E-0097. The next step is a private
-owner-corpus run followed by independent review of only the fixed-schema aggregate. That result is
-not yet tracked. It is now a coverage aid for the passive descriptors, not a prerequisite for their
-existence and not a semantic promotion. Consumer behavior and a falsifiable deeper grammar still
-need independent corroboration before any opaque region becomes a typed field or IR.
+`analysis/formats/MEMBER-STRUCTURAL-FINGERPRINT.md`,
+`analysis/formats/FRONTEND-ENVELOPE-COVERAGE.md`, and ledger entries E-0097/E-0113. The next step is
+a private owner-corpus run followed by independent review of only the selected fixed-schema
+aggregate. No such result is tracked. Both tools are coverage aids for the passive descriptors, not
+prerequisites for their existence and not semantic promotions. Consumer behavior and a falsifiable
+deeper grammar still need independent corroboration before any opaque region becomes a typed field
+or IR.
 
 Frozen contract for the bounded, privacy-safe structural fingerprint collector:
 

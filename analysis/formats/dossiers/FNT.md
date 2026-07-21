@@ -32,6 +32,9 @@ glyph, metric, texture, render, menu, or other asset semantics.
   failures.
 - `analysis/formats/DECODER-COVERAGE.md` classifies `.fnt` as
   `passive_descriptor_only`; no canonical or semantic decoder is claimed.
+- E-0113's `frontend-envelope-coverage-verify-tree` command can count project-passive descriptor
+  acceptance for HOG-contained FNT candidates. Its generated fixtures are implementation evidence;
+  no owner-corpus coverage result is recorded, and the tracked occurrence totals remain unchanged.
 ## 4. Aggregate-only facts
 
 The aggregate inventories still carry occurrence totals and the derived nested count only; no

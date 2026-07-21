@@ -1546,7 +1546,6 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     remote compilation/execution and exact-main validation remain pending. No private, owner,
     proprietary, D-drive, emulator, or PCSX2 input was accessed. This is not a retail/PS2 campaign,
     save, checkpoint, gameplay, continuation, world-state, memory-card, emulator, or parity claim.
-
 88. E-0112 completes one project-owned native bootstrap from profile confirmation through character
     creation/selection and a BriefingRoom/mission-selection surface into DiagnosticPlay.
     `CharacterCatalog` owns profile-scoped metadata beneath
@@ -1580,6 +1579,19 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     customization, appearance, loadout, combat, campaign, mission catalog, scene, checkpoint,
     world-state, save, or behavioral parity.
 
+89. E-0113 adds one bounded project-passive coverage command for the existing FNT, GUI, and IE
+    prefix/envelope descriptors. `omega_tool frontend-envelope-coverage-verify-tree <root>` performs
+    identity-guarded traversal and identity-bound HOG reads, rejects links/reparse points and
+    identity changes, ignores loose candidates, and follows nested members classified by an
+    ASCII-case-insensitive `.hog` suffix to depth 32. Its deterministic schema-version-1 JSON
+    retains only per-family candidate, acceptance,
+    and typed-rejection totals; it is distinct from E-0110 topology schema version 3, where `.fnt`
+    remains `other`. Infrastructure failures discard partial observations and emit a zero report
+    plus one fixed path-free category. Generated fixtures exercise nested exact/padded HOGs, typed
+    rejection counts, privacy equivalence, unsafe entries, resource limits, and replacement/mutation
+    races. No owner-corpus run is recorded. This is not retail validity, semantic decoding,
+    font/widget/layout/binding/rendering evidence, a retail menu reconstruction, or PCSX2 parity.
+
 ## Disc observations
 
 - The root contains `SYSTEM.CNF`, `SCUS_972.64`, `OVL_DNAS.BIN`, `SFO_GAME.INI`, and PS2
@@ -1600,13 +1612,16 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
 
 ## Next focused pass
 
-1. Publish E-0112 through protected-main CI and validate the exact merged tree. Preserve the working
-   profile -> character -> BriefingRoom/mission selector -> session route while replacing only
-   independently evidenced pieces of the current diagnostic topology/marker view with native level,
-   actor, camera, and control behavior.
+1. Preserve the merged E-0112 profile -> character -> BriefingRoom/mission selector -> session
+   route while replacing only independently evidenced pieces of the current diagnostic
+   topology/marker view with native level, actor, camera, and control behavior.
    Keep the project schemas explicit, transactional, and independent of PS2 save representation;
    do not infer retail customization, mission, world, or save behavior from the bootstrap itself.
-2. Treat E-0099 as runnable-tool and configuration-initialization readiness only. Before any new
+2. Run E-0113's fixed-schema coverage command privately only when owner-input access is explicitly
+   authorized. Review and retain only the aggregate; acceptance measures the current project-defined
+   descriptor boundary and cannot promote an opaque payload/root to a semantic IR. Require a
+   falsifiable deeper grammar plus independent consumer evidence before adding UI/font fields.
+3. Treat E-0099 as runnable-tool and configuration-initialization readiness only. Before any new
    observation, prepare a fresh neutral-menu savestate under the enforced modes and run the private
    producer's synthetic contract and security checks outside every OpenOmega worktree. Then collect
    the first ten-run `omega-frontend-trace-v1` matrix with private sites and inputs, accept only
@@ -1619,7 +1634,7 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
    material, packet, draw, placement, visibility, or gameplay semantics from the current header-only
    aggregate rows or the absence of VIF1 chunks. A zero VIF1 count does not rule out copied buffers
    or consumption outside the bounded observation window.
-3. Use E-0041's ineligible partition only to prioritize controlled observations of retail name
+4. Use E-0041's ineligible partition only to prioritize controlled observations of retail name
    lookup and MTRL-record consumption. Test one-pass extension removal, basename/stem/suffix, or
    other alias behavior as separate bounded experiments because E-0041 excludes them. Do not connect
    `MaterialCatalogIR` to `LevelTextureStore` until lookup behavior and material consumption are
@@ -1633,16 +1648,16 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
    still references only the existing project-generated diagnostic texture. It does not connect an
    asset, decoded texture storage, catalog name, material record, locator, cell, or mesh to a draw
    command.
-4. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
+5. Validate the TDX scorer's favored direct-family nibble and palette candidates through an
    independent behavioral oracle; separately resolve transfer-`0x00` swizzle and channel expansion
    before producing display-ready pixels or GPU uploads.
-5. Continue POP beyond the now-native guarded hypothesis envelope only through independent evidence.
+6. Continue POP beyond the now-native guarded hypothesis envelope only through independent evidence.
    Test record-internal invariants and controlled behavioral consumption before promoting any literal
    to a boundary or any observed word/stride to count or record semantics; independently connect
    consumed fields to placement or visibility behavior. Passive-descriptor acceptance is a
    conformity check, not semantic corroboration.
-6. Capture PS Rewired network behavior separately before designing any replacement service.
-7. Run the synthetically verified size-only HOG-member collector privately for `.gui/.fnt/.ie`,
+7. Capture PS Rewired network behavior separately before designing any replacement service.
+8. Run the synthetically verified size-only HOG-member collector privately for `.gui/.fnt/.ie`,
    review only its fixed-schema aggregate, and keep the semantic GUI-envelope gate closed unless a
    separate falsifiable grammar plus consumer evidence emerges.
 

@@ -69,7 +69,20 @@ python -B .\tools\hog.py `
 
 .\build\msvc\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe frontend-envelope-coverage-verify-tree .\private\extracted-disc
 ```
 
 Extraction refuses absolute paths, `.`/`..` components, empty components, and any destination
 that resolves outside the requested output root.
+
+## Passive-envelope coverage consumer
+
+`frontend-envelope-coverage-verify-tree` uses identity-guarded traversal and identity-bound HOG
+reads. It discovers regular top-level `.HOG` files under one supplied root, rejects links and
+reparse points, and follows nested members classified by an ASCII-case-insensitive `.hog` suffix
+through bounded random-access directory parsing to depth 32. Each FNT, GUI, or IE candidate is
+size-checked, read into one temporary owned buffer of at most 1 MiB, inspected, and released before
+the next candidate. The scanner does not materialize a separate full-archive buffer; it owns only
+the bounded indexes for the active nesting chain and at most one candidate buffer at a time. This is
+not a constant-memory claim or a new HOG-layout inference. See
+`FRONTEND-ENVELOPE-COVERAGE.md` and ledger E-0113.
