@@ -16,6 +16,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -26,6 +27,8 @@ namespace
 {
 constexpr std::string_view kExpectedBootExecutable = "SCUS_972.64";
 constexpr std::string_view kExpectedBootValue = "CDROM0:\\SCUS_972.64;1";
+constexpr std::string_view kOpeningMovieArchiveGamePath = "ZMEDIA/ZMOVIES.HOG";
+constexpr std::string_view kOpeningMovieArchiveMountRoot = "OPENING_MOVIE_ARCHIVE";
 constexpr std::size_t kMaximumLevelCodeBytes = 32;
 
 [[nodiscard]] bool HasIsoExtension(const std::filesystem::path& path)
@@ -49,6 +52,13 @@ constexpr std::size_t kMaximumLevelCodeBytes = 32;
     }
     return true;
 }
+
+enum class OpeningMovieArchiveState
+{
+    Missing,
+    Unavailable,
+    Ready,
+};
 
 struct SourceIdentityToken final
 {
@@ -667,6 +677,9 @@ struct GameDataService::Impl
     GameDataIdentity identity;
     vfs::VirtualFileSystem files;
     GameDataServiceConfig config;
+    OpeningMovieArchiveState opening_movie_archive_state =
+        OpeningMovieArchiveState::Missing;
+    std::optional<archive::HogIndex> opening_movie_archive_index;
     std::shared_ptr<const void> source_identity = std::make_shared<SourceIdentityToken>();
 };
 
@@ -732,6 +745,36 @@ std::expected<GameDataService, GameDataError> GameDataService::Open(
     if (!mounted)
         return std::unexpected(Error(GameDataErrorCode::MountFailed,
             "unable to mount game-data root"));
+
+    const std::filesystem::path opening_movie_archive_path =
+        impl->config.root / "ZMEDIA" / "ZMOVIES.HOG";
+    std::error_code opening_movie_archive_error;
+    const bool opening_movie_archive_exists = std::filesystem::exists(
+        opening_movie_archive_path, opening_movie_archive_error);
+    if (opening_movie_archive_error)
+    {
+        impl->opening_movie_archive_state = OpeningMovieArchiveState::Unavailable;
+    }
+    else if (opening_movie_archive_exists)
+    {
+        impl->opening_movie_archive_state = OpeningMovieArchiveState::Unavailable;
+        const bool opening_movie_archive_is_file = std::filesystem::is_regular_file(
+            opening_movie_archive_path, opening_movie_archive_error);
+        if (!opening_movie_archive_error && opening_movie_archive_is_file)
+        {
+            auto index = archive::HogIndex::Open(opening_movie_archive_path);
+            if (index)
+            {
+                auto movie_mounted = impl->files.MountHog(
+                    kOpeningMovieArchiveMountRoot, opening_movie_archive_path);
+                if (movie_mounted)
+                {
+                    impl->opening_movie_archive_index = std::move(*index);
+                    impl->opening_movie_archive_state = OpeningMovieArchiveState::Ready;
+                }
+            }
+        }
+    }
     impl->files.Freeze();
 
     if (!impl->files.Contains("SYSTEM.CNF"))
@@ -769,6 +812,32 @@ GameDataService& GameDataService::operator=(GameDataService&&) noexcept = defaul
 const GameDataIdentity& GameDataService::identity() const noexcept
 {
     return impl_->identity;
+}
+
+std::expected<asset::OpeningMovieSource, GameDataError>
+GameDataService::LoadOpeningMovieSource(const std::string_view member_name) const
+{
+    asset::DecodeLimits limits;
+    limits.maximum_input_bytes = asset::kOpeningMovieMaximumSourceBytes;
+    limits.maximum_output_bytes = asset::kOpeningMovieMaximumSourceBytes;
+    limits.maximum_nesting_depth = 0U;
+
+    auto resolved = ResolveSourceLocator(source_binding(), asset::SourceLocator{
+        .game_path = std::string(kOpeningMovieArchiveGamePath),
+        .hog_entries = {std::string(member_name)},
+    }, limits);
+    if (!resolved)
+        return std::unexpected(resolved.error());
+
+    auto source = asset::OpeningMovieSource::Create(
+        std::move(resolved->terminal_bytes));
+    if (!source)
+    {
+        return std::unexpected(DecodeFailure("unable to load opening movie source",
+            AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "opening movie source exceeds the input limit")));
+    }
+    return std::move(*source);
 }
 
 GameDataService::SourceBinding GameDataService::source_binding() const noexcept
@@ -825,6 +894,80 @@ GameDataService::ResolveSourceLocator(const SourceBinding& expected_source,
             return std::unexpected(DecodeFailure(
                 "invalid source locator", normalized.error()));
         normalized_components.push_back(std::move(*normalized));
+    }
+
+    if (*normalized_game_path == kOpeningMovieArchiveGamePath &&
+        normalized_components.size() == 1U)
+    {
+        if (impl_->opening_movie_archive_state == OpeningMovieArchiveState::Missing)
+        {
+            return std::unexpected(Error(GameDataErrorCode::MissingRequiredFile,
+                "opening movie archive is unavailable"));
+        }
+        if (impl_->opening_movie_archive_state != OpeningMovieArchiveState::Ready ||
+            !impl_->opening_movie_archive_index)
+        {
+            return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+                "opening movie archive is unavailable"));
+        }
+
+        const archive::HogEntry* selected_entry = nullptr;
+        for (const auto& entry : impl_->opening_movie_archive_index->entries())
+        {
+            auto normalized_entry = vfs::NormalizeGamePath(entry.name);
+            if (normalized_entry && *normalized_entry == normalized_components.front())
+            {
+                selected_entry = &entry;
+                break;
+            }
+        }
+        if (selected_entry == nullptr)
+        {
+            return std::unexpected(DecodeFailure("unable to load opening movie source",
+                AssetError(asset::DecodeErrorCode::InvalidReference,
+                    "opening movie member does not resolve")));
+        }
+
+        auto terminal_limit = budget.CheckTerminal(selected_entry->size);
+        if (!terminal_limit)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to load opening movie source", terminal_limit.error()));
+        }
+
+        std::uint64_t mounted_path_workspace = 0U;
+        if (!Add(kOpeningMovieArchiveMountRoot.size() + 1U,
+                normalized_components.front().size(), mounted_path_workspace) ||
+            !Add(*locator_workspace, mounted_path_workspace, mounted_path_workspace))
+        {
+            return std::unexpected(DecodeFailure("unable to load opening movie source",
+                AssetError(asset::DecodeErrorCode::Overflow,
+                    "opening movie member workspace size overflows")));
+        }
+        auto mounted_path_scratch = budget.ObserveScratch(mounted_path_workspace);
+        if (!mounted_path_scratch)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to load opening movie source", mounted_path_scratch.error()));
+        }
+
+        std::string mounted_member_path(kOpeningMovieArchiveMountRoot);
+        mounted_member_path.push_back('/');
+        mounted_member_path += normalized_components.front();
+        auto source_bytes = impl_->files.Read(
+            mounted_member_path, asset::kOpeningMovieMaximumSourceBytes);
+        if (!source_bytes || source_bytes->size() != selected_entry->size)
+        {
+            return std::unexpected(Error(GameDataErrorCode::ReadFailed,
+                "unable to read opening movie member"));
+        }
+        return ResolvedSourceLocator{
+            .terminal_bytes = std::move(*source_bytes),
+            .ancestor_input_bytes = 0U,
+            .ancestor_directory_items = 0U,
+            .archive_depth = 0U,
+            .peak_scratch_bytes = budget.peak_scratch_bytes(),
+        };
     }
 
     if (!impl_->files.Contains(*normalized_game_path))

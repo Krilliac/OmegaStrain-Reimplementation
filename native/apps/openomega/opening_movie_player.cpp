@@ -6,6 +6,9 @@
 #include "omega/media/mpeg_program_stream_descriptor.h"
 #include "omega/media/mpeg_video_elementary_stream.h"
 #include "omega/media/pss_pcm_audio_stream.h"
+// Completes asset::OpeningMovieSource through the allowed runtime/content edge
+// rather than a direct omega_assets dependency from the app module.
+#include "omega/runtime/content_startup.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -22,6 +25,11 @@
 #include <vector>
 
 namespace omega::app {
+// The app-owned ceiling and the asset-owned source ceiling are one policy and
+// may not drift; the layering rule keeps them declared in separate modules.
+static_assert(kOpeningMovieMaximumSourceBytes ==
+              asset::kOpeningMovieMaximumSourceBytes);
+
 namespace {
 using Error = OpeningMoviePlayerError;
 using ErrorCode = OpeningMoviePlayerErrorCode;
@@ -299,20 +307,29 @@ OpeningMoviePlayer::~OpeningMoviePlayer() = default;
 
 std::expected<OpeningMoviePlayer, OpeningMoviePlayerError>
 OpeningMoviePlayer::Create(const std::filesystem::path &path) {
-  try {
-    auto source = ReadSource(path);
-    if (!source)
-      return std::unexpected(source.error());
+  auto bytes = ReadSource(path);
+  if (!bytes)
+    return std::unexpected(bytes.error());
+  auto source = asset::OpeningMovieSource::Create(std::move(*bytes));
+  if (!source)
+    return std::unexpected(MakeError(ErrorCode::InputLimitExceeded));
+  return Create(std::move(*source));
+}
 
-    auto descriptor = media::InspectMpegProgramStream(*source);
+std::expected<OpeningMoviePlayer, OpeningMoviePlayerError>
+OpeningMoviePlayer::Create(asset::OpeningMovieSource source_owner) {
+  try {
+    std::vector<std::byte> source = std::move(source_owner).TakeBytes();
+
+    auto descriptor = media::InspectMpegProgramStream(source);
     if (!descriptor)
       return std::unexpected(MakeError(ErrorCode::ProgramStreamRejected));
-    auto plan = media::BuildMpegVideoElementaryStreamPlan(*source, *descriptor);
+    auto plan = media::BuildMpegVideoElementaryStreamPlan(source, *descriptor);
     if (!plan)
       return std::unexpected(MakeError(ErrorCode::VideoStreamRejected));
     media::H262SequenceHeaderFacts sequence;
     {
-      auto view = media::BorrowMpegVideoElementaryStream(*plan, *source);
+      auto view = media::BorrowMpegVideoElementaryStream(*plan, source);
       if (!view)
         return std::unexpected(MakeError(ErrorCode::VideoStreamRejected));
       auto inspected_sequence = media::InspectH262SequenceHeaderFacts(*view);
@@ -320,7 +337,7 @@ OpeningMoviePlayer::Create(const std::filesystem::path &path) {
         return std::unexpected(MakeError(ErrorCode::H262StreamRejected));
       sequence = *inspected_sequence;
     }
-    auto audio_plan = media::BuildPssPcmAudioStreamPlan(*source, *descriptor);
+    auto audio_plan = media::BuildPssPcmAudioStreamPlan(source, *descriptor);
     if (!audio_plan ||
         audio_plan->sample_rate_hz != kOpeningMovieAudioSampleRateHz ||
         audio_plan->channel_count != kOpeningMovieAudioChannelCount)
@@ -340,7 +357,7 @@ OpeningMoviePlayer::Create(const std::filesystem::path &path) {
     const std::uint64_t safety_ticks =
         CalculateOpeningMovieSafetyDurationTicks(*plan);
     auto impl = std::make_unique<Impl>(
-        std::move(*source), std::move(*plan), std::move(*audio_plan),
+        std::move(source), std::move(*plan), std::move(*audio_plan),
         std::move(*decoder), sequence.width, sequence.height, safety_ticks);
     impl->decoder_input_chunk_bytes = decoder_limits.maximum_input_chunk_bytes;
     return OpeningMoviePlayer(std::move(impl));
