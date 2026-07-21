@@ -2304,6 +2304,7 @@ void CheckReplayAllocationRetry()
     RunCaptureTracePair pair = BuildPair(actions, 1U, elapsed_values);
     RunReplaySessionConfig config = ValidConfig();
     config.initial_front_end_state = FrontEndState{};
+    config.front_end_capabilities.can_start_diagnostic_campaign = true;
     auto created = RunReplaySession::Create(std::move(pair), config);
     RunReplaySession session =
         TakeSession(created, "the allocation-retry fixture is created");
