@@ -710,10 +710,12 @@ one-argument overload remains ambient-free. A missing default yields the empty s
 the loader inspects only the final entry with `symlink_status(error_code)`: regular files use the
 existing bounded loader; a reported symlink, dangling symlink, directory, or other non-regular
 entry fails without being followed; other inspection errors fail. This does not assert rejection
-of symlinked parents or every Windows reparse point. Load and inspection diagnostics use only the
-fixed `runtime configuration explicit profile: ` or `runtime configuration default profile: `
-category and never include the source filesystem path. Existing `--set` diagnostics are unchanged.
-File values, source-order overrides, E-0074 tuple validation, and atomic direct CLI
+of symlinked parents or every Windows reparse point. Configuration diagnostics use fixed
+`runtime configuration explicit profile: `, `runtime configuration default profile: `, or
+`--set override: ` categories and never include a source filesystem path, user-controlled key, or
+raw value. Parser errors retain only structural line and budget data. Typed settings errors may
+name only their compile-time-known public setting. File values, source-order overrides, E-0074 tuple
+validation, and atomic direct CLI
 precedence retain their order. Success remains silent. There is no profile write, directory
 creation, migration, picker, startup dialog, default level, hot reload, private-data access, retail
 behavior, or emulator-equivalence claim.
@@ -725,7 +727,10 @@ the dependency gate checked 160 native files; all 209 tooling tests and Python c
 and the staged public-tree gate checked 247 indexed text blobs. On Windows, the non-missing
 inspection-error oracle was explicitly skipped because MSVC maps the
 available invalid and overlong candidates to not-found. Commit, DCO, publication, and exact-main
-validation remain unclaimed.
+validation remain unclaimed. The later non-reflective diagnostic hardening passed scoped diff
+checks, the 244-file dependency gate, the 411-blob public-tree gate, Python compile-all, and all
+298 tooling tests. Its C++ build, process contract, and CTest remain delegated to the serialized
+integration lane because local preflight was `CAUTION`.
 
 E-0076 adds startup-failure presentation as an app-private, stateless adapter rather than a service
 or component. `StartupFailureDialogRequest` borrows a stage, category, and detail only for the

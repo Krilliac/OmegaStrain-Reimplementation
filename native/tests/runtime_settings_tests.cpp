@@ -1,5 +1,6 @@
 #include "omega/runtime/runtime_settings.h"
 
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -36,6 +37,32 @@ void CheckProfileError(
     const std::string_view context)
 {
     Check(!result && result.error().code == code && result.error().message == message, context);
+}
+
+void CheckNoPrivateFragments(
+    const std::string_view diagnostic, const std::string_view context)
+{
+    constexpr std::array forbidden{
+        std::string_view("PrivateUser"),
+        std::string_view("SecretVault"),
+        std::string_view("privateuser"),
+        std::string_view("secretvault"),
+        std::string_view("raw-secret"),
+        std::string_view("C:/Users/"),
+    };
+    for (const std::string_view fragment : forbidden)
+        Check(diagnostic.find(fragment) == std::string_view::npos, context);
+}
+
+template<typename T>
+void CheckInputFreeError(const std::expected<T, std::string>& result,
+    const std::string_view expected, const std::string_view context)
+{
+    Check(!result, context);
+    if (result)
+        return;
+    Check(result.error() == expected, context);
+    CheckNoPrivateFragments(result.error(), context);
 }
 } // namespace
 
@@ -86,12 +113,24 @@ int RuntimeSettingsFailureCount()
             "known keys resolve without clamping or hidden defaults");
     }
 
-    auto unknown = omega::runtime::ParseConfigText("renderer.guess = false\n");
-    Check(unknown && !omega::runtime::ResolveRuntimeSettings(*unknown),
-        "unknown settings are rejected rather than silently ignored");
-    auto bad_severity = omega::runtime::ParseConfigText("log.minimum_severity = verbose\n");
-    Check(bad_severity && !omega::runtime::ResolveRuntimeSettings(*bad_severity),
-        "unknown log severities are rejected");
+    auto unknown = omega::runtime::ParseConfigText(
+        "privateuser.secretvault = PrivateUser-SecretVault-raw-secret\n");
+    Check(unknown.has_value(), "unknown private setting fixture parses");
+    if (unknown)
+    {
+        CheckInputFreeError(omega::runtime::ResolveRuntimeSettings(*unknown),
+            "unknown runtime setting",
+            "unknown-setting diagnostics omit the key and value");
+    }
+    auto bad_severity = omega::runtime::ParseConfigText(
+        "log.minimum_severity = PrivateUser-SecretVault-raw-secret-severity\n");
+    Check(bad_severity.has_value(), "private log severity fixture parses");
+    if (bad_severity)
+    {
+        CheckInputFreeError(omega::runtime::ResolveRuntimeSettings(*bad_severity),
+            "log.minimum_severity must be one of trace, debug, info, warning, or error",
+            "unsupported log severities are rejected without echoing the raw value");
+    }
     auto bad_workers = omega::runtime::ParseConfigText("jobs.worker_count = 0\n");
     Check(bad_workers && !omega::runtime::ResolveRuntimeSettings(*bad_workers),
         "service-owned worker bounds are enforced");
@@ -99,9 +138,15 @@ int RuntimeSettingsFailureCount()
         "frame.simulation_step_ns = 2000000\nframe.max_delta_ns = 1000000\n");
     Check(bad_delta && !omega::runtime::ResolveRuntimeSettings(*bad_delta),
         "the frame delta clamp cannot be shorter than one simulation step");
-    auto bad_integer = omega::runtime::ParseConfigText("input.max_events_per_frame = many\n");
-    Check(bad_integer && !omega::runtime::ResolveRuntimeSettings(*bad_integer),
-        "typed setting errors retain strict integer parsing");
+    auto bad_integer = omega::runtime::ParseConfigText(
+        "input.max_events_per_frame = C:/Users/PrivateUser/SecretVault/raw-secret\n");
+    Check(bad_integer.has_value(), "private integer setting fixture parses");
+    if (bad_integer)
+    {
+        CheckInputFreeError(omega::runtime::ResolveRuntimeSettings(*bad_integer),
+            "input.max_events_per_frame: config integer value must be a canonical base-10 int64",
+            "typed setting diagnostics retain strict parsing without raw values");
+    }
 
     using omega::runtime::ContentLaunchProfileErrorCode;
     Check(omega::runtime::ContentLaunchProfileErrorCodeName(
@@ -292,6 +337,44 @@ int RuntimeSettingsFailureCount()
     Check(overridden && overridden->RequireInt64("jobs.worker_count") == 1,
         "command-line overrides apply to the empty default store");
 
+    omega::runtime::LaunchOptions malformed_private_override;
+    malformed_private_override.config_overrides.push_back(
+        {.key = "PrivateUser.SecretVault", .value = "raw-secret-value"});
+    CheckInputFreeError(omega::runtime::LoadRuntimeConfig(malformed_private_override),
+        "--set override: config override: config key contains a byte outside [a-z0-9_.]",
+        "malformed --set diagnostics omit the key and value");
+
+    omega::runtime::LaunchOptions private_integer_override;
+    private_integer_override.config_overrides.push_back(
+        {.key = "jobs.worker_count",
+            .value = "C:/Users/PrivateUser/SecretVault/raw-secret-worker-count"});
+    auto private_integer_override_config =
+        omega::runtime::LoadRuntimeConfig(private_integer_override);
+    Check(private_integer_override_config.has_value(),
+        "a printable private --set integer value reaches typed validation");
+    if (private_integer_override_config)
+    {
+        CheckInputFreeError(
+            omega::runtime::ResolveRuntimeSettings(*private_integer_override_config),
+            "jobs.worker_count: config integer value must be a canonical base-10 int64",
+            "invalid integer --set diagnostics omit the raw value");
+    }
+
+    omega::runtime::LaunchOptions private_unknown_override;
+    private_unknown_override.config_overrides.push_back(
+        {.key = "privateuser.secretvault", .value = "PrivateUser-SecretVault-raw-secret"});
+    auto private_unknown_override_config =
+        omega::runtime::LoadRuntimeConfig(private_unknown_override);
+    Check(private_unknown_override_config.has_value(),
+        "a valid private-shaped unknown --set key reaches settings validation");
+    if (private_unknown_override_config)
+    {
+        CheckInputFreeError(
+            omega::runtime::ResolveRuntimeSettings(*private_unknown_override_config),
+            "unknown runtime setting",
+            "unknown --set diagnostics omit the key and value");
+    }
+
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
                       ("omega-runtime-settings-tests-PrivateUser-SecretVault-" +
@@ -342,6 +425,42 @@ int RuntimeSettingsFailureCount()
                   (*file_profile)->data_root == std::filesystem::path("direct/content") &&
                   !(*file_profile)->level_code,
             "a direct root-only choice does not inherit an effective --set level");
+    }
+
+    const auto private_integer_config_path = root / "PrivateUser-SecretVault-integer.cfg";
+    Check(WriteTextFile(private_integer_config_path,
+              "jobs.worker_count = C:/Users/PrivateUser/SecretVault/raw-secret-file-value\n"),
+        "private integer file-profile fixture is written");
+    omega::runtime::LaunchOptions private_integer_file_options;
+    private_integer_file_options.config_path = private_integer_config_path;
+    auto private_integer_file_config =
+        omega::runtime::LoadRuntimeConfig(private_integer_file_options);
+    Check(private_integer_file_config.has_value(),
+        "a printable private file value reaches typed validation");
+    if (private_integer_file_config)
+    {
+        CheckInputFreeError(
+            omega::runtime::ResolveRuntimeSettings(*private_integer_file_config),
+            "jobs.worker_count: config integer value must be a canonical base-10 int64",
+            "invalid integer file diagnostics omit source path, key, and value");
+    }
+
+    const auto private_unknown_config_path = root / "PrivateUser-SecretVault-unknown.cfg";
+    Check(WriteTextFile(private_unknown_config_path,
+              "privateuser.secretvault = PrivateUser-SecretVault-raw-secret-file-value\n"),
+        "private unknown-key file-profile fixture is written");
+    omega::runtime::LaunchOptions private_unknown_file_options;
+    private_unknown_file_options.config_path = private_unknown_config_path;
+    auto private_unknown_file_config =
+        omega::runtime::LoadRuntimeConfig(private_unknown_file_options);
+    Check(private_unknown_file_config.has_value(),
+        "a valid private-shaped unknown file key reaches settings validation");
+    if (private_unknown_file_config)
+    {
+        CheckInputFreeError(
+            omega::runtime::ResolveRuntimeSettings(*private_unknown_file_config),
+            "unknown runtime setting",
+            "unknown file-setting diagnostics omit source path, key, and value");
     }
 
     omega::runtime::LaunchOptions invalid_override_options;

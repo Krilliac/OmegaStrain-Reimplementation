@@ -185,7 +185,7 @@ ResolveConfiguredContentLaunchProfile(const ConfigStore& config)
     {
         auto applied = config.ApplyOverride(override.key, override.value);
         if (!applied)
-            return std::unexpected("--set=" + override.key + ": " + applied.error());
+            return std::unexpected("--set override: " + applied.error());
     }
     return config;
 }
@@ -252,7 +252,7 @@ std::expected<RuntimeSettings, std::string> ResolveRuntimeSettings(const ConfigS
     for (const ConfigEntry& entry : config.entries())
     {
         if (std::ranges::find(kKnownSettings, entry.key) == kKnownSettings.end())
-            return std::unexpected("unknown runtime setting: " + entry.key);
+            return std::unexpected("unknown runtime setting");
     }
 
     RuntimeSettings settings;

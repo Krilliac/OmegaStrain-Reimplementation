@@ -83,20 +83,22 @@ struct ContentLaunchProfileError
 
 // [game thread, startup] Loads only an explicitly selected project-owned configuration file, or
 // an empty store when no path was supplied, then applies validated --set overrides in source
-// order. This overload is ambient-free and performs no default-profile discovery.
+// order. This overload is ambient-free and performs no default-profile discovery. Failure
+// diagnostics use fixed source categories and never interpolate source paths, keys, or values.
 [[nodiscard]] std::expected<ConfigStore, std::string> LoadRuntimeConfig(
     const LaunchOptions& options);
 
 // [game thread, startup] Selects an explicit --config path ahead of the supplied default-profile
 // candidate. A missing default is an empty store; a reported non-regular final entry is rejected
 // without following it. The caller remains responsible for environment capture and lexical path
-// discovery.
+// discovery. Failure diagnostics never interpolate source paths, keys, or values.
 [[nodiscard]] std::expected<ConfigStore, std::string> LoadRuntimeConfig(
     const LaunchOptions& options,
     const std::optional<std::filesystem::path>& default_profile_path);
 
 // [any thread; reentrant] Resolves the strict store into validated service settings. Unknown keys
 // and values outside the service-owned bounds are rejected rather than ignored or clamped.
+// Diagnostics may name only compile-time-known public settings; raw keys and values are omitted.
 [[nodiscard]] std::expected<RuntimeSettings, std::string> ResolveRuntimeSettings(
     const ConfigStore& config);
 

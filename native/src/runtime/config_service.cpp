@@ -33,7 +33,7 @@ namespace
     if (key.size() > kMaxConfigKeyBytes)
         return "config key exceeds the " + std::to_string(kMaxConfigKeyBytes) + "-byte key budget";
     if (key.front() == '.' || key.back() == '.')
-        return "config key '" + std::string(key) + "' may not begin or end with '.'";
+        return "config key may not begin or end with '.'";
     char previous = '\0';
     for (const char character : key)
     {
@@ -42,7 +42,7 @@ namespace
         if (!lower && !digit && character != '_' && character != '.')
             return "config key contains a byte outside [a-z0-9_.]";
         if (character == '.' && previous == '.')
-            return "config key '" + std::string(key) + "' contains an empty dotted segment";
+            return "config key contains an empty dotted segment";
         previous = character;
     }
     return std::nullopt;
@@ -63,12 +63,11 @@ namespace
 }
 
 [[nodiscard]] std::expected<std::int64_t, std::string> ParseStrictInt64(
-    const std::string_view key, const std::string_view value)
+    const std::string_view value)
 {
-    const auto reject = [&key, &value]() -> std::unexpected<std::string>
+    const auto reject = []() -> std::unexpected<std::string>
     {
-        return std::unexpected("config key '" + std::string(key) +
-            "' must be a canonical base-10 int64, got '" + std::string(value) + "'");
+        return std::unexpected("config integer value must be a canonical base-10 int64");
     };
     std::string_view digits = value;
     const bool negative = !digits.empty() && digits.front() == '-';
@@ -87,8 +86,7 @@ namespace
     const auto conversion =
         std::from_chars(value.data(), value.data() + value.size(), parsed, 10);
     if (conversion.ec == std::errc::result_out_of_range)
-        return std::unexpected("config key '" + std::string(key) +
-            "' is outside the int64 range: '" + std::string(value) + "'");
+        return std::unexpected("config integer value is outside the int64 range");
     if (conversion.ec != std::errc{} || conversion.ptr != value.data() + value.size())
         return reject();
     return parsed;
@@ -148,8 +146,7 @@ std::expected<ConfigStore, std::string> ParseConfigText(
         for (const ConfigEntry& existing : entries)
         {
             if (existing.key == key)
-                return std::unexpected(
-                    line_label + " duplicates key '" + std::string(key) + "'");
+                return std::unexpected(line_label + " duplicates an earlier key");
         }
         if (entries.size() == limits.max_entries)
             return std::unexpected(line_label + " exceeds the entry budget of " +
@@ -212,8 +209,7 @@ std::expected<std::optional<bool>, std::string> ConfigStore::GetBool(
         return std::optional<bool>{true};
     if (entry->value == "false")
         return std::optional<bool>{false};
-    return std::unexpected("config key '" + std::string(key) +
-        "' must be exactly 'true' or 'false', got '" + entry->value + "'");
+    return std::unexpected("config boolean value must be exactly 'true' or 'false'");
 }
 
 std::expected<std::optional<std::int64_t>, std::string> ConfigStore::GetInt64(
@@ -222,7 +218,7 @@ std::expected<std::optional<std::int64_t>, std::string> ConfigStore::GetInt64(
     const ConfigEntry* entry = Find(key);
     if (entry == nullptr)
         return std::optional<std::int64_t>{};
-    auto parsed = ParseStrictInt64(key, entry->value);
+    auto parsed = ParseStrictInt64(entry->value);
     if (!parsed)
         return std::unexpected(std::move(parsed).error());
     return std::optional<std::int64_t>{*parsed};
@@ -233,8 +229,7 @@ std::expected<std::string, std::string> ConfigStore::RequireString(
 {
     const ConfigEntry* entry = Find(key);
     if (entry == nullptr)
-        return std::unexpected(
-            "config key '" + std::string(key) + "' is required but absent");
+        return std::unexpected("required config string value is absent");
     return entry->value;
 }
 
@@ -244,8 +239,7 @@ std::expected<bool, std::string> ConfigStore::RequireBool(const std::string_view
     if (!value)
         return std::unexpected(std::move(value).error());
     if (!value->has_value())
-        return std::unexpected(
-            "config key '" + std::string(key) + "' is required but absent");
+        return std::unexpected("required config boolean value is absent");
     return **value;
 }
 
@@ -256,8 +250,7 @@ std::expected<std::int64_t, std::string> ConfigStore::RequireInt64(
     if (!value)
         return std::unexpected(std::move(value).error());
     if (!value->has_value())
-        return std::unexpected(
-            "config key '" + std::string(key) + "' is required but absent");
+        return std::unexpected("required config integer value is absent");
     return **value;
 }
 
@@ -282,8 +275,8 @@ std::expected<void, std::string> ConfigStore::ApplyOverride(
         }
     }
     if (entries_.size() >= entry_budget_)
-        return std::unexpected("config override '" + std::string(key) +
-            "' exceeds the entry budget of " + std::to_string(entry_budget_) + " entries");
+        return std::unexpected("config override exceeds the entry budget of " +
+            std::to_string(entry_budget_) + " entries");
     entries_.push_back(ConfigEntry{std::string(key), std::string(value)});
     return {};
 }

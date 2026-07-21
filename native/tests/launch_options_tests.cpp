@@ -232,8 +232,12 @@ int LaunchOptionsFailureCount()
     CheckError(Parse({"--set=jobs.worker_count=1", "--set=jobs.worker_count=2"}),
         "--set key may be specified only once",
         "duplicate configuration override keys are rejected with a fixed diagnostic");
-    Check(!Parse({"--set=jobs.worker_count=1", "--set=jobs.worker_count =2"}),
-        "duplicate configuration override keys are compared after config-style trimming");
+    CheckSanitizedError(
+        Parse({"--set=privateuser.secretvault=PrivateUser-first-secret",
+            "--set=privateuser.secretvault =SecretVault-second-secret"}),
+        "--set key may be specified only once",
+        {"privateuser.secretvault", "PrivateUser-first-secret", "SecretVault-second-secret"},
+        "trimmed duplicate override diagnostics omit secret-looking keys and values");
     CheckSanitizedError(
         Parse({"--set=credentials.api_token=sk-live-first-secret",
             "--set=credentials.api_token=sk-live-second-secret"}),

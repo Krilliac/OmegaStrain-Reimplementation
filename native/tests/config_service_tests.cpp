@@ -1,5 +1,6 @@
 #include "omega/runtime/config_service.h"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -36,22 +37,45 @@ bool WriteTextFile(const std::filesystem::path& path, const std::string_view tex
     return output.good();
 }
 
-void CheckPathFreeFileError(
-    const std::expected<omega::runtime::ConfigStore, std::string>& result,
-    const std::string_view expected, const std::filesystem::path& private_path,
-    const std::string_view context)
+void CheckNoPrivateFragments(
+    const std::string_view diagnostic, const std::string_view context)
+{
+    constexpr std::array forbidden{
+        std::string_view("PrivateUser"),
+        std::string_view("SecretVault"),
+        std::string_view("privateuser"),
+        std::string_view("secretvault"),
+        std::string_view("raw-secret"),
+        std::string_view("C:/Users/"),
+    };
+    for (const std::string_view fragment : forbidden)
+    {
+        Check(diagnostic.find(fragment) == std::string_view::npos, context);
+    }
+}
+
+template<typename T>
+void CheckInputFreeError(const std::expected<T, std::string>& result,
+    const std::string_view expected, const std::string_view context)
 {
     Check(!result, context);
     if (result)
         return;
 
     Check(result.error() == expected, context);
+    CheckNoPrivateFragments(result.error(), context);
+}
+
+void CheckPathFreeFileError(
+    const std::expected<omega::runtime::ConfigStore, std::string>& result,
+    const std::string_view expected, const std::filesystem::path& private_path,
+    const std::string_view context)
+{
+    CheckInputFreeError(result, expected, context);
+    if (result)
+        return;
     Check(result.error().find(private_path.string()) == std::string::npos,
         "config file errors omit the complete source path");
-    Check(result.error().find("PrivateUser") == std::string::npos,
-        "config file errors omit the synthetic user identity");
-    Check(result.error().find("SecretVault") == std::string::npos,
-        "config file errors omit the synthetic private directory");
 }
 } // namespace
 
@@ -123,6 +147,20 @@ int ConfigServiceFailureCount()
     Check(!Parse("a. = 1"), "a trailing dot is rejected");
     Check(!Parse("a..b = 1"), "an empty dotted segment is rejected");
     Check(!Parse("a=1\nb=2\na=3"), "duplicate keys are rejected strictly");
+    CheckInputFreeError(Parse("PrivateUser.SecretVault = raw-secret-value"),
+        "config line 1: config key contains a byte outside [a-z0-9_.]",
+        "unsupported key-byte diagnostics omit the raw key and value");
+    CheckInputFreeError(Parse(".privateuser.secretvault = raw-secret-value"),
+        "config line 1: config key may not begin or end with '.'",
+        "edge-dot diagnostics omit the raw key and value");
+    CheckInputFreeError(Parse("privateuser..secretvault = raw-secret-value"),
+        "config line 1: config key contains an empty dotted segment",
+        "empty-segment diagnostics omit the raw key and value");
+    CheckInputFreeError(
+        Parse("privateuser.secretvault = first-secret\n"
+              "privateuser.secretvault = second-secret"),
+        "config line 2 duplicates an earlier key",
+        "duplicate-key diagnostics omit the repeated key and both values");
     Check(Parse(std::string(omega::runtime::kMaxConfigKeyBytes, 'k') + " = 1").has_value(),
         "a key at exactly the key budget is accepted");
     Check(!Parse(std::string(omega::runtime::kMaxConfigKeyBytes + 1U, 'k') + " = 1"),
@@ -193,18 +231,44 @@ int ConfigServiceFailureCount()
             "leading zeros are rejected as non-canonical");
         Check(!integers->GetInt64("plus").has_value(), "a '+' sign is rejected");
         Check(!integers->GetInt64("negzero").has_value(), "'-0' is rejected");
-        Check(!integers->GetInt64("over").has_value(),
-            "one past int64 max is rejected as out of range");
-        Check(!integers->GetInt64("under").has_value(),
-            "one past int64 min is rejected as out of range");
+        CheckInputFreeError(integers->GetInt64("over"),
+            "config integer value is outside the int64 range",
+            "one past int64 max is rejected without echoing its value");
+        CheckInputFreeError(integers->GetInt64("under"),
+            "config integer value is outside the int64 range",
+            "one past int64 min is rejected without echoing its value");
         Check(!integers->GetInt64("mixed").has_value(),
             "trailing non-digit bytes are rejected");
-        Check(!integers->GetBool("boolish").has_value(),
-            "'truex' is rejected by the exact bool match");
+        CheckInputFreeError(integers->GetBool("boolish"),
+            "config boolean value must be exactly 'true' or 'false'",
+            "invalid boolean text is rejected without echoing its value");
         Check(!integers->RequireInt64("pad").has_value(),
             "Require keeps present-but-invalid distinct from absent");
         Check(integers->GetString("pad") == "01",
             "an invalid int is still readable as its raw string");
+    }
+
+    auto private_values = Parse(
+        "privateuser.number = C:/Users/PrivateUser/SecretVault/raw-secret-number\n"
+        "privateuser.flag = PrivateUser-SecretVault-raw-secret-boolean");
+    Check(private_values.has_value(), "private diagnostic-value fixtures parse as strings");
+    if (private_values)
+    {
+        CheckInputFreeError(private_values->GetInt64("privateuser.number"),
+            "config integer value must be a canonical base-10 int64",
+            "integer diagnostics omit the requested key and raw value");
+        CheckInputFreeError(private_values->GetBool("privateuser.flag"),
+            "config boolean value must be exactly 'true' or 'false'",
+            "boolean diagnostics omit the requested key and raw value");
+        CheckInputFreeError(private_values->RequireString("PrivateUser.SecretVault"),
+            "required config string value is absent",
+            "required-string diagnostics omit the requested key");
+        CheckInputFreeError(private_values->RequireBool("PrivateUser.SecretVault"),
+            "required config boolean value is absent",
+            "required-boolean diagnostics omit the requested key");
+        CheckInputFreeError(private_values->RequireInt64("PrivateUser.SecretVault"),
+            "required config integer value is absent",
+            "required-integer diagnostics omit the requested key");
     }
 
     auto overridable = omega::runtime::ParseConfigText("a = 1", kTiny);
@@ -222,14 +286,20 @@ int ConfigServiceFailureCount()
         auto added = overridable->GetBool("b.new");
         Check(added.has_value() && added->has_value() && **added,
             "typed getters observe overridden values");
-        Check(!overridable->ApplyOverride("c", "3"),
-            "an added override beyond the entry budget is rejected");
+        CheckInputFreeError(
+            overridable->ApplyOverride("privateuser.secretvault", "raw-secret-value"),
+            "config override exceeds the entry budget of 2 entries",
+            "entry-budget diagnostics omit the override key and value");
         Check(overridable->ApplyOverride("a", "3").has_value(),
             "replacement overrides still work at the entry budget");
-        Check(!overridable->ApplyOverride("Bad", "1"),
-            "override keys face the same grammar as parsed keys");
-        Check(!overridable->ApplyOverride("d..e", "1"),
-            "override keys reject empty dotted segments");
+        CheckInputFreeError(
+            overridable->ApplyOverride("PrivateUser.SecretVault", "raw-secret-value"),
+            "config override: config key contains a byte outside [a-z0-9_.]",
+            "override malformed-key diagnostics omit the key and value");
+        CheckInputFreeError(
+            overridable->ApplyOverride("privateuser..secretvault", "raw-secret-value"),
+            "config override: config key contains an empty dotted segment",
+            "override dotted-key diagnostics omit the key and value");
         Check(!overridable->ApplyOverride(
                   "a", std::string(omega::runtime::kMaxConfigValueBytes + 1U, 'x')),
             "override values face the value budget");
