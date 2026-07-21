@@ -294,7 +294,8 @@ int RuntimeSettingsFailureCount()
 
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
-                      ("omega-runtime-settings-tests-" + std::to_string(suffix));
+                      ("omega-runtime-settings-tests-PrivateUser-SecretVault-" +
+                          std::to_string(suffix));
     std::error_code file_error;
     std::filesystem::create_directories(root, file_error);
     Check(!file_error, "temporary runtime-settings directory is created");
@@ -360,9 +361,21 @@ int RuntimeSettingsFailureCount()
             "invalid effective --set content remains fatal before valid direct CLI precedence");
     }
 
-    file_options.config_path = root / "missing.cfg";
-    Check(!omega::runtime::LoadRuntimeConfig(file_options),
+    const auto missing_config_path = root / "missing.cfg";
+    file_options.config_path = missing_config_path;
+    const auto missing_config = omega::runtime::LoadRuntimeConfig(file_options);
+    Check(!missing_config,
         "a requested missing runtime configuration is fatal");
+    if (!missing_config)
+    {
+        Check(missing_config.error() ==
+                  "runtime configuration explicit profile: unable to open config file",
+            "an explicit runtime configuration failure uses the fixed categorical label");
+        Check(missing_config.error().find(missing_config_path.string()) == std::string::npos &&
+                  missing_config.error().find("PrivateUser") == std::string::npos &&
+                  missing_config.error().find("SecretVault") == std::string::npos,
+            "an explicit runtime configuration failure omits private path identity");
+    }
     std::filesystem::remove_all(root, file_error);
     Check(!file_error, "temporary runtime-settings directory is removed");
     return failures;

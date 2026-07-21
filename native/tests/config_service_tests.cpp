@@ -35,6 +35,24 @@ bool WriteTextFile(const std::filesystem::path& path, const std::string_view tex
     output.write(text.data(), static_cast<std::streamsize>(text.size()));
     return output.good();
 }
+
+void CheckPathFreeFileError(
+    const std::expected<omega::runtime::ConfigStore, std::string>& result,
+    const std::string_view expected, const std::filesystem::path& private_path,
+    const std::string_view context)
+{
+    Check(!result, context);
+    if (result)
+        return;
+
+    Check(result.error() == expected, context);
+    Check(result.error().find(private_path.string()) == std::string::npos,
+        "config file errors omit the complete source path");
+    Check(result.error().find("PrivateUser") == std::string::npos,
+        "config file errors omit the synthetic user identity");
+    Check(result.error().find("SecretVault") == std::string::npos,
+        "config file errors omit the synthetic private directory");
+}
 } // namespace
 
 int ConfigServiceFailureCount()
@@ -236,7 +254,8 @@ int ConfigServiceFailureCount()
 
     const auto unique_suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
-                      ("omega-config-tests-" + std::to_string(unique_suffix));
+                      ("omega-config-tests-PrivateUser-SecretVault-" +
+                          std::to_string(unique_suffix));
     std::error_code file_error;
     std::filesystem::remove_all(root, file_error);
     std::filesystem::create_directories(root, file_error);
@@ -260,10 +279,21 @@ int ConfigServiceFailureCount()
     Check(WriteTextFile(oversize_path, "a = 4200\n"),
         "oversize fixture file is written");
     auto oversize = omega::runtime::LoadConfigFile(oversize_path, kFileLimits);
-    Check(!oversize && oversize.error().find("budget") != std::string::npos,
+    CheckPathFreeFileError(oversize, "config file exceeds the 8-byte budget", oversize_path,
         "a file over the byte budget is rejected by the bounded read");
-    Check(!omega::runtime::LoadConfigFile(root / "MISSING.CFG", kFileLimits),
+    const auto missing_path = root / "MISSING.CFG";
+    CheckPathFreeFileError(omega::runtime::LoadConfigFile(missing_path, kFileLimits),
+        "unable to open config file", missing_path,
         "a missing config file is a clear error");
+
+#if defined(_WIN32)
+    constexpr std::string_view kDirectoryReadError = "unable to open config file";
+#else
+    constexpr std::string_view kDirectoryReadError = "unable to read config file";
+#endif
+    CheckPathFreeFileError(omega::runtime::LoadConfigFile(root, kFileLimits),
+        kDirectoryReadError, root,
+        "a directory passed to the bounded loader fails without exposing its path");
 
     std::filesystem::remove_all(root, file_error);
     Check(!file_error, "temporary config test directory is removed");

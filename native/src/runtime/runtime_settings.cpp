@@ -36,6 +36,8 @@ constexpr std::string_view kInvalidLevelCodeMessage =
     "content.level_code must contain 1 to 32 ASCII alphanumeric characters";
 constexpr std::string_view kInvalidOptionsMessage =
     "direct content launch options are inconsistent";
+constexpr std::string_view kExplicitProfileErrorPrefix =
+    "runtime configuration explicit profile: ";
 constexpr std::string_view kDefaultProfileErrorPrefix =
     "runtime configuration default profile: ";
 constexpr std::string_view kDefaultProfileResolutionError =
@@ -194,8 +196,9 @@ std::expected<ConfigStore, std::string> LoadRuntimeConfig(const LaunchOptions& o
     auto loaded = options.config_path ? LoadConfigFile(*options.config_path) : ParseConfigText("");
     if (!loaded)
     {
-        const std::string source = options.config_path ? options.config_path->string() : "defaults";
-        return std::unexpected("runtime configuration " + source + ": " + loaded.error());
+        const std::string_view prefix =
+            options.config_path ? kExplicitProfileErrorPrefix : kDefaultProfileErrorPrefix;
+        return std::unexpected(std::string(prefix) + loaded.error());
     }
 
     return ApplyRuntimeConfigOverrides(std::move(*loaded), options);
@@ -219,16 +222,14 @@ std::expected<ConfigStore, std::string> LoadRuntimeConfig(
             if (inspection_error == std::errc::no_such_file_or_directory)
                 return LoadRuntimeConfig(options);
             return std::unexpected(std::string(kDefaultProfileErrorPrefix) +
-                                   "unable to inspect config file: " +
-                                   default_profile_path->string());
+                                   "unable to inspect config file");
         }
         if (profile_status.type() == std::filesystem::file_type::not_found)
             return LoadRuntimeConfig(options);
         if (profile_status.type() != std::filesystem::file_type::regular)
         {
             return std::unexpected(std::string(kDefaultProfileErrorPrefix) +
-                                   "config path is not a regular file: " +
-                                   default_profile_path->string());
+                                   "config path is not a regular file");
         }
 
         auto loaded = LoadConfigFile(*default_profile_path);

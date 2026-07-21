@@ -65,6 +65,24 @@ void CheckError(const std::expected<omega::runtime::ConfigStore, std::string>& r
     ++failures;
 }
 
+void CheckPathFreeError(
+    const std::expected<omega::runtime::ConfigStore, std::string>& result,
+    const std::string_view expected, const std::filesystem::path& private_path,
+    const std::string_view context)
+{
+    Check(!result, context);
+    if (result)
+        return;
+
+    Check(result.error() == expected, context);
+    Check(result.error().find(private_path.string()) == std::string::npos,
+        "runtime configuration errors omit the complete source path");
+    Check(result.error().find("PrivateUser") == std::string::npos,
+        "runtime configuration errors omit the synthetic user identity");
+    Check(result.error().find("SecretVault") == std::string::npos,
+        "runtime configuration errors omit the synthetic private directory");
+}
+
 #if defined(_WIN32)
 [[nodiscard]] bool TryCreateUnprivilegedFileSymlink(const std::filesystem::path& target,
     const std::filesystem::path& link, std::error_code& error) noexcept
@@ -216,7 +234,8 @@ int RuntimeConfigDiscoveryFailureCount()
 
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto test_root = std::filesystem::temp_directory_path() /
-                           ("omega-runtime-config-discovery-tests-" + std::to_string(suffix));
+                           ("omega-runtime-config-discovery-tests-PrivateUser-SecretVault-" +
+                               std::to_string(suffix));
     std::error_code file_error;
     std::filesystem::create_directories(test_root, file_error);
     Check(!file_error, "the synthetic default-profile test root is created");
@@ -245,18 +264,29 @@ int RuntimeConfigDiscoveryFailureCount()
     const auto malformed_default = test_root / "malformed-default.cfg";
     Check(WriteTextFile(malformed_default, "not a setting\n"),
         "the malformed default profile fixture is written");
-    CheckError(omega::runtime::LoadRuntimeConfig({}, malformed_default),
+    CheckPathFreeError(omega::runtime::LoadRuntimeConfig({}, malformed_default),
         "runtime configuration default profile: config line 1 is missing '='",
+        malformed_default,
         "regular default loader diagnostics reuse the existing parser bytes "
         "under one prefix");
+
+    const omega::runtime::ConfigLimits default_limits;
+    const auto oversized_default = test_root / "oversized-default.cfg";
+    Check(WriteTextFile(oversized_default,
+              std::string(default_limits.max_input_bytes + 1U, '#')),
+        "the oversized default profile fixture is written");
+    CheckPathFreeError(omega::runtime::LoadRuntimeConfig({}, oversized_default),
+        "runtime configuration default profile: config file exceeds the " +
+            std::to_string(default_limits.max_input_bytes) + "-byte budget",
+        oversized_default,
+        "the default-profile byte budget is fatal without disclosing its path");
 
     const auto directory_default = test_root / "directory-default.cfg";
     std::filesystem::create_directory(directory_default, file_error);
     Check(!file_error, "the non-regular default profile fixture is created");
-    CheckError(omega::runtime::LoadRuntimeConfig({}, directory_default),
-        "runtime configuration default profile: config path is not a regular "
-        "file: " +
-            directory_default.string(),
+    CheckPathFreeError(omega::runtime::LoadRuntimeConfig({}, directory_default),
+        "runtime configuration default profile: config path is not a regular file",
+        directory_default,
         "a directory at the final default entry is rejected without loading");
 
 #if defined(_WIN32)
@@ -264,19 +294,18 @@ int RuntimeConfigDiscoveryFailureCount()
 #else
     const auto uninspectable_default = test_root / std::string(300U, 'x');
     auto inspection = omega::runtime::LoadRuntimeConfig({}, uninspectable_default);
-    CheckError(inspection,
-        "runtime configuration default profile: unable to inspect config file: " +
-            uninspectable_default.string(),
+    CheckPathFreeError(inspection,
+        "runtime configuration default profile: unable to inspect config file",
+        uninspectable_default,
         "a non-missing final-entry inspection error is fatal and sanitized");
 #endif
 
     const auto leaf_symlink = test_root / "leaf-symlink.cfg";
     if (CreateFileSymlinkFixture(valid_default, leaf_symlink, file_error))
     {
-        CheckError(omega::runtime::LoadRuntimeConfig({}, leaf_symlink),
-            "runtime configuration default profile: config path is not a regular "
-            "file: " +
-                leaf_symlink.string(),
+        CheckPathFreeError(omega::runtime::LoadRuntimeConfig({}, leaf_symlink),
+            "runtime configuration default profile: config path is not a regular file",
+            leaf_symlink,
             "a final-entry symlink is reported and rejected without following it");
     }
 
@@ -284,10 +313,9 @@ int RuntimeConfigDiscoveryFailureCount()
     file_error.clear();
     if (CreateFileSymlinkFixture(test_root / "absent-target.cfg", dangling_symlink, file_error))
     {
-        CheckError(omega::runtime::LoadRuntimeConfig({}, dangling_symlink),
-            "runtime configuration default profile: config path is not a "
-            "regular file: " +
-                dangling_symlink.string(),
+        CheckPathFreeError(omega::runtime::LoadRuntimeConfig({}, dangling_symlink),
+            "runtime configuration default profile: config path is not a regular file",
+            dangling_symlink,
             "a dangling final-entry symlink is rejected rather than treated "
             "as absent");
     }
@@ -303,11 +331,17 @@ int RuntimeConfigDiscoveryFailureCount()
 
     const auto missing_explicit = test_root / "missing-explicit.cfg";
     explicit_options.config_path = missing_explicit;
-    CheckError(omega::runtime::LoadRuntimeConfig(explicit_options, directory_default),
-        "runtime configuration " + missing_explicit.string() +
-            ": unable to open config file: " + missing_explicit.string(),
-        "an explicit missing profile retains its pre-discovery diagnostic and "
-        "remains fatal");
+    CheckPathFreeError(omega::runtime::LoadRuntimeConfig(explicit_options, directory_default),
+        "runtime configuration explicit profile: unable to open config file",
+        missing_explicit,
+        "an explicit missing profile remains fatal without disclosing its path");
+
+    explicit_options.config_path = oversized_default;
+    CheckPathFreeError(omega::runtime::LoadRuntimeConfig(explicit_options, directory_default),
+        "runtime configuration explicit profile: config file exceeds the " +
+            std::to_string(default_limits.max_input_bytes) + "-byte budget",
+        oversized_default,
+        "an explicit oversized profile remains fatal without disclosing its path");
 
     omega::runtime::LaunchOptions invalid_override;
     invalid_override.config_overrides.push_back({.key = "Bad", .value = "value"});
