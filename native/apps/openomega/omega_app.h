@@ -130,6 +130,15 @@ private:
     [[nodiscard]] std::expected<void, std::string> ApplyFrontEndCommand(
         FrontEndCommand command);
     [[nodiscard]] std::expected<void, std::string> CreateFirstProfile();
+    // [game/main thread; no concurrent use] Explicit capability inputs for the
+    // bounded front-end reducer. No allocation, I/O, or persistence work occurs.
+    [[nodiscard]] FrontEndCapabilities CurrentFrontEndCapabilities() const noexcept;
+    // [game/main thread; no concurrent use] True when the confirmation
+    // ConfirmActiveProfile published still resolves against the current bounded
+    // model. This is the only diagnostic-play authorization input; the app holds
+    // no second selection value that could satisfy the gate on its own. No
+    // allocation, I/O, or persistence work occurs.
+    [[nodiscard]] bool ActiveProfileIsConfirmed() const noexcept;
     // [game/main/render thread; no concurrent use] Rebuilds only the fixed CPU
     // command value for the post-step diagnostic actor position. The marker
     // texture remains immutable and resident for the complete app lifetime.
@@ -145,6 +154,13 @@ private:
         runtime::RenderDrawList profiles_draw_list;
         std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>
             profile_selection_draw_lists;
+        // [selected position][confirmed active position]. Each list is the
+        // selection list for its row plus the project-owned active-row cue, so
+        // the cue is chosen by the position the confirmed identifier resolves to
+        // and never by a separately stored second identity.
+        std::array<std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>,
+            kFrontEndVisibleProfiles>
+            profile_active_draw_lists;
     };
 
     OmegaApp(std::unique_ptr<NativePersistence> native_persistence,
@@ -241,9 +257,16 @@ private:
     // the alternate presentation alone cannot express this because it then owns
     // the old empty presentation until teardown.
     bool can_create_first_profile_ = false;
+    // Explicit gate enablement. Production always composes a persistence owner,
+    // so production always enables it. A composition without persistence cannot
+    // reach ConfirmActiveProfile at all, so it has no authorization source to
+    // gate against and keeps the legacy unguarded diagnostic entry.
+    bool requires_active_profile_for_diagnostic_play_ = false;
     // Explicit per-launch activation only. The corresponding confirmation is
     // persisted before this value is published, but startup never copies a durable
-    // confirmation into session state or selects a profile implicitly.
+    // confirmation into session state or selects a profile implicitly. This value
+    // is the app's single active-profile identity: the diagnostic-play gate and
+    // the active-row cue are both derived from it against the current model.
     std::optional<profiles::ProfileId> active_profile_id_;
     // Friend-only wall-clock seam. Production samples system_clock at the command
     // boundary; tests may provide one valid UTC millisecond value.
