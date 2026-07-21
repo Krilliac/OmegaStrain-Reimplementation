@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <span>
 #include <sstream>
 #include <string>
@@ -122,6 +123,25 @@ bool WriteBytes(const std::filesystem::path &path,
     output.write(reinterpret_cast<const char *>(bytes.data()),
                  static_cast<std::streamsize>(bytes.size()));
   return output.good();
+}
+
+bool ReadBytes(const std::filesystem::path &path,
+               std::vector<std::byte> &bytes) {
+  std::ifstream input(path, std::ios::binary | std::ios::ate);
+  if (!input)
+    return false;
+  const std::streampos end = input.tellg();
+  if (end < 0)
+    return false;
+  const auto size = static_cast<std::uint64_t>(end);
+  if (size > std::numeric_limits<std::size_t>::max())
+    return false;
+  bytes.assign(static_cast<std::size_t>(size), std::byte{0});
+  input.seekg(0, std::ios::beg);
+  if (!bytes.empty())
+    input.read(reinterpret_cast<char *>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+  return input.good();
 }
 
 class TempTree final {
@@ -262,6 +282,73 @@ std::vector<std::byte> MakeAcceptedFrontendHog() {
       HogMember{.name = "VALID.GUI", .payload = MakeGui()},
       HogMember{.name = "VALID.IE", .payload = MakeIe()},
   });
+}
+
+std::uint8_t HexNibble(const char value) {
+  if (value >= '0' && value <= '9')
+    return static_cast<std::uint8_t>(value - '0');
+  if (value >= 'a' && value <= 'f')
+    return static_cast<std::uint8_t>(value - 'a' + 10);
+  return static_cast<std::uint8_t>(value - 'A' + 10);
+}
+
+omega::tool::FrontendEnvelopeSha256Digest
+DigestFromHex(const std::string_view hex) {
+  omega::tool::FrontendEnvelopeSha256Digest digest{};
+  for (std::size_t index = 0; index < digest.size(); ++index) {
+    digest[index] = static_cast<std::byte>((HexNibble(hex[index * 2U]) << 4U) |
+                                           HexNibble(hex[index * 2U + 1U]));
+  }
+  return digest;
+}
+
+void CheckSha256KnownAnswers() {
+  const std::string_view empty;
+  const std::string_view abc = "abc";
+  const std::string_view padding_boundary =
+      "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+  const auto bytes = [](const std::string_view text) {
+    return std::as_bytes(std::span<const char>(text.data(), text.size()));
+  };
+
+  Check(omega::tool::FrontendEnvelopeSha256ForTesting(bytes(empty)) ==
+            DigestFromHex("e3b0c44298fc1c149afbf4c8996fb924"
+                          "27ae41e4649b934ca495991b7852b855"),
+        "SHA-256 matches the empty-input known answer");
+  Check(omega::tool::FrontendEnvelopeSha256ForTesting(bytes(abc)) ==
+            DigestFromHex("ba7816bf8f01cfea414140de5dae2223"
+                          "b00361a396177a9cb410ff61f20015ad"),
+        "SHA-256 matches the abc known answer");
+  Check(
+      omega::tool::FrontendEnvelopeSha256ForTesting(bytes(padding_boundary)) ==
+          DigestFromHex("248d6a61d20638b8e5c026930c3e6039"
+                        "a33ce45964ff2167f6ecedd419db06c1"),
+      "SHA-256 matches the padding-boundary known answer");
+}
+
+void CheckAuthenticatedChunkBoundaries() {
+  TempTree tree("authenticated-chunk-boundary");
+  constexpr std::size_t padding_size = 65'432U;
+  const auto hog = MakeHog({
+      HogMember{.name = "PADDING.BIN",
+                .payload =
+                    std::vector<std::byte>(padding_size, std::byte{0x42})},
+      HogMember{.name = "VALID.FNT", .payload = MakeFnt()},
+      HogMember{.name = "VALID.GUI", .payload = MakeGui()},
+      HogMember{.name = "VALID.IE", .payload = MakeIe()},
+  });
+  Check(hog.size() > 64U * 1024U && tree.ready() &&
+            tree.Add("FRONTEND.HOG", hog),
+        "multi-chunk HOG with a boundary-spanning candidate is written");
+  if (!tree.ready())
+    return;
+
+  const ExpectedFamily accepted{.candidates = 1, .accepted = 1};
+  const ToolRun run = RunTool(tree.root());
+  Check(run.exit_code == 0 &&
+            run.standard_output == BuildReport(accepted, accepted, accepted) &&
+            run.standard_error.empty(),
+        "authenticated reads copy exact overlaps across the final short chunk");
 }
 
 ExpectedFamily OneAcceptedFamily() {
@@ -540,6 +627,196 @@ void FileReplacementHook(
   context.replaced = !error;
 }
 
+struct RawChunkMutationContext {
+  std::filesystem::path target;
+  std::size_t mutate_on_read = 0;
+  std::size_t chunk_zero_reads = 0;
+  bool mutated = false;
+};
+
+void MutateAuthenticatedScratch(const std::filesystem::path &path,
+                                const std::uint64_t chunk_offset,
+                                const std::span<std::byte> chunk,
+                                void *opaque) {
+  auto &context = *static_cast<RawChunkMutationContext *>(opaque);
+  if (path != context.target || chunk_offset != 0U)
+    return;
+  ++context.chunk_zero_reads;
+  if (context.chunk_zero_reads != context.mutate_on_read ||
+      chunk.size() <= 0x24U)
+    return;
+  chunk[0x24U] = std::byte{'v'};
+  context.mutated = true;
+}
+
+void CheckTransientChunkMutationIsRejected(const std::size_t mutate_on_read,
+                                           const std::string_view label) {
+  TempTree tree(label);
+  const auto original = MakeAcceptedFrontendHog();
+  const std::filesystem::path target = tree.root() / "FRONTEND.HOG";
+  Check(tree.ready() && tree.Add("FRONTEND.HOG", original),
+        "transient chunk-mutation fixture is written");
+  if (!tree.ready())
+    return;
+
+  std::error_code error;
+  const auto original_time = std::filesystem::last_write_time(target, error);
+  const auto original_size = std::filesystem::file_size(target, error);
+  Check(!error, "transient chunk-mutation metadata is captured");
+  if (error)
+    return;
+
+  RawChunkMutationContext context{
+      .target = target,
+      .mutate_on_read = mutate_on_read,
+  };
+  const ToolRun run = RunToolWithHooks(
+      tree.root(), omega::tool::FrontendEnvelopeCommandTestHooks{
+                       .after_raw_hog_chunk_read = MutateAuthenticatedScratch,
+                       .context = &context,
+                   });
+
+  std::vector<std::byte> after;
+  error.clear();
+  const auto after_time = std::filesystem::last_write_time(target, error);
+  const auto after_size = std::filesystem::file_size(target, error);
+  const bool read_back = ReadBytes(target, after);
+  Check(context.mutated && context.chunk_zero_reads == mutate_on_read &&
+            run.exit_code == 1 && run.standard_output == BuildReport() &&
+            run.standard_error == "frontend-envelope-coverage: member_read\n",
+        "transient authenticated-chunk mutation fails atomically");
+  Check(!error && read_back && after == original &&
+            after_size == original_size && after_time == original_time,
+        "transient chunk mutation leaves file bytes and metadata unchanged");
+}
+
+struct RawChunkCountContext {
+  std::filesystem::path target;
+  std::size_t reads = 0;
+};
+
+void CountAuthenticatedChunkReads(const std::filesystem::path &path,
+                                  const std::uint64_t,
+                                  const std::span<std::byte>, void *opaque) {
+  auto &context = *static_cast<RawChunkCountContext *>(opaque);
+  if (path == context.target)
+    ++context.reads;
+}
+
+void CheckPaddedNestedAuthenticationAllowance() {
+  TempTree tree("padded-nested-authentication-allowance");
+  auto nested = MakeAcceptedFrontendHog();
+  nested.resize(nested.size() + 2U * 64U * 1024U, std::byte{0});
+  const auto outer = MakeHog({
+      HogMember{.name = "NESTED.HOG", .payload = std::move(nested)},
+  });
+  const std::filesystem::path target = tree.root() / "FRONTEND.HOG";
+  Check(tree.ready() && tree.Add("FRONTEND.HOG", outer),
+        "multi-chunk padded nested-HOG fixture is written");
+  if (!tree.ready())
+    return;
+
+  RawChunkCountContext context{.target = target};
+  const ToolRun run = RunToolWithHooks(
+      tree.root(), omega::tool::FrontendEnvelopeCommandTestHooks{
+                       .after_raw_hog_chunk_read = CountAuthenticatedChunkReads,
+                       .context = &context,
+                   });
+  const ExpectedFamily accepted{.candidates = 1, .accepted = 1};
+  const std::size_t physical_chunks =
+      (outer.size() + 64U * 1024U - 1U) / (64U * 1024U);
+  Check(run.exit_code == 0 &&
+            run.standard_output == BuildReport(accepted, accepted, accepted) &&
+            run.standard_error.empty(),
+        "chunk-rounded nested allowance accepts padded nested HOG coverage");
+  Check(context.reads > physical_chunks,
+        "padded nested scan authenticates a bounded post-padding backtrack");
+}
+
+void CheckAuthenticatedChunkCacheBoundsTinyMemberWork() {
+  TempTree tree("authenticated-chunk-cache");
+  constexpr std::size_t member_count = 8'192U;
+  std::vector<HogMember> members;
+  members.reserve(member_count);
+  for (std::size_t index = 0; index < member_count; ++index) {
+    members.push_back(
+        HogMember{.name = "TINY.FNT", .payload = {std::byte{0x03}}});
+  }
+  members.push_back(HogMember{.name = "VALID.GUI", .payload = MakeGui()});
+  members.push_back(HogMember{.name = "VALID.IE", .payload = MakeIe()});
+  const auto hog = MakeHog(members);
+  const std::filesystem::path target = tree.root() / "FRONTEND.HOG";
+  Check(tree.ready() && tree.Add("FRONTEND.HOG", hog),
+        "many-tiny-member cache fixture is written");
+  if (!tree.ready())
+    return;
+
+  RawChunkCountContext context{.target = target};
+  const ToolRun run = RunToolWithHooks(
+      tree.root(), omega::tool::FrontendEnvelopeCommandTestHooks{
+                       .after_raw_hog_chunk_read = CountAuthenticatedChunkReads,
+                       .context = &context,
+                   });
+  ExpectedFamily fnt{.candidates = member_count};
+  fnt.rejected[0] = member_count;
+  const ExpectedFamily accepted{.candidates = 1, .accepted = 1};
+  const std::size_t physical_chunks =
+      (hog.size() + 64U * 1024U - 1U) / (64U * 1024U);
+  const bool report_matches =
+      run.exit_code == 2 &&
+      run.standard_output == BuildReport(fnt, accepted, accepted) &&
+      run.standard_error ==
+          "frontend-envelope-coverage: descriptor_rejections\n";
+  if (!report_matches) {
+    std::cerr << "many-tiny-member run: exit=" << run.exit_code
+              << ", stdout=" << run.standard_output
+              << ", stderr=" << run.standard_error;
+  }
+  Check(report_matches,
+        "many-tiny-member scan preserves the bounded aggregate report");
+  if (context.reads != physical_chunks) {
+    std::cerr << "authenticated chunk reads: expected " << physical_chunks
+              << ", observed " << context.reads << '\n';
+  }
+  Check(
+      context.reads == physical_chunks,
+      "verified chunk cache makes tiny-member work proportional to HOG bytes");
+}
+
+void CheckAuthenticatedReadBudgetIsEnforced() {
+  TempTree tree("authenticated-read-budget");
+  Check(tree.ready() && tree.Add("FRONTEND.HOG", MakeAcceptedFrontendHog()),
+        "authenticated-read budget fixture is written");
+  if (!tree.ready())
+    return;
+
+  const ToolRun run = RunToolWithHooks(
+      tree.root(), omega::tool::FrontendEnvelopeCommandTestHooks{
+                       .maximum_authenticated_hog_read_bytes = 1U,
+                   });
+  Check(run.exit_code == 1 && run.standard_output == BuildReport() &&
+            run.standard_error ==
+                "frontend-envelope-coverage: scan_limit_exceeded\n",
+        "physical authentication work stops at the per-HOG byte budget");
+}
+
+void CheckDiscoveryDigestBudgetIsEnforced() {
+  TempTree tree("discovery-digest-budget");
+  Check(tree.ready() && tree.Add("FRONTEND.HOG", MakeAcceptedFrontendHog()),
+        "discovery-digest budget fixture is written");
+  if (!tree.ready())
+    return;
+
+  const ToolRun run = RunToolWithHooks(
+      tree.root(), omega::tool::FrontendEnvelopeCommandTestHooks{
+                       .maximum_discovery_chunk_digests = 0U,
+                   });
+  Check(run.exit_code == 1 && run.standard_output == BuildReport() &&
+            run.standard_error ==
+                "frontend-envelope-coverage: scan_limit_exceeded\n",
+        "retained discovery digests stop at the global count budget");
+}
+
 struct SameSizeMutationContext {
   std::filesystem::path target;
   std::vector<std::byte> replacement;
@@ -666,6 +943,10 @@ void CheckSameSizeTimeFileReplacementIsRejected() {
 void CheckSameSizeMutationIsStableOrRejected() {
   TempTree tree("same-size-mutation");
   const auto bytes = MakeAcceptedFrontendHog();
+  auto replacement = bytes;
+  // Preserve a valid archive and the case-insensitive classification result so
+  // only the content-stability check can distinguish this same-size rewrite.
+  replacement[0x24U] = std::byte{'v'};
   const std::filesystem::path target = tree.root() / "FRONTEND.HOG";
   Check(tree.ready() && tree.Add("FRONTEND.HOG", bytes),
         "same-size mutation fixture is written");
@@ -674,7 +955,7 @@ void CheckSameSizeMutationIsStableOrRejected() {
 
   SameSizeMutationContext context{
       .target = target,
-      .replacement = std::vector<std::byte>(bytes.size(), std::byte{0xA5}),
+      .replacement = std::move(replacement),
   };
   const ToolRun run = RunToolWithHooks(
       tree.root(), omega::tool::FrontendEnvelopeCommandTestHooks{
@@ -685,7 +966,8 @@ void CheckSameSizeMutationIsStableOrRejected() {
     Check(context.invoked && run.exit_code == 1 &&
               run.standard_output == BuildReport() &&
               run.standard_error == "frontend-envelope-coverage: member_read\n",
-          "same-size mutation of an open POSIX HOG invalidates its snapshot");
+          "persistent same-size mutation is rejected before observations "
+          "publish");
   } else {
     const ExpectedFamily accepted = OneAcceptedFamily();
     Check(context.invoked && run.exit_code == 0 &&
@@ -756,13 +1038,20 @@ void CheckFifoReplacementCannotBlockStableOpen() {
 } // namespace
 
 int main() {
+  CheckSha256KnownAnswers();
   CheckNestedCoverageAndTypedRejections();
+  CheckAuthenticatedChunkBoundaries();
   CheckDeterminismAndPrivacy();
   CheckAtomicInfrastructureFailures();
   CheckNestedDepthLimit();
   CheckUnsafeLinksAreRejected();
   CheckHogDeletionBeforeStableOpen();
   CheckSameSizeTimeFileReplacementIsRejected();
+  CheckTransientChunkMutationIsRejected(1U, "first-chunk-read-mutation");
+  CheckPaddedNestedAuthenticationAllowance();
+  CheckAuthenticatedChunkCacheBoundsTinyMemberWork();
+  CheckAuthenticatedReadBudgetIsEnforced();
+  CheckDiscoveryDigestBudgetIsEnforced();
   CheckSameSizeMutationIsStableOrRejected();
   CheckDirectoryReplacementIsStableOrRejected();
 #ifndef _WIN32

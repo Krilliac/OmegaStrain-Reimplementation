@@ -296,10 +296,15 @@ remote compile/test remains pending. This assigns no retail/PS2 campaign, save, 
 gameplay, continuation, world-state, memory-card, owner-input, or parity semantics.
 E-0113 adds `omega_tool frontend-envelope-coverage-verify-tree <root>` as a separate bounded
 project-passive consumer of the existing FNT, GUI, and IE descriptors. Identity-guarded traversal
-and identity-bound HOG reads feed deterministic schema-version-1 aggregate acceptance and typed
-rejection counts; generated fixtures cover nested HOGs, privacy equivalence, unsafe entries,
-resource limits, and identity races. No owner-corpus result is recorded, and this does not promote a
-descriptor to semantic IR or establish UI/menu, retail-format, rendering, or PCSX2 behavior.
+and a complete discovery read retain SHA-256 per 64 KiB HOG chunk; parser bytes pass through one
+verified 64 KiB cache. Digest payload is capped at exactly 8 MiB, and admitted top-level sizes plus
+chunk-rounded nested spans bound parser raw reads while permitting padded nested archives. These
+unkeyed digests pin observed content but do not authenticate its source or form an atomic filesystem
+snapshot. Deterministic schema-version-1 output retains aggregate acceptance and typed rejection
+counts; generated fixtures cover digest answers and limits, cache reuse, nested HOGs, privacy
+equivalence, unsafe entries, resource limits, and identity/content races. No owner-corpus result is
+recorded, and this does not promote a descriptor to semantic IR or establish UI/menu, retail-format,
+rendering, or PCSX2 behavior.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-

@@ -223,14 +223,20 @@ Studio's historical engine source or internal toolchain.
   native-shell policy, not evidence of a retail control map, combat system, or menu graph.
 - E-0113 adds `omega_tool frontend-envelope-coverage-verify-tree <root>`, a bounded project-passive
   coverage command for the existing FNT, GUI, and IE prefix/envelope descriptors. It performs
-  identity-guarded traversal and identity-bound HOG reads, follows nested members classified by an
-  ASCII-case-insensitive `.hog` suffix to depth 32, ignores loose candidates, and emits only
-  deterministic schema-version-1 family
-  totals with typed rejection counts. Infrastructure failures discard partial observations and emit
-  a zero report plus one fixed path-free category. Generated fixtures cover nested exact/padded
-  spans, descriptor rejections, privacy equivalence, unsafe entries, resource limits, and identity
-  races. No owner-corpus run is recorded. Acceptance is not retail validity, semantic decode,
-  UI/menu evidence, format or consumer meaning, rendering behavior, or PCSX2 parity.
+  identity-guarded traversal, reads every admitted top-level HOG during successful discovery, and
+  records SHA-256 for each 64 KiB chunk, including a shorter final chunk. Parser bytes are exposed
+  only through one verified 64 KiB cache after matching those discovery digests. The retained
+  32-byte digest payload is globally capped at exactly 8 MiB; parser raw-read allowances are bounded
+  by admitted top-level sizes plus chunk-rounded nested spans. Nested members classified by an
+  ASCII-case-insensitive `.hog` suffix are followed to depth 32, loose candidates are ignored, and
+  output contains only deterministic schema-version-1 family totals with typed rejection counts.
+  Infrastructure failures discard partial observations and emit a zero report plus one fixed
+  path-free category. The unkeyed digests are consistency pins, not source authentication,
+  provenance, a signature, or an atomic filesystem snapshot. Generated fixtures cover SHA-256
+  known answers, chunk boundaries/cache reuse, exact and padded nested spans, forced resource
+  limits, descriptor rejections, privacy equivalence, unsafe entries, and identity/content races.
+  No owner-corpus run is recorded. Acceptance is not retail validity, semantic decode, UI/menu
+  evidence, format or consumer meaning, rendering behavior, or PCSX2 parity.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -54,6 +55,10 @@ constexpr std::uint64_t kMaximumAggregateCandidateBytes =
 constexpr std::uint64_t kMaximumPathMetadataBytes = 64ULL * 1024ULL * 1024ULL;
 constexpr std::size_t kMaximumTreeDepth = 32U;
 constexpr std::size_t kMaximumNestedHogDepth = 32U;
+constexpr std::size_t kAuthenticatedChunkBytes = 64U * 1024U;
+constexpr std::uint64_t kMaximumDiscoveryChunkDigests = 1ULL << 18U;
+constexpr std::size_t kSha256BlockBytes = 64U;
+static_assert(kMaximumDiscoveryChunkDigests * 32U == 8ULL * 1024ULL * 1024ULL);
 
 enum class InputKind : std::uint8_t {
   Other,
@@ -135,6 +140,132 @@ struct PathSnapshot {
   std::uint64_t links = 0;
 };
 
+using Sha256Digest = FrontendEnvelopeSha256Digest;
+
+constexpr std::array<std::uint32_t, 64> kSha256RoundConstants{
+    0x428A2F98U, 0x71374491U, 0xB5C0FBCFU, 0xE9B5DBA5U, 0x3956C25BU,
+    0x59F111F1U, 0x923F82A4U, 0xAB1C5ED5U, 0xD807AA98U, 0x12835B01U,
+    0x243185BEU, 0x550C7DC3U, 0x72BE5D74U, 0x80DEB1FEU, 0x9BDC06A7U,
+    0xC19BF174U, 0xE49B69C1U, 0xEFBE4786U, 0x0FC19DC6U, 0x240CA1CCU,
+    0x2DE92C6FU, 0x4A7484AAU, 0x5CB0A9DCU, 0x76F988DAU, 0x983E5152U,
+    0xA831C66DU, 0xB00327C8U, 0xBF597FC7U, 0xC6E00BF3U, 0xD5A79147U,
+    0x06CA6351U, 0x14292967U, 0x27B70A85U, 0x2E1B2138U, 0x4D2C6DFCU,
+    0x53380D13U, 0x650A7354U, 0x766A0ABBU, 0x81C2C92EU, 0x92722C85U,
+    0xA2BFE8A1U, 0xA81A664BU, 0xC24B8B70U, 0xC76C51A3U, 0xD192E819U,
+    0xD6990624U, 0xF40E3585U, 0x106AA070U, 0x19A4C116U, 0x1E376C08U,
+    0x2748774CU, 0x34B0BCB5U, 0x391C0CB3U, 0x4ED8AA4AU, 0x5B9CCA4FU,
+    0x682E6FF3U, 0x748F82EEU, 0x78A5636FU, 0x84C87814U, 0x8CC70208U,
+    0x90BEFFFAU, 0xA4506CEBU, 0xBEF9A3F7U, 0xC67178F2U,
+};
+
+[[nodiscard]] std::uint32_t
+ReadBigEndianWord(const std::span<const std::byte> bytes,
+                  const std::size_t offset) noexcept {
+  return (std::to_integer<std::uint32_t>(bytes[offset]) << 24U) |
+         (std::to_integer<std::uint32_t>(bytes[offset + 1U]) << 16U) |
+         (std::to_integer<std::uint32_t>(bytes[offset + 2U]) << 8U) |
+         std::to_integer<std::uint32_t>(bytes[offset + 3U]);
+}
+
+void CompressSha256(std::array<std::uint32_t, 8> &state,
+                    const std::span<const std::byte> block) noexcept {
+  std::array<std::uint32_t, 64> schedule{};
+  for (std::size_t index = 0; index < 16U; ++index)
+    schedule[index] = ReadBigEndianWord(block, index * 4U);
+  for (std::size_t index = 16U; index < schedule.size(); ++index) {
+    const std::uint32_t first = std::rotr(schedule[index - 15U], 7) ^
+                                std::rotr(schedule[index - 15U], 18) ^
+                                (schedule[index - 15U] >> 3U);
+    const std::uint32_t second = std::rotr(schedule[index - 2U], 17) ^
+                                 std::rotr(schedule[index - 2U], 19) ^
+                                 (schedule[index - 2U] >> 10U);
+    schedule[index] =
+        schedule[index - 16U] + first + schedule[index - 7U] + second;
+  }
+
+  std::uint32_t a = state[0];
+  std::uint32_t b = state[1];
+  std::uint32_t c = state[2];
+  std::uint32_t d = state[3];
+  std::uint32_t e = state[4];
+  std::uint32_t f = state[5];
+  std::uint32_t g = state[6];
+  std::uint32_t h = state[7];
+  for (std::size_t index = 0; index < schedule.size(); ++index) {
+    const std::uint32_t large_second =
+        std::rotr(e, 6) ^ std::rotr(e, 11) ^ std::rotr(e, 25);
+    const std::uint32_t choice = (e & f) ^ ((~e) & g);
+    const std::uint32_t first = h + large_second + choice +
+                                kSha256RoundConstants[index] + schedule[index];
+    const std::uint32_t large_first =
+        std::rotr(a, 2) ^ std::rotr(a, 13) ^ std::rotr(a, 22);
+    const std::uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+    const std::uint32_t second = large_first + majority;
+    h = g;
+    g = f;
+    f = e;
+    e = d + first;
+    d = c;
+    c = b;
+    b = a;
+    a = first + second;
+  }
+
+  state[0] += a;
+  state[1] += b;
+  state[2] += c;
+  state[3] += d;
+  state[4] += e;
+  state[5] += f;
+  state[6] += g;
+  state[7] += h;
+}
+
+[[nodiscard]] Sha256Digest
+Sha256(const std::span<const std::byte> bytes) noexcept {
+  std::array<std::uint32_t, 8> state{
+      0x6A09E667U, 0xBB67AE85U, 0x3C6EF372U, 0xA54FF53AU,
+      0x510E527FU, 0x9B05688CU, 0x1F83D9ABU, 0x5BE0CD19U,
+  };
+
+  const std::size_t complete_bytes =
+      (bytes.size() / kSha256BlockBytes) * kSha256BlockBytes;
+  for (std::size_t offset = 0; offset < complete_bytes;
+       offset += kSha256BlockBytes) {
+    CompressSha256(state, bytes.subspan(offset, kSha256BlockBytes));
+  }
+
+  std::array<std::byte, kSha256BlockBytes * 2U> tail{};
+  const std::size_t remaining = bytes.size() - complete_bytes;
+  if (remaining != 0U)
+    std::copy_n(bytes.data() + complete_bytes, remaining, tail.data());
+  tail[remaining] = std::byte{0x80};
+  const std::size_t tail_bytes =
+      remaining < 56U ? kSha256BlockBytes : kSha256BlockBytes * 2U;
+  const std::uint64_t bit_length =
+      static_cast<std::uint64_t>(bytes.size()) * 8U;
+  for (std::size_t index = 0; index < 8U; ++index) {
+    tail[tail_bytes - 1U - index] =
+        static_cast<std::byte>((bit_length >> (index * 8U)) & 0xFFU);
+  }
+  for (std::size_t offset = 0; offset < tail_bytes;
+       offset += kSha256BlockBytes) {
+    CompressSha256(state, std::span<const std::byte>(tail).subspan(
+                              offset, kSha256BlockBytes));
+  }
+
+  Sha256Digest digest{};
+  for (std::size_t index = 0; index < state.size(); ++index) {
+    digest[index * 4U] = static_cast<std::byte>((state[index] >> 24U) & 0xFFU);
+    digest[index * 4U + 1U] =
+        static_cast<std::byte>((state[index] >> 16U) & 0xFFU);
+    digest[index * 4U + 2U] =
+        static_cast<std::byte>((state[index] >> 8U) & 0xFFU);
+    digest[index * 4U + 3U] = static_cast<std::byte>(state[index] & 0xFFU);
+  }
+  return digest;
+}
+
 [[nodiscard]] bool SameSnapshot(const PathSnapshot &left,
                                 const PathSnapshot &right) noexcept {
 #ifdef _WIN32
@@ -158,6 +289,7 @@ struct PathSnapshot {
 struct TopLevelHog {
   std::filesystem::path path;
   PathSnapshot discovery_snapshot;
+  std::vector<Sha256Digest> discovery_chunk_digests;
 };
 
 struct Discovery {
@@ -493,11 +625,8 @@ void InvokeHook(const FrontendEnvelopeCommandTestHooks &hooks,
 }
 
 [[nodiscard]] std::expected<void, std::string>
-ReadStableRange(void *opaque, const std::uint64_t offset,
+ReadStableRange(StablePathGuard &guard, const std::uint64_t offset,
                 const std::span<std::byte> output) {
-  if (opaque == nullptr)
-    return std::unexpected("HOG read source has no stable handle");
-  auto &guard = *static_cast<StablePathGuard *>(opaque);
   if (guard.kind() != StablePathKind::RegularFile ||
       offset > guard.snapshot().size ||
       output.size() > guard.snapshot().size - offset)
@@ -552,12 +681,187 @@ ReadStableRange(void *opaque, const std::uint64_t offset,
   return {};
 }
 
+[[nodiscard]] std::size_t
+AuthenticatedChunkCount(const std::uint64_t size) noexcept {
+  return static_cast<std::size_t>(
+      size / kAuthenticatedChunkBytes +
+      static_cast<std::uint64_t>(size % kAuthenticatedChunkBytes != 0U));
+}
+
+[[nodiscard]] std::expected<std::vector<Sha256Digest>, StablePathError>
+DigestStableFileChunks(StablePathGuard &guard) {
+  std::vector<Sha256Digest> digests;
+  digests.reserve(AuthenticatedChunkCount(guard.snapshot().size));
+  std::array<std::byte, kAuthenticatedChunkBytes> buffer{};
+  std::uint64_t offset = 0;
+  while (offset < guard.snapshot().size) {
+    const std::uint64_t remaining = guard.snapshot().size - offset;
+    const std::size_t request = static_cast<std::size_t>(
+        std::min<std::uint64_t>(remaining, buffer.size()));
+    const std::span<std::byte> output(buffer.data(), request);
+    auto read = ReadStableRange(guard, offset, output);
+    if (!read)
+      return std::unexpected(StablePathError::Io);
+    digests.push_back(
+        Sha256(std::span<const std::byte>(output.data(), output.size())));
+    offset += request;
+  }
+  return digests;
+}
+
+struct AuthenticatedReadContext {
+  StablePathGuard *guard = nullptr;
+  std::span<const Sha256Digest> chunk_digests;
+  const FrontendEnvelopeCommandTestHooks *hooks = nullptr;
+  std::array<std::byte, kAuthenticatedChunkBytes> scratch{};
+  std::uint64_t authenticated_bytes = 0;
+  std::uint64_t maximum_authenticated_bytes = 0;
+  std::uint64_t authentication_hard_limit =
+      std::numeric_limits<std::uint64_t>::max();
+  std::size_t cached_chunk_index = 0;
+  std::size_t cached_chunk_size = 0;
+  bool cache_valid = false;
+  bool read_failed = false;
+  bool limit_exceeded = false;
+};
+
+[[nodiscard]] ScanError
+ClassifyAuthenticatedReadFailure(const AuthenticatedReadContext &context,
+                                 const ScanError fallback) noexcept {
+  if (context.limit_exceeded)
+    return ScanError::LimitExceeded;
+  if (context.read_failed)
+    return ScanError::MemberRead;
+  return fallback;
+}
+
+[[nodiscard]] std::expected<std::uint64_t, ScanError>
+AuthenticatedPhysicalRangeBytes(const AuthenticatedReadContext &context,
+                                const std::uint64_t offset,
+                                const std::uint64_t size) noexcept {
+  if (context.guard == nullptr ||
+      context.guard->kind() != StablePathKind::RegularFile)
+    return std::unexpected(ScanError::LimitExceeded);
+  const std::uint64_t file_size = context.guard->snapshot().size;
+  if (offset > file_size || size > file_size - offset)
+    return std::unexpected(ScanError::LimitExceeded);
+  if (size == 0U)
+    return 0U;
+
+  const std::uint64_t first =
+      (offset / kAuthenticatedChunkBytes) * kAuthenticatedChunkBytes;
+  const std::uint64_t end = offset + size;
+  const std::uint64_t final_chunk = (end - 1U) / kAuthenticatedChunkBytes;
+  const std::uint64_t final_offset = final_chunk * kAuthenticatedChunkBytes;
+  const std::uint64_t final_size = std::min<std::uint64_t>(
+      file_size - final_offset, kAuthenticatedChunkBytes);
+  return final_offset + final_size - first;
+}
+
+[[nodiscard]] std::expected<void, ScanError>
+GrantAuthenticatedRangeBudget(AuthenticatedReadContext &context,
+                              const std::uint64_t offset,
+                              const std::uint64_t size) noexcept {
+  auto physical_bytes = AuthenticatedPhysicalRangeBytes(context, offset, size);
+  if (!physical_bytes)
+    return std::unexpected(physical_bytes.error());
+  if (context.maximum_authenticated_bytes > context.authentication_hard_limit)
+    return std::unexpected(ScanError::LimitExceeded);
+  const std::uint64_t available =
+      context.authentication_hard_limit - context.maximum_authenticated_bytes;
+  context.maximum_authenticated_bytes += std::min(*physical_bytes, available);
+  return {};
+}
+
+[[nodiscard]] std::expected<void, std::string>
+ReadAuthenticatedRange(void *opaque, const std::uint64_t offset,
+                       const std::span<std::byte> output) {
+  if (opaque == nullptr)
+    return std::unexpected("HOG read source has no authenticated context");
+  auto &context = *static_cast<AuthenticatedReadContext *>(opaque);
+  if (context.guard == nullptr || context.hooks == nullptr)
+    return std::unexpected("HOG read source is missing authentication state");
+  StablePathGuard &guard = *context.guard;
+  if (guard.kind() != StablePathKind::RegularFile ||
+      offset > guard.snapshot().size ||
+      output.size() > guard.snapshot().size - offset ||
+      context.chunk_digests.size() !=
+          AuthenticatedChunkCount(guard.snapshot().size)) {
+    context.read_failed = true;
+    return std::unexpected("HOG authenticated read range is invalid");
+  }
+  if (output.empty())
+    return {};
+
+  const std::uint64_t end = offset + output.size();
+  const std::size_t first_chunk =
+      static_cast<std::size_t>(offset / kAuthenticatedChunkBytes);
+  const std::size_t final_chunk =
+      static_cast<std::size_t>((end - 1U) / kAuthenticatedChunkBytes);
+  for (std::size_t chunk_index = first_chunk; chunk_index <= final_chunk;
+       ++chunk_index) {
+    const std::uint64_t chunk_offset =
+        static_cast<std::uint64_t>(chunk_index) * kAuthenticatedChunkBytes;
+    const std::size_t chunk_size =
+        static_cast<std::size_t>(std::min<std::uint64_t>(
+            guard.snapshot().size - chunk_offset, context.scratch.size()));
+    const std::span<std::byte> chunk =
+        std::span<std::byte>(context.scratch).first(chunk_size);
+    if (!context.cache_valid || context.cached_chunk_index != chunk_index) {
+      context.cache_valid = false;
+      if (context.authenticated_bytes > context.maximum_authenticated_bytes ||
+          chunk_size > context.maximum_authenticated_bytes -
+                           context.authenticated_bytes) {
+        context.limit_exceeded = true;
+        return std::unexpected("HOG physical authentication budget exceeded");
+      }
+
+      auto read = ReadStableRange(guard, chunk_offset, chunk);
+      if (!read) {
+        context.read_failed = true;
+        return read;
+      }
+      if (context.hooks->after_raw_hog_chunk_read != nullptr) {
+        context.hooks->after_raw_hog_chunk_read(guard.path(), chunk_offset,
+                                                chunk, context.hooks->context);
+      }
+
+      const auto digest =
+          Sha256(std::span<const std::byte>(chunk.data(), chunk.size()));
+      if (digest != context.chunk_digests[chunk_index]) {
+        context.read_failed = true;
+        return std::unexpected("stable HOG chunk digest changed");
+      }
+      context.authenticated_bytes += chunk_size;
+      context.cached_chunk_index = chunk_index;
+      context.cached_chunk_size = chunk_size;
+      context.cache_valid = true;
+    }
+    if (context.cached_chunk_size != chunk_size) {
+      context.read_failed = true;
+      return std::unexpected("HOG authenticated chunk cache is inconsistent");
+    }
+
+    const std::uint64_t copy_begin = std::max(offset, chunk_offset);
+    const std::uint64_t copy_end = std::min(end, chunk_offset + chunk_size);
+    const std::size_t copy_size =
+        static_cast<std::size_t>(copy_end - copy_begin);
+    const std::size_t chunk_begin =
+        static_cast<std::size_t>(copy_begin - chunk_offset);
+    const std::size_t output_begin =
+        static_cast<std::size_t>(copy_begin - offset);
+    std::copy_n(chunk.data() + chunk_begin, copy_size,
+                output.data() + output_begin);
+  }
+  return {};
+}
+
 [[nodiscard]] archive::HogReadSource
-MakeReadSource(StablePathGuard &guard) noexcept {
+MakeReadSource(AuthenticatedReadContext &context) noexcept {
   return archive::HogReadSource{
-      .size = guard.snapshot().size,
-      .context = &guard,
-      .read_exact = ReadStableRange,
+      .size = context.guard == nullptr ? 0U : context.guard->snapshot().size,
+      .context = &context,
+      .read_exact = ReadAuthenticatedRange,
   };
 }
 
@@ -605,6 +909,7 @@ DiscoverTopLevelHogs(const std::filesystem::path &root,
   std::uint64_t visited_entries = 0;
   std::uint64_t path_metadata_bytes = 0;
   std::uint64_t top_level_hog_bytes = 0;
+  std::uint64_t discovery_chunk_digests = 0;
   if (!RecordPathMetadata(root, path_metadata_bytes))
     return std::unexpected(ScanError::LimitExceeded);
 
@@ -650,7 +955,7 @@ DiscoverTopLevelHogs(const std::filesystem::path &root,
           if (discovery.hogs.size() >= kMaximumTopLevelHogs)
             return std::unexpected(ScanError::LimitExceeded);
           auto file_guard = OpenStablePath(path, StablePathKind::RegularFile,
-                                           StablePathAccess::Metadata);
+                                           StablePathAccess::Read);
           if (!file_guard)
             return std::unexpected(DiscoveryError(file_guard.error()));
           const std::uint64_t size = file_guard->snapshot().size;
@@ -658,9 +963,22 @@ DiscoverTopLevelHogs(const std::filesystem::path &root,
               !AddBounded(top_level_hog_bytes, size,
                           kMaximumAggregateTopLevelHogBytes))
             return std::unexpected(ScanError::LimitExceeded);
+          const auto chunk_count =
+              static_cast<std::uint64_t>(AuthenticatedChunkCount(size));
+          if (!AddBounded(discovery_chunk_digests, chunk_count,
+                          std::min(kMaximumDiscoveryChunkDigests,
+                                   hooks.maximum_discovery_chunk_digests)))
+            return std::unexpected(ScanError::LimitExceeded);
+          auto chunk_digests = DigestStableFileChunks(*file_guard);
+          if (!chunk_digests)
+            return std::unexpected(DiscoveryError(chunk_digests.error()));
+          auto digest_verification = VerifyStablePath(*file_guard);
+          if (!digest_verification)
+            return std::unexpected(DiscoveryError(digest_verification.error()));
           discovery.hogs.push_back(TopLevelHog{
               .path = path,
               .discovery_snapshot = file_guard->snapshot(),
+              .discovery_chunk_digests = std::move(*chunk_digests),
           });
         }
       } else {
@@ -684,7 +1002,8 @@ DiscoverTopLevelHogs(const std::filesystem::path &root,
 
 [[nodiscard]] std::expected<std::vector<std::byte>, ScanError>
 ReadRange(const archive::HogReadSource &source, const std::uint64_t offset,
-          const std::uint64_t size) {
+          const std::uint64_t size,
+          const AuthenticatedReadContext &authenticated_reads) {
   if (source.read_exact == nullptr ||
       size > std::numeric_limits<std::size_t>::max() || offset > source.size ||
       size > source.size - offset)
@@ -693,7 +1012,8 @@ ReadRange(const archive::HogReadSource &source, const std::uint64_t offset,
   std::vector<std::byte> bytes(static_cast<std::size_t>(size));
   auto read = source.read_exact(source.context, offset, bytes);
   if (!read)
-    return std::unexpected(ScanError::MemberRead);
+    return std::unexpected(ClassifyAuthenticatedReadFailure(
+        authenticated_reads, ScanError::MemberRead));
   return bytes;
 }
 
@@ -776,11 +1096,10 @@ RecordDescriptor(FamilyStats &stats,
   return false;
 }
 
-[[nodiscard]] std::expected<void, ScanError>
-ScanHogEntries(const archive::HogReadSource &source,
-               const archive::HogIndex &parent,
-               const std::uint64_t parent_file_offset, const std::size_t depth,
-               ScanState &state) {
+[[nodiscard]] std::expected<void, ScanError> ScanHogEntries(
+    const archive::HogReadSource &source, const archive::HogIndex &parent,
+    const std::uint64_t parent_file_offset, const std::size_t depth,
+    ScanState &state, AuthenticatedReadContext &authenticated_reads) {
   const auto entry_count = static_cast<std::uint64_t>(parent.entries().size());
   if (!AddBounded(state.indexed_entries, entry_count, kMaximumIndexedEntries))
     return std::unexpected(ScanError::LimitExceeded);
@@ -801,15 +1120,20 @@ ScanHogEntries(const archive::HogReadSource &source,
           !AddBounded(state.nested_hog_bytes, entry.size,
                       kMaximumAggregateNestedHogBytes))
         return std::unexpected(ScanError::LimitExceeded);
+      auto granted = GrantAuthenticatedRangeBudget(
+          authenticated_reads, *absolute_offset, entry.size);
+      if (!granted)
+        return std::unexpected(granted.error());
 
       auto nested = archive::HogIndex::OpenRange(
           source,
           archive::HogFileRange{.offset = *absolute_offset, .size = entry.size},
           kMaximumNestedHogBytes);
       if (!nested)
-        return std::unexpected(ScanError::HogOpen);
-      auto scanned =
-          ScanHogEntries(source, *nested, *absolute_offset, depth + 1U, state);
+        return std::unexpected(ClassifyAuthenticatedReadFailure(
+            authenticated_reads, ScanError::HogOpen));
+      auto scanned = ScanHogEntries(source, *nested, *absolute_offset,
+                                    depth + 1U, state, authenticated_reads);
       if (!scanned)
         return std::unexpected(scanned.error());
       continue;
@@ -831,7 +1155,8 @@ ScanHogEntries(const archive::HogReadSource &source,
       continue;
     }
 
-    auto bytes = ReadRange(source, *absolute_offset, entry.size);
+    auto bytes =
+        ReadRange(source, *absolute_offset, entry.size, authenticated_reads);
     if (!bytes)
       return std::unexpected(bytes.error());
     if (!InspectCandidate(
@@ -866,11 +1191,22 @@ ScanTree(const std::filesystem::path &root,
     if (!opened_verification)
       return std::unexpected(FileReadError(opened_verification.error()));
 
-    auto source = MakeReadSource(*guard);
+    AuthenticatedReadContext authenticated_reads{
+        .guard = &*guard,
+        .chunk_digests = candidate.discovery_chunk_digests,
+        .hooks = &hooks,
+        .maximum_authenticated_bytes =
+            std::min(candidate.discovery_snapshot.size,
+                     hooks.maximum_authenticated_hog_read_bytes),
+        .authentication_hard_limit = hooks.maximum_authenticated_hog_read_bytes,
+    };
+    auto source = MakeReadSource(authenticated_reads);
     auto hog = archive::HogIndex::Open(source);
     if (!hog)
-      return std::unexpected(ScanError::HogOpen);
-    auto scanned = ScanHogEntries(source, *hog, 0, 0, state);
+      return std::unexpected(ClassifyAuthenticatedReadFailure(
+          authenticated_reads, ScanError::HogOpen));
+    auto scanned =
+        ScanHogEntries(source, *hog, 0, 0, state, authenticated_reads);
     if (!scanned)
       return std::unexpected(scanned.error());
 
@@ -947,6 +1283,11 @@ void PrintError(const std::string_view name) {
          aggregate.ie.accepted == aggregate.ie.candidates;
 }
 } // namespace
+
+FrontendEnvelopeSha256Digest FrontendEnvelopeSha256ForTesting(
+    const std::span<const std::byte> bytes) noexcept {
+  return Sha256(bytes);
+}
 
 int FrontendEnvelopeCoverageVerifyTreeForTesting(
     const std::filesystem::path &root,
