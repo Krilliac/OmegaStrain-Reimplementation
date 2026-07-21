@@ -2,6 +2,30 @@
 
 Each milestone ends with an executable regression, not only a research note.
 
+## Cross-cutting engine and SDK evolution
+
+M0 through M8 remain the compatibility and release spine. In parallel, every milestone follows the
+compatibility-first direction in [`ADR 0004`](adr/0004-compatibility-first-engine-sdk.md) and the
+staged plan in [`07-Engine-and-SDK-Roadmap.md`](07-Engine-and-SDK-Roadmap.md):
+
+- Retail parsing stays in bounded compatibility adapters.
+- Passive descriptors remain inspection-only until independent evidence supports semantic promotion.
+- Every published value owns its data. Existing source-preserving compatibility values may retain
+  structural text, raw flags, observed fields, or locators without becoming stable engine IR.
+- Promoted semantic/cooked IR excludes borrowed retail spans, retail offsets, platform objects, and
+  speculative fields, with provenance kept separate.
+- Project-owned and retail inputs converge only at stable semantic/import contracts.
+- The promoted-engine target is for runtime services to consume promoted semantic or cooked data;
+  the current `omega_content`-to-retail path remains a grandfathered transitional compatibility
+  composition until its provider/import boundary exists. Tools and editors depend downward on SDK
+  contracts and never become shipping-engine dependencies.
+- Generalization waits for a second real consumer or a concrete retail-independence test.
+- Every promotion records ownership, thread affinity, resource bounds, reload behavior, evidence,
+  synthetic regressions, and any remaining compatibility gap.
+
+This work happens as compatible vertical slices mature; M9 and M10 are measurable culmination proofs,
+not a reason to postpone reusable boundaries.
+
 ## M0: Reproducible laboratory
 
 Status: complete for the current NTSC-U research baseline.
@@ -28,7 +52,9 @@ a bounded level-scoped texture store and native verifier, and a semantic VUM mat
 adapter plus a retail-only passive render-payload descriptor are implemented. Bounded passive SKM
 and SKL descriptors, a fixed-output retail-only SKA descriptor, bounded canonical LPD and SKAS
 envelope adapters, a fixed passive VPK wrapper descriptor, and an analysis-only passive SO module
-descriptor are also implemented.
+descriptor are also implemented. E-0101 records passive FNT, GUI, and IE project-defined prefix
+hypotheses; generated fixtures confirm their implementation boundaries, while the retail provenance
+of their constants remains unrecorded. They are nonsemantic offline scaffolding, not front-end IR.
 Other scene decoders remain incomplete.
 
 - Native HOG parser validated against all 273 top-level archives and 6,677 nested spans.
@@ -180,6 +206,12 @@ other retail semantic claim. Headless named-level startup owns the complete cano
 material collections plus an inventory-only texture store. It does not load texture storage, bind
 materials, or expand display pixels; no store payload enters GPU upload or rendering. The rendered
 host path uploads only the existing project-generated diagnostic RGBA8 image.
+E-0102 also implements one explicit modal opening-movie path. It validates bounded MPEG-PS, H.262,
+and the accepted PSS PCM variant; presents decoded video and audio through owned buffers, a stable GPU
+texture, a fixed audio ring, and a device-demand clock; and supports skip, EOS, safety timeout, and
+fail-open transition to the existing front end without scheduler catch-up. Capture/replay remains
+mutually exclusive. This does not establish general media selection/mixing, non-Windows end-to-end
+playback, perceptual synchronization, or exact retail audiovisual timing.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
@@ -197,11 +229,14 @@ synthetic shell policy, not inferred retail behavior, and `SdlGpuHost` is now vi
 Executing a `SimulationWorld` from the fixed-step plans is wired through `OmegaApp`: every planned
 step advances an owned,
 platform-neutral deterministic world clock before rendering, with fail-closed representation
-limits. The app also owns the SDL process lifetime and a resumed system-default playback stream;
-its callback supplies bounded project-owned silence and exposes lock-free health counters without
-loading files or retail data. A synthetic positioned diagnostic component and pure digital
+limits. The app also owns the SDL process lifetime and a system-default playback stream. Its callback
+supplies bounded project-owned silence while idle and consumes opening-movie samples from a fixed
+ring. Project callback code performs no loading, logging, explicit locking, or dynamic allocation.
+The main thread validates and deinterleaves the accepted PSS PCM variant, refills the ring, and
+contains it on transition; this is not a general mixer, final hardware-playback proof, or retail
+timing-parity claim. A synthetic positioned diagnostic component and pure digital
 locomotion planner now exercise the world/input boundary, but retail player components and gameplay
-systems, render scene snapshots, decoded voices, and mixing remain incomplete.
+systems, render scene snapshots, general decoded voices, and mixing remain incomplete.
 
 The simulation world now solely owns a bounded, preallocated generational entity registry plus one
 direct bounded `Position3` component store. Entity
@@ -1145,3 +1180,21 @@ asset lookup/binding, rendering, audio, or behavior.
 - Performance budgets, crash recovery, accessibility, controller remapping, packaging,
   license notices, CI matrix, clean-machine install, and full regression suite.
 - No firmware, disc content, executable code, or extracted asset ships with the runtime.
+
+## M9: OpenOmega SDK and authoring pipeline
+
+This milestone culminates the required SDK-0 through SDK-6 stages in
+[`07-Engine-and-SDK-Roadmap.md`](07-Engine-and-SDK-Roadmap.md); that roadmap owns the staged
+implementation details. Optional SDK-7 exporters are independent and do not gate M9 or M10.
+
+Exit regression: a completely project-owned sample is validated, cooked, packaged, and run through
+the same promoted semantic/runtime contracts used by compatibility content.
+
+## M10: Retail-independent engine proof
+
+This milestone is the SDK-8 proof defined in
+[`07-Engine-and-SDK-Roadmap.md`](07-Engine-and-SDK-Roadmap.md).
+
+Exit regression: CI configures, builds, and runs a non-Omega, project-owned sample whose link graph is
+restricted to an allowlist of deliberately promoted engine/SDK targets. No retail/compatibility
+adapter or Omega title-composition/app-host target is present.

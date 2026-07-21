@@ -27,6 +27,20 @@ instruction block, or mechanism that executes a retail executable/module. See
 Retail code may be inspected offline to establish observable contracts. Implement the resulting
 behavior independently and cite reproducible metadata or behavioral evidence.
 
+## Compatibility-to-engine boundary
+
+Retail parsers and original-format interchange belong at bounded compatibility edges. Public engine
+values own their data and express only independently evidenced semantics; they must not expose
+borrowed retail spans, source offsets, proprietary paths, platform objects, or speculative field
+names. A passive descriptor is inspection evidence, not a cookable asset.
+
+Project-authored fixtures validate reusable engine contracts. Owner data may validate compatibility
+adapters locally, but owner-derived content and cooked caches remain outside version control and
+releases. Add a shared abstraction only for a demonstrated second consumer or a concrete
+retail-independence test. See
+[`ADR 0004`](docs/adr/0004-compatibility-first-engine-sdk.md) and the
+[`engine and SDK roadmap`](docs/07-Engine-and-SDK-Roadmap.md).
+
 ## Build and test
 
 Use a VS2022 developer environment on Windows:

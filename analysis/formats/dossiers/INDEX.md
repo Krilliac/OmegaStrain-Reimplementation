@@ -48,27 +48,27 @@ disc placement alone does not establish a decoder class, system role, or out-of-
 | `.skas` | [SKAS.md](SKAS.md) |
 | `.vpk` | [VPK.md](VPK.md) |
 
-### passive_descriptor_only (5)
+### passive_descriptor_only (8)
 
 | Suffix | Dossier |
 | --- | --- |
+| `.fnt` | [FNT.md](FNT.md) |
+| `.gui` | [GUI.md](GUI.md) |
+| `.ie` | [IE.md](IE.md) |
 | `.ska` | [SKA.md](SKA.md) |
 | `.skl` | [SKL.md](SKL.md) |
 | `.skm` | [SKM.md](SKM.md) |
 | `.so` | [SO.md](SO.md) |
 | `.tbl` | [TBL.md](TBL.md) |
 
-### aggregate_scanner_only (14)
+### aggregate_scanner_only (11)
 
 | Suffix | Dossier |
 | --- | --- |
 | `.bin` | [BIN.md](BIN.md) |
 | `.bnk` | [BNK.md](BNK.md) |
 | `.bon` | [BON.md](BON.md) |
-| `.fnt` | [FNT.md](FNT.md) |
-| `.gui` | [GUI.md](GUI.md) |
 | `.gun` | [GUN.md](GUN.md) |
-| `.ie` | [IE.md](IE.md) |
 | `.prn` | [PRN_.md](PRN_.md) |
 | `.pss` | [PSS.md](PSS.md) |
 | `.scc` | [SCC.md](SCC.md) |
@@ -116,27 +116,34 @@ proving that every file sharing its suffix is one format family.
 
 ## Ranked next work
 
-1. Run the hardened size-only HOG-member collector documented in
-   `analysis/formats/MEMBER-STRUCTURAL-FINGERPRINT.md` privately for the default
-   `.gui/.fnt/.ie` set. `.bnk/.gun` are optional allowlisted measurements. Commit only a sanitized
-   aggregate after independent review.
-2. Keep the front-end envelope gate closed. Size regularity alone does not establish a falsifiable
-   grammar or justify `GuiEnvelopeIR`; a native descriptor requires stable structure plus malformed
-   boundaries and independent consumer evidence.
+1. Preserve the bounded FNT/GUI/IE passive hypothesis descriptors and their opaque payload/root
+   regions. Their exact constants lack tracked retail provenance. The hardened size-only HOG-member
+   collector may provide reviewed coverage evidence for the default `.gui/.fnt/.ie` set;
+   `.bnk/.gun` remain optional allowlisted measurements. Commit only a sanitized aggregate after
+   independent review.
+2. Keep the semantic front-end gate closed. Size regularity and project-defined prefix words do not
+   establish font, widget, node, layout, lookup, render, menu, or consumer semantics or justify a
+   semantic `GuiEnvelopeIR`/UI IR.
 3. Run metadata-only owner-corpus validation for existing synthetic-only LPD, PAR, VPK, SKAS, SKL,
    TBL, and VAG boundaries where their authoritative format notes still leave that validation unclaimed.
    Their publication on main is already established and must not be re-opened as a work item.
 4. Treat `.pf` and `.tm2` as Unknown until a designed experiment produces tracked evidence.
    Do not promote the 16 whole-disc-only families from placement or public suffix convention alone.
-5. Use `docs/native-scaffolds/README.md` before proposing a native descriptor. Occurrence and size
-   ranges are evidence inputs, not accept/reject grammars or API designs.
+5. Keep the native opening-movie MPEG-PS/H.262/PCM presentation path separate from suffix-wide
+   `.pss` classification. It accepts one bounded external stream shape; alternate variants and exact
+   retail A/V parity remain evidence-gated.
+6. Use `docs/native-scaffolds/README.md` before proposing or widening a native descriptor.
+   Occurrence and size ranges are evidence inputs, not semantic grammars or API designs.
 
 ## Remaining nonclaims
 
-The dossier set does not add an owner-corpus measurement, decode any previously opaque payload,
-identify a retail menu consumer, or establish layout, lookup, rendering, audio, timing, gameplay, or
-PCSX2 equivalence. Composite formats retain the narrower scope stated by their authoritative native
-interfaces—for example VUM's canonical material catalog and separate passive render-payload view.
+The dossier set does not establish retail provenance for the FNT/GUI/IE prefix constants, add an
+owner-corpus measurement, decode their opaque payload/root regions, identify a retail menu consumer,
+or establish UI/font semantics, layout, lookup, rendering, gameplay, or PCSX2 equivalence. The
+separate opening-movie path demonstrates bounded native video and PCM presentation for one accepted
+external stream shape, not general `.pss` coverage or exact retail A/V behavior. Composite formats
+retain the narrower scope stated by their authoritative native interfaces—for example VUM's
+canonical material catalog and separate passive render-payload view.
 
 ## Provenance
 

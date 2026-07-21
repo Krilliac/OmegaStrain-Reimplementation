@@ -7,6 +7,10 @@ modern host CPUs. Use metadata and observable behavioral tests to derive contrac
 the implementation independently. PCSX2 and PS2-code analysis are offline reference tools, not
 shipping dependencies or execution mechanisms.
 
+Compatibility remains the immediate objective. Evidence-backed work should also preserve the
+boundaries accepted in [`ADR 0004`](adr/0004-compatibility-first-engine-sdk.md) so the runtime can
+evolve into the independently designed OpenOmega engine and SDK without speculative rewrites.
+
 ## Verified game identity
 
 | Field | Value |
@@ -1360,6 +1364,19 @@ shipping dependencies or execution mechanisms.
     save, memory-card image, savestate, emulator, PCSX2 runtime, or runtime network input was
     accessed. No full integration build, Release build, push, or retail-fidelity validation is
     claimed.
+79. E-0101 records three bounded passive FNT, GUI, and IE project-defined prefix hypotheses
+    introduced by the merged native front-end structural slice. They retain only narrow neutral
+    scalars and byte ranges, own no input payload, use fixed project security ceilings, and are
+    exercised only with generated fixtures. No tracked evidence records the retail provenance of
+    their exact constants. They remain offline scaffolding and establish no font, widget, hierarchy,
+    layout, rendering, consumer relationship, retail behavior, or PCSX2 parity.
+    E-0102 records the merged native opening-movie media path: bounded MPEG-PS/H.262 inspection and
+    Windows decode, a validated 48 kHz stereo PSS PCM variant, allocation-free interval deinterleave,
+    a fixed SDL audio ring, device-demand presentation clock, stable GPU texture updates, modal skip
+    and fail-open transition, and containment before resource release. It remains one narrow Windows
+    compatibility path, not a general mixer, full PSS grammar, perceptual-sync proof, frame-exact
+    retail timing claim, or non-Windows end-to-end playback claim. Proprietary inputs and private
+    validation artifacts remain outside version control.
 
 ## Disc observations
 
@@ -1442,7 +1459,10 @@ shipping dependencies or execution mechanisms.
 
 ## Front-end asset reconnaissance (branch `claude/frontend-asset-decoding`, 2026-07-20)
 
-Verified outcomes (Python and documentation only; no C++ decoder added). Ledger entry E-0095.
+Historical E-0095 outcomes (Python and documentation only; no C++ decoder existed in that slice).
+E-0101 later supersedes only the implementation-status statements with three narrow passive
+project-defined hypotheses; it does not establish their retail provenance or add semantic front-end
+IR.
 
 - **`.gui` topology promotion (schema_version 2).** `tools/measure_frontend_hog_topology.py`
   now promotes only the `.gui` member suffix out of `other` into its own frozen public aggregate
@@ -1463,15 +1483,15 @@ Verified outcomes (Python and documentation only; no C++ decoder added). Ledger 
 
 Remaining limitations (deliberately unclaimed):
 
-- **GUI-envelope tool not built.** The tracked tree records only existence and occurrence counts for
-  `.gui`/`.fnt`/`.ie` — no member size, byte, header field, or alignment. The audit's Lane C gate
-  verdict is therefore **NO**: there is not enough evidence to freeze a non-misleading positional
-  or envelope schema, so `measure_frontend_gui_envelopes.py` was intentionally not written. The
-  semantic envelope tool plus the evidence-gap note is the correct conservative result. A separate
-  size-only fingerprint collector now exists under E-0097, but no owner-corpus result is tracked.
-- No native `GuiEnvelopeIR` or decoder; no retail menu role, lookup, field, layout, state, timing,
-  rendering, or audio semantics for `.gui`/`.fnt`/`.ie`; no owner-corpus, behavioral-oracle,
-  runtime, packaged-host, or PCSX2-equivalence validation.
+- **Semantic GUI-envelope tool not built.** At E-0095 the tracked tree recorded only existence and
+  occurrence counts, so `measure_frontend_gui_envelopes.py` was intentionally not written. E-0097
+  later added a size-only collector, and E-0101 added three generated-fixture-tested passive prefix
+  hypotheses. Their exact constants lack tracked retail provenance, their opaque payload/root regions
+  remain unparsed, no owner-corpus result is tracked, and the semantic Lane C gate remains **NO**
+  without a falsifiable deeper grammar plus consumer evidence.
+- No native semantic `GuiEnvelopeIR` or font/UI decoder; no retail menu role, lookup, field meaning,
+  layout, state, timing, rendering, or audio semantics for `.gui`/`.fnt`/`.ie`; no owner-corpus,
+  behavioral-oracle, runtime, packaged-host, or PCSX2-equivalence validation.
 - The AI brief's hot-file list cites three headers that do not exist in the tree
   (`native/include/omega/asset/decode_result.h`, `decode_test_hooks.h`,
   `native/include/omega/retail/tdx_decoder.h`); the real contracts live in

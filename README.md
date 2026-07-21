@@ -9,6 +9,11 @@ oracle and debugger; it is not intended to be a dependency of the eventual nativ
 The shipping runtime is pure modern-CPU native code: no MIPS interpreter, recompiler, translated
 retail instruction blocks, or PS2 execution layer.
 
+Omega Strain compatibility is also the proving workload for an independently designed OpenOmega
+engine and SDK. Evidence-backed canonical data, runtime services, and authoring tools may become
+reusable as their contracts stabilize; this project does not claim to recover or represent Bend
+Studio's historical engine source or internal toolchain.
+
 ## Current verified baseline
 
 - Official PCSX2 `master` built from commit `86d76bbf590566d9ea74d381eeff3acd9856503a`.
@@ -49,9 +54,19 @@ retail instruction blocks, or PS2 execution layer.
 - The native host validates an owner-supplied NTSC-U data root, loads MINSK as 299 canonical
   manifest cells with matching owned spatial meshes, and renders a deterministic synthetic
   canonical-COL wireframe contact sheet through SDL_GPU/D3D12.
-- The native host opens and resumes the system-default SDL playback stream as 48 kHz stereo F32;
-  its fixed-buffer callback supplies project-owned silence until decoded assets and mixing are
-  wired, with a deterministic dummy-device test covering the callback boundary. E-0090 separately
+- E-0102 adds an explicit native opening-movie path: bounded MPEG-PS and H.262 inspection, Windows
+  Media Foundation video decode to owned NV12, project-owned RGBA8 conversion, stable GPU texture
+  updates, and bounded PSS PCM presentation through a device-demand clock. The modal boot reducer
+  supports skip, EOS, safety timeout, and fail-open transition to the existing native front end while
+  suppressing simulation catch-up and isolating capture/replay. This is one narrow compatibility
+  path, not a general media engine or a frame-exact retail audiovisual parity claim.
+- The native host owns the system-default SDL playback stream as 48 kHz stereo F32. Its callback
+  supplies project-owned silence while idle and can consume opening-movie PCM from a fixed 4,096-
+  frame ring. Project callback code performs no file access, logging, explicit locking, or dynamic
+  allocation. The main thread validates the bounded PSS `SShd`/`SSbd` 48 kHz stereo PCM16 variant,
+  deinterleaves exact frame ranges into owned memory, queues converted samples, and contains the
+  stream on skip, completion, or failure. This is opening-movie presentation, not a general mixer,
+  proof of final hardware playback, or a retail timing-parity claim. E-0090 separately
   adds a backend-neutral, bounded VAG-to-owned-mono-PCM16 decoder for the complete observed
   48-byte-header/version/rate/zero-tail envelope and standard five-predictor PS-ADPCM frames. Raw
   frame flags and marker sample offsets survive as data, but no flag applies playback, looping,
@@ -60,6 +75,11 @@ retail instruction blocks, or PS2 execution layer.
   envelope. It owns the exact printable-ASCII/CRLF text and 72 opaque source-order line ranges,
   validates five blank lines, 67 one-colon lines, and one through three trailing zero bytes, and
   assigns no label, value, relationship, animation, skeleton, or SKA-association semantics.
+- E-0101 records bounded passive FNT, GUI, and IE project-defined prefix hypotheses backed by
+  generated tests. They retain only narrow neutral scalars/ranges, own no source payload, and remain
+  offline structural scaffolding. No tracked evidence records the retail provenance of their exact
+  constants, and no font, widget, hierarchy, layout, rendering, consumer, or retail-menu semantics
+  are assigned.
 - An app-owned, non-hot-reloadable SDL input leaf owns the gamepad subsystem, the process-global
   event pump, and one primary gamepad. It filters controller events by SDL instance ID, resets only
   gamepad controls when that device disconnects, and promotes the next available device. A
@@ -1193,14 +1213,17 @@ pair. Frame defaults are synthetic host-shell engineering values, not claims abo
 rate. A local root-level `openomega.cfg` is ignored by version control because it may contain a
 private filesystem path.
 
-Architecture and completion criteria are versioned in
+Architecture, completion criteria, and the compatibility-first engine/SDK direction are versioned in
 [`docs/02-Runtime-Architecture.md`](docs/02-Runtime-Architecture.md) and
-[`docs/03-Milestones.md`](docs/03-Milestones.md). Research confidence is tracked in
+[`docs/03-Milestones.md`](docs/03-Milestones.md), with the staged long-horizon plan in
+[`docs/07-Engine-and-SDK-Roadmap.md`](docs/07-Engine-and-SDK-Roadmap.md) and its accepted decision in
+[`ADR 0004`](docs/adr/0004-compatibility-first-engine-sdk.md). Research confidence is tracked in
 `analysis/evidence/ledger.jsonl`.
 
 ## Layout
 
-- `docs/` — handoff and research notes.
+- `docs/` — architecture, milestones, decisions, policy, research contracts, and handoffs.
+- `native/` — independently written runtime, engine libraries, tools, and synthetic tests.
 - `tools/` — deterministic disc/ELF archaeology tools.
 - `analysis/` — generated, redistributable metadata and reports.
 - `analysis/formats/HOG.md` — validated HOG container layout and extraction notes.

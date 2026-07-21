@@ -41,12 +41,13 @@ Each row is verifiable by reading the cited tracked file.
 | C3 | `.gui`, `.fnt`, and `.ie` are member-name suffixes inside HOG containers, not standalone disc files: the disc-file extension histogram lists none of them, and the per-file manifest (keys `path`, `sha256`, `size`; 448 rows) contains no `.gui`/`.fnt`/`.ie` entry. | `analysis/manifests/disc-summary.json`; `analysis/manifests/disc-files.jsonl` |
 | C4 | The fingerprint scanner has no format handler for `.gui`, `.fnt`, or `.ie`; `FORMAT_HANDLERS` covers only `.tdx`, `.ska`, `.skas`, `.skm`, `.skl`, `.vag`, `.lpd`, `.par`, `.col`, `.vum`, `.vpk`. Per-span size (`span_bytes`) and any header/extent field are recorded only inside a per-format aggregate, i.e. only for handled suffixes. | `tools/fingerprint_assets.py` |
 | C5 | The bounded front-end HOG topology scanner (schema_version 2) has a frozen approved vocabulary of `.col`, `.gui`, `.hog`, `.pop`, `.ska`, `.skas`, `.skl`, `.skm`, `.so`, `.tbl`, `.tdx`, `.txt`, `.vag`, `.vum`; `.gui` maps to its own category `gui`, which echoes the suffix only and asserts no menu role, layout, lookup, or render semantics. `.fnt` and `.ie` remain unapproved and collapse into the single `other` count. The scanner's JSON is aggregate-only and emits no member names, sizes tied to a member, offsets, or raw suffixes. | `tools/measure_frontend_hog_topology.py`; `analysis/formats/FRONTEND-TOPOLOGY.md` |
-| C6 | No evidence-ledger entry decodes, structurally envelopes, or assigns semantics to `.gui`, `.fnt`, or `.ie`. The ledger's canonical/passive format work covers HOG, POP, SO, TDX, SKM, SKL, SKA, SKAS, VAG, LPD, PAR, COL, VUM, and VPK only. | `analysis/evidence/ledger.jsonl` |
+| C6 | Three native `Inspect*` APIs now implement bounded passive prefix/envelope hypotheses. Their code and generated fixtures confirm the project-defined accept/reject boundaries only; no tracked source records the retail provenance of the exact FNT constants, GUI tag/offsets, or IE offsets. None retains source bytes or assigns font, glyph, texture, widget, node, layout, lookup, render, menu, or recursive-payload semantics. | `native/include/omega/retail/fnt_envelope_descriptor.h`; `native/include/omega/retail/gui_envelope_descriptor.h`; `native/include/omega/retail/ie_envelope_descriptor.h`; matching files under `native/src/retail/` and `native/tests/` |
 | C7 | The tracked HOG container layout is proven across 273 top-level archives and 32,351 entries: little-endian header (`tag`, `count`, `offsets_offset` = `0x14`, `names_offset` = `offsets_offset + 4*(count+1)`, `data_offset`), a monotonic-from-zero offset array, and NUL-terminated ASCII member names. It does not prove what any member payload (including a `.gui`/`.fnt`/`.ie` member) contains. | `analysis/formats/HOG.md`; `analysis/formats/hog-validation.json` |
 | C8 | The static executable trace establishes a level-loader archive chain (`LOADING.HOG`, `DATA.HOG`, weapon/NPC archives) but names no `.gui`/`.fnt`/`.ie` consumer, no front-end archive load, and no front-end asset parser. | `analysis/elf/argument-loader.md`; `analysis/elf/loader-hints.md` |
 | C9 | The tracked native "front end" (`FrontEndState`/`FrontEndView`, `kFrontEndLabelCells`, "project-font cells") is a project-owned synthetic menu explicitly documented as not a retail input, layout, font, or asset claim. It is not evidence about the retail `.fnt`/`.gui`/`.ie` formats. | `native/apps/openomega/front_end.h` |
 | C10 | The sanitized front-end trace contract (`omega-frontend-trace-v1`) defines an anonymous `resource_class_totals` bucket named `font`; the contract states these carry no names, paths, formats, or bindings and make no claim about retail behavior. The token `font` here is a design placeholder, not `.fnt` evidence. | `docs/05-Frontend-Trace-Contract.md` |
 | C11 | A bounded size-only HOG-member collector now has a frozen path-free schema and generated privacy/resource tests for default `.gui/.fnt/.ie` measurements, with optional allowlisted `.bnk/.gun`. Its implementation is evidence about the collector only; no owner-corpus output is tracked. | `tools/measure_member_structural_fingerprint.py`; `analysis/formats/MEMBER-STRUCTURAL-FINGERPRINT.md` |
+| C12 | Each passive front-end descriptor has a generated-fixture-focused test executable covering its accepted prefix, truncation/malformed boundaries, hard and caller limits, deterministic results, unaligned input, and path-free typed failures. These tests validate the implemented boundary, not owner-corpus coverage or retail semantics. | `native/tests/fnt_envelope_descriptor_tests.cpp`; `native/tests/gui_envelope_descriptor_tests.cpp`; `native/tests/ie_envelope_descriptor_tests.cpp`; `CMakeLists.txt` |
 
 ---
 
@@ -60,7 +61,7 @@ Honest arithmetic and cross-counts over tracked aggregates. No semantics.
 | A2 | Subtracting depth-0 from recursive totals (C1 minus C2): 56 `.gui` and 56 `.ie` occurrences are members of embedded/nested HOGs (depth >= 1), while all 3 `.fnt` occurrences are depth-0 members of top-level HOGs and none appear in nested HOGs. Combined with C3, every `.gui`/`.fnt`/`.ie` occurrence is a HOG member. This is a count relationship only; it assigns no role, archive, or meaning. | `analysis/formats/asset-fingerprints.json`; `analysis/formats/hog-validation.json` |
 | A3 | Across the 46,604 non-HOG spans whose first bytes the scanner checked (`standard_compression_spans_checked`), `standard_compression_magic_hits` = 0. Because `.gui`/`.fnt`/`.ie` members are non-HOG spans, none of them begins with any of the checked whole-file magics (gzip, zip, bzip2, xz, 7zip, lz4-frame, zstd, RNC1/2, LZSS, LZ77, Yaz0). This rules out those specific whole-file wrappers only; it does not rule out internal or headerless compression. | `analysis/formats/asset-fingerprints.json`; `tools/fingerprint_assets.py` |
 | A4 | `hog-validation.json` records, per archive, only a logical path, entry count, and tag. It contains no per-archive suffix breakdown, so the disc-wide `.gui`/`.fnt`/`.ie` counts cannot be attributed to any particular archive from tracked data. | `analysis/formats/hog-validation.json` |
-| A5 | No tracked aggregate reports a per-suffix depth distribution, size bucket, alignment class, or header-field value for `.gui`, `.fnt`, or `.ie`. The only tracked per-span facts for these suffixes are: the suffix itself, inclusion in the global depth histogram, and inclusion in the global compression check (A3). | `analysis/formats/asset-fingerprints.json`; `tools/fingerprint_assets.py` |
+| A5 | No tracked aggregate report publishes a per-suffix depth distribution, size bucket, alignment class, or header-field distribution for `.gui`, `.fnt`, or `.ie`. The native descriptors now freeze a few project-defined prefix hypotheses and opaque region boundaries, but those implementation facts are not retail evidence or a sanitized corpus distribution and do not establish how broadly the accepted families cover owner inputs. | `analysis/formats/asset-fingerprints.json`; `tools/fingerprint_assets.py`; the three native envelope-descriptor headers |
 
 ---
 
@@ -88,56 +89,47 @@ remains UNKNOWN.
 
 ## Lane C gate verdict
 
-**Verdict: NO.** The tracked evidence is not sufficient to freeze a
-non-misleading fixed aggregate schema for a bounded
-`measure_frontend_gui_envelopes.py` tool. A conservative no-decoder result is the
-correct outcome here; a plausible invented envelope would be a regression per the
-campaign brief.
+The original Lane C verdict remains **NO** for a free-standing aggregate
+`measure_frontend_gui_envelopes.py` schema. The size-only collector still cannot justify arbitrary
+header fields, alignment claims, equality families, or recursive structure, and no such broader
+collector has been added.
 
-Reasoning, mapped to the candidate aggregate dimensions the brief enumerates:
+The current native status is deliberately narrower and should be read as two separate gates:
 
-- **Candidate count** - *supported, but redundant.* Existence and occurrence
-  counts of `.gui` (and `.fnt`/`.ie`) are tracked (C1, C2, A2). This is the only
-  dimension with tracked grounding, and `.gui` is already reported as its own
-  category by the front-end HOG topology scanner (C5, schema_version 2; Lane B
-  promoted it out of `other`). A separate envelope tool adds nothing here.
-- **Fixed size buckets** - *not supported.* No tracked file records any
-  `.gui`/`.fnt`/`.ie` member size. `fingerprint_assets.py` records `span_bytes`
-  only for handled suffixes, and there is no handler for these three (C4, A5).
-  The topology scanner's size buckets for `other` are not published to any
-  tracked output and mix all non-approved suffixes together (C5).
-- **Alignment families** - *not supported.* Alignment requires member sizes or
-  offsets, which are not tracked for these suffixes (A5).
-- **Zero/nonzero classes at predeclared positions** - *not supported.* No
-  tracked evidence reads any byte of a `.gui`/`.fnt`/`.ie` member; predeclaring a
-  position would invent structure (A5, C4). The only byte-level fact is the
-  aggregate negative that none begins with a listed compression magic (A3),
-  which supports no positional schema.
-- **Equality / monotonicity families** - *not supported.* These require reading
-  multiple header words per member across the corpus; nothing tracked does so
-  (A5, C4).
+- **Passive prefix/envelope implementation: YES, as a project-defined hypothesis only.** The
+  generated-fixture tests make each implemented accept/reject boundary falsifiable and bounded, but
+  no tracked evidence records the retail provenance of its constants. FNT reports a small prefix and
+  opaque remainder; GUI and IE stop at fixed root boundaries and leave all root bytes opaque.
+- **Semantic UI/font decoder: NO.** The descriptors do not establish resource identity, font or
+  glyph data, widget/node trees, layout, lookup, rendering, menu state, timing, or consumer
+  bindings. They are `Inspect*` boundaries returning neutral ranges and observations, not
+  `GuiEnvelopeIR`, font IR, or a retail front-end loader.
+- **Owner-corpus coverage: still unclaimed.** The tracked inventories establish counts, while the
+  current generated fixtures establish code behavior. A reviewed sanitized coverage result and
+  independent consumer evidence remain necessary before widening accepted variants or assigning
+  meaning to any opaque region.
 
-**What is missing to reach a YES.** The safe size-only collector now exists and is synthetically
-verified, but no owner-corpus result is tracked. Even a uniform size family would not establish an
-envelope grammar. A YES requires a sanitized result plus a falsifiable header/envelope observation,
-generated malformed boundaries, and independent consumer evidence (M1, M2). The rejected
-`measure_frontend_gui_envelopes.py` concept is distinct from the implemented size-only fingerprint
-collector. Only after those gates should a native `GuiEnvelopeIR`/decoder be considered.
+This split preserves the original conservative result: later code landed three small passive
+hypothesis descriptors, but generated fixtures do not convert their constants into retail evidence,
+make the earlier size-only proposal a semantic decoder, or authorize deeper parsing.
 
 ---
 
 ## Provenance
 
-Prepared 2026-07-20 (Lane A) solely from tracked repository content on branch
-`claude/frontend-asset-decoding`. Primary sources:
+Prepared 2026-07-20 (Lane A) and refreshed after the passive front-end descriptors landed, solely
+from tracked repository content. Primary sources:
 `analysis/formats/asset-fingerprints.json`, `analysis/formats/hog-validation.json`,
 `analysis/formats/HOG.md`, `analysis/formats/ASSET-RECON.md`,
 `analysis/formats/FRONTEND-TOPOLOGY.md`, `analysis/manifests/disc-summary.json`,
 `analysis/manifests/disc-files.jsonl`, `analysis/evidence/ledger.jsonl`,
 `analysis/elf/argument-loader.md`, `analysis/elf/loader-hints.md`,
 `tools/fingerprint_assets.py`, `tools/measure_frontend_hog_topology.py`,
-`docs/05-Frontend-Trace-Contract.md`, and `native/apps/openomega/front_end.h`.
+`docs/05-Frontend-Trace-Contract.md`, `native/apps/openomega/front_end.h`, the FNT/GUI/IE descriptor
+headers and implementations under `native/include/omega/retail/` and `native/src/retail/`, and
+their generated-fixture tests under `native/tests/`.
 No private input, disc image, extracted asset, emulator, or ignored analysis
-output was read. Not proven for `.gui`/`.fnt`/`.ie`: retail menu role, archive
-attribution, lookup, field semantics, layout, state, timing, rendering, audio,
-internal structure, owner-corpus structural coverage, and PCSX2 equivalence.
+output was read during this refresh. Not proven for `.gui`/`.fnt`/`.ie`: retail menu role, archive
+attribution, lookup, field semantics, layout, state, timing, rendering, audio, structure beyond the
+project-defined prefix hypotheses, retail provenance for those constants, owner-corpus structural
+coverage, and PCSX2 equivalence.

@@ -13,11 +13,16 @@ their behavior is independently rewritten.
 Windows x64 is the first supported host. The core remains platform-neutral so additional
 hosts can be added after behavioral parity is established.
 
+The compatibility target is also the proving workload for a reusable OpenOmega engine and SDK.
+That evolution does not widen this clean-room boundary: shared engine contracts are independently
+designed and verified with project-owned synthetic content. OpenOmega does not claim to recover
+Bend Studio's historical source code, editor, or internal production toolchain.
+
 ## Boundary
 
 Allowed in version control:
 
-- Original implementation source and tests.
+- Original OpenOmega implementation source and tests.
 - Independently written format descriptions and compatibility metadata.
 - Hashes, sizes, addresses, call graphs, behavioral traces, and screenshots used as evidence.
 - Small synthetic fixtures created for this project.
