@@ -32,6 +32,9 @@ struct Glyph
     GlyphRows rows;
 };
 
+constexpr Glyph kFallbackGlyph{
+    '?', {{0b110U, 0b001U, 0b010U, 0b000U, 0b010U}}};
+
 constexpr Color kBackgroundColor{std::byte{8U}, std::byte{12U}, std::byte{24U}, std::byte{255U}};
 constexpr Color kCyanColor{std::byte{112U}, std::byte{220U}, std::byte{255U}, std::byte{255U}};
 constexpr Color kSlateColor{std::byte{28U}, std::byte{38U}, std::byte{58U}, std::byte{255U}};
@@ -63,7 +66,7 @@ constexpr std::array<Glyph, 44U> kProjectGlyphs{{
     {'/', {{0b001U, 0b001U, 0b010U, 0b100U, 0b100U}}}, {'-', {{0b000U, 0b000U, 0b111U, 0b000U, 0b000U}}},
     {'.', {{0b000U, 0b000U, 0b000U, 0b000U, 0b010U}}}, {'+', {{0b000U, 0b010U, 0b111U, 0b010U, 0b000U}}},
     {'>', {{0b100U, 0b010U, 0b001U, 0b010U, 0b100U}}}, {'_', {{0b000U, 0b000U, 0b000U, 0b000U, 0b111U}}},
-    {'?', {{0b110U, 0b001U, 0b010U, 0b000U, 0b010U}}}, {' ', {{0b000U, 0b000U, 0b000U, 0b000U, 0b000U}}},
+    kFallbackGlyph, {' ', {{0b000U, 0b000U, 0b000U, 0b000U, 0b000U}}},
 }};
 
 static_assert(kBorderPixels * 2U < kFrontEndImageWidth);
@@ -113,7 +116,7 @@ const GlyphRows &FindGlyph(const char symbol) noexcept
         if (glyph.symbol == symbol)
             return glyph.rows;
     }
-    return kProjectGlyphs[kProjectGlyphs.size() - 2U].rows;
+    return kFallbackGlyph.rows;
 }
 
 [[nodiscard]] bool IsSupportedProjectFontAscii(const char symbol) noexcept
