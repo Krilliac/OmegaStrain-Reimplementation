@@ -1516,6 +1516,33 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     This establishes only project-owned native confirmation policy. It assigns no retail or PS2
     save, menu, profile, campaign, checkpoint, memory-card, guest-RAM, savestate, emulator,
     proprietary-input, owner-corpus, or behavioral-parity semantics, and no owner input was used.
+87. E-0111 reconciles the project diagnostic checkpoint with the confirmed-profile gate. Production
+    startup calls `ProfileCatalog::ListBounded` with the shared 1,024-profile front-end maximum;
+    direct markers spend budget before parse, while checkpoint and non-marker child records do not.
+    The app database ceiling is now 2,049 records, enough for 1,024 profile markers, one independent
+    diagnostic marker per profile, and `profiles/active` when unrelated records have not consumed
+    capacity. `FrontEndCapabilities` has three independent booleans: creation support, diagnostic
+    start support, and the optional active-profile requirement. Closed support or an unresolved
+    required confirmation leaves Main/Start Diagnostic inert and publishes no command. Production
+    derives authorization from `ActiveProfileIsConfirmed()` against the bounded model, publishes
+    typed `StartDiagnosticCampaign`, applies `PrepareDiagnosticCampaignStart`, then publishes
+    DiagnosticPlay and simulates. A support-open composition without the requirement is the explicit
+    synthetic persistence-free path. Replay uses an identity-free confirmation mirror and may
+    publish the typed command, but never reads or writes persistence.
+
+    The canonical schema-1 record is
+    `profiles/<id>/campaigns/diagnostic/checkpoint`. Its exact 32 bytes are ASCII `OODIAGCP`,
+    little-endian payload version 1, zero flags and reserved word, and the raw 16-byte `ProfileId`.
+    Preparation requires the same confirmed durable ID and observed active-pointer revision,
+    revalidates profile existence, and treats an exact marker as a no-write success. Bootstrap
+    rejects malformed keys/values, mismatches, and orphan markers through one sanitized category.
+    Generated reducer, replay, live capture, and opening-movie fixtures cover inert, success,
+    rollback, idempotence, and bounded-startup cases. Successful storage reaches generation 3,
+    three records, and 105 logical bytes. Static validation covers 361 tooling tests and 111 ledger
+    records. No local C++ build or executable test was attempted under the host RAM STOP condition;
+    remote compilation/execution and exact-main validation remain pending. No private, owner,
+    proprietary, D-drive, emulator, or PCSX2 input was accessed. This is not a retail/PS2 campaign,
+    save, checkpoint, gameplay, continuation, world-state, memory-card, emulator, or parity claim.
 
 ## Disc observations
 
@@ -1537,11 +1564,11 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
 
 ## Next focused pass
 
-1. After E-0109's generated direct-process and portable-package reopen contract is compiled and
-   executed by publication CI, define the first bounded project-owned campaign/checkpoint policy as
-   a separate native schema and transaction slice. It must remain explicit, transactional, and
-   independent of PS2 save representation. Do not infer retail or PS2 save/menu/profile behavior or
-   introduce a PS2 memory-card device, guest RAM, or emulator savestate into the shipping runtime.
+1. Compile and execute the reconciled E-0111 reducer, persistence, replay, capture, and opening-movie
+   fixtures in hosted Native CI, then validate the exact merged main tree. Keep the project marker
+   explicit, transactional, and independent of PS2 save representation. Do not infer retail or PS2
+   save/menu/profile/gameplay behavior or introduce a PS2 memory-card device, guest RAM, or emulator
+   savestate into the shipping runtime.
 2. Treat E-0099 as runnable-tool and configuration-initialization readiness only. Before any new
    observation, prepare a fresh neutral-menu savestate under the enforced modes and run the private
    producer's synthetic contract and security checks outside every OpenOmega worktree. Then collect

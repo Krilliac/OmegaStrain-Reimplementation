@@ -12,8 +12,10 @@ adds the first typed native schema, and the app-level `NativePersistence` servic
 independent of runtime, content, retail-format, simulation, gameplay, app, SDL, and PCSX2 code;
 only the app composition root owns them. E-0096 adds app-session active-profile selection without
 moving that ownership boundary. E-0109 makes the same explicit Profiles action confirm one owned ID
-through a separate project-native durable pointer before session publication. Campaign records,
-profile mutation UI, and PS2 compatibility adapters remain separate slices.
+through a separate project-native durable pointer before session publication. E-0111 adds one
+profile-bound project diagnostic marker behind that same explicit session confirmation. General
+profile mutation UI, retail campaign/save payloads, and PS2 compatibility adapters remain separate
+slices.
 
 ## Ownership and thread contract
 
@@ -28,8 +30,9 @@ profile mutation UI, and PS2 compatibility adapters remain separate slices.
 - Move construction transfers the lock and all state. A moved-from object fails closed as
   `invalid-state`.
 - `NativePersistence::Bootstrap` heap-owns the database at a stable address, constructs one
-  `ProfileCatalog` that borrows it, validates all profile markers through one deterministic list,
-  and then moves the complete owner into `OmegaApp`.
+  `ProfileCatalog` that borrows it, validates at most the shared 1,024-profile front-end marker
+  budget, validates every checkpoint-shaped child record against that catalog, and then moves the
+  complete owner into `OmegaApp`.
 - `OmegaApp` declares native persistence before its other services, so reverse member destruction
   destroys all app consumers before the catalog and then destroys the catalog before its database.
 - Before SDL startup, `OmegaApp` copies at most the three displayed `ProfileId` values and fixed
@@ -43,7 +46,11 @@ profile mutation UI, and PS2 compatibility adapters remain separate slices.
   performs no write.
 - Bootstrap and every subsequent catalog/database operation run on the externally serialized
   persistence/game thread. Neither layer creates a worker or performs hidden asynchronous I/O.
-- Capture retains only the existing bounded front-end command. Replay performs no persistence,
+- Start Diagnostic is capability-closed until the current launch owns a confirmed ID that still
+  resolves in the bounded model. `OmegaApp` applies its typed start command before publishing
+  DiagnosticPlay. A closed row is inert rather than an operational error.
+- Capture retains only the bounded front-end command. Replay may publish the same typed start from
+  caller-supplied support plus its identity-free confirmation mirror, but performs no persistence,
   catalog lookup, profile-ID publication, or GPU-resource operation.
 
 ## Logical model
@@ -89,7 +96,24 @@ wrong magic, unsupported payload version, nonzero flags/reserved fields, or an o
 ID missing from the validated catalog through the typed `persisted-active-profile` startup category.
 The pointer is therefore neither an ambient default nor permission to activate a session.
 
-Campaign, checkpoint, inventory, unlock, equipment, and retail-payload records remain unassigned.
+The app-level repository also owns one optional project diagnostic marker per profile at
+`profiles/<id>/campaigns/diagnostic/checkpoint`. Its database record schema is 1 and its value is
+exactly 32 bytes:
+
+```text
+offset  bytes  meaning
+0       8      ASCII OODIAGCP
+8       2      little-endian payload version 1
+10      2      little-endian zero flags
+12      4      little-endian zero reserved word
+16      16     raw ProfileId bytes
+```
+
+Bootstrap rejects a checkpoint-shaped record with a malformed key ID, unsupported schema, wrong
+length or scalar, key/value ID mismatch, or an ID absent from the validated startup catalog through
+the fixed `persisted-diagnostic-checkpoint` category. The marker records only that this native
+diagnostic launch boundary was prepared. Retail campaign, mission, continuation, save, world,
+checkpoint, inventory, unlock, equipment, and gameplay payload semantics remain unassigned.
 
 ## On-disk format version 1
 
@@ -110,10 +134,12 @@ a zero reserved field, followed immediately by key bytes and value bytes.
 
 The implementation checks every arithmetic edge before allocation or subspan creation. Standalone
 database defaults bound records to 1,024, mutations per commit to 256, a key to 96 bytes, a value to
-8 MiB, aggregate logical values to 48 MiB, and one snapshot to 64 MiB. The production app overrides
-only the record ceiling to 1,025. That capacity is sufficient for its bounded 1,024-profile startup
-model plus `profiles/active` when no other record consumes the budget; it is not a reserved slot or
-namespace quota, and confirmation reports a typed capacity failure if the database is already full.
+8 MiB, aggregate logical values to 48 MiB, and one snapshot to 64 MiB. E-0109 initially overrode only
+the production record ceiling to 1,025. E-0111 supersedes that ceiling with 2,049 records: enough for
+the bounded 1,024 profile markers, one project diagnostic marker for each, and `profiles/active` when
+no unrelated record consumes capacity. This remains a ceiling rather than a reserved slot or
+namespace quota; confirmation or diagnostic preparation reports a typed capacity failure if
+accepted records already consumed the budget.
 Separate hard ceilings prevent configuration from exceeding 4,096 records/mutations, 255 key bytes,
 16 MiB per value, 128 MiB logical bytes, or 256 MiB per file. These are project engineering limits,
 not retail or PS2 limits.
@@ -184,6 +210,36 @@ Capture and replay retain their existing schema. Capture observes the same bound
 reduces it without accessing the profile catalog, database, filesystem, clock, or GPU. Persistent
 confirmation is deliberately a live composition-root responsibility rather than replay state.
 
+## Project-owned diagnostic checkpoint
+
+Main/Start Diagnostic publishes `StartDiagnosticCampaign` only when start support is open and the
+independent optional confirmation requirement is satisfied. Production calculates both its start
+capability and authorization from `ActiveProfileIsConfirmed()`, which resolves the single session ID
+against the current bounded model. Raw optional presence does not authorize a start. A private
+support-open composition without the confirmation requirement is the explicit synthetic,
+persistence-free path. Closed support or an unresolved required confirmation leaves the row inert.
+
+`PrepareDiagnosticCampaignStart` requires its ID to equal the owned confirmed ID, re-reads and
+decodes `profiles/active`, requires the exact revision observed by confirmation/bootstrap, and
+revalidates current profile existence. It then reads the profile-bound checkpoint. An existing
+schema-1 marker with the same ID succeeds without a write even after unrelated database generations.
+An absent marker is committed once with `MustBeAbsent`; a competing or malformed marker is a typed
+revision conflict. Active-profile-required, missing-profile, revision, capacity, storage, and
+resource failures map to fixed path-, key-, ID-, and byte-free categories.
+
+`OmegaApp` completes preparation before publishing DiagnosticPlay and before simulation or render
+submission. Definite validation, precondition, and configured-limit failures commit nothing and
+preserve prior app/session/GPU state. The database's existing indeterminate publication rule remains
+authoritative: an I/O failure after atomic replacement may have published the marker, poisons the
+database instance, and requires destroy/reopen reconciliation even though app state is unpublished.
+
+Replay owns neither profile identity nor a persistence boundary. Its explicit start capability and
+identity-free mirror determine whether the reducer publishes `StartDiagnosticCampaign`; only a
+replayed `SetActiveProfile` opens that mirror. Replay never creates or validates the marker. A
+generated successful live fixture reaches generation 3 with exactly three records and 105 logical
+value bytes: 41-byte metadata, 32-byte active pointer, and 32-byte diagnostic marker. Repeating the
+same valid start preserves those totals.
+
 ## Native directory and startup contract
 
 The executable captures environment roots once at the application boundary and passes them to the
@@ -202,9 +258,11 @@ working directory.
 
 Startup validates command-line/configuration and content first. `--probe-only` returns after its
 content probe and never resolves, creates, locks, or reads native persistence. Every non-probe run
-then resolves the native directory, opens the database, and validates the profile catalog before
-platform creation. When `profiles/active` exists, the same bootstrap validates its complete typed
-value and requires its ID to exist in that catalog. It does not activate the new app session.
+then resolves the native directory, opens the database, and validates at most 1,024 direct profile
+markers before platform creation. The budget is spent before marker parsing; checkpoint and other
+child records do not consume it. When `profiles/active` exists, the same bootstrap validates its
+complete typed value and requires its ID to exist in that catalog. Every checkpoint-shaped child is
+also validated against that bounded catalog. Bootstrap does not activate the new app session.
 Consequently `--frames=0` intentionally creates a fresh pair of 64-byte
 generation-zero snapshots plus the empty lock file, reports the deterministic profile count, and
 returns only after this bootstrap. Reopening the same zero-frame run must preserve the complete
@@ -282,12 +340,13 @@ neighboring working/package/extracted trees, and retain exact install/archive al
 the helper and all save state. These fixtures use no owner data, retail executable, disc image,
 memory card, savestate, emulator, PCSX2 input, or D-drive input.
 
-The E-0109 implementation and generated fixtures are present. Static validation passed 340 tooling
-tests, Python compile-all, the 262-file native dependency gate, both 109-record ledger gates, the
-439-blob staged public-tree gate, diff checks, and independent core/package reviews. Local C++
-compilation/execution and publication CI remain pending and unclaimed. The next persistence boundary
-is a separate bounded project-owned campaign/checkpoint policy; it must not reinterpret this
-confirmation pointer as retail or PS2 save behavior.
+The E-0111 implementation and generated fixtures are present. Static validation passed 361 tooling
+tests, Python compile-all, the 262-file native-dependency gate, both 111-record ledger gates, and the
+440-blob staged public-tree gate. A local C++ build and executable tests were not attempted under the
+host RAM STOP condition. Remote compilation/execution and exact-main validation remain pending and
+unclaimed. This project marker remains independent of PS2 save representation and does not
+reinterpret the active pointer or marker as retail campaign, save, gameplay, continuation,
+world-state, or checkpoint semantics.
 
 The database foundation's serialized local validation passed warning-free runtime-disabled Debug,
 runtime-enabled Debug, and runtime-enabled Release builds. Their complete CTest suites passed 29/29,

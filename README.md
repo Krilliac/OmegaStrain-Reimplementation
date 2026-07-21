@@ -163,6 +163,29 @@ Studio's historical engine source or internal toolchain.
   core/package reviews. Local C++ compilation/execution and publication CI remain pending. This
   establishes no retail or PS2 save, menu, profile, campaign, checkpoint, memory-card,
   proprietary-input, owner-corpus, or behavioral-parity semantics.
+- E-0111 supersedes only E-0109's production record ceiling and no-checkpoint boundary. Startup
+  enumerates at most the shared front-end maximum of 1,024 direct profile markers with
+  `ProfileCatalog::ListBounded`; checkpoint-shaped and other child records do not consume that
+  marker budget, and a 1,025th direct marker fails closed before parsing. The app database ceiling
+  is now 2,049 records: enough for 1,024 profile markers, one independent 32-byte project
+  diagnostic checkpoint per profile, and `profiles/active` when no unrelated record consumes
+  capacity. `FrontEndCapabilities` keeps creation, diagnostic-start support, and the active-profile
+  requirement independent. Main/Start Diagnostic is inert unless start support is open and the
+  optional gate is satisfied by a confirmed ID that still resolves in the bounded model. A
+  successful live transition publishes typed `StartDiagnosticCampaign`, applies
+  `PrepareDiagnosticCampaignStart`, and only then publishes DiagnosticPlay and simulates. The
+  canonical record `profiles/<id>/campaigns/diagnostic/checkpoint`, schema 1, contains exactly
+  `OODIAGCP`, little-endian payload version 1, zero flags/reserved word, and the raw 16-byte
+  `ProfileId`. Bootstrap rejects malformed, mismatched, or orphan markers through one sanitized
+  category; the same confirmed active ID and observed pointer revision are prerequisites, and an
+  exact existing marker is a no-write success. Replay may publish the typed command from its
+  caller-supplied support plus identity-free confirmation mirror but never touches persistence.
+  Generated live and opening-movie paths reach generation 3, three records, and 105 logical value
+  bytes. Static validation covers 361 tooling tests and 111 evidence records; no local C++ build or
+  executable test was attempted under the host RAM STOP condition, and remote compilation/execution
+  remains pending. This is a project-generated diagnostic launch marker, not a retail/PS2 campaign,
+  save, checkpoint, gameplay, continuation, world-state, memory-card, emulator, owner-input, or
+  parity claim.
 - E-0103 gives that project-owned front end a distinct cancel action without changing the global
   quit path. Backspace and gamepad East publish action 7; Escape and gamepad Back remain action 1
   quit controls. Cancel is inert on Main, otherwise returns Profiles, DiagnosticPlay, Controls, or
@@ -1277,15 +1300,17 @@ Configure with `-DOMEGA_RUN_GPU_SMOKE_TEST=ON` to register it as a serial GPU in
 
 OpenOmega owns a native persistence database rather than emulating PS2 RAM, memory-card hardware,
 or emulator savestates. Non-probe startup opens the platform-native `OpenOmega/native-save`
-directory and validates a deterministic profile catalog plus any project-owned `profiles/active`
-confirmation pointer before platform creation; `--frames=0`
+directory and validates a front-end-bounded profile catalog plus any project-owned `profiles/active`
+confirmation pointer and profile-bound diagnostic marker before platform creation; `--frames=0`
 therefore bootstraps persistence, while `--probe-only` never touches it. A fresh database contains
 two checksummed generation-zero snapshots and an empty process-lock file. Profiles use bounded,
 versioned `profiles/<32-lower-hex-id>/metadata` records. Startup never automatically creates or
 selects a default profile; creation occurs only after the explicit empty-Profiles Primary action,
 and that new profile remains unselected until a later Primary action durably confirms it. A reopened
 confirmation is validated but never becomes the new session's active profile without another
-explicit Primary edge.
+explicit Primary edge. Only a currently resolved session confirmation opens the production Start
+Diagnostic path; its first successful start writes the fixed project marker before DiagnosticPlay,
+and repeating the same valid start performs no write.
 Windows uses `%LOCALAPPDATA%/OpenOmega/native-save`, macOS uses
 `$HOME/Library/Application Support/OpenOmega/native-save`, and XDG hosts use
 `$XDG_DATA_HOME/openomega/native-save` or `$HOME/.local/share/openomega/native-save`.
