@@ -221,6 +221,16 @@ Studio's historical engine source or internal toolchain.
   `--set=input.gamepad_enabled=true`, never a startup or play requirement. Live capture and replay consume bounded logical
   actions without physical provenance. These bindings, cues, and transitions are synthetic
   native-shell policy, not evidence of a retail control map, combat system, or menu graph.
+- E-0113 adds `omega_tool frontend-envelope-coverage-verify-tree <root>`, a bounded project-passive
+  coverage command for the existing FNT, GUI, and IE prefix/envelope descriptors. It performs
+  identity-guarded traversal and identity-bound HOG reads, follows nested members classified by an
+  ASCII-case-insensitive `.hog` suffix to depth 32, ignores loose candidates, and emits only
+  deterministic schema-version-1 family
+  totals with typed rejection counts. Infrastructure failures discard partial observations and emit
+  a zero report plus one fixed path-free category. Generated fixtures cover nested exact/padded
+  spans, descriptor rejections, privacy equivalence, unsafe entries, resource limits, and identity
+  races. No owner-corpus run is recorded. Acceptance is not retail validity, semantic decode,
+  UI/menu evidence, format or consumer meaning, rendering behavior, or PCSX2 parity.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public
@@ -1273,6 +1283,7 @@ ctest --preset msvc-debug
 .\build\msvc\Debug\omega_sdl_gpu_texture_smoke.exe
 .\build\msvc\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
+.\build\msvc\Debug\omega_tool.exe frontend-envelope-coverage-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe pop-post-terrain-hypotheses-verify-tree .\private\extracted-disc
 .\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc

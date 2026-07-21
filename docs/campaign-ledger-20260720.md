@@ -157,6 +157,14 @@ native-dependency (247 files); ledger-format (102 records); Python compile-all; 
 - Historical owner-home paths in ledger check commands — owner/Codex policy decision applied during
   integration by replacing only the username segment with the generic `<user>` placeholder.
 
+## Follow-on implementation: E-0113 passive-envelope coverage
+
+`omega_tool frontend-envelope-coverage-verify-tree <root>` now provides identity-guarded traversal
+and identity-bound HOG reads for aggregate project-passive FNT/GUI/IE descriptor coverage. Its
+schema-version-1 output contains only family acceptance and typed-rejection totals, and generated
+fixtures cover nested HOGs, path-free deterministic reporting, limits, unsafe entries, and identity
+races. No owner-corpus run is recorded. The semantic GUI/font/menu gate remains closed.
+
 ## Remaining cutscene/menu blockers (honest)
 - Cutscene playback is Windows-only and selected through an external `--opening-movie` path; retail-
   intro discovery from game data is absent. Transition reliability also requires a defined practical

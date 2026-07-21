@@ -36,6 +36,9 @@ semantics.
   public aggregate category `ie` and includes the fixed `.gui+.ie`
   sibling-pair key. The label and pair key expose only frozen aggregate
   vocabulary; they assign no front-end role, payload structure, or binding.
+- E-0113's separate schema-version-1 `frontend-envelope-coverage-verify-tree` command can count
+  project-passive descriptor acceptance for HOG-contained IE candidates. Its generated fixtures are
+  implementation evidence; no owner-corpus coverage result is recorded.
 
 ## 4. Aggregate-only facts
 

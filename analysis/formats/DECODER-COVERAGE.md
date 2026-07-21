@@ -89,6 +89,12 @@ plus focused coverage through its own executable/CTest pair or `omega_core_tests
 and IE passive descriptors each have an independently registered focused test. **No missing CMake
 registration was found** for a matrix-listed native format boundary.
 
+E-0113 adds a separate project-passive coverage consumer for those three descriptors. The
+`frontend-envelope-coverage-verify-tree` command emits only deterministic aggregate acceptance and
+typed-rejection counts from HOG members. Its schema version 1 is distinct from E-0110 topology
+schema version 3, where `.fnt` remains `other`. No owner-corpus result is tracked, and this consumer
+does not promote any family beyond `passive descriptor only` or supply UI/menu semantics.
+
 The separate `omega_media` target registers the generic MPEG-2 Program Stream inspector, video
 range planning/H.262 inspection, Windows Media Foundation video adapter, and narrow PSS PCM stream
 planner/deinterleaver. `openomega` composes those pieces with its opening-movie player and bounded
