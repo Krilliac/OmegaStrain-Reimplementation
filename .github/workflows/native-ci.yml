@@ -90,7 +90,7 @@ jobs:
           ctest --preset msvc-debug --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "CTest failed: $LASTEXITCODE" }
 
-      - name: Run generated menu-to-diagnostic GPU acceptance
+      - name: Run generated movie and menu GPU acceptances
         timeout-minutes: 5
         shell: pwsh
         env:
@@ -98,13 +98,19 @@ jobs:
           SDL_GPU_DRIVER: direct3d12
         run: |
           $ErrorActionPreference = 'Stop'
-          $captureSmoke = Join-Path $PWD 'build/msvc/Debug/omega_app_capture_smoke.exe'
-          if (-not (Test-Path -LiteralPath $captureSmoke -PathType Leaf)) {
-            throw 'Built omega_app_capture_smoke executable is missing'
-          }
-          & $captureSmoke
-          if ($LASTEXITCODE -ne 0) {
-            throw "Generated GPU acceptance failed: $LASTEXITCODE"
+          $smokeNames = @(
+            'omega_app_opening_movie_smoke.exe',
+            'omega_app_capture_smoke.exe'
+          )
+          foreach ($smokeName in $smokeNames) {
+            $smoke = Join-Path $PWD "build/msvc/Debug/$smokeName"
+            if (-not (Test-Path -LiteralPath $smoke -PathType Leaf)) {
+              throw "Built $smokeName executable is missing"
+            }
+            & $smoke
+            if ($LASTEXITCODE -ne 0) {
+              throw "$smokeName failed: $LASTEXITCODE"
+            }
           }
 
   windows-portable-package:
