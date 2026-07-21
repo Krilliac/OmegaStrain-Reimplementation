@@ -219,6 +219,13 @@ on Main, otherwise returns each modal mode to its corresponding Main row without
 and precedes simultaneous confirm/navigation. Live capture and replay route the same bounded schema;
 terminal input still resolves first. These controls and transitions are native shell policy rather
 than a retail-menu or retail-input claim.
+E-0104 adds an opt-in generated-playback acceptance smoke through the actual `OmegaApp`, SDL GPU,
+dummy-driver SDL audio, SDL event input, boot reducer, scheduler gate, and synthetic front end. It
+covers natural EOS into Main followed by actionable next-frame navigation, primary skip at zero,
+two, and five player advances, zero transition-frame simulation, playback/GPU/audio containment,
+and path-free categorical failure logging. Because the generated source bypasses owner-stream
+parsing and production decode, it establishes no Media Foundation teardown, finite-source PCM or
+hardware-backlog drain, perceptual synchronization, retail timing, or repeated owner-input result.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-

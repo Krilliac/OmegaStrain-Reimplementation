@@ -19,7 +19,7 @@ OmegaApp [game/main thread, sole composition owner]
 |- SdlInputService [main thread; SDL event/gamepad owner]
 |- SdlAudioService [main thread control; SDL audio callback]
 |- SdlGpuHost [main/render thread; GPU resource owner]
-`- OpeningMoviePlayer [optional; created last and destroyed first]
+`- OpeningMoviePlayback [optional; production OpeningMoviePlayer; created last and destroyed first]
 ```
 
 Script, UI, network, and backend-neutral render services are target engine concepts, not current
@@ -43,8 +43,10 @@ The composition root owns the validated configuration store, content startup sta
 stderr/ring log sinks, logging service, worker pool, fixed-step scheduler, input tracker,
 `SimulationWorld`, SDL process-global platform service, SDL input service, SDL audio service, and
 SDL GPU host in that order. The host is the last platform service. An explicitly selected
-`OpeningMoviePlayer` may be created afterward, so it is destroyed before the host; audio and input
-stop before the platform service calls the process-global SDL shutdown.
+`OpeningMoviePlayback` may be created afterward; production supplies `OpeningMoviePlayer`, while a
+friend-private test seam may inject one generated implementation. Playback is therefore destroyed
+before the host; audio and input stop before the platform service calls the process-global SDL
+shutdown.
 `OmegaApp::Run` owns the steady clock, closes immutable input frames, asks the scheduler for a
 bounded plan, executes every planned world step, copies the clock and live-entity aggregate into an
 owned renderer-neutral `RenderFramePacket`, then submits one render frame. The current host consumes
@@ -56,6 +58,13 @@ and resetting the host; host destruction remains the fallback resource teardown.
 `SdlInputService::PumpEvents` is the sole process-global event-queue consumer. `SdlGpuHost` owns
 only video, window, GPU, and rendering resources; no SDL type crosses into the platform-neutral
 runtime or simulation libraries.
+
+Production opening-movie creation remains explicit-path-only, and the private test factory rejects
+simultaneous path and injected-playback sources before SDL startup. The narrow playback interface
+preserves the existing main-thread ownership and borrowed-frame lifetime contract. Generated
+injection validates app composition, GPU/audio/input integration, modal scheduler gating, front-end
+transition, cleanup, and log redaction while deliberately bypassing source inspection, production
+H.262/PSS decoding, and Media Foundation lifetime.
 
 `GameDataService` is the implemented startup boundary. It owns its VFS, freezes mounts during
 `Open()`, and returns only canonical owned IR. It resolves each manifest cell HOG and its unique COL

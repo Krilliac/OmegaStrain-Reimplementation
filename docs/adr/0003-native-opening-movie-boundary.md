@@ -91,6 +91,13 @@ audio variants, or claim retail audiovisual timing parity.
   fixtures validate implemented boundaries and self-consistency, not independent format provenance.
 - Windows builds cover the real Media Foundation implementation; Linux builds cover the unsupported
   H.262 stub and platform-neutral parser layers, not a non-Windows movie-playback claim.
+- An opt-in generated app-boundary smoke drives one RGBA frame and bounded silent PCM through the
+  actual app services. It covers natural EOS into Main plus next-frame navigation, primary skip at
+  zero, two, and five advances, modal zero-simulation behavior, playback/texture/draw/audio
+  containment, and path-free categorical failure logging. It bypasses `OpeningMoviePlayer::Create`
+  and the production decoder, so it does not establish owned-stream decode, Media Foundation
+  teardown, finite-source PCM or hardware-backlog drain, perceptual synchronization, retail timing,
+  or repeated owner validation.
 - Private validation may confirm full-stream audiovisual presentation, skip, drain, menu transition,
   resource containment, and the absence of path-bearing logs without publishing the input or
   resulting artifacts. Such observation does not by itself establish frame-exact retail timing

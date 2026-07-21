@@ -63,6 +63,14 @@ Studio's historical engine source or internal toolchain.
   grammar remains a project-defined provisional compatibility hypothesis: generated fixtures prove
   implementation boundaries, and the recorded owner-stream smoke proves only that one stream passed
   them, not the field meanings or deinterleave semantics independently.
+- E-0104 adds an opt-in generated-playback acceptance smoke at the `OmegaApp` boundary. Generated
+  RGBA and silent PCM traverse the actual SDL GPU host, dummy-driver SDL audio service, event-input
+  path, boot reducer, scheduler gate, and synthetic front end. Natural EOS reaches Main and a fresh
+  next-frame Down edge selects Profiles; primary skip is covered before playback and after two and
+  five advances. The smoke asserts zero transition simulation, complete movie-resource and audio
+  containment, and categorical redaction of a hostile path-bearing playback error. It does not read
+  or decode an owned stream, exercise Media Foundation lifetime, prove finite-source PCM or hardware
+  drain, establish perceptual synchronization or retail timing, or replace repeated owner runs.
 - The native host owns the system-default SDL playback stream as 48 kHz stereo F32. Its callback
   supplies project-owned silence while idle and can consume opening-movie PCM from a fixed 4,096-
   frame ring. Project callback code performs no file access, logging, explicit locking, or dynamic
