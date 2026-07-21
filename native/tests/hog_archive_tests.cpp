@@ -1,5 +1,6 @@
 #include "omega/archive/hog_archive.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -49,6 +50,30 @@ std::vector<std::byte> MakeArchive()
     bytes.push_back(std::byte{'F'});
     bytes.push_back(std::byte{'G'});
     return bytes;
+}
+
+struct MemoryReadContext
+{
+    const std::vector<std::byte>* bytes = nullptr;
+    std::uint64_t calls = 0;
+    bool fail_reads = false;
+};
+
+std::expected<void, std::string> ReadMemorySource(
+    void* opaque, const std::uint64_t offset, const std::span<std::byte> output)
+{
+    if (opaque == nullptr)
+        return std::unexpected("missing memory source context");
+    auto& context = *static_cast<MemoryReadContext*>(opaque);
+    ++context.calls;
+    if (context.fail_reads)
+        return std::unexpected("injected memory source failure");
+    if (context.bytes == nullptr || offset > context.bytes->size() ||
+        output.size() > context.bytes->size() - static_cast<std::size_t>(offset))
+        return std::unexpected("memory source range is out of bounds");
+    std::copy_n(context.bytes->data() + static_cast<std::size_t>(offset),
+        output.size(), output.data());
+    return {};
 }
 
 bool WriteFile(const std::filesystem::path& path, const std::span<const std::byte> bytes)
@@ -103,6 +128,47 @@ int ComponentStoreFailureCount();
 int main()
 {
     const auto complete_archive = MakeArchive();
+    const auto complete_size = static_cast<std::uint64_t>(complete_archive.size());
+    const omega::archive::HogReadSource null_source{.size = complete_size};
+    Check(!omega::archive::HogIndex::Open(null_source),
+        "source index rejects a null callback");
+    Check(!omega::archive::HogIndex::OpenRange(
+              null_source, omega::archive::HogFileRange{.offset = 0, .size = complete_size},
+              complete_size),
+        "source range index rejects a null callback");
+
+    MemoryReadContext source_context{.bytes = &complete_archive};
+    const omega::archive::HogReadSource memory_source{
+        .size = complete_size,
+        .context = &source_context,
+        .read_exact = ReadMemorySource,
+    };
+    auto source_index = omega::archive::HogIndex::Open(memory_source);
+    Check(source_index && source_index->entries().size() == 2,
+        "source index parses through the caller callback");
+    auto source_range_index = omega::archive::HogIndex::OpenRange(
+        memory_source, omega::archive::HogFileRange{.offset = 0, .size = complete_size},
+        complete_size);
+    Check(source_range_index && source_range_index->padding_size() == 0,
+        "source range index parses an exact bounded span");
+
+    source_context.calls = 0;
+    Check(!omega::archive::HogIndex::OpenRange(memory_source,
+              omega::archive::HogFileRange{.offset = complete_size, .size = 1}, 1) &&
+              source_context.calls == 0,
+        "source range rejects out-of-bounds spans before invoking the callback");
+    source_context.fail_reads = true;
+    source_context.calls = 0;
+    Check(!omega::archive::HogIndex::Open(memory_source) && source_context.calls == 1,
+        "source index propagates callback failure without retrying an invalid read");
+    source_context.calls = 0;
+    Check(!omega::archive::HogIndex::OpenRange(
+              memory_source, omega::archive::HogFileRange{.offset = 0, .size = complete_size},
+              complete_size) &&
+              source_context.calls == 1,
+        "source range index propagates callback failure");
+    source_context.fail_reads = false;
+
     bool all_truncations_rejected = true;
     for (std::size_t size = 0; size < complete_archive.size(); ++size)
     {

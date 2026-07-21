@@ -127,6 +127,60 @@ struct ParsedDirectory
     return {};
 }
 
+[[nodiscard]] std::expected<void, std::string> ValidateSourceRange(
+    const HogReadSource& source, const HogFileRange range, const std::uint64_t maximum_bytes)
+{
+    if (source.read_exact == nullptr)
+        return std::unexpected("HOG read source has no read callback");
+    if (range.size > maximum_bytes)
+        return std::unexpected("archive range exceeds caller's load limit");
+    if (range.offset > source.size || range.size > source.size - range.offset)
+        return std::unexpected("archive range extends past the byte source");
+    return {};
+}
+
+[[nodiscard]] std::expected<void, std::string> ReadExact(
+    const HogReadSource& source, const std::uint64_t offset,
+    const std::span<std::byte> output, const std::string_view description)
+{
+    if (source.read_exact == nullptr)
+        return std::unexpected("HOG read source has no read callback");
+    if (offset > source.size || output.size() > source.size - offset)
+        return std::unexpected(std::string(description) + " extends past the byte source");
+    auto read = source.read_exact(source.context, offset, output);
+    if (!read)
+        return std::unexpected(read.error());
+    return {};
+}
+
+[[nodiscard]] std::expected<void, std::string> ValidateZeroSourceRange(
+    const HogReadSource& source, const HogFileRange range)
+{
+    std::array<std::byte, kPaddingValidationChunkSize> buffer{};
+    std::uint64_t cursor = range.offset;
+    std::uint64_t remaining = range.size;
+    while (remaining != 0)
+    {
+        const auto chunk_size = static_cast<std::size_t>(
+            std::min<std::uint64_t>(remaining, buffer.size()));
+        auto read = ReadExact(source, cursor,
+            std::span<std::byte>(buffer).first(chunk_size), "HOG trailing padding");
+        if (!read)
+            return read;
+        if (!std::ranges::all_of(std::span<const std::byte>(buffer).first(chunk_size),
+                [](const std::byte value) { return value == std::byte{0}; }))
+            return std::unexpected(
+                "archive range contains non-zero bytes after its logical payload end");
+
+        auto next_cursor = CheckedAdd(cursor, chunk_size, "HOG padding cursor");
+        if (!next_cursor)
+            return std::unexpected(next_cursor.error());
+        cursor = *next_cursor;
+        remaining -= chunk_size;
+    }
+    return {};
+}
+
 [[nodiscard]] std::expected<ParsedDirectory, std::string> ParseDirectory(
     const std::span<const std::byte> directory, const std::uint64_t archive_size)
 {
@@ -269,6 +323,30 @@ struct ParsedDirectory
     return ParseDirectory(directory, range.size);
 }
 
+[[nodiscard]] std::expected<ParsedDirectory, std::string> ReadDirectoryFromRange(
+    const HogReadSource& source, const HogFileRange range)
+{
+    if (range.size < kHeaderSize + sizeof(std::uint32_t))
+        return std::unexpected("archive range is too small for a HOG header and terminal offset");
+
+    std::array<std::byte, kHeaderSize> header_bytes{};
+    auto header_read = ReadExact(source, range.offset, header_bytes, "HOG header");
+    if (!header_read)
+        return std::unexpected(header_read.error());
+
+    const std::uint32_t data_offset = ReadU32(header_bytes, 0x10);
+    if (data_offset < kHeaderSize + sizeof(std::uint32_t) || data_offset > range.size)
+        return std::unexpected("invalid directory prefix size: " + Hex(data_offset));
+    if (data_offset > kMaximumDirectorySize)
+        return std::unexpected("directory prefix exceeds safety limit: " + Hex(data_offset));
+
+    std::vector<std::byte> directory(data_offset);
+    auto directory_read = ReadExact(source, range.offset, directory, "HOG directory");
+    if (!directory_read)
+        return std::unexpected(directory_read.error());
+    return ParseDirectory(directory, range.size);
+}
+
 [[nodiscard]] std::expected<std::vector<std::byte>, std::string> ReadOwnedRange(
     std::ifstream& stream, const std::filesystem::path& path, const HogFileRange range)
 {
@@ -324,6 +402,28 @@ std::expected<HogIndex, std::string> HogIndex::Open(const std::filesystem::path&
     return result;
 }
 
+std::expected<HogIndex, std::string> HogIndex::Open(const HogReadSource& source)
+{
+    const HogFileRange range{.offset = 0, .size = source.size};
+    auto valid_range = ValidateSourceRange(source, range, source.size);
+    if (!valid_range)
+        return std::unexpected(valid_range.error());
+
+    auto parsed = ReadDirectoryFromRange(source, range);
+    if (!parsed)
+        return std::unexpected(parsed.error());
+    if (parsed->logical_size != range.size)
+        return std::unexpected("terminal payload boundary " + Hex(parsed->logical_size) +
+                               " does not equal archive size " + Hex(range.size));
+
+    HogIndex result;
+    result.header_ = parsed->header;
+    result.entries_ = std::move(parsed->entries);
+    result.archive_size_ = range.size;
+    result.logical_size_ = parsed->logical_size;
+    return result;
+}
+
 std::expected<HogIndex, std::string> HogIndex::OpenRange(
     const std::filesystem::path& path, const HogFileRange range, const std::uint64_t maximum_bytes)
 {
@@ -346,6 +446,35 @@ std::expected<HogIndex, std::string> HogIndex::OpenRange(
     if (!padding_offset)
         return std::unexpected(padding_offset.error());
     auto padding_valid = ValidateZeroFileRange(stream, path, HogFileRange{
+        .offset = *padding_offset,
+        .size = range.size - parsed->logical_size,
+    });
+    if (!padding_valid)
+        return std::unexpected(padding_valid.error());
+
+    HogIndex result;
+    result.header_ = parsed->header;
+    result.entries_ = std::move(parsed->entries);
+    result.archive_size_ = range.size;
+    result.logical_size_ = parsed->logical_size;
+    return result;
+}
+
+std::expected<HogIndex, std::string> HogIndex::OpenRange(
+    const HogReadSource& source, const HogFileRange range, const std::uint64_t maximum_bytes)
+{
+    auto valid_range = ValidateSourceRange(source, range, maximum_bytes);
+    if (!valid_range)
+        return std::unexpected(valid_range.error());
+
+    auto parsed = ReadDirectoryFromRange(source, range);
+    if (!parsed)
+        return std::unexpected(parsed.error());
+
+    auto padding_offset = CheckedAdd(range.offset, parsed->logical_size, "HOG padding offset");
+    if (!padding_offset)
+        return std::unexpected(padding_offset.error());
+    auto padding_valid = ValidateZeroSourceRange(source, HogFileRange{
         .offset = *padding_offset,
         .size = range.size - parsed->logical_size,
     });

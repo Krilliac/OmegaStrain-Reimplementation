@@ -1,6 +1,7 @@
 #include "omega/archive/hog_archive.h"
 
 #include "asset_commands.h"
+#include "frontend_envelope_commands.h"
 #include "level_texture_commands.h"
 #include "pop_post_terrain_commands.h"
 #include "pop_commands.h"
@@ -44,7 +45,8 @@ void PrintUsage()
               << "  omega_tool level-material-catalogs-verify-tree <root>\n"
               << "  omega_tool level-texture-store-verify-tree <root>\n"
               << "  omega_tool asset-service-verify-tree <root>\n"
-              << "  omega_tool asset-metadata-verify-tree <root>\n";
+              << "  omega_tool asset-metadata-verify-tree <root>\n"
+              << "  omega_tool frontend-envelope-coverage-verify-tree <root>\n";
 }
 
 [[nodiscard]] std::optional<std::uint64_t> CheckedAdd(
@@ -390,6 +392,8 @@ int main(const int argc, char** argv)
         return omega::tool::AssetServiceVerifyTree(argv[2]);
     if (command == "asset-metadata-verify-tree")
         return omega::tool::AssetMetadataVerifyTree(argv[2]);
+    if (command == "frontend-envelope-coverage-verify-tree")
+        return omega::tool::FrontendEnvelopeCoverageVerifyTree(argv[2]);
 
     PrintUsage();
     return 64;

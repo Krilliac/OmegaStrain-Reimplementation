@@ -19,6 +19,20 @@ struct HogFileRange
     std::uint64_t size = 0;
 };
 
+// Caller-owned, synchronous random-access byte source. The callback and context
+// are borrowed only for the duration of an Open/OpenRange call and are never
+// retained. This lets a caller bind parsing to an already-open no-follow file
+// handle instead of reopening an untrusted pathname.
+struct HogReadSource
+{
+    using ReadExact = std::expected<void, std::string> (*)(
+        void* context, std::uint64_t offset, std::span<std::byte> output);
+
+    std::uint64_t size = 0;
+    void* context = nullptr;
+    ReadExact read_exact = nullptr;
+};
+
 struct HogHeader
 {
     std::uint32_t tag = 0;
@@ -43,11 +57,23 @@ public:
     [[nodiscard]] static std::expected<HogIndex, std::string> Open(
         const std::filesystem::path& path);
 
+    // [any thread; caller-synchronized source] Indexes an exact top-level
+    // archive through one identity-bound random-access source.
+    [[nodiscard]] static std::expected<HogIndex, std::string> Open(
+        const HogReadSource& source);
+
     // [any thread] Indexes one independently bounded nested archive span without loading its
     // payload. Entry offsets remain relative to the start of the nested span. Only an all-zero
     // tail between logical_size() and archive_size() is accepted.
     [[nodiscard]] static std::expected<HogIndex, std::string> OpenRange(
         const std::filesystem::path& path,
+        HogFileRange range,
+        std::uint64_t maximum_bytes = kDefaultMaximumArchiveLoadBytes);
+
+    // [any thread; caller-synchronized source] Indexes one independently
+    // bounded nested archive span through the same identity-bound source.
+    [[nodiscard]] static std::expected<HogIndex, std::string> OpenRange(
+        const HogReadSource& source,
         HogFileRange range,
         std::uint64_t maximum_bytes = kDefaultMaximumArchiveLoadBytes);
 
