@@ -601,6 +601,18 @@ int main()
     static_assert(noexcept(omega::app::TryShowStartupFailureDialog(
         request, StartupFailureDialogPolicy::Suppress)));
 
+    constexpr auto application_request =
+        omega::app::ApplicationStartupFailureDialogRequest();
+    static_assert(noexcept(omega::app::ApplicationStartupFailureDialogRequest()));
+    static_assert(application_request.stage == StartupFailureStage::ApplicationStartup);
+    static_assert(application_request.category == "application-startup");
+    static_assert(application_request.detail ==
+                  "Application components could not be initialized.");
+    Check(Text(omega::app::BuildStartupFailureDialogText(application_request)) ==
+              ExpectedText("application startup", "application-startup",
+                  "Application components could not be initialized."),
+        "application startup uses a fixed identity-free dialog request");
+
     static_assert(std::string_view(omega::app::kStartupFailureDialogTitle) ==
                   "OpenOmega startup error");
     static_assert(std::string_view(

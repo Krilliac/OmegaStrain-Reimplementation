@@ -887,8 +887,11 @@ Studio's historical engine source or internal toolchain.
   `OPENOMEGA_DISABLE_STARTUP_DIALOG=1` suppresses presentation, and invalid policy values fail
   closed as suppressed. CMake supplies that suppression to the existing synthetic process and
   capture contracts, while the dedicated unit contract exercises only suppressed presentation and
-  verifies that SDL remains uninitialized. Parse/help, app creation, SDL/GPU/audio setup, the run
-  loop, capture, and replay failures remain console-only. Serialized local validation passed:
+  verifies that SDL remains uninitialized. Parse/help, the run loop, capture, and replay failures
+  remain console-only. A later hardening step extends presentation to app creation, including
+  SDL/GPU/audio setup, while preserving its exact stderr diagnostic: the dialog uses fixed code
+  `application-startup` and fixed detail `Application components could not be initialized.`, so
+  raw backend text never reaches the packaged dialog. The E-0076 baseline validation passed:
   focused and full MSVC builds; the direct dialog unit and exact process contract; CTest 31/35/31;
   runtime-off direct and focused `omega_core_tests` with 27 registrations and no dialog target; the
   163-file dependency gate; all 209 tooling tests; Python compile-all; and the staged public-tree
