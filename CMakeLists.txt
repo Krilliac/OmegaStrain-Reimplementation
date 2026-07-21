@@ -353,6 +353,7 @@ endif()
 
 add_executable(omega_tool
     native/apps/omega_tool/asset_commands.cpp
+    native/apps/omega_tool/frontend_envelope_commands.cpp
     native/apps/omega_tool/level_texture_commands.cpp
     native/apps/omega_tool/main.cpp
     native/apps/omega_tool/pop_post_terrain_commands.cpp
@@ -1413,6 +1414,39 @@ if(BUILD_TESTING)
     add_test(NAME omega_pop_post_terrain_commands_tests COMMAND omega_pop_post_terrain_commands_tests)
     set_tests_properties(omega_pop_post_terrain_commands_tests PROPERTIES TIMEOUT 10)
 
+    add_executable(omega_frontend_envelope_commands_tests
+        native/tests/frontend_envelope_commands_tests.cpp
+        native/apps/omega_tool/frontend_envelope_commands.cpp
+    )
+    target_include_directories(omega_frontend_envelope_commands_tests PRIVATE
+        native/apps/omega_tool
+    )
+    target_link_libraries(omega_frontend_envelope_commands_tests PRIVATE
+        omega_core
+        omega_retail_formats
+    )
+    if(MSVC)
+        target_compile_options(omega_frontend_envelope_commands_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_frontend_envelope_commands_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_frontend_envelope_commands_tests
+        COMMAND omega_frontend_envelope_commands_tests)
+    set_tests_properties(omega_frontend_envelope_commands_tests PROPERTIES TIMEOUT 10)
+
     add_executable(omega_level_texture_commands_tests
         native/tests/level_texture_commands_tests.cpp
         native/apps/omega_tool/level_texture_commands.cpp
@@ -2203,6 +2237,9 @@ if(BUILD_TESTING)
             "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_asset_metadata_tree
         COMMAND omega_tool asset-metadata-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_rejects_empty_frontend_envelope_coverage_tree
+        COMMAND omega_tool frontend-envelope-coverage-verify-tree
+            "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     set_tests_properties(
         omega_tool_rejects_empty_hog_tree
         omega_tool_rejects_empty_nested_hog_tree
@@ -2214,6 +2251,7 @@ if(BUILD_TESTING)
         omega_tool_rejects_empty_level_texture_store_tree
         omega_tool_rejects_empty_asset_service_tree
         omega_tool_rejects_empty_asset_metadata_tree
+        omega_tool_rejects_empty_frontend_envelope_coverage_tree
         PROPERTIES
             WILL_FAIL TRUE
             TIMEOUT 10
