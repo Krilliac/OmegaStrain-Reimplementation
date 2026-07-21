@@ -80,13 +80,16 @@ audio variants, or claim retail audiovisual timing parity.
   native mix format or an assertion about every retail PSS stream.
 - The PSS PCM grammar is a project-defined provisional compatibility hypothesis, not confirmed
   retail format semantics. Generated fixtures and one accepted owner stream do not promote it.
-- Audio callback, queue, underrun, clock, or containment failures fail open to the front end and may
-  not leave the device running or retain queued proprietary samples.
+- Audio callback, queue, underrun, or clock failures during the modal movie window fail open to the
+  front end after the runtime has paused and cleared movie audio. If containment itself fails, the
+  run ends after releasing CPU/GPU movie state; the runtime must not enter an interactive front end
+  while the device may still be running or retaining queued proprietary samples.
 
 ## Validation
 
 - Synthetic MPEG-PS, elementary-stream, PSS PCM plan/deinterleave, H.262, decoder-state, NV12
-  conversion, opening-audio queue/drain/discard, isolated audio-clock, boot-reducer, launch
+  conversion, opening-audio queue/drain/discard, isolated audio-clock and audio-fault policy,
+  boot-reducer, launch
   isolation, texture-update, dependency-policy, and public-tree tests run in CI. The PSS PCM
   fixtures validate implemented boundaries and self-consistency, not independent format provenance.
 - Windows builds cover the real Media Foundation implementation; Linux builds cover the unsupported
@@ -94,7 +97,9 @@ audio variants, or claim retail audiovisual timing parity.
 - An opt-in generated app-boundary smoke drives one RGBA frame and bounded silent PCM through the
   actual app services. It covers natural EOS into Main plus next-frame navigation, primary skip at
   zero, two, and five advances, modal zero-simulation behavior, playback/texture/draw/audio
-  containment, and path-free categorical failure logging. It bypasses `OpeningMoviePlayer::Create`
+  containment, real queue-rejection and control faults raised after the pre-render health sample,
+  one-shot fault re-baselining, and path-free categorical failure logging. It bypasses
+  `OpeningMoviePlayer::Create`
   and the production decoder, so it does not establish owned-stream decode, Media Foundation
   teardown, finite-source PCM or hardware-backlog drain, perceptual synchronization, retail timing,
   or repeated owner validation.

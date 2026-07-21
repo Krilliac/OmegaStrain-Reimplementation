@@ -942,6 +942,53 @@ bool OmegaApp::ContainOpeningMovieAudio() noexcept
     return audio_ == nullptr || audio_->DiscardOpeningMovieAudio();
 }
 
+OpeningMovieAudioFaultCounters OmegaApp::OpeningMovieAudioFaultCountersOf(
+    const AudioServiceSnapshot& snapshot) noexcept
+{
+    return OpeningMovieAudioFaultCounters{
+        .callback_failures = snapshot.callback_failures,
+        .opening_movie_control_failures = snapshot.opening_movie_control_failures,
+        .opening_movie_underrun_frames = snapshot.opening_movie_underrun_frames,
+        .opening_movie_queue_rejections = snapshot.opening_movie_queue_rejections,
+    };
+}
+
+void OmegaApp::ReleaseOpeningMovieForFrontEnd()
+{
+    if (IsBootSequenceActive(boot_sequence_state_))
+    {
+        boot_sequence_state_ = BootSequenceState{
+            .phase = BootSequencePhase::Failed,
+            .position_ticks = boot_sequence_state_.position_ticks,
+            .duration_ticks = boot_sequence_state_.duration_ticks,
+        };
+    }
+
+    opening_movie_player_.reset();
+    opening_movie_draw_list_ = {};
+    if (!opening_movie_texture_.valid())
+        return;
+
+    auto released = host_->ReleaseTexture(opening_movie_texture_);
+    if (!released)
+    {
+        log_->Warning("opening_movie",
+            "opening movie texture release failed; host cleanup will retry");
+        return;
+    }
+    opening_movie_texture_ = {};
+}
+
+bool OmegaApp::FinishOpeningMovieFrontEndTransition(
+    AudioServiceSnapshot& audio_fault_baseline)
+{
+    const bool contained = ContainOpeningMovieAudio();
+    if (audio_ != nullptr)
+        audio_fault_baseline = audio_->Snapshot();
+    ReleaseOpeningMovieForFrontEnd();
+    return contained;
+}
+
 OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
 
 std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
@@ -1158,15 +1205,15 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             if (!primary_pressed)
             {
                 AudioServiceSnapshot movie_audio = audio_->Snapshot();
-                if (movie_audio.callback_failures > audio_fault_baseline.callback_failures ||
-                    movie_audio.opening_movie_control_failures >
-                        audio_fault_baseline.opening_movie_control_failures ||
-                    movie_audio.opening_movie_underrun_frames >
-                        audio_fault_baseline.opening_movie_underrun_frames)
+                const OpeningMovieAudioFault movie_audio_fault =
+                    ClassifyOpeningMovieAudioFault(
+                        OpeningMovieAudioFaultCountersOf(audio_fault_baseline),
+                        OpeningMovieAudioFaultCountersOf(movie_audio));
+                if (DisposeOpeningMovieAudioFault(movie_audio_fault, true) ==
+                    OpeningMovieAudioFaultDisposition::FailOpen)
                 {
                     log_->Warning("opening_movie",
-                        "opening movie audio playback reported a callback, control, or underrun "
-                        "failure");
+                        OpeningMovieAudioFaultMessage(movie_audio_fault));
                     source_failed = true;
                 }
                 else if (opening_movie_player_ == nullptr)
@@ -1356,30 +1403,19 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                     log_->Warning("opening_movie",
                         "opening movie safety timeout reached; entering front end");
                 }
-                const bool contained = ContainOpeningMovieAudio();
+                const bool contained = FinishOpeningMovieFrontEndTransition(
+                    audio_fault_baseline);
                 if (!contained)
                 {
-                    log_->Warning("opening_movie",
-                        "opening movie audio discard failed during front-end transition");
-                }
-                else
-                {
-                    audio_fault_baseline = audio_->Snapshot();
-                }
-                opening_movie_player_.reset();
-                opening_movie_draw_list_ = {};
-                if (opening_movie_texture_.valid())
-                {
-                    auto released = host_->ReleaseTexture(opening_movie_texture_);
-                    if (!released)
-                    {
-                        log_->Warning("opening_movie",
-                            "opening movie texture release failed; host cleanup will retry");
-                    }
-                    else
-                    {
-                        opening_movie_texture_ = {};
-                    }
+                    jobs_->WaitForIdle();
+                    constexpr std::string_view error =
+                        "opening movie audio containment failed during the front-end transition";
+                    log_->Error("opening_movie", error);
+                    return RunLoopResult{
+                        .result = result,
+                        .operational_error = std::string(error),
+                        .capture_error = std::nullopt,
+                    };
                 }
             }
         }
@@ -1515,14 +1551,38 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         result.rendered_frames = *next_rendered_frame_count;
 
         const AudioServiceSnapshot audio_health = audio_->Snapshot();
-        if (audio_health.callback_failures > audio_fault_baseline.callback_failures ||
-            audio_health.opening_movie_control_failures >
-                audio_fault_baseline.opening_movie_control_failures)
+        const OpeningMovieAudioFault audio_fault =
+            ClassifyOpeningMovieAudioFault(
+                OpeningMovieAudioFaultCountersOf(audio_fault_baseline),
+                OpeningMovieAudioFaultCountersOf(audio_health));
+        const OpeningMovieAudioFaultDisposition audio_fault_disposition =
+            DisposeOpeningMovieAudioFault(audio_fault, movie_was_active);
+        if (audio_fault_disposition ==
+            OpeningMovieAudioFaultDisposition::FailOpen)
+        {
+            log_->Warning("opening_movie",
+                OpeningMovieAudioFaultMessage(audio_fault));
+            const bool contained = FinishOpeningMovieFrontEndTransition(
+                audio_fault_baseline);
+            if (!contained)
+            {
+                jobs_->WaitForIdle();
+                constexpr std::string_view error =
+                    "opening movie audio containment failed during the front-end transition";
+                log_->Error("opening_movie", error);
+                return RunLoopResult{
+                    .result = result,
+                    .operational_error = std::string(error),
+                    .capture_error = std::nullopt,
+                };
+            }
+        }
+        else if (audio_fault_disposition ==
+            OpeningMovieAudioFaultDisposition::Fatal)
         {
             const bool contained = ContainOpeningMovieAudio();
             jobs_->WaitForIdle();
-            constexpr std::string_view error =
-                "audio playback callback or control operation failed";
+            const std::string_view error = GeneralAudioFaultMessage(audio_fault);
             log_->Error("audio", error);
             if (!contained)
                 log_->Error("audio", "audio containment also reported a control failure");
@@ -1534,15 +1594,40 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         }
     }
 
+    const bool movie_window_open_at_exit =
+        IsBootSequenceActive(boot_sequence_state_);
     const bool contained = ContainOpeningMovieAudio();
     jobs_->WaitForIdle();
     const AudioServiceSnapshot audio = audio_->Snapshot();
-    if (!contained || audio.callback_failures > audio_fault_baseline.callback_failures ||
-        audio.opening_movie_control_failures >
-            audio_fault_baseline.opening_movie_control_failures)
+    const OpeningMovieAudioFault exit_audio_fault =
+        ClassifyOpeningMovieAudioFault(
+            OpeningMovieAudioFaultCountersOf(audio_fault_baseline),
+            OpeningMovieAudioFaultCountersOf(audio));
+    const OpeningMovieAudioFaultDisposition exit_audio_fault_disposition =
+        DisposeOpeningMovieAudioFault(
+            exit_audio_fault, movie_window_open_at_exit);
+    if (exit_audio_fault_disposition ==
+        OpeningMovieAudioFaultDisposition::FailOpen)
+    {
+        log_->Warning("opening_movie",
+            OpeningMovieAudioFaultMessage(exit_audio_fault));
+        ReleaseOpeningMovieForFrontEnd();
+    }
+    if (!contained)
     {
         constexpr std::string_view error =
-            "audio playback callback, control, or containment operation failed";
+            "audio playback containment operation failed";
+        log_->Error("audio", error);
+        return RunLoopResult{
+            .result = result,
+            .operational_error = std::string(error),
+            .capture_error = std::nullopt,
+        };
+    }
+    if (exit_audio_fault_disposition ==
+        OpeningMovieAudioFaultDisposition::Fatal)
+    {
+        const std::string_view error = GeneralAudioFaultMessage(exit_audio_fault);
         log_->Error("audio", error);
         return RunLoopResult{
             .result = result,

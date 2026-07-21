@@ -55,7 +55,7 @@ public:
     SdlAudioService(const SdlAudioService&) = delete;
     SdlAudioService& operator=(const SdlAudioService&) = delete;
 
-    // [game thread; atomic snapshot]
+    // [game thread; independent atomic counter/state observations]
     [[nodiscard]] AudioServiceSnapshot Snapshot() const noexcept;
     // [creating main/game thread; single producer] Converts and enqueues one exact frame-aligned
     // host-endian signed-16 stereo span. The call is all-or-nothing and never allocates. Setting
