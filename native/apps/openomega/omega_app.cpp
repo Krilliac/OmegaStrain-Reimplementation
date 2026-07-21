@@ -946,7 +946,10 @@ OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
 
 std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
 {
-    RunLoopResult loop = RunLoop(frame_limit, nullptr);
+    auto first_elapsed_override =
+        std::exchange(next_run_elapsed_override_for_testing_, std::nullopt);
+    RunLoopResult loop =
+        RunLoop(frame_limit, nullptr, std::move(first_elapsed_override));
     if (loop.operational_error)
         return std::unexpected(std::move(*loop.operational_error));
     return loop.result;
@@ -955,6 +958,8 @@ std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
 std::expected<RunCaptureOutcome, std::string> OmegaApp::RunWithCapture(
     const int frame_limit)
 {
+    auto first_elapsed_override =
+        std::exchange(next_run_elapsed_override_for_testing_, std::nullopt);
     const auto planned = detail::PlanFiniteRunCapture(
         frame_limit, input_->next_frame_index());
     if (!planned)
@@ -991,7 +996,8 @@ std::expected<RunCaptureOutcome, std::string> OmegaApp::RunWithCapture(
                 std::in_place, std::move(*finished)});
     }
 
-    RunLoopResult loop = RunLoop(frame_limit, &capture_session);
+    RunLoopResult loop = RunLoop(
+        frame_limit, &capture_session, std::move(first_elapsed_override));
     const runtime::FrameSchedulerState scheduler_state_after =
         frame_scheduler_->Snapshot();
 
@@ -1037,7 +1043,8 @@ std::expected<RunCaptureOutcome, std::string> OmegaApp::RunWithCapture(
 }
 
 OmegaApp::RunLoopResult OmegaApp::RunLoop(
-    const int frame_limit, runtime::RunCaptureSession* const capture_session)
+    const int frame_limit, runtime::RunCaptureSession* const capture_session,
+    std::optional<std::chrono::nanoseconds> first_elapsed_override)
 {
     using Clock = std::chrono::steady_clock;
 
@@ -1118,9 +1125,14 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         }
 
         const auto current_frame = Clock::now();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
             current_frame - previous_frame);
         previous_frame = current_frame;
+        if (first_elapsed_override)
+        {
+            elapsed = *first_elapsed_override;
+            first_elapsed_override.reset();
+        }
         if (capture_session != nullptr)
         {
             const auto captured = capture_session->AppendElapsed(elapsed);

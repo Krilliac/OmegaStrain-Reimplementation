@@ -23,6 +23,7 @@
 #include "omega/simulation/simulation_world.h"
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -107,7 +108,8 @@ private:
     };
 
     [[nodiscard]] RunLoopResult RunLoop(
-        int frame_limit, runtime::RunCaptureSession* capture_session);
+        int frame_limit, runtime::RunCaptureSession* capture_session,
+        std::optional<std::chrono::nanoseconds> first_elapsed_override);
     [[nodiscard]] bool ContainOpeningMovieAudio() noexcept;
     // [game/main thread; no concurrent use] Resolves only bounded startup slots
     // and copies their immutable ID. It performs no catalog or database access.
@@ -207,5 +209,9 @@ private:
     // Explicit session policy only. This owned value is never persisted and no
     // profile is selected implicitly at startup.
     std::optional<profiles::ProfileId> active_profile_id_;
+    // Friend-only, game-thread, one-shot wall-time input. Production factories leave it empty,
+    // and no production API can populate it. Run and RunWithCapture consume it before validation
+    // so every exit path is leak-free and at most the first elapsed-bearing host frame observes it.
+    std::optional<std::chrono::nanoseconds> next_run_elapsed_override_for_testing_;
 };
 } // namespace omega::app
