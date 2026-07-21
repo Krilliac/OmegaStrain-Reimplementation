@@ -1,6 +1,7 @@
 #include "opening_movie_audio_fault.h"
 
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -120,6 +121,31 @@ int main()
     {
         Check(!omega::app::OpeningMovieAudioFaultMessage(fault).empty(),
             "every fault has categorical diagnostic text");
+    }
+
+    // A value outside the declared enumeration models a corrupted classification
+    // or an enumerator added without updating the disposition switch. The modal
+    // window must still cost at most the movie.
+    for (std::uint8_t encoded = 5U; encoded < 16U; ++encoded)
+    {
+        const auto unknown = static_cast<OpeningMovieAudioFault>(encoded);
+        Check(DisposeOpeningMovieAudioFault(unknown, true) ==
+                  OpeningMovieAudioFaultDisposition::FailOpen,
+            "an unclassifiable fault inside the movie window fails open");
+        Check(DisposeOpeningMovieAudioFault(unknown, false) ==
+                  OpeningMovieAudioFaultDisposition::Fatal,
+            "an unclassifiable fault outside the movie window stays fatal");
+        Check(!omega::app::OpeningMovieAudioFaultMessage(unknown).empty() &&
+                  !omega::app::GeneralAudioFaultMessage(unknown).empty(),
+            "an unclassifiable fault still has categorical diagnostic text");
+    }
+
+    for (const bool movie_window_open : {false, true})
+    {
+        Check(DisposeOpeningMovieAudioFault(
+                  OpeningMovieAudioFault::None, movie_window_open) ==
+                  OpeningMovieAudioFaultDisposition::Ignore,
+            "a quiet audio surface never interrupts either window");
     }
     Check(omega::app::GeneralAudioFaultMessage(
               OpeningMovieAudioFault::Callback).find("movie") ==
