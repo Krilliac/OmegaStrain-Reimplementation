@@ -106,6 +106,9 @@ target_compile_features(omega_gameplay PUBLIC cxx_std_23)
 add_library(omega_retail_formats STATIC
     native/src/retail/col_spatial_mesh_decoder.cpp
     native/src/retail/container_descriptors.cpp
+    native/src/retail/fnt_envelope_descriptor.cpp
+    native/src/retail/gui_envelope_descriptor.cpp
+    native/src/retail/ie_envelope_descriptor.cpp
     native/src/retail/lpd_envelope_decoder.cpp
     native/src/retail/par_text_envelope_decoder.cpp
     native/src/retail/pop_level_manifest_decoder.cpp
@@ -699,6 +702,84 @@ if(BUILD_TESTING)
     add_test(NAME omega_vpk_wrapper_envelope_decoder_tests
         COMMAND omega_vpk_wrapper_envelope_decoder_tests)
     set_tests_properties(omega_vpk_wrapper_envelope_decoder_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_fnt_envelope_descriptor_tests
+        native/tests/fnt_envelope_descriptor_tests.cpp
+    )
+    target_link_libraries(omega_fnt_envelope_descriptor_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_fnt_envelope_descriptor_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_fnt_envelope_descriptor_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_fnt_envelope_descriptor_tests
+        COMMAND omega_fnt_envelope_descriptor_tests)
+    set_tests_properties(omega_fnt_envelope_descriptor_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_gui_envelope_descriptor_tests
+        native/tests/gui_envelope_descriptor_tests.cpp
+    )
+    target_link_libraries(omega_gui_envelope_descriptor_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_gui_envelope_descriptor_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_gui_envelope_descriptor_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_gui_envelope_descriptor_tests
+        COMMAND omega_gui_envelope_descriptor_tests)
+    set_tests_properties(omega_gui_envelope_descriptor_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_ie_envelope_descriptor_tests
+        native/tests/ie_envelope_descriptor_tests.cpp
+    )
+    target_link_libraries(omega_ie_envelope_descriptor_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_ie_envelope_descriptor_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_ie_envelope_descriptor_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_ie_envelope_descriptor_tests
+        COMMAND omega_ie_envelope_descriptor_tests)
+    set_tests_properties(omega_ie_envelope_descriptor_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_mpeg_program_stream_descriptor_tests
         native/tests/mpeg_program_stream_descriptor_tests.cpp
