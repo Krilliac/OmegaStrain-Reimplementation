@@ -34,6 +34,9 @@ CPP_PATH_FRAGMENT_PATTERN = re.compile(
     r"native/(?:include|src|tests)/[A-Za-z0-9_./-]+\.(?:h|cpp)"
 )
 INLINE_CODE_PATTERN = re.compile(r"`(?P<value>[^`\r\n]+)`")
+TARGET_FILE_EXPRESSION_PATTERN = re.compile(
+    r"\$<TARGET_FILE:(?P<target>[A-Za-z0-9_.+:-]+)>"
+)
 BOUNDARY_FUNCTION_PATTERN = re.compile(
     r"\b(?P<name>(?:Decode|Inspect)[A-Z0-9][A-Za-z0-9_]*)\s*\("
 )
@@ -717,7 +720,11 @@ def registered_cmake_surface(
             if "COMMAND" in upper_words:
                 command_index = upper_words.index("COMMAND") + 1
                 if command_index < len(words):
-                    tested_targets.add(words[command_index])
+                    command = words[command_index]
+                    target_file = TARGET_FILE_EXPRESSION_PATTERN.fullmatch(command)
+                    tested_targets.add(
+                        target_file["target"] if target_file is not None else command
+                    )
             elif len(words) >= 2:
                 tested_targets.add(words[1])
 
@@ -1493,6 +1500,26 @@ class DecoderCoverageContractTests(unittest.TestCase):
                 "native/tests/foo_decoder_tests.cpp",
                 validate_decoder_coverage(root),
             )
+
+    def test_target_file_generator_expression_registers_test_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_synthetic_repository(root)
+            (root / "CMakeLists.txt").write_text(
+                "\n".join(
+                    (
+                        "add_library(omega_retail_formats STATIC "
+                        "native/src/retail/foo_decoder.cpp)",
+                        "add_executable(foo_tests "
+                        "native/tests/foo_decoder_tests.cpp)",
+                        "add_test(NAME foo_tests COMMAND "
+                        '"$<TARGET_FILE:foo_tests>")',
+                        "",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(validate_decoder_coverage(root), [])
 
     def test_interface_only_target_sources_do_not_count_as_compiled(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
