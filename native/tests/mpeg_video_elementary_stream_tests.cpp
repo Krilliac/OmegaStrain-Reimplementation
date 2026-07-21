@@ -66,6 +66,21 @@ void CheckError(const Result& result, const DecodeErrorCode code, const std::str
           "media error contains no filesystem path");
 }
 
+template <typename Result>
+void CheckExactError(const Result& result, const DecodeErrorCode code,
+                     const std::string_view expected_message,
+                     const std::uint64_t expected_byte_offset,
+                     const std::string_view message)
+{
+    CheckError(result, code, "H.262", message);
+    if (result)
+        return;
+    Check(result.error().message == expected_message, message);
+    Check(result.error().byte_offset ==
+              std::optional<std::uint64_t>{expected_byte_offset},
+          message);
+}
+
 void AppendByte(std::vector<std::byte>& bytes, const std::uint8_t value)
 {
     bytes.push_back(static_cast<std::byte>(value));
@@ -521,7 +536,9 @@ void AppendSequenceExtension(std::vector<std::uint8_t>& bytes, const std::uint8_
                              const std::uint8_t horizontal_size_extension = 0,
                              const std::uint8_t vertical_size_extension = 0,
                              const std::uint8_t frame_rate_extension_n = 0,
-                             const std::uint8_t frame_rate_extension_d = 0)
+                             const std::uint8_t frame_rate_extension_d = 0,
+                             const std::uint8_t chroma_format = 1,
+                             const bool bit_rate_marker = true)
 {
     AppendEsStartCode(bytes, 0xB5);
     std::uint64_t packed = 0;
@@ -532,11 +549,11 @@ void AppendSequenceExtension(std::vector<std::uint8_t>& bytes, const std::uint8_
     append_bits(1, 4); // sequence_extension_id
     append_bits(profile_and_level, 8);
     append_bits(1, 1); // progressive_sequence
-    append_bits(1, 2); // 4:2:0 chroma_format
+    append_bits(chroma_format, 2); // chroma_format
     append_bits(horizontal_size_extension, 2);
     append_bits(vertical_size_extension, 2);
     append_bits(0, 12); // bit_rate_extension
-    append_bits(1, 1);  // marker_bit
+    append_bits(bit_rate_marker ? 1U : 0U, 1); // marker_bit
     append_bits(0, 8);  // vbv_buffer_size_extension
     append_bits(0, 1);  // low_delay
     append_bits(frame_rate_extension_n, 2);
@@ -674,6 +691,44 @@ void RunH262AdversarialChecks()
                      CheckError(omega::media::InspectH262SequenceHeaderFacts(view),
                                 DecodeErrorCode::UnsupportedVariant, "H.262",
                                 "H.262 rejects a reserved frame-rate code");
+                 });
+
+    std::vector<std::uint8_t> reserved_aspect;
+    AppendSequenceHeader(reserved_aspect, 720, 480, 0, 4);
+    WithH262View({reserved_aspect},
+                 [](const std::vector<std::byte>&, const MpegVideoElementaryStreamPlan&,
+                    const MpegVideoElementaryStreamView& view) {
+                     CheckExactError(
+                         omega::media::InspectH262SequenceHeaderFacts(view),
+                         DecodeErrorCode::UnsupportedVariant,
+                         "H.262 sequence header has a reserved aspect-ratio code", 7U,
+                         "H.262 rejects a reserved aspect-ratio code with its exact diagnostic");
+                 });
+
+    std::vector<std::uint8_t> reserved_extension_chroma;
+    AppendSequenceHeader(reserved_extension_chroma, 720, 480, 3, 4);
+    AppendSequenceExtension(reserved_extension_chroma, 0x48, 0, 0, 0, 0, 0);
+    WithH262View({reserved_extension_chroma},
+                 [](const std::vector<std::byte>&, const MpegVideoElementaryStreamPlan&,
+                    const MpegVideoElementaryStreamView& view) {
+                     CheckExactError(
+                         omega::media::InspectH262SequenceHeaderFacts(view),
+                         DecodeErrorCode::Malformed,
+                         "H.262 sequence extension has a reserved chroma format", 17U,
+                         "H.262 rejects reserved extension chroma with its exact diagnostic");
+                 });
+
+    std::vector<std::uint8_t> missing_extension_marker;
+    AppendSequenceHeader(missing_extension_marker, 720, 480, 3, 4);
+    AppendSequenceExtension(missing_extension_marker, 0x48, 0, 0, 0, 0, 1, false);
+    WithH262View({missing_extension_marker},
+                 [](const std::vector<std::byte>&, const MpegVideoElementaryStreamPlan&,
+                    const MpegVideoElementaryStreamView& view) {
+                     CheckExactError(
+                         omega::media::InspectH262SequenceHeaderFacts(view),
+                         DecodeErrorCode::Malformed,
+                         "H.262 sequence-extension bit-rate marker is missing", 19U,
+                         "H.262 rejects a missing extension marker with its exact diagnostic");
                  });
 
     std::vector<std::uint8_t> matrix_truncated;
