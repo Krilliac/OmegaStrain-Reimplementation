@@ -36,10 +36,10 @@ struct PssPcmAudioPayloadRange
     [[nodiscard]] bool operator==(const PssPcmAudioPayloadRange&) const = default;
 };
 
-// Owned metadata for the supported SShd encoding tag 1 variant: signed 16-bit
-// little-endian PCM. Encoded sample blocks repeat as one interleave_block_bytes
-// extent per channel. The plan owns no media bytes and retains no pointer into
-// the source.
+// Owned metadata for the project-defined provisional SShd encoding-tag-1
+// compatibility hypothesis: signed 16-bit little-endian PCM whose encoded
+// sample blocks repeat as one interleave_block_bytes extent per channel. The
+// plan owns no media bytes and retains no pointer into the source.
 struct PssPcmAudioStreamPlan
 {
     std::array<std::byte, 4> private_packet_prefix{};
@@ -60,12 +60,12 @@ struct PssPcmAudioStreamPlan
 // descriptor against the source, selects one exact four-byte private_stream_1
 // packet prefix, and parses a complete SShd/SSbd stream without joining its PES
 // payloads. With no requested prefix, exactly one distinct prefix must be
-// present. The currently supported narrow variant has SShd size 24, encoding
-// tag 1, non-looping sentinels, signed 16-bit little-endian samples, and
-// complete channel-interleave rounds. maximum_items charges one result root
-// plus one selected PCM payload range; maximum_output_bytes charges the
-// returned plan, while descriptor reinspection is charged to
-// maximum_scratch_bytes.
+// present. The currently implemented provisional compatibility hypothesis has
+// SShd size 24, encoding tag 1, non-looping sentinels, signed 16-bit
+// little-endian samples, and complete channel-interleave rounds. maximum_items
+// charges one result root plus one selected PCM payload range;
+// maximum_output_bytes charges the returned plan, while descriptor reinspection
+// is charged to maximum_scratch_bytes.
 [[nodiscard]] asset::DecodeResult<PssPcmAudioStreamPlan> BuildPssPcmAudioStreamPlan(
     std::span<const std::byte> source, const MpegProgramStreamDescriptor& descriptor,
     std::optional<std::array<std::byte, 4>> requested_private_packet_prefix = std::nullopt,

@@ -203,8 +203,9 @@ handles fail closed at resident lookup.
   disconnect reconciliation, and promotion without a window or physical controller.
 - `AudioService` owns a system-default SDL playback stream. Its callback supplies bounded,
   frame-aligned project-owned silence while idle and consumes opening-movie samples from one fixed
-  single-producer ring when active. The main thread performs PSS PCM validation, deinterleave,
-  PCM16-to-F32 conversion, refill, pause, and discard; project callback code performs no file access,
+  single-producer ring when active. The main thread applies the project-defined provisional PSS PCM
+  compatibility validation and deinterleave hypothesis, then performs PCM16-to-F32 conversion,
+  refill, pause, and discard; project callback code performs no file access,
   logging, explicit locking, or dynamic allocation and publishes only lock-free counters. The 48 kHz
   stereo F32 device format and device-demand movie clock are native engineering policy, not retail
   timing or final hardware-playback proof. General decoded voices, resampling, mixing, and title

@@ -59,14 +59,17 @@ Studio's historical engine source or internal toolchain.
   updates, and bounded PSS PCM presentation through a device-demand clock. The modal boot reducer
   supports skip, EOS, safety timeout, and fail-open transition to the existing native front end while
   suppressing simulation catch-up and isolating capture/replay. This is one narrow compatibility
-  path, not a general media engine or a frame-exact retail audiovisual parity claim.
+  path, not a general media engine or a frame-exact retail audiovisual parity claim. Its custom PCM
+  grammar remains a project-defined provisional compatibility hypothesis: generated fixtures prove
+  implementation boundaries, and the recorded owner-stream smoke proves only that one stream passed
+  them, not the field meanings or deinterleave semantics independently.
 - The native host owns the system-default SDL playback stream as 48 kHz stereo F32. Its callback
   supplies project-owned silence while idle and can consume opening-movie PCM from a fixed 4,096-
   frame ring. Project callback code performs no file access, logging, explicit locking, or dynamic
-  allocation. The main thread validates the bounded PSS `SShd`/`SSbd` 48 kHz stereo PCM16 variant,
-  deinterleaves exact frame ranges into owned memory, queues converted samples, and contains the
-  stream on skip, completion, or failure. This is opening-movie presentation, not a general mixer,
-  proof of final hardware playback, or a retail timing-parity claim. E-0090 separately
+  allocation. The main thread applies the bounded provisional PSS `SShd`/`SSbd` 48 kHz stereo PCM16
+  compatibility shape, deinterleaves exact frame ranges into owned memory, queues converted samples,
+  and contains the stream on skip, completion, or failure. This is opening-movie presentation, not a
+  general mixer, proof of final hardware playback, or a retail timing-parity claim. E-0090 separately
   adds a backend-neutral, bounded VAG-to-owned-mono-PCM16 decoder for the complete observed
   48-byte-header/version/rate/zero-tail envelope and standard five-predictor PS-ADPCM frames. Raw
   frame flags and marker sample offsets survive as data, but no flag applies playback, looping,

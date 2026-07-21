@@ -206,12 +206,13 @@ other retail semantic claim. Headless named-level startup owns the complete cano
 material collections plus an inventory-only texture store. It does not load texture storage, bind
 materials, or expand display pixels; no store payload enters GPU upload or rendering. The rendered
 host path uploads only the existing project-generated diagnostic RGBA8 image.
-E-0102 also implements one explicit modal opening-movie path. It validates bounded MPEG-PS, H.262,
-and the accepted PSS PCM variant; presents decoded video and audio through owned buffers, a stable GPU
-texture, a fixed audio ring, and a device-demand clock; and supports skip, EOS, safety timeout, and
-fail-open transition to the existing front end without scheduler catch-up. Capture/replay remains
-mutually exclusive. This does not establish general media selection/mixing, non-Windows end-to-end
-playback, perceptual synchronization, or exact retail audiovisual timing.
+E-0102 also implements one explicit modal opening-movie path. It validates bounded MPEG-PS and H.262,
+and applies one project-defined provisional PSS PCM compatibility shape; it presents decoded video
+and audio through owned buffers, a stable GPU texture, a fixed audio ring, and a device-demand clock;
+and supports skip, EOS, safety timeout, and fail-open transition to the existing front end without
+scheduler catch-up. Capture/replay remains mutually exclusive. This does not establish general media
+selection/mixing, non-Windows end-to-end playback, perceptual synchronization, or exact retail
+audiovisual timing.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
@@ -232,9 +233,11 @@ platform-neutral deterministic world clock before rendering, with fail-closed re
 limits. The app also owns the SDL process lifetime and a system-default playback stream. Its callback
 supplies bounded project-owned silence while idle and consumes opening-movie samples from a fixed
 ring. Project callback code performs no loading, logging, explicit locking, or dynamic allocation.
-The main thread validates and deinterleaves the accepted PSS PCM variant, refills the ring, and
-contains it on transition; this is not a general mixer, final hardware-playback proof, or retail
-timing-parity claim. A synthetic positioned diagnostic component and pure digital
+The main thread applies and deinterleaves the provisional PSS PCM compatibility shape, refills the
+ring, and contains it on transition. Generated fixtures establish implementation safety and
+self-consistency, while one owner-stream smoke establishes acceptance only; neither independently
+proves the custom field meanings. This is not a general mixer, final hardware-playback proof, or
+retail timing-parity claim. A synthetic positioned diagnostic component and pure digital
 locomotion planner now exercise the world/input boundary, but retail player components and gameplay
 systems, render scene snapshots, general decoded voices, and mixing remain incomplete.
 
