@@ -16,7 +16,7 @@ OmegaApp [game/main thread, sole composition owner]
 |  |- EntityRegistry [world-owned identity component]
 |  `- ComponentStore<Position3> [world-owned bounded synthetic position state]
 |- SdlPlatformService [main thread; process-global SDL owner]
-|- SdlInputService [main thread; SDL event/gamepad owner]
+|- SdlInputService [main thread; SDL event owner; opt-in primary gamepad]
 |- SdlAudioService [main thread control; SDL audio callback]
 |- SdlGpuHost [main/render thread; GPU resource owner]
 `- OpeningMoviePlayback [optional; production OpeningMoviePlayer; created last and destroyed first]
@@ -32,9 +32,9 @@ release the asset service before the worker pool and content state, so its non-o
 
 `OmegaApp` is the ultimate composition owner and destroys its top-level objects in reverse order.
 Peer lifecycle-heavy services are generally held through `std::unique_ptr`; explicit aggregates own
-their subordinate state. In particular, `NativePersistence` owns its `SaveDatabase` and
-`ProfileCatalog`, while `ContentStartupState` owns its `GameDataService` and optional
-`LevelTextureStore`. No subordinate object owns the app. Constructor references outside those
+their subordinate state. In particular, `NativePersistence` owns its `SaveDatabase`,
+`ProfileCatalog`, and `CharacterCatalog`, while `ContentStartupState` owns its `GameDataService` and
+optional `LevelTextureStore`. No subordinate object owns the app. Constructor references outside those
 explicit aggregates are non-owning dependencies whose lifetimes are guaranteed by the composition
 root. Long-lived asset references are typed generation handles, not raw pointers or `shared_ptr`
 ownership graphs.
@@ -202,9 +202,11 @@ handles fail closed at resident lookup.
   mip-zero source crop and target rectangle in a synthetic normalized extent of 65,536, and explicit
   `Contain`/`Stretch` fit plus `Nearest`/`Linear` filter policy. Commands retain handles without
   owning or pinning the referenced texture generations.
-- `SdlInputService` is an app-owned, non-hot-reloadable main-thread leaf. It owns the ref-counted
-  SDL gamepad subsystem, pumps the global SDL event queue, and owns at most one primary gamepad.
-  Button events are accepted only when their instance ID matches that primary. Window focus loss
+- `SdlInputService` is an app-owned, non-hot-reloadable main-thread leaf. It pumps the global SDL
+  event queue and routes keyboard and mouse controls without requiring a controller. Gamepad
+  discovery is disabled by default; `input.gamepad_enabled=true` opts into the ref-counted SDL
+  subsystem and at most one primary gamepad. Button events are then accepted only when their
+  instance ID matches that primary. Window focus loss
   reconciles all neutral controls; primary disconnect instead reconciles only `GamepadButton`
   controls to up, preserving keyboard and mouse state, then promotes the next available gamepad.
   Choosing one primary is a synthetic host-shell policy, not a retail behavior claim. A
@@ -2165,18 +2167,51 @@ compilation and execution remain pending. This is a project-generated diagnostic
 retail/PS2 campaign, save, checkpoint, gameplay, continuation, world-state, owner-input, or parity
 claim.
 
+### E-0112 character, briefing, and session route
+
+`NativePersistence` remains the only database owner and now owns the stateless
+`CharacterCatalog` beside `ProfileCatalog`. Explicit profile confirmation prepares one bounded,
+owned character startup model before the app publishes Characters. The exact empty model admits one
+fixed project-generated `DIAGNOSTIC CHARACTER`; creation and confirmation remain separate Primary
+edges. Character confirmation commits the exact active-character pointer before the reducer
+publishes `FrontEndMode::BriefingRoom`.
+
+BriefingRoom reuses the immutable project-generated Main-card draw-list family, relabeled
+`BRIEFING ROOM` with a `MISSION SELECT` row. It represents only the diagnostic content already fixed
+by startup; no mission catalog, content rebinding, or retail identifier is introduced. Primary calls
+`PrepareGameSessionStart` through the typed command boundary and enters DiagnosticPlay only after
+both profile and character pointers, catalog records, and the character-owned session marker
+validate. Cancel returns to Characters while retaining the selected character. In the
+character-enabled route, the DiagnosticPlay menu edge returns to BriefingRoom. The legacy
+character-disabled path retains its direct synthetic behavior.
+
+The current physical-to-logical table is keyboard/mouse first: W/A/S/D and the arrow keys share
+menu navigation and diagnostic movement; Return, keypad Enter, and F1 select; Space and left mouse
+select outside play and produce the project diagnostic fire cue in play; Escape and Backspace
+cancel; T and held right mouse target in play, with right mouse acting as cancel outside play; and
+F10 quits. These 26 physical bindings project to nine logical actions. Gamepad discovery is disabled
+by default; `--set=input.gamepad_enabled=true` explicitly opts into button and D-pad aliases.
+Controller attachment is never a prerequisite for startup, navigation, or DiagnosticPlay. Input
+capture retains only logical rows, never physical device provenance. The targeting/fire rectangles,
+BriefingRoom card, and transitions are synthetic
+host policy and establish no retail mission selector, input map, combat, camera, UI, timing, or
+behavioral-equivalence claim.
+
 ### Project-owned front-end cancel action
 
-Logical action 7 is a distinct project-owned cancel edge. Keyboard Backspace and gamepad East map
-to it; Escape and gamepad Back remain global quit controls and still resolve before front-end
-reduction. After invalid-state normalization, cancel has priority over primary and navigation. It is
-inert on Main. From Profiles, DiagnosticPlay, Controls, or AssetTopology it returns to Main on the
-corresponding Profiles, StartDiagnostic, Controls, or AssetTopology row, resets the bounded profile
-cursor, and publishes no command. Primary retains its existing activation and return behavior.
+Logical action 7 remains the distinct project-owned cancel edge. Keyboard Escape and Backspace map
+to it, while F10 is the keyboard quit control. Gamepad East remains an optional cancel alias and
+gamepad Back an optional quit alias. Right mouse shares targeting action 9: it is held targeting
+only
+in DiagnosticPlay and is interpreted as cancel in the modal front end. After invalid-state
+normalization, cancel has priority over primary and navigation. It is inert on Main. Profiles,
+Controls, and AssetTopology return to their corresponding Main rows; Characters returns to Profiles;
+BriefingRoom returns to Characters; and the character-enabled DiagnosticPlay path returns to
+BriefingRoom. No cancel transition publishes a persistence command.
 
 The live host and `RunReplaySession` route the same press edge through `FrontEndInputEdges`.
-Capture therefore carries sorted action 7 as an ordinary logical-action row without physical-input
-provenance. The host table grows from seventeen to nineteen bindings and from six to seven logical
-actions, remaining below the fixed 64-action trace limit. These bindings, precedence rules, and
+Capture therefore carries sorted action rows without physical-input provenance. The current host
+table owns 26 bindings and nine logical actions, remaining below the fixed 64-action trace limit.
+These bindings, precedence rules, and
 return rows are native host-shell policy only; they establish no retail control map, button-name,
 menu graph, timing, or behavioral-equivalence claim.

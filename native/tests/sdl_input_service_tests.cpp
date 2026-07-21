@@ -134,12 +134,25 @@ int main()
         return 1;
     }
 
+    Check((SDL_WasInit(SDL_INIT_GAMEPAD) & SDL_INIT_GAMEPAD) == 0U,
+        "the process-global platform does not initialize the gamepad subsystem");
+    {
+        auto keyboard_mouse_only = SdlInputService::Create(*platform);
+        Check(keyboard_mouse_only.has_value(),
+            "default input construction succeeds before any gamepad subsystem owner exists");
+        Check((SDL_WasInit(SDL_INIT_GAMEPAD) & SDL_INIT_GAMEPAD) == 0U,
+            "default input construction does not initialize the gamepad subsystem");
+    }
+    Check((SDL_WasInit(SDL_INIT_GAMEPAD) & SDL_INIT_GAMEPAD) == 0U,
+        "default input teardown leaves the gamepad subsystem uninitialized");
+
     Check(SDL_InitSubSystem(SDL_INIT_GAMEPAD),
         "the test fixture holds a gamepad-subsystem reference");
 
     {
-        auto no_controller = SdlInputService::Create(*platform);
-        Check(no_controller.has_value(), "no controller is not an input startup failure");
+        auto no_controller = SdlInputService::Create(*platform, true);
+        Check(no_controller.has_value(),
+            "explicit gamepad opt-in tolerates no attached controller");
     }
 
     const SDL_JoystickID first_attached = AttachVirtualGamepad("Omega virtual gamepad A");
@@ -201,8 +214,35 @@ int main()
     InputTracker tracker = std::move(*created_tracker);
 
     {
-        auto created_input = SdlInputService::Create(*platform);
-        Check(created_input.has_value(), "the SDL input service initializes");
+        auto keyboard_mouse_only = SdlInputService::Create(*platform);
+        Check(keyboard_mouse_only.has_value(),
+            "default input construction remains keyboard/mouse only");
+        if (!keyboard_mouse_only)
+            return 1;
+        Check(SDL_GetGamepadFromID(primary_id) == nullptr &&
+                  SDL_GetGamepadFromID(secondary_id) == nullptr,
+            "default input construction does not open an attached gamepad");
+        Check(PushKey(true) && PushMouseButton(true),
+            "keyboard and mouse presses enter the default input queue");
+        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto keyboard_mouse_pressed = tracker.EndFrame();
+        Check(keyboard_mouse_pressed.IsHeld(kKeyboardAction) &&
+                  keyboard_mouse_pressed.IsHeld(kMouseAction) &&
+                  !keyboard_mouse_pressed.IsHeld(kGamepadAction),
+            "default input accepts keyboard and mouse while gamepad stays disabled");
+        Check(PushKey(false) && PushMouseButton(false),
+            "keyboard and mouse releases enter the default input queue");
+        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto keyboard_mouse_released = tracker.EndFrame();
+        Check(!keyboard_mouse_released.IsHeld(kKeyboardAction) &&
+                  !keyboard_mouse_released.IsHeld(kMouseAction),
+            "default keyboard and mouse releases reconcile normally");
+    }
+
+    {
+        auto created_input = SdlInputService::Create(*platform, true);
+        Check(created_input.has_value(),
+            "the explicitly enabled SDL gamepad input service initializes");
         if (!created_input)
         {
             std::cerr << created_input.error() << '\n';

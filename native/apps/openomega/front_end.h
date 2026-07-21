@@ -50,6 +50,7 @@ enum class FrontEndMode : std::uint8_t
     Controls = 3U,
     AssetTopology = 4U,
     Characters = 5U,
+    BriefingRoom = 6U,
 };
 
 enum class FrontEndMainRow : std::uint8_t
@@ -266,6 +267,31 @@ struct FrontEndInputEdges
     friend constexpr bool operator==(const FrontEndInputEdges &, const FrontEndInputEdges &) noexcept = default;
 };
 
+// [any thread; reentrant] Projects the project-owned action aliases into the
+// reducer's four semantic edges from the mode that owned the input frame.
+// Fire/target are select/back only outside DiagnosticPlay; within play they
+// remain gameplay-only actions. Left/right always share menu previous/next.
+// Keeping this pure projection common to live capture and replay prevents
+// physical keyboard/mouse aliases from changing a replayed menu path.
+[[nodiscard]] constexpr FrontEndInputEdges ResolveFrontEndInputEdges(
+    const FrontEndMode input_context_mode, const FrontEndInputEdges direct,
+    const bool left_pressed, const bool right_pressed,
+    const bool fire_pressed, const bool target_pressed) noexcept
+{
+    const bool diagnostic_play_input_context =
+        input_context_mode == FrontEndMode::DiagnosticPlay;
+    return FrontEndInputEdges{
+        .primary_pressed =
+            direct.primary_pressed ||
+            (!diagnostic_play_input_context && fire_pressed),
+        .previous_pressed = direct.previous_pressed || left_pressed,
+        .next_pressed = direct.next_pressed || right_pressed,
+        .cancel_pressed =
+            direct.cancel_pressed ||
+            (!diagnostic_play_input_context && target_pressed),
+    };
+}
+
 enum class FrontEndCommandType : std::uint8_t
 {
     None = 0U,
@@ -325,12 +351,11 @@ struct FrontEndCapabilities
                                                active_character_is_confirmed);
 }
 
-// Fully owned reducer publication. SetActiveProfile carries only one of the
-// three bounded startup-model positions. CreateFirstProfile and
+// Fully owned reducer publication. SetActiveProfile and SetActiveCharacter
+// carry only bounded startup-model positions. Create commands and
 // StartDiagnosticCampaign carry no caller data; the latter is a project-owned
 // diagnostic start request, not a retail campaign, save-slot, or gameplay
-// semantic claim. No command carries a catalog view or performs persistence
-// work.
+// semantic claim. No command carries a catalog view or performs persistence.
 struct FrontEndCommand
 {
     FrontEndCommandType type = FrontEndCommandType::None;
@@ -413,7 +438,8 @@ struct FrontEndView
 {
     const bool valid_mode = state.mode == FrontEndMode::Main || state.mode == FrontEndMode::Profiles ||
                             state.mode == FrontEndMode::DiagnosticPlay || state.mode == FrontEndMode::Controls ||
-                            state.mode == FrontEndMode::AssetTopology || state.mode == FrontEndMode::Characters;
+                            state.mode == FrontEndMode::AssetTopology || state.mode == FrontEndMode::Characters ||
+                            state.mode == FrontEndMode::BriefingRoom;
     const bool valid_row = state.selected_main_row == FrontEndMainRow::StartDiagnostic ||
                            state.selected_main_row == FrontEndMainRow::Profiles ||
                            state.selected_main_row == FrontEndMainRow::Controls ||
@@ -427,32 +453,31 @@ struct FrontEndView
     return valid_mode && valid_row && valid_profile_slot && valid_character_slot;
 }
 
-// [any thread; reentrant] Consumes already-routed logical press edges and a
-// caller-owned startup-model count. Invalid input state fails closed to the
-// initial front-end before considering any edge. The count is clamped to the
-// three project-owned slots. Cancel has priority over primary and navigation;
-// it is inert on Main and returns every other mode to its corresponding Main
-// row without publishing a command. Primary has priority over navigation. A
-// selectable Profiles slot publishes one typed command and returns to its Main
-// row. When the catalog is empty and the explicit capability is enabled,
-// Primary publishes CreateFirstProfile and remains in Profiles; the default
-// capability preserves the legacy empty return transition byte-for-byte.
-// Primary on Main/StartDiagnostic publishes the project-only
-// StartDiagnosticCampaign command with the projected DiagnosticPlay state only
-// when its explicit capability is enabled; otherwise that row is inert.
-// Out-of-range slots retain that legacy return transition. Empty
-// selection/navigation is otherwise inert. Simultaneous navigation edges are
-// neutral, and navigation is press-edge-only and clamps at both bounds.
+// [any thread; reentrant] Consumes already-routed logical press edges and
+// caller-owned bounded profile/character counts. Invalid state fails closed
+// before any edge is considered; BriefingRoom additionally requires its sole
+// canonical mission-selection row. Cancel has priority over primary and
+// navigation: Main is inert; Profiles, Controls, and AssetTopology return to
+// their matching Main rows; Characters returns to Main/Profiles; BriefingRoom
+// returns to Characters; and character-enabled DiagnosticPlay returns to
+// BriefingRoom. No cancel path publishes a command.
 //
-// Start support and confirmation are independent inputs. Both must permit the
-// transition. A closed support capability or an unsatisfied confirmation gate
-// leaves Main/StartDiagnostic inert and publishes no command.
-// Live callers must derive it with FrontEndHasConfirmedActiveProfile; the
-// bounded replay adapter may use its private identity-free mirror, initialized
-// closed and opened only by a replayed SetActiveProfile command. An already
-// entered DiagnosticPlay state fails closed to the initial front end whenever
-// either input closes it. No allocation, I/O, catalog access, or persistence
-// mutation occurs.
+// Primary has priority over navigation. Exact empty catalogs may publish their
+// explicit create commands and remain modal. Selectable profiles publish
+// SetActiveProfile and enter Characters when that capability is enabled;
+// selectable characters publish SetActiveCharacter and project BriefingRoom.
+// BriefingRoom publishes StartDiagnosticCampaign and projects DiagnosticPlay
+// only when start support and both required confirmation gates are open. The
+// legacy character-disabled Main/StartDiagnostic path retains its direct start
+// command. DiagnosticPlay primary returns to BriefingRoom for the
+// character-enabled route and to the initial state for the legacy route.
+//
+// Out-of-range selections fail closed or remain inert as specified by their
+// legacy paths. Empty navigation is inert, simultaneous navigation edges are
+// neutral, and bounded navigation clamps at both ends. Live callers derive
+// confirmation from identifiers resolved against their startup models; replay
+// uses private identity-free mirrors opened only by replayed selection
+// commands. No allocation, I/O, catalog access, or persistence mutation occurs.
 [[nodiscard]] constexpr FrontEndReduction ReduceFrontEnd(FrontEndState state, const FrontEndInputEdges input,
                                                          const std::uint8_t visible_profile_slots,
                                                          const FrontEndCapabilities capabilities = {},
@@ -472,6 +497,13 @@ struct FrontEndView
     {
         return FrontEndReduction{.state = InitialFrontEndState()};
     }
+    if (state.mode == FrontEndMode::BriefingRoom &&
+        (state.selected_main_row != FrontEndMainRow::StartDiagnostic ||
+         !capabilities.supports_character_selection ||
+         !diagnostic_play_is_permitted))
+    {
+        return FrontEndReduction{.state = InitialFrontEndState()};
+    }
 
     if (input.cancel_pressed)
     {
@@ -485,7 +517,18 @@ struct FrontEndView
         case FrontEndMode::Characters:
             state.selected_main_row = FrontEndMainRow::Profiles;
             break;
+        case FrontEndMode::BriefingRoom:
+            state.mode = FrontEndMode::Characters;
+            state.selected_main_row = FrontEndMainRow::Profiles;
+            return FrontEndReduction{.state = state};
         case FrontEndMode::DiagnosticPlay:
+            if (capabilities.supports_character_selection &&
+                diagnostic_play_is_permitted)
+            {
+                state.mode = FrontEndMode::BriefingRoom;
+                state.selected_main_row = FrontEndMainRow::StartDiagnostic;
+                return FrontEndReduction{.state = state};
+            }
             state.selected_main_row = FrontEndMainRow::StartDiagnostic;
             break;
         case FrontEndMode::Controls:
@@ -542,10 +585,10 @@ struct FrontEndView
             return FrontEndReduction{
                 .state =
                     FrontEndState{
-                        .mode = FrontEndMode::Main,
+                        .mode = FrontEndMode::BriefingRoom,
                         .selected_main_row = FrontEndMainRow::StartDiagnostic,
                         .selected_profile_slot = FrontEndProfileSlot::First,
-                        .selected_character_slot = FrontEndCharacterSlot::First,
+                        .selected_character_slot = state.selected_character_slot,
                     },
                 .command =
                     FrontEndCommand{
@@ -589,7 +632,25 @@ struct FrontEndView
                         .profile_slot = state.selected_profile_slot,
                     },
             };
+        case FrontEndMode::BriefingRoom:
+            if (!diagnostic_play_is_permitted)
+                return FrontEndReduction{.state = state};
+            state.mode = FrontEndMode::DiagnosticPlay;
+            return FrontEndReduction{
+                .state = state,
+                .command =
+                    FrontEndCommand{
+                        .type = FrontEndCommandType::StartDiagnosticCampaign,
+                    },
+            };
         case FrontEndMode::DiagnosticPlay:
+            if (capabilities.supports_character_selection &&
+                diagnostic_play_is_permitted)
+            {
+                state.mode = FrontEndMode::BriefingRoom;
+                state.selected_main_row = FrontEndMainRow::StartDiagnostic;
+                return FrontEndReduction{.state = state};
+            }
             return FrontEndReduction{.state = InitialFrontEndState()};
         case FrontEndMode::Controls:
             return FrontEndReduction{.state = FrontEndState{
@@ -617,13 +678,17 @@ struct FrontEndView
         switch (state.selected_main_row)
         {
         case FrontEndMainRow::StartDiagnostic:
+            if (capabilities.supports_character_selection)
+            {
+                state.mode = FrontEndMode::BriefingRoom;
+                return FrontEndReduction{.state = state};
+            }
             state.mode = FrontEndMode::DiagnosticPlay;
             return FrontEndReduction{
                 .state = state,
                 .command =
                     FrontEndCommand{
                         .type = FrontEndCommandType::StartDiagnosticCampaign,
-                        .profile_slot = FrontEndProfileSlot::First,
                     },
             };
         case FrontEndMainRow::Profiles:

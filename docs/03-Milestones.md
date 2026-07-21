@@ -215,8 +215,9 @@ and supports skip, EOS, safety timeout, and fail-open transition to the existing
 scheduler catch-up. Capture/replay remains mutually exclusive. This does not establish general media
 selection/mixing, non-Windows end-to-end playback, perceptual synchronization, or exact retail
 audiovisual timing.
-E-0103 adds a distinct project-owned cancel action to that existing synthetic front end. Backspace
-and gamepad East publish action 7, while Escape and gamepad Back remain global quit. Cancel is inert
+E-0103 originally added a distinct project-owned cancel action to that existing synthetic front end.
+Backspace and gamepad East published action 7, while Escape and gamepad Back remained global quit at
+that slice. Cancel is inert
 on Main, otherwise returns each modal mode to its corresponding Main row without a profile command,
 and precedes simultaneous confirm/navigation. Live capture and replay route the same bounded schema;
 terminal input still resolves first. These controls and transitions are native shell policy rather
@@ -302,8 +303,10 @@ edge snapshots) are implemented as tested library services. Wiring those service
 SDL host shell is complete through an app-owned composition root: strict file/command-line
 configuration resolves their bounded settings, logging owns stderr and ring sinks, the worker
 pool drains before shutdown, and steady-clock deltas drive fixed-step planning. SDL input now has
-an app-owned, non-hot-reloadable `SdlInputService` that owns the gamepad subsystem, the global event
-pump through `PumpEvents`, and one primary gamepad. It filters button events by instance ID,
+an app-owned, non-hot-reloadable `SdlInputService` that owns the global event pump through
+`PumpEvents` and keyboard/mouse routing. Gamepad discovery is disabled by default; the exact
+`input.gamepad_enabled=true` setting opts into at most one primary gamepad. It filters controller
+button events by instance ID,
 reconciles only gamepad controls on disconnect, and promotes the next available device;
 deterministic headless virtual-gamepad coverage exercises this boundary. The single-primary rule is
 synthetic shell policy, not inferred retail behavior, and `SdlGpuHost` is now video/render-only.
@@ -1258,12 +1261,20 @@ nonempty or explicitly creatable exact-empty startup snapshots into Profiles thr
 and replay planner, while malformed or unsupported snapshots fail closed to Main. E-0109 makes
 profile selection an explicit durable confirmation, and E-0111 retains the separate project-owned
 profile diagnostic marker. E-0112 adds a profile-scoped `CharacterCatalog`, explicit Characters
-creation and selection, a durable active-character pointer invalidated by profile switches, and a
-character-owned diagnostic-session marker. Production enters DiagnosticPlay only after both
-per-launch identities resolve and both durable revisions validate. The implemented zero-to-one path
+creation and selection, a durable active-character pointer invalidated by profile switches, a
+project-owned BriefingRoom/mission-selection surface, and a character-owned diagnostic-session
+marker. Character confirmation enters BriefingRoom; mission activation enters DiagnosticPlay only
+after both per-launch identities resolve and both durable revisions validate. Cancel returns from
+BriefingRoom to Characters, and the DiagnosticPlay menu edge returns to BriefingRoom. The
+implemented zero-to-one path
 uses one fixed `DIAGNOSTIC CHARACTER` record and deliberately assigns no appearance, body, class,
-skill, equipment, inventory, progression, or retail slot semantics. General profile/character
-mutation UI, retail campaign/save schemas, and the independently evidenced Omega Strain payload
+skill, equipment, inventory, progression, or retail slot semantics. Keyboard/mouse operation needs
+no gamepad: W/A/S/D and arrows navigate/move; Return, keypad Enter, and F1 select; Space/left mouse
+select or fire; Escape/Backspace cancel; T/held right mouse target in play, with right mouse acting
+as menu back; and F10 quits. `--set=input.gamepad_enabled=true` explicitly opts into gamepad
+aliases, which are disabled by default. General profile/character
+mutation UI, retail campaign/save schemas, a retail mission catalog or control map, and the
+independently evidenced Omega Strain payload
 mapping remain in progress. No PS2 memory-card device or emulator savestate is part of the
 shipping-runtime design, and the synthetic shell is not a retail-fidelity claim.
 

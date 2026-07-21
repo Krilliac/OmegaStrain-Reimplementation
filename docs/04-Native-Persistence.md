@@ -348,10 +348,12 @@ preparation preserves those totals.
 
 ## Project-owned character session checkpoint
 
-The current production Start Diagnostic gate requires both per-launch identities to resolve against
-their bounded models. Its accepted command calls `PrepareGameSessionStart` with the owned profile and
+The current production mission-activation gate is exposed from the project-owned BriefingRoom after
+explicit character confirmation. It requires both per-launch identities to resolve against their
+bounded models. Its accepted command calls `PrepareGameSessionStart` with the owned profile and
 character IDs before `OmegaApp` publishes DiagnosticPlay or permits simulation. Raw optional presence
-does not authorize the transition.
+does not authorize the transition. The briefing surface selects only the one content value already
+bound at startup; it neither discovers nor persists a mission identity.
 
 Preparation requires the same durable confirmed pair, re-reads and decodes both confirmation
 pointers at their observed revisions, and revalidates both catalog records. It then reads the
@@ -366,8 +368,8 @@ pointers, and one session marker in five commits and five records. Repeating pre
 the database generation. Reopen validates the profile, character, both durable pointers, and the
 marker before exposing them; repeated preparation after reopen is likewise a no-write success. This
 proves only the native transactional/session boundary. It does not establish retail save,
-character-customization, campaign, checkpoint, level-selection, spawn, simulation, world-state,
-continuation, networking, or behavioral-parity semantics.
+character-customization, campaign, checkpoint, mission/level catalog or selection, spawn,
+simulation, world-state, continuation, networking, or behavioral-parity semantics.
 
 ## Native directory and startup contract
 

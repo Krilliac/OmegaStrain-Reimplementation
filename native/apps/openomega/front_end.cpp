@@ -443,6 +443,7 @@ runtime::DebugImage BuildProjectFrontEndMainImage(const runtime::ContentStartupS
     runtime::DebugImage image = BuildDiagnosticCardBase();
 
     DrawOpenOmegaHeader(image);
+    DrawLabel(image, "BRIEFING ROOM", 56U, 11U);
     DrawLabel(image, "CONTENT", 8U, 22U);
     switch (content_stage)
     {
@@ -461,7 +462,7 @@ runtime::DebugImage BuildProjectFrontEndMainImage(const runtime::ContentStartupS
     DrawUnsigned(image, profile_count, 104U, 22U);
 
     constexpr std::array row_tops{28U, 38U, 48U, 58U};
-    constexpr std::array<std::string_view, kFrontEndMainRowCount> row_labels{"START DIAGNOSTIC", "PROFILES", "CONTROLS",
+    constexpr std::array<std::string_view, kFrontEndMainRowCount> row_labels{"MISSION SELECT", "PROFILES", "CONTROLS",
                                                                              "ASSET TOPOLOGY"};
     for (std::size_t row = 0U; row < row_tops.size(); ++row)
     {
@@ -593,8 +594,8 @@ runtime::DebugImage BuildProjectFrontEndDiagnosticPlayImage()
     DrawLabel(image, "NO LEVEL IMAGE", 36U, 40U);
 
     FillRectangle(image, 8U, 56U, 120U, 68U, kSlateColor);
-    DrawLabel(image, "F1/ENTER MENU", 12U, 59U);
-    DrawLabel(image, "ESC QUIT", 84U, 59U);
+    DrawLabel(image, "ENTER/F1 MENU", 12U, 59U);
+    DrawLabel(image, "F10 QUIT", 86U, 59U);
     return image;
 }
 
@@ -606,14 +607,14 @@ runtime::DebugImage BuildProjectFrontEndControlsImage()
     DrawLabel(image, "CONTROLS", 42U, 11U);
 
     FillRectangle(image, 8U, 24U, 120U, 52U, kSlateColor);
-    DrawLabel(image, "W/UP FORWARD", 12U, 25U);
-    DrawLabel(image, "S/DOWN REVERSE", 12U, 32U);
-    DrawLabel(image, "A LEFT", 12U, 39U);
-    DrawLabel(image, "D RIGHT", 12U, 46U);
+    DrawLabel(image, "WASD/ARROWS MOVE/NAV", 12U, 25U);
+    DrawLabel(image, "ENTER/SPACE/LMB SELECT", 12U, 32U);
+    DrawLabel(image, "ESC/BKSP/RMB BACK", 12U, 39U);
+    DrawLabel(image, "F10 QUIT", 12U, 46U);
 
     FillRectangle(image, 8U, 54U, 120U, 68U, kSlateColor);
-    DrawLabel(image, "F1/ENTER RETURN", 12U, 55U);
-    DrawLabel(image, "ESC QUIT", 12U, 62U);
+    DrawLabel(image, "LMB/SPACE FIRE", 12U, 55U);
+    DrawLabel(image, "T/RMB TARGET", 12U, 62U);
     return image;
 }
 

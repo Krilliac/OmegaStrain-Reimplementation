@@ -1444,11 +1444,11 @@ void CheckPackedTransferUploadBudgetFallback(omega::app::OmegaApp& app,
     return SDL_PushEvent(&event);
 }
 
-[[nodiscard]] bool PushEscape(const bool down)
+[[nodiscard]] bool PushQuitKey(const bool down)
 {
     SDL_Event event{};
     event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
-    event.key.scancode = SDL_SCANCODE_ESCAPE;
+    event.key.scancode = SDL_SCANCODE_F10;
     event.key.down = down;
     return SDL_PushEvent(&event);
 }
@@ -1459,6 +1459,15 @@ void CheckPackedTransferUploadBudgetFallback(omega::app::OmegaApp& app,
     event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
     event.key.scancode = scancode;
     event.key.down = down;
+    return SDL_PushEvent(&event);
+}
+
+[[nodiscard]] bool PushMouseButton(const Uint8 button, const bool down)
+{
+    SDL_Event event{};
+    event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+    event.button.button = button;
+    event.button.down = down;
     return SDL_PushEvent(&event);
 }
 
@@ -1779,6 +1788,13 @@ void CheckDiagnosticCampaignStart(
         .selected_main_row = omega::app::FrontEndMainRow::StartDiagnostic,
         .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
     };
+    constexpr omega::app::FrontEndState kBriefingRoom{
+        .mode = omega::app::FrontEndMode::BriefingRoom,
+        .selected_main_row = omega::app::FrontEndMainRow::StartDiagnostic,
+        .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+        .selected_character_slot =
+            omega::app::FrontEndCharacterSlot::First,
+    };
     constexpr omega::app::FrontEndState kCharactersFirst{
         .mode = omega::app::FrontEndMode::Characters,
         .selected_main_row = omega::app::FrontEndMainRow::Profiles,
@@ -1870,7 +1886,7 @@ void CheckDiagnosticCampaignStart(
 
         const auto gpu_before_character_select = Access::GpuSnapshot(*app);
         Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
-                  Access::FrontEnd(*app) == kMainStartDiagnostic &&
+                  Access::FrontEnd(*app) == kBriefingRoom &&
                   Access::ActiveCharacter(*app) == character_id &&
                   Access::PersistedConfirmedCharacter(*app) == character_id &&
                   Access::PersistenceGeneration(*app) ==
@@ -1881,12 +1897,12 @@ void CheckDiagnosticCampaignStart(
                       std::optional<std::size_t>{173U} &&
                   IsOneVisibleMenuSubmission(
                       gpu_before_character_select, Access::GpuSnapshot(*app)),
-            "character selection commits its 48-byte active pointer and returns directly to Main/Start");
+            "character selection commits its 48-byte active pointer and enters the Briefing Room mission selector");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the generated character-selection edge releases");
 
         const omega::app::GpuHostSnapshot gpu_before = Access::GpuSnapshot(*app);
-        const bool pushed = PushKey(SDL_SCANCODE_F1, true);
+        const bool pushed = PushMouseButton(SDL_BUTTON_LEFT, true);
         auto started = app->RunWithCapture(1);
         Check(pushed && started &&
                   started->completion() ==
@@ -1905,13 +1921,13 @@ void CheckDiagnosticCampaignStart(
                       std::optional<std::size_t>{221U} &&
                   IsOneDiagnosticPlaySubmission(gpu_before,
                       Access::GpuSnapshot(*app)),
-            "diagnostic start commits the 48-byte character-owned session checkpoint before publishing DiagnosticPlay and rendering it");
+            "left-click mission selection commits the 48-byte character-owned session checkpoint before publishing DiagnosticPlay without leaking a fire cue into the deployed frame");
 
-        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
-            "the first generated diagnostic-start edge releases");
+        Check(PushMouseButton(SDL_BUTTON_LEFT, false) && app->Run(1).has_value(),
+            "the first generated mouse mission-selection edge releases");
         Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
-                  Access::FrontEnd(*app) == kMainStartDiagnostic,
-            "primary returns the generated diagnostic surface to Main");
+                  Access::FrontEnd(*app) == kBriefingRoom,
+            "primary returns the generated diagnostic surface to the Briefing Room");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the generated diagnostic-return edge releases");
         const std::uint64_t before_idempotent =
@@ -2061,7 +2077,7 @@ void CheckDiagnosticCampaignStart(
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the constrained profile-selection edge releases");
         Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
-                  Access::FrontEnd(*app) == kMainStartDiagnostic &&
+                  Access::FrontEnd(*app) == kBriefingRoom &&
                   Access::ActiveCharacter(*app) == character_id &&
                   Access::PersistedConfirmedCharacter(*app) == character_id &&
                   Access::PersistenceGeneration(*app) ==
@@ -2084,7 +2100,7 @@ void CheckDiagnosticCampaignStart(
                       std::string_view::npos &&
                   failure->find(profile_id->ToString()) ==
                       std::string_view::npos &&
-                  Access::FrontEnd(*app) == kMainStartDiagnostic &&
+                  Access::FrontEnd(*app) == kBriefingRoom &&
                   Access::ActiveProfile(*app) == profile_id &&
                   Access::PersistedConfirmedProfile(*app) == profile_id &&
                   Access::ActiveCharacter(*app) == character_id &&
@@ -2096,7 +2112,7 @@ void CheckDiagnosticCampaignStart(
                   Access::PersistenceLogicalValueBytes(*app) ==
                       std::optional<std::size_t>{173U} &&
                   Access::GpuSnapshot(*app) == gpu_before,
-            "character-owned checkpoint capacity failure preserves Main, both active identities, database totals, and exact GPU state");
+            "character-owned checkpoint capacity failure preserves the Briefing Room, both active identities, database totals, and exact GPU state");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the rejected capacity diagnostic-start edge releases");
     }
@@ -2333,8 +2349,8 @@ void CheckExplicitFirstProfileCreation(
             const auto gpu_before_character_select = Access::GpuSnapshot(*app);
             const bool character_selection_frame =
                 PushKey(SDL_SCANCODE_F1, true) && run_plain_frame();
-            constexpr omega::app::FrontEndState kMainStart{
-                .mode = omega::app::FrontEndMode::Main,
+            constexpr omega::app::FrontEndState kBriefingRoom{
+                .mode = omega::app::FrontEndMode::BriefingRoom,
                 .selected_main_row =
                     omega::app::FrontEndMainRow::StartDiagnostic,
                 .selected_profile_slot =
@@ -2343,7 +2359,7 @@ void CheckExplicitFirstProfileCreation(
                     omega::app::FrontEndCharacterSlot::First,
             };
             Check(character_selection_frame &&
-                      Access::FrontEnd(*app) == kMainStart &&
+                      Access::FrontEnd(*app) == kBriefingRoom &&
                       Access::ActiveCharacter(*app) == *first_character_id &&
                       Access::PersistedConfirmedCharacter(*app) ==
                           *first_character_id &&
@@ -2355,7 +2371,7 @@ void CheckExplicitFirstProfileCreation(
                           std::optional<std::size_t>{173U} &&
                       IsOneVisibleMenuSubmission(
                           gpu_before_character_select, Access::GpuSnapshot(*app)),
-                "Primary confirms the first character and lands directly on Main/Start");
+                "Primary confirms the first character and enters the Briefing Room mission selector");
             Check(PushKey(SDL_SCANCODE_F1, false) && run_plain_frame(),
                 "the explicit first-character selection key releases");
 
@@ -2382,7 +2398,7 @@ void CheckExplicitFirstProfileCreation(
                           std::optional<std::size_t>{221U} &&
                       IsOneDiagnosticPlaySubmission(
                           gpu_before_start, Access::GpuSnapshot(*app)),
-                "Main/Start commits the character-owned diagnostic session and enters DiagnosticPlay");
+                "Briefing Room mission selection commits the character-owned diagnostic session and enters DiagnosticPlay");
             Check(PushKey(SDL_SCANCODE_F1, false) && run_plain_frame(),
                 "the explicit diagnostic-start key releases before teardown");
         }
@@ -2513,12 +2529,20 @@ void CheckExplicitFirstProfileCreation(
                 "the capacity-eight fixture selects its first character");
             Check(PushKey(SDL_SCANCODE_F1, false) && run_reselect_frame(),
                 "the capacity-eight character-selection edge releases");
-            Check(PushKey(SDL_SCANCODE_DOWN, true) && run_reselect_frame() &&
+            Check(PushKey(SDL_SCANCODE_ESCAPE, true) && run_reselect_frame() &&
+                      Access::FrontEnd(*reselect_app).mode ==
+                          omega::app::FrontEndMode::Characters,
+                "Escape returns the capacity-eight fixture from Briefing Room to Characters");
+            Check(PushKey(SDL_SCANCODE_ESCAPE, false) && run_reselect_frame(),
+                "the capacity-eight Briefing Room cancel edge releases");
+            Check(PushKey(SDL_SCANCODE_ESCAPE, true) && run_reselect_frame() &&
+                      Access::FrontEnd(*reselect_app).mode ==
+                          omega::app::FrontEndMode::Main &&
                       Access::FrontEnd(*reselect_app).selected_main_row ==
                           omega::app::FrontEndMainRow::Profiles,
-                "the capacity-eight fixture returns to the Profiles row");
-            Check(PushKey(SDL_SCANCODE_DOWN, false) && run_reselect_frame(),
-                "the capacity-eight Profiles navigation edge releases");
+                "a second Escape returns the capacity-eight fixture to the Profiles row");
+            Check(PushKey(SDL_SCANCODE_ESCAPE, false) && run_reselect_frame(),
+                "the capacity-eight Characters cancel edge releases");
             Check(PushKey(SDL_SCANCODE_F1, true) && run_reselect_frame() &&
                       Access::FrontEnd(*reselect_app).mode ==
                           omega::app::FrontEndMode::Profiles,
@@ -2546,6 +2570,8 @@ void CheckExplicitFirstProfileCreation(
             Check(PushKey(SDL_SCANCODE_F1, true) && run_reselect_frame() &&
                       Access::ActiveCharacter(*reselect_app) ==
                           *first_character_id &&
+                      Access::FrontEnd(*reselect_app).mode ==
+                          omega::app::FrontEndMode::BriefingRoom &&
                       Access::FrontEnd(*reselect_app).selected_main_row ==
                           omega::app::FrontEndMainRow::StartDiagnostic,
                 "the capacity-eight replacement character remains selectable");
@@ -2588,6 +2614,13 @@ void CheckComposedGeneratedMenuAcceptance(
         .selected_main_row = omega::app::FrontEndMainRow::StartDiagnostic,
         .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
     };
+    constexpr omega::app::FrontEndState kBriefingRoom{
+        .mode = omega::app::FrontEndMode::BriefingRoom,
+        .selected_main_row = omega::app::FrontEndMainRow::StartDiagnostic,
+        .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+        .selected_character_slot =
+            omega::app::FrontEndCharacterSlot::First,
+    };
     constexpr omega::app::FrontEndState kDiagnosticPlay{
         .mode = omega::app::FrontEndMode::DiagnosticPlay,
         .selected_main_row = omega::app::FrontEndMainRow::StartDiagnostic,
@@ -2599,11 +2632,11 @@ void CheckComposedGeneratedMenuAcceptance(
         .right = omega::runtime::kNormalizedRenderExtent,
         .bottom = omega::runtime::kNormalizedRenderExtent,
     };
-    constexpr omega::runtime::RenderTargetRectQ16 kActorPositiveZOneDestination{
+    constexpr omega::runtime::RenderTargetRectQ16 kActorOriginDestination{
         .left = 31'744U,
-        .top = 30'720U,
+        .top = 31'744U,
         .right = 33'792U,
-        .bottom = 32'768U,
+        .bottom = 33'792U,
     };
     // Fixed project-owned Profiles layout. The card fills the menu panel, the
     // selection cursor sits at the left of its row band, and the active-row cue
@@ -3054,7 +3087,7 @@ void CheckComposedGeneratedMenuAcceptance(
     const auto character_selected_gpu = Access::GpuSnapshot(*app);
     Check(character_select_queued && character_selected &&
               character_selected->result().planned_simulation_steps == 0U &&
-              Access::FrontEnd(*app) == kMainStart &&
+              Access::FrontEnd(*app) == kBriefingRoom &&
               Access::ActiveCharacter(*app) == character_id &&
               Access::PersistedConfirmedCharacter(*app) == character_id &&
               Access::PersistenceGeneration(*app) ==
@@ -3065,17 +3098,17 @@ void CheckComposedGeneratedMenuAcceptance(
                   std::optional<std::size_t>{173U} &&
               IsOneVisibleMenuSubmission(
                   gpu_before_character_select, character_selected_gpu),
-        "character selection commits its 48-byte active pointer and lands on visible Main/Start");
+        "character selection commits its 48-byte active pointer and enters the visible Briefing Room mission selector");
     const bool character_select_release_queued = PushKey(SDL_SCANCODE_F1, false);
     auto character_select_released = app->RunWithCapture(1);
     const omega::app::GpuHostSnapshot navigation_released_gpu =
         Access::GpuSnapshot(*app);
     Check(character_select_release_queued && character_select_released &&
-              Access::FrontEnd(*app) == kMainStart &&
+              Access::FrontEnd(*app) == kBriefingRoom &&
               Access::SchedulerSnapshot(*app) == startup_scheduler &&
               IsOneVisibleMenuSubmission(
                   character_selected_gpu, navigation_released_gpu),
-        "the character-selection release preserves Main/Start with the modal scheduler frozen");
+        "the character-selection release preserves Briefing Room with the modal scheduler frozen");
     if (!character_select_released)
         return;
 
@@ -3096,7 +3129,7 @@ void CheckComposedGeneratedMenuAcceptance(
         actor_commands[0] == hidden_commands[0] &&
         actor_commands[1].texture == marker_texture &&
         actor_commands[1].source == kFullSource &&
-        actor_commands[1].destination == kActorPositiveZOneDestination &&
+        actor_commands[1].destination == kActorOriginDestination &&
         actor_commands[1].fit_mode ==
             omega::runtime::RenderTextureFitMode::Stretch &&
         actor_commands[1].filter_mode ==
@@ -3123,7 +3156,7 @@ void CheckComposedGeneratedMenuAcceptance(
               play_simulation.completed_steps == 1U &&
               play_simulation.simulated_time == settings.frame.simulation_step &&
               play_simulation.alive_entities == 1U && play_position &&
-              *play_position == omega::simulation::Position3{.z = 1} &&
+              *play_position == omega::simulation::Position3{} &&
               marker_command_is_visible &&
               DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
                   actor_draw_list) &&
@@ -3139,7 +3172,7 @@ void CheckComposedGeneratedMenuAcceptance(
                   startup_gpu.textures.resident_logical_bytes +
                       kFrontEndCardLogicalBytes &&
               IsOneDiagnosticPlaySubmission(navigation_released_gpu, play_gpu),
-        "a profile-and-character-confirmed Primary commits the 48-byte character-owned checkpoint, enters DiagnosticPlay, advances one generated simulation step, and retains exactly one live character card");
+        "a profile-and-character-confirmed Primary commits the 48-byte character-owned checkpoint, enters DiagnosticPlay, advances one generated simulation step without leaking held menu movement, and retains exactly one live character card");
     if (!play)
         return;
 
@@ -3698,8 +3731,8 @@ int main()
                 const auto gpu_before_character_select =
                     omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
                         *profile_app);
-                const omega::app::FrontEndState main_start{
-                    .mode = omega::app::FrontEndMode::Main,
+                const omega::app::FrontEndState briefing_room{
+                    .mode = omega::app::FrontEndMode::BriefingRoom,
                     .selected_main_row =
                         omega::app::FrontEndMainRow::StartDiagnostic,
                     .selected_profile_slot =
@@ -3710,7 +3743,7 @@ int main()
                 Check(PushKey(SDL_SCANCODE_F1, true) &&
                           run_plain_profile_frame() && character_id &&
                           omega::app::detail::OmegaAppTestAccess::FrontEnd(
-                              *profile_app) == main_start &&
+                              *profile_app) == briefing_room &&
                           omega::app::detail::OmegaAppTestAccess::ActiveCharacter(
                               *profile_app) == character_id &&
                           omega::app::detail::OmegaAppTestAccess::PersistedConfirmedCharacter(
@@ -3725,7 +3758,7 @@ int main()
                               gpu_before_character_select,
                               omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
                                   *profile_app)),
-                    "the four-profile character selection commits its pointer and lands on Main/Start");
+                    "the four-profile character selection commits its pointer and enters the Briefing Room mission selector");
                 Check(PushKey(SDL_SCANCODE_F1, false) &&
                           run_plain_profile_frame(),
                     "the four-profile character-selection edge releases");
@@ -3841,7 +3874,13 @@ int main()
                   static_cast<std::uint16_t>(SDL_SCANCODE_A),
                   omega::app::kDebugMoveLeftAction) &&
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_LEFT),
+                  omega::app::kDebugMoveLeftAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
                   static_cast<std::uint16_t>(SDL_SCANCODE_D),
+                  omega::app::kDebugMoveRightAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_RIGHT),
                   omega::app::kDebugMoveRightAction) &&
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
                   static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_UP),
@@ -3855,10 +3894,13 @@ int main()
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
                   static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_RIGHT),
                   omega::app::kDebugMoveRightAction),
-        "the synthetic W/S, Up/Down, A/D, and gamepad dpad bindings expose action IDs 2 through 5");
+        "WASD and the arrow keys provide a complete keyboard movement and menu-navigation path while the gamepad dpad remains an optional alias");
     Check(OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
               static_cast<std::uint16_t>(SDL_SCANCODE_ESCAPE),
-              OmegaAppTestAccess::QuitAction()) &&
+              omega::app::kFrontEndCancelAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_F10),
+                  OmegaAppTestAccess::QuitAction()) &&
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
                   static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_BACK),
                   OmegaAppTestAccess::QuitAction()) &&
@@ -3880,13 +3922,24 @@ int main()
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
                   static_cast<std::uint16_t>(SDL_SCANCODE_BACKSPACE),
                   omega::app::kFrontEndCancelAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_SPACE),
+                  omega::app::kDebugFireAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::MouseButton,
+                  static_cast<std::uint16_t>(SDL_BUTTON_LEFT),
+                  omega::app::kDebugFireAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_T),
+                  omega::app::kDebugTargetAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::MouseButton,
+                  static_cast<std::uint16_t>(SDL_BUTTON_RIGHT),
+                  omega::app::kDebugTargetAction) &&
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
                   static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_EAST),
                   omega::app::kFrontEndCancelAction) &&
-              OmegaAppTestAccess::InputBindingCount(*app) == 19U &&
-              OmegaAppTestAccess::InputActionCount(*app) == 7U,
-        "nineteen physical bindings expose seven logical actions; five confirmation controls "
-        "share action 6 while Backspace and gamepad East share cancel action 7");
+              OmegaAppTestAccess::InputBindingCount(*app) == 26U &&
+              OmegaAppTestAccess::InputActionCount(*app) == 9U,
+        "twenty-six physical bindings expose a controller-free nine-action keyboard/mouse layout; gamepad buttons remain optional aliases");
 
     const omega::runtime::RenderTextureHandle diagnostic_texture =
         OmegaAppTestAccess::DiagnosticTexture(*app);
@@ -3937,6 +3990,26 @@ int main()
         .top = 31'744U,
         .right = 33'792U,
         .bottom = 33'792U,
+    };
+    constexpr std::array kTargetCueDestinations{
+        omega::runtime::RenderTargetRectQ16{
+            .left = 28'672U,
+            .top = 32'512U,
+            .right = 36'864U,
+            .bottom = 33'024U,
+        },
+        omega::runtime::RenderTargetRectQ16{
+            .left = 32'512U,
+            .top = 28'672U,
+            .right = 33'024U,
+            .bottom = 36'864U,
+        },
+    };
+    constexpr omega::runtime::RenderTargetRectQ16 kFireCueDestination{
+        .left = 32'000U,
+        .top = 24'000U,
+        .right = 33'536U,
+        .bottom = 25'536U,
     };
     constexpr omega::runtime::RenderTargetRectQ16 kMenuDestination{
         .left = 2048U,
@@ -4616,7 +4689,7 @@ int main()
 
     Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, one_step_elapsed),
         "terminal host capture discards its unobserved clock override");
-    Check(PushEscape(true), "an Escape press enters the SDL queue");
+    Check(PushQuitKey(true), "an F10 press enters the SDL queue");
     auto logical = app->RunWithCapture(1);
     Check(logical.has_value(), "logical quit publishes a terminal capture");
     if (!logical)
@@ -4641,7 +4714,7 @@ int main()
             "logical quit retains its distinct owned reason and continued index");
     }
 
-    const bool movement_events_queued = PushEscape(false) &&
+    const bool movement_events_queued = PushQuitKey(false) &&
                                         PushKey(SDL_SCANCODE_RETURN, true) &&
                                         PushKey(SDL_SCANCODE_W, true);
     Check(movement_events_queued,
@@ -5257,7 +5330,7 @@ int main()
         OmegaAppTestAccess::NextInputFrameIndex(*app);
     const omega::app::GpuHostSnapshot controls_terminal_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    Check(PushKey(SDL_SCANCODE_F1, true) && PushEscape(true) && PushQuit(),
+    Check(PushKey(SDL_SCANCODE_F1, true) && PushQuitKey(true) && PushQuit(),
         "Profiles primary and simultaneous terminal reasons enter the queue");
     auto controls_terminal = app->RunWithCapture(1);
     Check(controls_terminal.has_value(), "Profiles terminal precedence captures");
@@ -5288,7 +5361,7 @@ int main()
               OmegaAppTestAccess::GpuSnapshot(*app) == controls_terminal_gpu_before,
         "terminal resolution captures the Profiles primary edge without reducing, rendering, or mutating any owner");
 
-    Check(PushEscape(false) && PushKey(SDL_SCANCODE_F1, false),
+    Check(PushQuitKey(false) && PushKey(SDL_SCANCODE_F1, false),
         "Profiles terminal inputs release");
     Check(RunPlainFrame() &&
               OmegaAppTestAccess::FrontEnd(*app) == kProfilesRowOne,
@@ -5518,7 +5591,7 @@ int main()
 
     const std::uint64_t topology_terminal_index =
         OmegaAppTestAccess::NextInputFrameIndex(*app);
-    Check(PushKey(SDL_SCANCODE_F1, true) && PushEscape(true) && PushQuit(),
+    Check(PushKey(SDL_SCANCODE_F1, true) && PushQuitKey(true) && PushQuit(),
         "AssetTopology primary and simultaneous terminal reasons enter the queue");
     auto topology_terminal = app->RunWithCapture(1);
     Check(topology_terminal.has_value(), "AssetTopology terminal precedence captures");
@@ -5549,7 +5622,7 @@ int main()
               OmegaAppTestAccess::GpuSnapshot(*app) == topology_released_gpu,
         "terminal resolution captures the AssetTopology primary edge without reducing, rendering, or mutating any owner");
 
-    Check(PushEscape(false) && PushKey(SDL_SCANCODE_F1, false),
+    Check(PushQuitKey(false) && PushKey(SDL_SCANCODE_F1, false),
         "AssetTopology terminal inputs release");
     const omega::app::GpuHostSnapshot topology_terminal_release_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
@@ -5667,6 +5740,135 @@ int main()
         "DiagnosticPlay is ready for a terminal-priority frame");
     if (!ready_for_terminal)
         return EXIT_FAILURE;
+    const omega::runtime::RenderDrawList keyboard_mouse_base_actor_draw_list =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app);
+    const auto keyboard_mouse_base_commands =
+        keyboard_mouse_base_actor_draw_list.commands();
+    const std::size_t keyboard_mouse_base_command_count =
+        keyboard_mouse_base_commands.size();
+    const auto marker_command_is_exact =
+        [diagnostic_actor_marker_texture, kFullMenuSource](
+            const omega::runtime::RenderTextureBlitCommand& command,
+            const omega::runtime::RenderTargetRectQ16 destination) {
+            return command.texture == diagnostic_actor_marker_texture &&
+                   command.source == kFullMenuSource &&
+                   command.destination == destination &&
+                   command.fit_mode ==
+                       omega::runtime::RenderTextureFitMode::Stretch &&
+                   command.filter_mode ==
+                       omega::runtime::RenderTextureFilterMode::Nearest;
+        };
+    const auto has_exact_base_prefix =
+        [keyboard_mouse_base_commands](
+            const std::span<const omega::runtime::RenderTextureBlitCommand>
+                commands) {
+            return commands.size() >= keyboard_mouse_base_commands.size() &&
+                   std::equal(keyboard_mouse_base_commands.begin(),
+                       keyboard_mouse_base_commands.end(), commands.begin());
+        };
+
+    Check(PushMouseButton(SDL_BUTTON_LEFT, true),
+        "a left mouse press enters the live DiagnosticPlay input queue");
+    auto mouse_fire = app->RunWithCapture(1);
+    Check(mouse_fire &&
+              mouse_fire->completion() ==
+                  omega::app::RunCaptureCompletion::FrameLimitReached &&
+              !mouse_fire->failure() &&
+              mouse_fire->result().rendered_frames == 1 &&
+              OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
+              OmegaAppTestAccess::DiagnosticActorDrawList(*app).commands().size() ==
+                  keyboard_mouse_base_command_count + 1U &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
+                  OmegaAppTestAccess::DiagnosticActorDrawList(*app)),
+        "left mouse fires one native cue without opening a menu or requiring a gamepad");
+
+    Check(PushMouseButton(SDL_BUTTON_LEFT, false) &&
+              PushMouseButton(SDL_BUTTON_RIGHT, true),
+        "the fire release and right-mouse target press enter the input queue");
+    auto mouse_target = app->RunWithCapture(1);
+    const omega::runtime::RenderDrawList mouse_target_draw_list =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app);
+    Check(mouse_target &&
+              mouse_target->completion() ==
+                  omega::app::RunCaptureCompletion::FrameLimitReached &&
+              !mouse_target->failure() &&
+              mouse_target->result().rendered_frames == 1 &&
+              OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
+              mouse_target_draw_list.commands().size() ==
+                  keyboard_mouse_base_command_count + 2U &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
+                  OmegaAppTestAccess::DiagnosticActorDrawList(*app)),
+        "right mouse holds a centered native targeting cue without leaving DiagnosticPlay");
+
+    auto mouse_target_held = app->RunWithCapture(1);
+    const auto held_target_action = CapturedActionState(
+        mouse_target_held, omega::app::kDebugTargetAction);
+    Check(mouse_target_held &&
+              mouse_target_held->completion() ==
+                  omega::app::RunCaptureCompletion::FrameLimitReached &&
+              !mouse_target_held->failure() &&
+              mouse_target_held->result().rendered_frames == 1 &&
+              held_target_action && held_target_action->held &&
+              !held_target_action->pressed && !held_target_action->released &&
+              OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
+              DrawListsEqual(
+                  OmegaAppTestAccess::DiagnosticActorDrawList(*app),
+                  mouse_target_draw_list),
+        "held right mouse preserves the exact targeting cue across a later frame without a repeated press edge");
+
+    Check(PushMouseButton(SDL_BUTTON_LEFT, true),
+        "a left-mouse fire press enters the queue while right-mouse targeting remains held");
+    auto mouse_target_fire = app->RunWithCapture(1);
+    const auto mouse_target_fire_commands =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app).commands();
+    const auto chord_target_action = CapturedActionState(
+        mouse_target_fire, omega::app::kDebugTargetAction);
+    const bool mouse_target_fire_draw_is_exact =
+        mouse_target_fire_commands.size() ==
+            keyboard_mouse_base_command_count + 3U &&
+        has_exact_base_prefix(mouse_target_fire_commands) &&
+        marker_command_is_exact(
+            mouse_target_fire_commands[keyboard_mouse_base_command_count],
+            kTargetCueDestinations[0U]) &&
+        marker_command_is_exact(
+            mouse_target_fire_commands[keyboard_mouse_base_command_count + 1U],
+            kTargetCueDestinations[1U]) &&
+        marker_command_is_exact(
+            mouse_target_fire_commands[keyboard_mouse_base_command_count + 2U],
+            kFireCueDestination);
+    Check(mouse_target_fire &&
+              mouse_target_fire->completion() ==
+                  omega::app::RunCaptureCompletion::FrameLimitReached &&
+              !mouse_target_fire->failure() &&
+              mouse_target_fire->result().rendered_frames == 1 &&
+              IsFreshPress(CapturedActionState(
+                  mouse_target_fire, omega::app::kDebugFireAction)) &&
+              chord_target_action && chord_target_action->held &&
+              !chord_target_action->pressed && !chord_target_action->released &&
+              OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
+              mouse_target_fire_draw_is_exact &&
+              DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
+                  OmegaAppTestAccess::DiagnosticActorDrawList(*app)),
+        "left-mouse fire composes after both exact targeting bars while right mouse remains held");
+
+    Check(PushMouseButton(SDL_BUTTON_LEFT, false) &&
+              PushMouseButton(SDL_BUTTON_RIGHT, false),
+        "the chord's fire and target releases enter the input queue");
+    auto mouse_released = app->RunWithCapture(1);
+    Check(mouse_released &&
+              mouse_released->completion() ==
+                  omega::app::RunCaptureCompletion::FrameLimitReached &&
+              !mouse_released->failure() &&
+              mouse_released->result().rendered_frames == 1 &&
+              IsRelease(CapturedActionState(
+                  mouse_released, omega::app::kDebugFireAction)) &&
+              IsRelease(CapturedActionState(
+                  mouse_released, omega::app::kDebugTargetAction)) &&
+              OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
+              DrawListsEqual(OmegaAppTestAccess::DiagnosticActorDrawList(*app),
+                  keyboard_mouse_base_actor_draw_list),
+        "releasing the mouse chord restores the ordinary actor draw without menu mutation");
+
     const omega::app::GpuHostSnapshot ready_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
     const omega::runtime::RenderDrawList ready_actor_draw_list =
@@ -5704,11 +5906,11 @@ int main()
     const auto debug_position_before_terminal =
         OmegaAppTestAccess::DebugLocomotionPosition(*app);
     const omega::runtime::FrameSchedulerState scheduler_before_terminal =
-        ready_for_terminal->scheduler_state_after();
+        OmegaAppTestAccess::SchedulerSnapshot(*app);
     const std::uint64_t terminal_frame_index =
         OmegaAppTestAccess::NextInputFrameIndex(*app);
     Check(PushKey(SDL_SCANCODE_F1, true) &&
-              PushKey(SDL_SCANCODE_BACKSPACE, true) && PushEscape(true) && PushQuit(),
+              PushKey(SDL_SCANCODE_BACKSPACE, true) && PushQuitKey(true) && PushQuit(),
         "fresh confirm/cancel edges and simultaneous quit reasons enter the SDL queue");
     auto both = app->RunWithCapture(1);
     Check(both.has_value(), "simultaneous quit reasons publish a terminal capture");
@@ -5773,9 +5975,9 @@ int main()
               terminal_gpu == ready_gpu,
         "terminal action-6 and action-7 edges perform no render or menu/resource mutation");
 
-    Check(PushEscape(false) && PushKey(SDL_SCANCODE_F1, false) &&
+    Check(PushQuitKey(false) && PushKey(SDL_SCANCODE_F1, false) &&
               PushKey(SDL_SCANCODE_BACKSPACE, false),
-        "the final Escape, confirm, and cancel releases enter the SDL queue");
+        "the final F10, confirm, and cancel releases enter the SDL queue");
     Check(omega::app::detail::OmegaAppTestAccess::InstallUnownedDiagnosticDraw(*app),
         "the operational-failure fixture installs an unowned diagnostic draw");
     const omega::app::GpuHostSnapshot failure_gpu_before =

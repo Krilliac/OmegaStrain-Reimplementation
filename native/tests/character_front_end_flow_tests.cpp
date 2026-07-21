@@ -1,5 +1,6 @@
 #include "front_end.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -263,10 +264,10 @@ void CheckCharacterCreationAndSelection()
     Check(selected ==
               FrontEndReduction{
                   .state = FrontEndState{
-                      .mode = FrontEndMode::Main,
+                      .mode = FrontEndMode::BriefingRoom,
                       .selected_main_row = FrontEndMainRow::StartDiagnostic,
                       .selected_profile_slot = FrontEndProfileSlot::First,
-                      .selected_character_slot = FrontEndCharacterSlot::First,
+                      .selected_character_slot = FrontEndCharacterSlot::Second,
                   },
                   .command = FrontEndCommand{
                       .type = FrontEndCommandType::SetActiveCharacter,
@@ -274,14 +275,15 @@ void CheckCharacterCreationAndSelection()
                       .character_slot = FrontEndCharacterSlot::Second,
                   },
               },
-          "selecting a populated character publishes its slot and returns to Main");
+          "selecting a populated character publishes its slot and enters the Briefing Room mission row");
 }
 
-void CheckDiagnosticGate()
+void CheckBriefingMissionGate()
 {
     constexpr FrontEndCapabilities gated_start{
         .can_start_diagnostic_campaign = true,
         .requires_active_profile_for_diagnostic_play = true,
+        .supports_character_selection = true,
         .requires_active_character_for_diagnostic_play = true,
     };
     constexpr FrontEndState main_start{
@@ -291,6 +293,7 @@ void CheckDiagnosticGate()
         .selected_character_slot = FrontEndCharacterSlot::First,
     };
     constexpr FrontEndInputEdges primary{.primary_pressed = true};
+    constexpr FrontEndInputEdges cancel{.cancel_pressed = true};
 
     const std::array denied{
         omega::app::ReduceFrontEnd(main_start, primary, 1U, gated_start,
@@ -303,10 +306,21 @@ void CheckDiagnosticGate()
     Check(denied[0] == FrontEndReduction{.state = main_start} &&
               denied[1] == FrontEndReduction{.state = main_start} &&
               denied[2] == FrontEndReduction{.state = main_start},
-          "diagnostic start remains inert until both confirmations are present");
+          "the Main mission row remains inert until both confirmations are present");
+
+    constexpr FrontEndState briefing{
+        .mode = FrontEndMode::BriefingRoom,
+        .selected_main_row = FrontEndMainRow::StartDiagnostic,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+        .selected_character_slot = FrontEndCharacterSlot::First,
+    };
+    const FrontEndReduction entered_briefing = omega::app::ReduceFrontEnd(
+        main_start, primary, 1U, gated_start, true, 1U, true);
+    Check(entered_briefing == FrontEndReduction{.state = briefing},
+          "the confirmed character-enabled Main route enters Briefing Room without starting a session");
 
     const FrontEndReduction allowed = omega::app::ReduceFrontEnd(
-        main_start, primary, 1U, gated_start, true, 1U, true);
+        briefing, primary, 1U, gated_start, true, 1U, true);
     Check(allowed ==
               FrontEndReduction{
                   .state = FrontEndState{
@@ -318,16 +332,81 @@ void CheckDiagnosticGate()
                   .command = FrontEndCommand{
                       .type = FrontEndCommandType::StartDiagnosticCampaign,
                       .profile_slot = FrontEndProfileSlot::First,
+                      .character_slot = FrontEndCharacterSlot::First,
                   },
               } &&
               omega::app::FrontEndAllowsSimulation(allowed.state, gated_start,
                                                     true, true),
-          "both confirmations authorize the typed diagnostic start and simulation");
+          "mission confirmation in Briefing Room publishes the typed start and enables simulation");
     Check(!omega::app::FrontEndAllowsSimulation(allowed.state, gated_start,
                                                 true, false) &&
               !omega::app::FrontEndAllowsSimulation(allowed.state, gated_start,
                                                     false, true),
           "losing either confirmation closes an entered diagnostic state");
+
+    const std::array gate_loss{
+        omega::app::ReduceFrontEnd(briefing, {}, 1U, gated_start, false, 1U,
+                                   true),
+        omega::app::ReduceFrontEnd(briefing, {}, 1U, gated_start, true, 1U,
+                                   false),
+        omega::app::ReduceFrontEnd(allowed.state, {}, 1U, gated_start, false,
+                                   1U, true),
+        omega::app::ReduceFrontEnd(allowed.state, {}, 1U, gated_start, true,
+                                   1U, false),
+    };
+    Check(std::ranges::all_of(gate_loss, [](const FrontEndReduction reduced) {
+              return reduced == FrontEndReduction{
+                                    .state = omega::app::InitialFrontEndState()};
+          }),
+          "Briefing Room and DiagnosticPlay fail closed when either confirmed identity is lost");
+
+    constexpr FrontEndState incoherent_briefing{
+        .mode = FrontEndMode::BriefingRoom,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+        .selected_character_slot = FrontEndCharacterSlot::First,
+    };
+    Check(omega::app::ReduceFrontEnd(incoherent_briefing, primary, 1U,
+              gated_start, true, 1U, true) ==
+              FrontEndReduction{.state = omega::app::InitialFrontEndState()},
+          "a noncanonical Briefing Room row fails closed instead of displaying one action and starting another");
+
+    const FrontEndReduction briefing_cancel = omega::app::ReduceFrontEnd(
+        briefing, cancel, 1U, gated_start, true, 1U, true);
+    Check(briefing_cancel ==
+              FrontEndReduction{.state = FrontEndState{
+                                    .mode = FrontEndMode::Characters,
+                                    .selected_main_row = FrontEndMainRow::Profiles,
+                                    .selected_profile_slot = FrontEndProfileSlot::First,
+                                    .selected_character_slot = FrontEndCharacterSlot::First,
+                                }},
+          "Briefing Room cancel returns to Characters without publishing a command");
+
+    const FrontEndReduction play_primary = omega::app::ReduceFrontEnd(
+        allowed.state, primary, 1U, gated_start, true, 1U, true);
+    const FrontEndReduction play_cancel = omega::app::ReduceFrontEnd(
+        allowed.state, cancel, 1U, gated_start, true, 1U, true);
+    Check(play_primary == FrontEndReduction{.state = briefing} &&
+              play_cancel == FrontEndReduction{.state = briefing},
+          "DiagnosticPlay primary and cancel both return a confirmed character session to Briefing Room");
+
+    constexpr FrontEndCapabilities legacy_start{
+        .can_start_diagnostic_campaign = true,
+    };
+    Check(omega::app::ReduceFrontEnd(main_start, primary, 1U, legacy_start) ==
+              FrontEndReduction{
+                  .state = FrontEndState{
+                      .mode = FrontEndMode::DiagnosticPlay,
+                      .selected_main_row = FrontEndMainRow::StartDiagnostic,
+                      .selected_profile_slot = FrontEndProfileSlot::First,
+                      .selected_character_slot = FrontEndCharacterSlot::First,
+                  },
+                  .command = FrontEndCommand{
+                      .type = FrontEndCommandType::StartDiagnosticCampaign,
+                      .profile_slot = FrontEndProfileSlot::First,
+                  },
+              },
+          "the character-disabled synthetic Main route retains its direct diagnostic start");
 }
 
 void CheckCancelAndInvalidStateContainment()
@@ -460,7 +539,7 @@ int main()
     CheckCharacterModelProjection();
     CheckProfileToCharacterRouting();
     CheckCharacterCreationAndSelection();
-    CheckDiagnosticGate();
+    CheckBriefingMissionGate();
     CheckCancelAndInvalidStateContainment();
     CheckCharacterImageContract();
 

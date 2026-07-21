@@ -547,6 +547,7 @@ void CheckReducerAndViewContract()
     static_assert(static_cast<std::uint8_t>(FrontEndCommandType::SetActiveProfile) == 1U);
     static_assert(static_cast<std::uint8_t>(FrontEndCommandType::CreateFirstProfile) == 2U);
     static_assert(static_cast<std::uint8_t>(FrontEndCommandType::StartDiagnosticCampaign) == 3U);
+    static_assert(static_cast<std::uint8_t>(FrontEndMode::BriefingRoom) == 6U);
     static_assert(std::is_trivially_copyable_v<FrontEndCapabilities>);
     static_assert(FrontEndCapabilities{} == FrontEndCapabilities{
         .can_create_first_profile = false,
@@ -1192,6 +1193,14 @@ void CheckRasterContract()
               PixelAt(main_none, 8U, 58U) == kCyanColor && PixelAt(main_none, 13U, 58U) == kSlateColor,
           "main-card probes cover the opaque frame, header, and all four-row "
           "geometry");
+    Check(PixelAt(main_none, 56U, 11U) == kCyanColor &&
+              PixelAt(main_none, 57U, 11U) == kCyanColor &&
+              PixelAt(main_none, 58U, 11U) == kAmberColor &&
+              PixelAt(main_none, 16U, 29U) == kCyanColor &&
+              PixelAt(main_none, 17U, 29U) == kSlateColor &&
+              PixelAt(main_none, 18U, 29U) == kCyanColor &&
+              PixelAt(main_none, 20U, 29U) == kCyanColor,
+        "main-card semantic probes distinguish the BRIEFING ROOM title and MISSION SELECT first row");
     Check(PixelAt(main_none, 41U, 23U) == kCyanColor &&
               PixelAt(main_data, 41U, 22U) == kCyanColor &&
               PixelAt(main_level, 42U, 23U) == kBackgroundColor,
@@ -1217,6 +1226,17 @@ void CheckRasterContract()
               PixelAt(controls, 8U, 24U) == kSlateColor &&
               PixelAt(controls, 12U, 25U) == kCyanColor,
         "diagnostic and controls probes cover their distinct project-authored panels and labels");
+    Check(PixelAt(diagnostic, 16U, 59U) == kCyanColor &&
+              PixelAt(diagnostic, 17U, 59U) == kSlateColor &&
+              PixelAt(diagnostic, 18U, 59U) == kCyanColor &&
+              PixelAt(diagnostic, 87U, 59U) == kCyanColor &&
+              PixelAt(controls, 17U, 25U) == kCyanColor &&
+              PixelAt(controls, 18U, 25U) == kSlateColor &&
+              PixelAt(controls, 14U, 46U) == kCyanColor &&
+              PixelAt(controls, 18U, 55U) == kCyanColor &&
+              PixelAt(controls, 13U, 62U) == kCyanColor &&
+              PixelAt(controls, 14U, 62U) == kCyanColor,
+        "keyboard-first card probes distinguish menu, quit, movement, select/fire, back, and target legends");
 
     const std::array hashes{
         Fnv1a64(main_none.pixels()),      Fnv1a64(main_data.pixels()),          Fnv1a64(main_level.pixels()),
@@ -1233,13 +1253,13 @@ void CheckRasterContract()
     // were checked by a separate Python FNV-1a implementation, SHA-256, four-
     // color histograms, and the independently selected semantic probes above.
     constexpr std::array<std::uint64_t, 7U> expected_hashes{
-        0x177b53f8cad1acdeULL,
-        0x50cbdb38858d5d32ULL,
-        0xdd47380e14da12f2ULL,
+        0x270ea18399817f81ULL,
+        0x7a315522b1ed32e5ULL,
+        0x10d5b8366f1d4ba5ULL,
         0xea15c2933b6cfffdULL,
         0xe26182d60b0bd82dULL,
-        0x37f823d27a4cb3ceULL,
-        0xcfa7cc57696aae0aULL,
+        0x35ba044580a8be52ULL,
+        0x11fbb806ab0dd626ULL,
     };
     Check(hashes == expected_hashes, "all complete project front-end cards match "
                                      "their independently frozen hashes");
@@ -1256,7 +1276,7 @@ void CheckRasterContract()
     }
     std::cout << std::dec << '\n';
     constexpr std::array<std::uint64_t, 3U> expected_new_hashes{
-        0x28017f7f880b223aULL,
+        0x29eb2cd1d30e624dULL,
         0xca45b40c018f0de6ULL,
         0x6889eb81d787f146ULL,
     };
@@ -1278,6 +1298,45 @@ void CheckRasterContract()
               second_empty.rgba8_pixels.data() != empty_profiles.rgba8_pixels.data(),
           "repeated profile-card builds own distinct byte-identical storage");
 }
+
+void CheckInputAliasProjection()
+{
+    constexpr FrontEndInputEdges direct{
+        .primary_pressed = false,
+        .previous_pressed = true,
+        .next_pressed = false,
+        .cancel_pressed = false,
+    };
+    Check(omega::app::ResolveFrontEndInputEdges(FrontEndMode::Main, direct,
+              true, true, true, true) ==
+              FrontEndInputEdges{
+                  .primary_pressed = true,
+                  .previous_pressed = true,
+                  .next_pressed = true,
+                  .cancel_pressed = true,
+              },
+        "modal input projection maps left/right and contextual fire/target aliases");
+    Check(omega::app::ResolveFrontEndInputEdges(
+              FrontEndMode::DiagnosticPlay, direct, true, true, true, true) ==
+              FrontEndInputEdges{
+                  .primary_pressed = false,
+                  .previous_pressed = true,
+                  .next_pressed = true,
+                  .cancel_pressed = false,
+              },
+        "DiagnosticPlay input projection keeps fire and target out of menu edges");
+    Check(omega::app::ResolveFrontEndInputEdges(FrontEndMode::DiagnosticPlay,
+              FrontEndInputEdges{
+                  .primary_pressed = true,
+                  .cancel_pressed = true,
+              },
+              false, false, false, false) ==
+              FrontEndInputEdges{
+                  .primary_pressed = true,
+                  .cancel_pressed = true,
+              },
+        "direct confirm and cancel edges remain available in DiagnosticPlay");
+}
 } // namespace
 
 int main()
@@ -1287,6 +1346,7 @@ int main()
     CheckReducerAndViewContract();
     CheckActiveProfileGateContract();
     CheckRasterContract();
+    CheckInputAliasProjection();
 
     if (failures != 0)
     {

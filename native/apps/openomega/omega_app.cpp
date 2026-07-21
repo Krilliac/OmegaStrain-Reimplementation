@@ -164,6 +164,11 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         runtime::InputBinding{
             .device = runtime::InputDevice::Keyboard,
             .code = static_cast<std::uint16_t>(SDL_SCANCODE_ESCAPE),
+            .action = kFrontEndCancelAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_F10),
             .action = kQuitAction,
         },
         runtime::InputBinding{
@@ -175,6 +180,11 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             .device = runtime::InputDevice::Keyboard,
             .code = static_cast<std::uint16_t>(SDL_SCANCODE_BACKSPACE),
             .action = kFrontEndCancelAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::MouseButton,
+            .code = static_cast<std::uint16_t>(SDL_BUTTON_RIGHT),
+            .action = kDebugTargetAction,
         },
         runtime::InputBinding{
             .device = runtime::InputDevice::GamepadButton,
@@ -195,6 +205,21 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             .device = runtime::InputDevice::Keyboard,
             .code = static_cast<std::uint16_t>(SDL_SCANCODE_KP_ENTER),
             .action = kFrontEndPrimaryAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_SPACE),
+            .action = kDebugFireAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::MouseButton,
+            .code = static_cast<std::uint16_t>(SDL_BUTTON_LEFT),
+            .action = kDebugFireAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_T),
+            .action = kDebugTargetAction,
         },
         runtime::InputBinding{
             .device = runtime::InputDevice::GamepadButton,
@@ -242,6 +267,11 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             .action = kDebugMoveLeftAction,
         },
         runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_LEFT),
+            .action = kDebugMoveLeftAction,
+        },
+        runtime::InputBinding{
             .device = runtime::InputDevice::GamepadButton,
             .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_DPAD_LEFT),
             .action = kDebugMoveLeftAction,
@@ -249,6 +279,11 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         runtime::InputBinding{
             .device = runtime::InputDevice::Keyboard,
             .code = static_cast<std::uint16_t>(SDL_SCANCODE_D),
+            .action = kDebugMoveRightAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_RIGHT),
             .action = kDebugMoveRightAction,
         },
         runtime::InputBinding{
@@ -353,7 +388,8 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     }
     auto platform = std::make_unique<SdlPlatformService>(std::move(*created_platform));
 
-    auto created_sdl_input = SdlInputService::Create(*platform);
+    auto created_sdl_input =
+        SdlInputService::Create(*platform, settings.gamepad_enabled);
     if (!created_sdl_input)
     {
         log->Error("startup", "SDL input service: " + created_sdl_input.error());
@@ -1594,10 +1630,14 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         }
 
         const bool movie_was_active = IsBootSequenceActive(boot_sequence_state_);
+        const bool diagnostic_play_input_context =
+            !movie_was_active &&
+            front_end_state_.mode == FrontEndMode::DiagnosticPlay;
         if (movie_was_active)
         {
             const bool primary_pressed =
-                input_snapshot.WasPressed(kFrontEndPrimaryAction);
+                input_snapshot.WasPressed(kFrontEndPrimaryAction) ||
+                input_snapshot.WasPressed(kDebugFireAction);
             bool source_failed = false;
             bool source_completed = false;
             if (!primary_pressed)
@@ -1821,12 +1861,21 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         {
             const FrontEndReduction front_end =
                 ReduceFrontEnd(front_end_state_,
-                    FrontEndInputEdges{
-                        .primary_pressed = input_snapshot.WasPressed(kFrontEndPrimaryAction),
-                        .previous_pressed = input_snapshot.WasPressed(kFrontEndPreviousAction),
-                        .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
-                        .cancel_pressed = input_snapshot.WasPressed(kFrontEndCancelAction),
-                    },
+                    ResolveFrontEndInputEdges(front_end_state_.mode,
+                        FrontEndInputEdges{
+                            .primary_pressed =
+                                input_snapshot.WasPressed(kFrontEndPrimaryAction),
+                            .previous_pressed =
+                                input_snapshot.WasPressed(kFrontEndPreviousAction),
+                            .next_pressed =
+                                input_snapshot.WasPressed(kFrontEndNextAction),
+                            .cancel_pressed =
+                                input_snapshot.WasPressed(kFrontEndCancelAction),
+                        },
+                        input_snapshot.WasPressed(kDebugMoveLeftAction),
+                        input_snapshot.WasPressed(kDebugMoveRightAction),
+                        input_snapshot.WasPressed(kDebugFireAction),
+                        input_snapshot.WasPressed(kDebugTargetAction)),
                     front_end_startup_model_.visible_profiles,
                     CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
                     front_end_character_startup_model_.visible_characters,
@@ -1851,6 +1900,10 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             !movie_was_active && FrontEndAllowsSimulation(front_end_state_,
                                      CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
                                      ActiveCharacterIsConfirmed());
+        debug_target_held_ = simulation_allowed && diagnostic_play_input_context &&
+            input_snapshot.IsHeld(kDebugTargetAction);
+        debug_fire_pressed_ = simulation_allowed && diagnostic_play_input_context &&
+            input_snapshot.WasPressed(kDebugFireAction);
         const std::chrono::nanoseconds effective_elapsed = simulation_allowed
             ? elapsed
             : std::chrono::nanoseconds::zero();
@@ -1884,7 +1937,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         }
 
         simulation::SimulationStepInput simulation_input{};
-        if (simulation_allowed)
+        if (simulation_allowed && diagnostic_play_input_context)
         {
             const auto planned_translation = gameplay::PlanDebugLocomotionStep(
                 gameplay::DigitalMoveCommand{
@@ -2555,7 +2608,7 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
         .right = runtime::kNormalizedRenderExtent,
         .bottom = runtime::kNormalizedRenderExtent,
     };
-    std::array<runtime::RenderTextureBlitCommand, 2U> commands{};
+    std::array<runtime::RenderTextureBlitCommand, 5U> commands{};
     const std::span<const runtime::RenderTextureBlitCommand> base_commands =
         diagnostic_hidden_draw_list_.commands();
     if (base_commands.size() > 1U)
@@ -2575,6 +2628,49 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
         .fit_mode = runtime::RenderTextureFitMode::Stretch,
         .filter_mode = runtime::RenderTextureFilterMode::Nearest,
     };
+    if (debug_target_held_)
+    {
+        constexpr std::array target_cue_destinations{
+            runtime::RenderTargetRectQ16{
+                .left = 28'672U,
+                .top = 32'512U,
+                .right = 36'864U,
+                .bottom = 33'024U,
+            },
+            runtime::RenderTargetRectQ16{
+                .left = 32'512U,
+                .top = 28'672U,
+                .right = 33'024U,
+                .bottom = 36'864U,
+            },
+        };
+        for (const runtime::RenderTargetRectQ16 destination :
+            target_cue_destinations)
+        {
+            commands[command_count++] = runtime::RenderTextureBlitCommand{
+                .texture = diagnostic_actor_marker_texture_,
+                .source = full_source,
+                .destination = destination,
+                .fit_mode = runtime::RenderTextureFitMode::Stretch,
+                .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+            };
+        }
+    }
+    if (debug_fire_pressed_)
+    {
+        commands[command_count++] = runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_actor_marker_texture_,
+            .source = full_source,
+            .destination = runtime::RenderTargetRectQ16{
+                .left = 32'000U,
+                .top = 24'000U,
+                .right = 33'536U,
+                .bottom = 25'536U,
+            },
+            .fit_mode = runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        };
+    }
     auto created = runtime::RenderDrawList::Create(
         std::span<const runtime::RenderTextureBlitCommand>{
             commands.data(), command_count});
@@ -2600,6 +2696,7 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
     switch (view.mode)
     {
     case FrontEndMode::Main:
+    case FrontEndMode::BriefingRoom:
         return front_end_presentation_.main_draw_lists[selected_main_row];
     case FrontEndMode::Profiles:
     {

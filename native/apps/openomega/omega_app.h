@@ -299,6 +299,12 @@ private:
     // the active-row cue are both derived from it against the current model.
     std::optional<profiles::ProfileId> active_profile_id_;
     std::optional<profiles::CharacterId> active_character_id_;
+    // Contextual native playtest controls. Mouse/keyboard actions update these
+    // only when DiagnosticPlay was already active at frame input time, so the
+    // same physical controls remain menu select/back aliases without leaking a
+    // deploy click into gameplay.
+    bool debug_target_held_ = false;
+    bool debug_fire_pressed_ = false;
     // Friend-only wall-clock seam. Production samples system_clock at the command
     // boundary; tests may provide one valid UTC millisecond value.
     std::optional<std::uint64_t> first_profile_timestamp_override_for_testing_;

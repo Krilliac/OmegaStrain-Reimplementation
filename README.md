@@ -91,9 +91,11 @@ Studio's historical engine source or internal toolchain.
   offline structural scaffolding. No tracked evidence records the retail provenance of their exact
   constants, and no font, widget, hierarchy, layout, rendering, consumer, or retail-menu semantics
   are assigned.
-- An app-owned, non-hot-reloadable SDL input leaf owns the gamepad subsystem, the process-global
-  event pump, and one primary gamepad. It filters controller events by SDL instance ID, resets only
-  gamepad controls when that device disconnects, and promotes the next available device. A
+- An app-owned, non-hot-reloadable SDL input leaf owns the process-global event pump, keyboard and
+  mouse routing, and explicitly opt-in primary-gamepad support. No controller is required to start,
+  navigate, or play the native diagnostic runtime. Gamepad discovery is disabled by default and is
+  enabled with `--set=input.gamepad_enabled=true`; only then does the leaf filter controller events
+  by SDL instance ID, reset gamepad controls on disconnect, and promote the next available device. A
   deterministic headless virtual-gamepad test covers that hotplug boundary; selecting only one
   primary gamepad is a synthetic host-shell policy, not a claim about retail behavior.
 - The standalone `omega_persistence` foundation implements OpenOmega-owned native saves instead of
@@ -186,33 +188,39 @@ Studio's historical engine source or internal toolchain.
   remains pending. This is a project-generated diagnostic launch marker, not a retail/PS2 campaign,
   save, checkpoint, gameplay, continuation, world-state, memory-card, emulator, owner-input, or
   parity claim.
-- E-0112 adds the first complete project-owned profile-to-character-to-session path. A stateless
+- E-0112 adds the first complete project-owned profile-to-character-to-briefing-to-session path. A
+  stateless
   `CharacterCatalog` stores bounded metadata at
   `profiles/<profile-id>/characters/<character-id>/metadata` and validates the parent profile on
   every operation. Explicit profile confirmation now prepares and opens a Characters surface.
   Primary on its exact empty state creates fixed native ID
   `00000000000000000000000000000001` named `DIAGNOSTIC CHARACTER` but does not select it; a later
-  release and Primary edge confirms it through the 48-byte `OOACTCHR` active-character pointer.
-  Switching profiles atomically replaces the profile pointer and invalidates the character pointer.
-  Start Diagnostic remains inert until both per-launch identities resolve against their bounded
-  models, then `PrepareGameSessionStart` validates both durable revisions and writes or reuses the
-  48-byte `OOGAMECP` marker at the character-owned diagnostic-session key before publishing
-  DiagnosticPlay. Capture/replay retain bounded commands and identity-free confirmation mirrors;
+  release and Primary edge confirms it through the 48-byte `OOACTCHR` active-character pointer and
+  opens the project-owned `BriefingRoom`/mission-selection surface. Switching profiles atomically
+  replaces the profile pointer and invalidates the character pointer. Mission activation remains
+  inert until both per-launch identities resolve against their bounded models, then
+  `PrepareGameSessionStart` validates both durable revisions and writes or reuses the 48-byte
+  `OOGAMECP` marker at the character-owned diagnostic-session key before publishing DiagnosticPlay.
+  Cancel returns from BriefingRoom to Characters, and the DiagnosticPlay menu edge returns to
+  BriefingRoom. Capture/replay retain bounded commands and identity-free confirmation mirrors;
   neither owns persistence or a catalog view. The production database uses the existing hard 4,096
   record and 255-byte key ceilings because the canonical session key exceeds the standalone 96-byte
   default. Generated catalog, reducer, corruption, profile-switch, reopen, and session tests cover
   the complete transactional boundary. A separate owner-only manual smoke reached the existing
   MINSK diagnostic topology and actor marker through create, select, start, close, reopen, reselect,
   and restart; no owner input or captured byte entered this tree. This is a functional native
-  bootstrap into the current diagnostic game view, not a retail character editor, appearance,
-  loadout, campaign, mission, scene, save, checkpoint, world-state, or parity claim.
-- E-0103 gives that project-owned front end a distinct cancel action without changing the global
-  quit path. Backspace and gamepad East publish action 7; Escape and gamepad Back remain action 1
-  quit controls. Cancel is inert on Main, otherwise returns Profiles, DiagnosticPlay, Controls, or
-  AssetTopology to its corresponding Main row without publishing a profile command, and wins over
-  simultaneous confirm/navigation edges. Live capture and replay consume the same bounded action
-  schema and terminal input still resolves before any reduction. These bindings and transitions are
-  synthetic native-shell policy, not evidence of a retail control map or menu graph.
+  bootstrap into the current diagnostic game view. BriefingRoom is a synthetic selector for the one
+  startup-bound diagnostic content value; it is not a retail character editor, appearance, loadout,
+  campaign, mission catalog, scene, save, checkpoint, world-state, or parity claim.
+- E-0103 introduced the project-owned cancel edge; the current keyboard/mouse-first host mapping
+  requires no gamepad. W/A/S/D and the arrow keys navigate menus and move in DiagnosticPlay;
+  Return, keypad Enter, or F1 select; Space or left mouse selects in menus and fires the synthetic
+  diagnostic cue in play; Escape or Backspace cancels; T or held right mouse targets in play, with
+  right mouse also acting as menu back; and F10 quits. The 26 physical bindings cover nine logical
+  actions. Gamepad buttons and D-pad directions become optional aliases only after
+  `--set=input.gamepad_enabled=true`, never a startup or play requirement. Live capture and replay consume bounded logical
+  actions without physical provenance. These bindings, cues, and transitions are synthetic
+  native-shell policy, not evidence of a retail control map, combat system, or menu graph.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public
@@ -686,8 +694,9 @@ Studio's historical engine source or internal toolchain.
   are typed failures that leave the complete attempted step unchanged; the original no-input step
   remains the neutral wrapper. A separate SDL-free `omega_gameplay` value maps only the synthetic
   digital domain `-1/0/1` to one signed project unit on the X/Z axes.
-  `OmegaApp` owns one synthetic diagnostic actor and binds W/S/A/D plus the gamepad D-pad to held
-  movement actions. The same immutable command is applied to each fixed step planned for that
+  `OmegaApp` owns one synthetic diagnostic actor and binds W/S/A/D plus the arrow keys to held
+  movement actions; the gamepad D-pad is an optional alias. The same immutable command is applied to
+  each fixed step planned for that
   input frame. `RunReplaySession` can opt into the identical input-to-world path; its default stays
   neutral for old callers, while the finite capture/replay CLI enables it only when all four
   synthetic action identifiers are present. The established `OpenOmega fresh replay:` output line
@@ -1310,9 +1319,16 @@ timing value, not a retail-rate claim. The app also owns a non-hot-reloadable SD
 callback never reads files, logs, blocks, or touches retail data; the current silent stream proves
 device lifecycle and thread plumbing without embedding or guessing proprietary audio. A separate
 non-hot-reloadable `SdlInputService` is the sole global event-queue consumer through `PumpEvents`,
-owns the gamepad subsystem and primary-gamepad lifetime, and translates accepted events into the
-neutral input tracker. `SdlGpuHost` is consequently limited to video, window, GPU, and rendering
-resources.
+routes keyboard and mouse input without requiring a controller, and owns a primary-gamepad lifetime
+only when explicitly enabled. `SdlGpuHost` is consequently limited to video, window, GPU, and
+rendering resources.
+
+The current native controls are keyboard/mouse first. W/A/S/D or the arrow keys navigate and move;
+Return, keypad Enter, or F1 select; Space or left mouse selects in menus and fires the synthetic
+diagnostic cue in play; Escape or Backspace cancels; T or held right mouse targets in play, with
+right mouse acting as back in menus; and F10 quits. Gamepad discovery is off by default;
+`--set=input.gamepad_enabled=true` opts into optional button and D-pad aliases. These are
+project-authored diagnostic controls, not a retail input or combat map.
 
 The zero-file `omega_sdl_gpu_texture_smoke` target compiles whenever tests and the SDL backend are
 built, but hardware/display-dependent CTest registration is off by default for headless safety.
@@ -1320,17 +1336,18 @@ Configure with `-DOMEGA_RUN_GPU_SMOKE_TEST=ON` to register it as a serial GPU in
 
 OpenOmega owns a native persistence database rather than emulating PS2 RAM, memory-card hardware,
 or emulator savestates. Non-probe startup opens the platform-native `OpenOmega/native-save`
-directory and validates a front-end-bounded profile catalog plus any project-owned `profiles/active`
-confirmation pointer and profile-bound diagnostic marker before platform creation; `--frames=0`
-therefore bootstraps persistence, while `--probe-only` never touches it. A fresh database contains
-two checksummed generation-zero snapshots and an empty process-lock file. Profiles use bounded,
-versioned `profiles/<32-lower-hex-id>/metadata` records. Startup never automatically creates or
-selects a default profile; creation occurs only after the explicit empty-Profiles Primary action,
-and that new profile remains unselected until a later Primary action durably confirms it. A reopened
-confirmation is validated but never becomes the new session's active profile without another
-explicit Primary edge. Only a currently resolved session confirmation opens the production Start
-Diagnostic path; its first successful start writes the fixed project marker before DiagnosticPlay,
-and repeating the same valid start performs no write.
+directory and validates front-end-bounded profile and character catalogs plus project-owned active
+identity and diagnostic-session records before platform creation; `--frames=0` therefore bootstraps
+persistence, while `--probe-only` never touches it. A fresh database contains two checksummed
+generation-zero snapshots and an empty process-lock file. Profiles and characters use bounded,
+versioned metadata records. Startup never automatically creates or selects a default identity:
+explicit Primary edges separately create, select, and durably confirm the native profile and
+`DIAGNOSTIC CHARACTER`. Character confirmation opens the project-owned BriefingRoom/mission
+selector.
+Only the currently resolved profile/character pair can activate its one startup-bound diagnostic
+content value; successful preparation writes the fixed session marker before DiagnosticPlay, and
+repeating the same valid preparation performs no write. This flow is native bootstrap policy, not a
+retail profile, character, mission, or save representation.
 Windows uses `%LOCALAPPDATA%/OpenOmega/native-save`, macOS uses
 `$HOME/Library/Application Support/OpenOmega/native-save`, and XDG hosts use
 `$XDG_DATA_HOME/openomega/native-save` or `$HOME/.local/share/openomega/native-save`.
@@ -1350,7 +1367,8 @@ directory or file is created. `--set=KEY=VALUE` applies one validated command-li
 Current keys are
 `log.minimum_severity`, `log.ring_capacity`, `jobs.worker_count`, `jobs.max_pending_jobs`,
 `frame.simulation_step_ns`, `frame.max_steps_per_frame`, `frame.max_delta_ns`,
-`input.max_events_per_frame`, `content.data_root`, and `content.level_code`. The content root plus
+`input.max_events_per_frame`, `input.gamepad_enabled`, `content.data_root`, and
+`content.level_code`. The gamepad key is an exact boolean and defaults to `false`. The content root plus
 optional level form one profile; direct `--data-root`/`--level` options override that profile as one
 pair. Frame defaults are synthetic host-shell engineering values, not claims about the retail tick
 rate. A local root-level `openomega.cfg` is ignored by version control because it may contain a
