@@ -3,40 +3,48 @@
 ## Ownership
 
 ```text
-OmegaApp [game thread, sole lifetime owner]
-|- PlatformService [main thread]
+OmegaApp [game/main thread, sole composition owner]
+|- NativePersistence [game thread]
+|- ConfigStore and LogService [externally serialized]
 |- ContentStartupState [all-or-error level-content owner]
 |  |- GameDataService [owns frozen VirtualFileSystem]
 |  `- LevelTextureStore [optional immutable locator inventory]
 |- JobService [worker pool owner]
-|- AssetService [planned, unimplemented; game thread API; worker decode]
-|- RenderService [render thread]
-|- AudioService [game thread API; audio callback]
-|- SdlInputService [main thread; SDL event/gamepad owner]
-|- ScriptService [game thread]
+|- AssetService [optional; game thread API; worker decode]
+|- FrameScheduler and InputTracker [game thread]
 |- SimulationWorld [game thread; non-hot-reloadable owner]
 |  |- EntityRegistry [world-owned identity component]
 |  `- ComponentStore<Position3> [world-owned bounded synthetic position state]
-|- UiService [game thread build; render thread consume]
-`- NetworkService [game thread API; I/O worker]
+|- SdlPlatformService [main thread; process-global SDL owner]
+|- SdlInputService [main thread; SDL event/gamepad owner]
+|- SdlAudioService [main thread control; SDL audio callback]
+|- SdlGpuHost [main/render thread; GPU resource owner]
+`- OpeningMoviePlayer [optional; created last and destroyed first]
 ```
 
-E-0043 supersedes the historical planned/unimplemented `AssetService` labels in this tree and the
-earlier prose retained below. The current composition root owns an optional `AssetService` after
-`JobService` and only when `ContentStartupState` contains a `LevelTextureStore`. Its declaration and
-reverse-destruction order release the asset service before the worker pool and content state, so its
-non-owning `JobService`, `GameDataService`, and `LevelTextureStore` dependencies remain valid.
+Script, UI, network, and backend-neutral render services are target engine concepts, not current
+`OmegaApp` owners. They become concrete only with evidence-backed callers and lifecycle contracts.
 
-`OmegaApp` owns every service through `std::unique_ptr` and destroys them in reverse order.
-Services never own the app or one another. Dependencies are constructor references whose
-lifetime is guaranteed by the app. Long-lived asset references are typed generation handles,
-not raw pointers or `shared_ptr` ownership graphs.
+The current composition root owns an optional `AssetService` after `JobService` and only when
+`ContentStartupState` contains a `LevelTextureStore`. Its declaration and reverse-destruction order
+release the asset service before the worker pool and content state, so its non-owning `JobService`,
+`GameDataService`, and `LevelTextureStore` dependencies remain valid.
 
-The initial composition root now owns the validated configuration store, content startup state,
+`OmegaApp` is the ultimate composition owner and destroys its top-level objects in reverse order.
+Peer lifecycle-heavy services are generally held through `std::unique_ptr`; explicit aggregates own
+their subordinate state. In particular, `NativePersistence` owns its `SaveDatabase` and
+`ProfileCatalog`, while `ContentStartupState` owns its `GameDataService` and optional
+`LevelTextureStore`. No subordinate object owns the app. Constructor references outside those
+explicit aggregates are non-owning dependencies whose lifetimes are guaranteed by the composition
+root. Long-lived asset references are typed generation handles, not raw pointers or `shared_ptr`
+ownership graphs.
+
+The composition root owns the validated configuration store, content startup state,
 stderr/ring log sinks, logging service, worker pool, fixed-step scheduler, input tracker,
 `SimulationWorld`, SDL process-global platform service, SDL input service, SDL audio service, and
-SDL GPU host in that order. The host is created last and destroyed first; audio and input stop
-before the platform service calls the process-global SDL shutdown.
+SDL GPU host in that order. The host is the last platform service. An explicitly selected
+`OpeningMoviePlayer` may be created afterward, so it is destroyed before the host; audio and input
+stop before the platform service calls the process-global SDL shutdown.
 `OmegaApp::Run` owns the steady clock, closes immutable input frames, asks the scheduler for a
 bounded plan, executes every planned world step, copies the clock and live-entity aggregate into an
 owned renderer-neutral `RenderFramePacket`, then submits one render frame. The current host consumes
@@ -54,8 +62,9 @@ runtime or simulation libraries.
 member into one `SpatialMeshIR`, and separately resolves the unique VUM member into one semantic
 `MaterialCatalogIR`, both in manifest order and cardinality. HOG objects, byte spans, and retail
 offsets remain local to each call. The catalog names retain no assigned role, and no COL triangle,
-TDX asset, placement, transform, visibility, or draw binding is asserted. A future, currently
-unimplemented `AssetService` will receive a non-owning reference; neither service will own the other.
+TDX asset, placement, transform, visibility, or draw binding is asserted. The optional
+`AssetService` receives non-owning dependencies on the stable content and worker services and owns
+none of those dependencies.
 
 `LevelManifestIR` also owns explicit `SourceLocator` values for the level's sibling `TEX.HOG` and
 `MAPTEX.HOG` texture sources. These locators preserve source provenance only; their order assigns no
@@ -76,17 +85,28 @@ resources: files, jobs, GPU objects, audio voices, input devices, scripts, and s
 The simulation operates on components through systems. Platform and resource services do not
 contain mission rules.
 
-## Thread contract
+## Thread contract and target roles
+
+The current app runs composition, deterministic simulation, SDL event/input control, opening-movie
+source inspection, Media Foundation decode/frame conversion, PSS PCM decode, and audio-ring refill on
+the main/game thread. The current worker pool performs the bounded texture load/decode work submitted
+by `AssetService`. The SDL audio callback consumes a fixed sample ring and atomic session state;
+project callback code performs no explicit lock or wait, file load, log write, media parse, or dynamic
+allocation. This claim does not cover SDL internals.
+
+As further systems become real, the intended roles are:
 
 - **Game thread:** deterministic simulation, scripts, AI, mission state, and entity mutation.
-- **Render thread:** GPU device/queue/resources and immutable frame packets.
-- **Worker pool:** file reads, decompression, parsing, and CPU-side asset preparation.
-- **Audio callback:** consumes lock-free commands; never loads files or blocks.
+- **Render thread:** GPU device/queue/resources and immutable frame packets; it may initially be the
+  same physical thread as the game/main thread.
+- **Worker pool:** explicitly thread-safe file reads, decompression, parsing, and CPU-side asset
+  preparation.
+- **Audio callback:** bounded consumption of prebuilt audio state, with no project-code wait or lock.
 - **Network I/O:** receives packets into queues; game-thread code applies state changes.
 
-Every public API carries a thread-affinity comment. Debug builds will add thread assertions as
-each service becomes real. Cross-thread ownership transfers use immutable packets or explicit
-queues.
+An explicit affinity annotation and, where practical, a debug assertion are requirements for public
+API promotion, not a claim that every current helper already carries one. Promoted cross-thread
+ownership transfers use immutable packets or explicit bounded queues.
 
 `LevelTextureStore::Open` is a game-thread operation and requires that neither the store nor its
 source service be moved or destroyed concurrently. After a successful Open, `size`, `HandleAt`, and
@@ -129,13 +149,11 @@ handles fail closed at resident lookup.
 - `LevelTextureStore` normalizes, sorts, and deduplicates the manifest's explicit texture sources,
   resolves each source through the bound `GameDataService`, and owns a sorted, deduplicated direct
   TDX locator inventory. Named-level startup invokes `Open` and owns the resulting value, but does not
-  call `Load`; the planned `AssetService` remains unimplemented.
-- The planned, currently unimplemented `AssetService` will map paths to typed handles, perform async
-  decode, and publish immutable CPU assets before render/audio upload.
-- E-0043 supersedes the two preceding historical `AssetService` clauses: v0 accepts an existing
-  `LevelTextureHandle`, schedules bounded asynchronous native storage loading, and publishes a
-  generation handle. It deliberately performs no path/name lookup, alias resolution, material
-  consumption or binding, display expansion, GPU upload, placement, visibility, or rendering.
+  call `Load` directly.
+- `AssetService` v0 accepts an existing `LevelTextureHandle`, schedules bounded asynchronous native
+  storage loading, and publishes an immutable CPU asset behind a generation handle. It deliberately
+  performs no path/name lookup, alias resolution, material consumption or binding, display
+  expansion, GPU upload, placement, visibility, or rendering.
 - `ScriptService` executes only project-owned native logic or declarative mission data. Retail
   executable/script modules are inspected offline and are never loaded as executable code.
 - `SimulationWorld` advances only from explicit fixed-step calls and owns deterministic completed-
@@ -183,33 +201,90 @@ handles fail closed at resident lookup.
   Choosing one primary is a synthetic host-shell policy, not a retail behavior claim. A
   deterministic headless virtual-gamepad regression covers attach/open, filtered button edges,
   disconnect reconciliation, and promotion without a window or physical controller.
-- `AudioService` owns a system-default SDL playback stream. Its first callback supplies bounded,
-  frame-aligned project-owned silence from a fixed buffer and publishes only lock-free diagnostic
-  counters. The 48 kHz stereo F32 source format is a native engineering choice, not a retail claim;
-  decoded voices and mixing remain future clean-room work.
+- `AudioService` owns a system-default SDL playback stream. Its callback supplies bounded,
+  frame-aligned project-owned silence while idle and consumes opening-movie samples from one fixed
+  single-producer ring when active. The main thread performs PSS PCM validation, deinterleave,
+  PCM16-to-F32 conversion, refill, pause, and discard; project callback code performs no file access,
+  logging, explicit locking, or dynamic allocation and publishes only lock-free counters. The 48 kHz
+  stereo F32 device format and device-demand movie clock are native engineering policy, not retail
+  timing or final hardware-playback proof. General decoded voices, resampling, mixing, and title
+  selection remain future clean-room work.
 
-## Hot reload
+## Hot reload target (not implemented)
 
-Research builds may hot-reload decoded assets, internal scripts, and mission compatibility
-tables at frame boundaries. Platform, renderer, input device/event pump, audio device, and network
-transport are non-hot-reloadable initially. The validated retail-data root and its frozen mount
-table, `SimulationWorld`, its `EntityRegistry`, and future direct `ComponentStore<T>` members are
-also non-hot-reloadable. Entity IDs may be copied as plain data, but registry/component storage and
+There is no current file watcher or live-reload implementation. A future research/SDK path may
+hot-reload decoded assets, project-owned scripts, and mission compatibility tables at frame
+boundaries. Platform, renderer, input device/event pump, audio device, and network transport remain
+non-hot-reloadable initially. The validated retail-data root and its frozen mount table,
+`SimulationWorld`, its `EntityRegistry`, and direct `ComponentStore<T>` members also remain
+non-hot-reloadable. Entity IDs may be copied as plain data, but registry/component storage and
 borrowed component references never cross a reloadable boundary. No vtable pointer crosses a
 reloadable boundary.
+
+## Compatibility adapters, semantic IR, and SDK boundary
+
+[`ADR 0004`](adr/0004-compatibility-first-engine-sdk.md) makes Omega Strain compatibility the
+proving workload for the reusable OpenOmega engine and SDK. The intended boundary is:
+
+```text
+retail data -> bounded compatibility adapters --+
+                                                +-> owned semantic IR -> native asset compiler
+                                                                                  |
+project data -> native source importers --------+                                 v
+                                                                         cooked data -> runtime
+
+promoted semantic or source-preserving compatibility data -> optional tool-only exporters
+```
+
+Retail adapters may retain title layouts and provenance inside compatibility/tooling layers. The
+current `omega::asset` namespace also contains owned source-preserving values such as structural
+text, raw audio flags, observed fields, and source locators. Those values are useful compatibility
+contracts but are transitional inputs, not automatically stable semantic or cooked engine IR.
+Passive descriptors and structural envelopes cannot enter shipping simulation, rendering, audio
+policy, or a cooked asset merely because they parse.
+
+All published values own their data. A deliberately promoted semantic/cooked IR excludes borrowed
+input spans, retail offsets, platform objects, and speculative meanings, and keeps provenance in a
+separate value or tool-side record. Runtime services consume those promoted values or future
+versioned cooked data; they do not depend on editor code. Project-authored and retail inputs will
+converge at that semantic/import boundary, while original-format export remains an isolated,
+optional compatibility tool.
+
+The current private `omega_content -> omega_retail_formats` link is transitional compatibility
+composition. It will be split behind a provider/import boundary when native cooked content becomes a
+real second consumer; inventing that interface earlier would freeze untested assumptions. Similarly,
+application-host headers exposed from `native/apps/openomega` for composition and tests are internal
+scaffolding, not source-stable SDK APIs. A location under `native/include/omega/` is necessary but
+not sufficient for future engine API stability: retail, compatibility, platform-named, provisional,
+and source-preserving headers remain internal until an explicit decision promotes them.
+
+The detailed maturity gates and staged exits live in
+[`07-Engine-and-SDK-Roadmap.md`](07-Engine-and-SDK-Roadmap.md).
 
 ## Dependency direction
 
 ```text
-apps -> runtime -> content -> retail formats -> assets/core
-   |                   \-> vfs -> core
-   \-> simulation
-gameplay -> simulation -> core
-        \-> assets -> vfs -> core
-renderer/audio/platform -> core
+omega_profiles -> omega_persistence
+omega_media -> omega_assets                         (+ Windows OS libraries privately)
+omega_gameplay -> omega_simulation
+omega_retail_formats -> omega_assets + omega_core
+omega_content -> omega_assets                       (public)
+              -> omega_core + omega_retail_formats  (private)
+omega_runtime -> omega_assets + omega_content       (public)
+              -> Threads                            (private)
+omega_app_core -> omega_profiles + omega_runtime + omega_simulation + omega_gameplay
+omega_sdl_backend -> SDL3                           (public)
+                  -> omega_runtime                  (private)
+omega_native_persistence -> omega_profiles
+omega_app_host -> omega_app_core + omega_media + omega_native_persistence
+               + omega_runtime + omega_simulation + omega_sdl_backend
+omega_tool -> omega_core + omega_retail_formats + omega_content + omega_runtime  (private)
+openomega -> omega_app_host
 ```
 
-Platform backends and retail decoders are leaves. Core and simulation never include PCSX2,
+These are the current CMake project-dependency edges, not a promise that every public link is a stable
+SDK edge. A dependency-free target such as `omega_ps2_compat` intentionally has no arrow. Platform
+backends and retail decoders remain architectural leaves. Core and simulation never include PCSX2,
 Windows, GPU API, or proprietary-format implementation headers.
 
 `omega_persistence` and `omega_profiles` are separate bottom-level native service layers. Persistence
@@ -218,7 +293,7 @@ platform-neutral and neither can include runtime, content, retail-format, simula
 SDL, or PCSX2 headers. Profiles may depend only on persistence; the app may own both through its
 composition service, and no lower layer depends upward on it.
 
-The initial native build targets express the same direction:
+The current native build targets express the same direction:
 
 - `omega_core`: HOG indexing, VFS, and generic bounded infrastructure;
 - `omega_persistence`: the project-owned transactional save database, with no emulator or retail
@@ -228,14 +303,25 @@ The initial native build targets express the same direction:
 - `omega_ps2_compat`: stateless bounded standard PS2 memory-card image/filesystem codecs over owned
   bytes, with no dependency on persistence, retail payloads, PCSX2, or emulator state;
 - `omega_assets`: canonical owned IR values and decode contracts;
+- `omega_media`: bounded MPEG/program-stream and owned decoded-media values. Its current
+  Media-Foundation-named public header and `platform_code` error field are transitional internal
+  contracts, not promoted SDK APIs, even though Windows SDK types remain hidden;
 - `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
-- `omega_retail_formats`: stateless POP/COL/VUM/TDX/VAG/LPD/VPK/SKM/SKL/SKA/SKAS adapters that may
-  depend on the first two targets;
+- `omega_gameplay`: project-owned gameplay systems over `omega_simulation`;
+- `omega_retail_formats`: stateless retail adapters and passive descriptors over `omega_assets` and
+  `omega_core`;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
-  orchestration;
+  orchestration, currently with a private transitional retail-adapter dependency;
 - `omega_runtime`: launch/configuration services and renderer-neutral diagnostic scene values
-  consumed by the composition root and SDL host; and
-- `omega_sdl_backend`: the non-hot-reloadable SDL platform, audio, input translation, and GPU leaf.
+  consumed by the composition root and SDL host;
+- `omega_app_core`: portable OpenOmega title composition over profiles, runtime, simulation, and
+  gameplay;
+- `omega_tool`: offline inspection and verification that may link retail adapters;
+- `omega_native_persistence`: app composition over project-owned profiles and saves;
+- `omega_sdl_backend`: the non-hot-reloadable SDL platform, audio, input translation, and GPU leaf;
+  and
+- `omega_app_host`: the runtime composition leaf joining app core, media, persistence, simulation,
+  runtime, and SDL before the `openomega` executable.
 
 E-0083 implements the standalone `omega_persistence` foundation described in
 `docs/04-Native-Persistence.md`. `SaveDatabase` is movable but noncopyable and holds one exclusive
@@ -974,14 +1060,9 @@ offsets, payloads, per-level rows, identities, bindings, messages, or exception 
 
 Startup owns `LevelManifestIR`, one `LevelContentIR`, and the inventory-only `LevelTextureStore` as
 one all-or-error content state. Store Open occurs after the synthetic debug image succeeds; startup
-does not call texture `Load`. `AssetService` remains unimplemented, and no texture locator or loaded
-storage enters `RenderFramePacket`, `RenderService`, `SimulationWorld`, material catalogs, or a
-renderer upload path. Display expansion and all ownership/binding semantics beyond this native
-level-scoped locator inventory remain explicitly unwired.
-
-E-0043 supersedes only the historical “`AssetService` remains unimplemented” clause above. Startup
-may now construct the optional service, but still issues no asset request and sends no texture data to
-`RenderFramePacket`, `RenderService`, `SimulationWorld`, a material catalog, or any upload path. The
+may construct the optional E-0043 `AssetService`, but still issues no asset request and sends no
+texture data to `RenderFramePacket`, `RenderService`, `SimulationWorld`, a material catalog, or any
+upload path. The
 service performs no VUM-name/material lookup, alias resolution, material/texture/cell/mesh/draw
 binding, display-pixel expansion, placement, visibility, or rendering.
 

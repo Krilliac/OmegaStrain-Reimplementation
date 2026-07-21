@@ -7,8 +7,9 @@ This document is derived mechanically from tracked repository source: the suffix
 narrower archive-level inventory in `analysis/formats/hog-validation.json` (produced by
 `tools/validate_hogs.py`), the whole-disc file tally in `analysis/manifests/disc-summary.json`
 (produced by `tools/generate_manifest.py`), the frozen category map in
-`tools/measure_frontend_hog_topology.py`, every header under `native/include/omega/retail/` and
-`native/include/omega/asset/`, every corresponding file under `native/src/`, and `CMakeLists.txt`.
+`tools/measure_frontend_hog_topology.py`, every header under `native/include/omega/retail/`,
+`native/include/omega/asset/`, and `native/include/omega/media/`, every corresponding file under
+`native/src/`, the opening-movie presentation boundary, and `CMakeLists.txt`.
 No claim below rests on memory, plausibility, or naming intuition; every row cites the
 repo-relative tracked file(s) it comes from. Where a suffix has no citable tooling or decoder
 beyond a raw count, it is marked `unknown` rather than inferred.
@@ -35,9 +36,11 @@ than one native code path):
   (`asset-fingerprints.json`/`hog-validation.json`). This is also the mandatory bucket for `.PF`
   and `.TM2` per the campaign's hard rules, regardless of what any manifest tool counts.
 
-No native decoder, envelope, or descriptor in this tree asserts retail menu role, lookup rule,
-layout, timing, rendering, audio, owner-corpus coverage, or PCSX2 equivalence. Those remain false
-unless separately demonstrated, independent of the classification below.
+No retail-format decoder, envelope, or descriptor in this matrix asserts menu role, lookup rule,
+layout, rendering behavior, owner-corpus coverage, or PCSX2 equivalence. The separate opening-movie
+path presents one bounded MPEG-PS/H.262/PCM shape through project-owned video, audio, and clock
+boundaries; that application capability does not establish suffix-wide retail behavior or general
+audio/video parity.
 
 ## 1. Suffix classification matrix
 
@@ -58,15 +61,15 @@ unless separately demonstrated, independent of the classification below.
 | `.skm` | passive descriptor only | `InspectSkmContainer` → `SkmContainerDescriptor` (`native/include/omega/retail/skm_container_descriptor.h`, `native/src/retail/skm_container_descriptor.cpp`) | `native/tests/skm_container_descriptor_tests.cpp` (`omega_core_tests`, `CMakeLists.txt:1403`) |
 | `.so` | passive descriptor only | `InspectSoModule` -> `SoModuleDescriptor` validates the tracked little-endian structural grammar through exact EOF while retaining bounded section ranges, counts, and neutral record summaries but no code cells, strings, or payload bytes (`native/include/omega/retail/so_module_descriptor.h`, `native/src/retail/so_module_descriptor.cpp`) | `native/tests/so_module_descriptor_tests.cpp` (own executable `omega_so_module_descriptor_tests`, registered in `CMakeLists.txt`) |
 | `.tbl` | passive descriptor only | `InspectTblEnvelope` -> `TblEnvelopeDescriptor` performs the bounded fixed-stride zero-sentinel observation while retaining only payload size, sentinel offset, preceding nonzero-probe count, and opaque trailing-byte count; inter-probe and trailing bytes remain opaque and no lane, integer, endianness, record, lookup, or front-end semantics are assigned (`native/include/omega/retail/tbl_envelope_descriptor.h`, `native/src/retail/tbl_envelope_descriptor.cpp`) | `native/tests/tbl_envelope_descriptor_tests.cpp` (own executable `omega_tbl_envelope_descriptor_tests`, registered in `CMakeLists.txt`; project-generated fixtures only) |
-| `.gui` | aggregate scanner only | Raw suffix count in `asset-fingerprints.json` (`scan.extensions[".gui"]`) and in `hog-validation.json` (`entry_extensions[".gui"]`); `tools/measure_frontend_hog_topology.py` currently maps `.gui` → category `gui` in `APPROVED_EXTENSION_CATEGORIES` (schema_version 2, observed in the tracked file at read time) — this is a container-topology label, not a structural field schema | `tools/tests/test_measure_frontend_hog_topology.py` covers the topology label only, not a `.gui` payload schema |
-| `.fnt` | aggregate scanner only | Raw suffix count only, in both `asset-fingerprints.json` and `hog-validation.json`; `analysis/formats/FRONTEND-TOPOLOGY.md` explicitly documents it as deliberately left out of the approved vocabulary ("menu-adjacent-sounding suffixes such as `.fnt` and `.ie` deliberately remain in the `other` bucket") | none |
-| `.ie` | aggregate scanner only | Same as `.fnt` — raw count only, explicitly named as excluded in `FRONTEND-TOPOLOGY.md` | none |
+| `.gui` | passive descriptor only | `InspectGuiEnvelope` implements one project-defined three-byte-tag/prefix hypothesis, reads one neutral little-endian word after an opaque byte, and reports the fixed boundary of an otherwise opaque root region. It does not traverse the root or assign version, count, flag, layout, widget, node, lookup, render, or menu semantics. No tracked evidence records the retail provenance of its constants (`native/include/omega/retail/gui_envelope_descriptor.h`, `native/src/retail/gui_envelope_descriptor.cpp`) | `native/tests/gui_envelope_descriptor_tests.cpp` (own executable `omega_gui_envelope_descriptor_tests`; project-generated fixtures only) |
+| `.fnt` | passive descriptor only | `InspectFntEnvelope` implements one small project-defined prefix hypothesis and reports a printable region, its terminator, and the remaining opaque payload as byte ranges without retaining source bytes. It assigns no version, resource binding, glyph, metric, texture, render, or font semantics. No tracked evidence records the retail provenance of its constants (`native/include/omega/retail/fnt_envelope_descriptor.h`, `native/src/retail/fnt_envelope_descriptor.cpp`) | `native/tests/fnt_envelope_descriptor_tests.cpp` (own executable `omega_fnt_envelope_descriptor_tests`; project-generated fixtures only) |
+| `.ie` | passive descriptor only | `InspectIeEnvelope` implements one project-defined prefix-layout hypothesis, skips an opaque two-byte prefix, reads one neutral little-endian word, and reports the fixed boundary of an otherwise opaque root region. It does not traverse the root or assign tag, version, count, flag, string, node, layout, lookup, or menu semantics. No tracked evidence records the retail provenance of its offsets (`native/include/omega/retail/ie_envelope_descriptor.h`, `native/src/retail/ie_envelope_descriptor.cpp`) | `native/tests/ie_envelope_descriptor_tests.cpp` (own executable `omega_ie_envelope_descriptor_tests`; project-generated fixtures only) |
 | `.bin` | aggregate scanner only | Raw suffix count in `asset-fingerprints.json`/`hog-validation.json`; also present in `tools/check_public_tree.py`'s commit-blocklist (existence signal only, not structural evidence) | none |
 | `.bnk` | aggregate scanner only | Raw suffix count only (`asset-fingerprints.json`, `hog-validation.json`) | none |
 | `.bon` | aggregate scanner only | Raw suffix count only | none |
 | `.gun` | aggregate scanner only | Raw suffix count only (`asset-fingerprints.json`; absent from `hog-validation.json`'s narrower top-level tally) | none |
 | `.prn` | aggregate scanner only | Raw suffix count only | none |
-| `.pss` | aggregate scanner only | Raw suffix count only; also in `check_public_tree.py`'s blocklist. `omega::media::InspectMpegProgramStream` is a generic MPEG-2 Program Stream/PES inspector backed only by project-generated fixtures; no tracked evidence connects that syntax to `.pss`, so it is not a `.pss` decoder or descriptor | none for `.pss`; generic framing tests only in `native/tests/mpeg_program_stream_descriptor_tests.cpp` |
+| `.pss` | aggregate scanner only (suffix classification) | Raw suffix counts remain the only tracked suffix-wide corpus evidence. Separately, the native opening-movie path bounds and inspects MPEG-2 Program Stream/PES framing, builds a zero-copy MPEG video plan, inspects H.262 sequence facts, decodes video through Media Foundation on Windows, parses one narrow SShd/SSbd signed-PCM shape, deinterleaves it into caller-owned samples, and presents it through bounded SDL video/audio queues. Those APIs accept an explicit external movie and do not prove that every retail `.pss` member uses the accepted shape or behaves like the retail runtime (`native/include/omega/media/`, `native/apps/openomega/opening_movie_player.h`, `native/apps/openomega/sdl_audio_service.h`) | Suffix occurrence only; synthetic media coverage in `native/tests/mpeg_program_stream_descriptor_tests.cpp`, `mpeg_video_elementary_stream_tests.cpp`, `media_foundation_h262_decoder_tests.cpp`, `pss_pcm_audio_stream_tests.cpp`, and app/audio tests |
 | `.scc` | aggregate scanner only | Raw suffix count only in both archive inventories, plus a separate whole-disc count in `disc-summary.json` | none |
 | `.skel` | aggregate scanner only | Raw suffix count only | none |
 | `.skf` | aggregate scanner only | Raw suffix count only | none |
@@ -75,20 +78,22 @@ unless separately demonstrated, independent of the classification below.
 | `.PF` (`.pf`) | unknown (hard-rule mandated) | Zero occurrences in either in-archive inventory; exactly 3 whole-disc occurrences in `analysis/manifests/disc-summary.json`, outside any HOG archive | none |
 | `.TM2` (`.tm2`) | unknown (hard-rule mandated) | Zero occurrences in either in-archive inventory; exactly 16 whole-disc occurrences in `analysis/manifests/disc-summary.json`, outside any HOG archive | none |
 
-Totals observed in this pass: **6 canonical decoder**, **4 structural envelope only**, **5 passive
-descriptor only**, **14 aggregate scanner only**, **2 unknown** — 31 families.
+Totals observed in this pass: **6 canonical decoder**, **4 structural envelope only**, **8 passive
+descriptor only**, **11 aggregate scanner only**, **2 unknown** — 31 families.
 
 ## 2. CMake / test registration cross-check
 
-Every native header listed above as canonical/envelope/descriptor has a matching `.cpp` under
-`native/src/retail/` (or `native/src/archive/`, `native/src/asset/`) in `CMakeLists.txt`, plus a
-matching focused test registered either through its own executable/CTest pair or as part of
-`omega_core_tests`. **No missing CMake registration was found** for any of the 15 retail-format
-headers or `hog_archive`/`pop_terrain_index`/`container_descriptors`.
+Every matrix-listed native canonical/envelope/descriptor boundary has a matching implementation in
+`native/src/retail/` (or `native/src/archive/`/`native/src/asset/`) registered in `CMakeLists.txt`,
+plus focused coverage through its own executable/CTest pair or `omega_core_tests`. The FNT, GUI,
+and IE passive descriptors each have an independently registered focused test. **No missing CMake
+registration was found** for a matrix-listed native format boundary.
 
-The separate `omega_media` target registers the generic MPEG-2 Program Stream inspector and its
-generated-fixture test. It is intentionally outside `omega_retail_formats`: the public tree has no
-evidence-backed mapping from that standardized framing grammar to any retail suffix.
+The separate `omega_media` target registers the generic MPEG-2 Program Stream inspector, video
+range planning/H.262 inspection, Windows Media Foundation video adapter, and narrow PSS PCM stream
+planner/deinterleaver. `openomega` composes those pieces with its opening-movie player and bounded
+SDL presentation services. Keeping them outside `omega_retail_formats` is deliberate: media
+presentation for one accepted external stream shape is not a suffix-wide canonical asset decoder.
 
 ## 3. Mixed-layer families and mechanical inconsistencies (not fixed)
 
@@ -173,16 +178,17 @@ Ranked by how directly current tracked evidence motivates the next step — not 
 about retail menu roles. Each entry names the missing evidence and the privacy-safe aggregate
 collection that would produce it.
 
-1. **Run the implemented size-only collector for `.gui/.fnt/.ie`.**
-   `tools/measure_member_structural_fingerprint.py` now has a frozen, bounded, path-free schema
-   documented in `MEMBER-STRUCTURAL-FINGERPRINT.md`, with generated privacy and boundary tests.
-   This confirms only the collector contract. Missing evidence: a reviewed, sanitized owner-corpus
-   result containing count/min/max/distinct/GCD values. Size GCD is a divisor of sizes, never an
-   address-alignment claim.
-2. **Keep the semantic GUI-envelope gate closed.** A size-only result can test uniformity but cannot
-   establish a header, field, valid/invalid grammar, menu role, or native `GuiEnvelopeIR`. Promotion
-   requires a falsifiable grammar, generated malformed boundaries, and independent consumer
-   evidence.
+1. **Keep the semantic front-end gate closed beyond the three passive prefix hypotheses.** FNT, GUI,
+   and IE now have bounded, generated-fixture-tested `Inspect*` descriptors, but no tracked evidence
+   records the retail provenance of their constants. Their opaque payload/root regions are
+   intentionally not traversed. Do not turn neutral words or byte ranges into
+   font, widget, node, layout, lookup, render, or menu fields without independent consumer evidence
+   and a falsifiable deeper grammar.
+2. **Use the size-only collector only as a coverage aid.**
+   `tools/measure_member_structural_fingerprint.py` retains its frozen, bounded, path-free schema
+   documented in `MEMBER-STRUCTURAL-FINGERPRINT.md`. A reviewed, sanitized owner-corpus result could
+   measure cohort size regularity, but it cannot promote any passive descriptor to a semantic IR.
+   Size GCD is a divisor of sizes, never an address-alignment claim.
 3. **Optionally measure `.bnk/.gun`.** The same collector accepts these two suffixes only when
    explicitly requested. They remain `aggregate_scanner_only` until a sanitized owner result is
    tracked and still gain no audio, weapon, or menu semantics from their names.
@@ -190,12 +196,16 @@ collection that would produce it.
    `FRONTEND-TOPOLOGY.md`'s frozen schema already computes "every unordered pair of approved
    suffixes that shares a normalized sibling basename," but only across the approved vocabulary.
    Missing evidence: whether `.gui`, `.fnt`, or `.ie` members ever co-locate (same basename) with
-   `.tdx`, `.vum`, or `.txt` members — the most direct structural precursor to a font/texture/table
-   co-location signal, still asserting zero semantics. Collection: once (1)-(3) establish that a
-   suffix is structurally uniform enough to be worth promoting, reuse the existing pair-key
-   machinery in `tools/measure_frontend_hog_topology.py` (Agent B/C's schema-versioned extension,
-   not to be duplicated here).
-5. **Whether `.tbl` ever occurs inside a HOG archive.** Tracked evidence: `.tbl` is frozen into
+   `.tdx`, `.vum`, or `.txt` members — a structural co-location signal that would still assert zero
+   semantics. Collection: only if a separately reviewed topology question warrants extending the
+   approved vocabulary for `.fnt`/`.ie`, reuse the existing pair-key machinery in
+   `tools/measure_frontend_hog_topology.py`; do not duplicate it or treat a pairing as a binding.
+5. **Keep opening-movie capability separate from suffix-wide `.pss` parity.** The native path can
+   present bounded H.262 video and one narrow block-interleaved PCM shape from an explicitly
+   selected MPEG-PS input. Missing evidence includes accepted-shape coverage across retail members,
+   alternate private-stream variants, subtitle/multi-stream behavior, seek policy, and exact retail
+   A/V timing. Add support one demonstrated variant at a time; do not infer it from the suffix.
+6. **Whether `.tbl` ever occurs inside a HOG archive.** Tracked evidence: `.tbl` is frozen into
    the topology scanner's approved vocabulary and category map, but has never been observed inside
    any archive in either archive-level inventory — only once, outside any archive, in the
    whole-disc tally. Missing evidence: does this suffix ever appear as an actual HOG member.
@@ -203,7 +213,7 @@ collection that would produce it.
    `tools/fingerprint_assets.py` run against a directory tree that happens to contain a `.tbl`
    member (if one exists) would settle this; until then it should be flagged as an untested
    vocabulary slot rather than assumed populated.
-6. **Confirm `.PF`/`.TM2` remain absent from every archive-level inventory.** Tracked evidence:
+7. **Confirm `.PF`/`.TM2` remain absent from every archive-level inventory.** Tracked evidence:
    both are true only at the whole-disc level (`disc-summary.json`, 3 and 16 occurrences
    respectively) and are explicitly named in the campaign's hard rules as families to keep
    `unknown` regardless. Missing evidence: nothing changes this without new tracked in-archive
@@ -212,8 +222,10 @@ collection that would produce it.
 
 ## 5. What this document does not establish
 
-Consistent with the campaign's evidence bar: no row above proves retail menu role, lookup
-behavior, field semantics, layout, render state, timing, audio playback policy, owner-corpus
-coverage, or PCSX2 behavioral equivalence for any suffix, including the six classified as
-"canonical decoder." Canonical-decoder status means a native, tested, bounded parser owns a typed
-result for that suffix — nothing more.
+Consistent with the campaign's evidence bar: no row above proves retail menu role, lookup behavior,
+field semantics, layout, render state, owner-corpus coverage, or PCSX2 behavioral equivalence for
+any suffix, including the six classified as "canonical decoder." Canonical-decoder status means a
+native, tested, bounded parser owns a typed result for that suffix — nothing more. The opening-movie
+composition additionally proves a project-owned presentation path for one accepted external
+MPEG-PS/H.262/PCM shape; it does not prove general `.pss` compatibility, exact retail A/V timing,
+alternate stream variants, subtitles, seeking, or non-Windows end-to-end playback.

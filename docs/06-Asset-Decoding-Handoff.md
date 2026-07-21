@@ -1,9 +1,10 @@
 # Asset-decoding handoff (for the Codex workstream)
 
-Prepared 2026-07-20 on branch `claude/frontend-asset-decoding` (see PR #58). This document hands the
-Claude asset-decoding workstream's non-decoding follow-up to the Codex workstream: C++ adapter
-tests, mechanical verification, evidence-collection runs against the owner corpus, and RE-tool
-integration. It records only tracked, aggregate, path-free facts.
+Originally prepared 2026-07-20 from the `claude/frontend-asset-decoding` workstream (PR #58), then
+refreshed after the bounded front-end descriptors and native opening-movie audio path landed in
+PR #70. This document hands forward adapter hardening, evidence collection, and RE-tool integration.
+It records only tracked, path-free facts and keeps implementation capability distinct from retail
+behavioral parity.
 
 The governing rules are unchanged: never access `D:`; never commit private/runtime/third_party
 content; a format claim requires tracked aggregate evidence plus adversarial validation; unknown
@@ -15,10 +16,13 @@ a regression. See `docs/01-Clean-Room-Method.md` and `analysis/evidence/ledger.j
 - `.gui` is now a first-class category in the front-end HOG topology scanner (schema_version 2);
   `.fnt`/`.ie` stay in `other`. See `tools/measure_frontend_hog_topology.py` and
   `analysis/formats/FRONTEND-TOPOLOGY.md`.
-- The front-end evidence for `.gui`/`.fnt`/`.ie` is fully audited in
-  `analysis/formats/FRONTEND-EVIDENCE-AUDIT.md`. **The gate verdict is NO**: the tracked tree
-  records only existence and occurrence counts (recursive 77/3/79, top-level 21/3/23) — no member
-  size, byte, header field, or alignment. No front-end envelope decoder was built, by design.
+- The front-end evidence for `.gui`/`.fnt`/`.ie` is audited in
+  `analysis/formats/FRONTEND-EVIDENCE-AUDIT.md`. The original broad semantic-decoder gate remains
+  **NO**, but three later `Inspect*` APIs now provide bounded passive prefix/envelope descriptions:
+  FNT reports a small project-defined prefix hypothesis plus an opaque payload; GUI and IE implement
+  narrow project-defined prefix hypotheses and stop at opaque root boundaries. No tracked evidence
+  records the retail provenance of their constants. They assign no font, glyph, widget, node,
+  layout, lookup, render, menu, or consumer semantics.
 - Every observed format family is classified in `analysis/formats/DECODER-COVERAGE.md` with a
   tracked-source citation, plus a ranked next-evidence queue.
 - Ledger entry `E-0095` records this pass.
@@ -27,17 +31,25 @@ a regression. See `docs/01-Clean-Room-Method.md` and `analysis/evidence/ledger.j
 - Ledger entry `E-0098` promotes `.so` from aggregate-scanner-only to a native passive descriptor.
   The descriptor is analysis-only, uses generated fixtures, retains no strings or code cells, and
   does not authorize retail script execution or runtime integration.
+- Ledger entry `E-0101` records the FNT/GUI/IE passive-descriptor boundary and keeps owner-corpus
+  acceptance, UI/font semantics, consumer bindings, runtime integration, and retail parity
+  explicitly unclaimed.
+- Ledger entry `E-0102` records the bounded private-stream PCM planner/deinterleaver and its native
+  opening-movie SDL presentation path. That path presents one accepted MPEG-PS/H.262/PCM shape; it
+  does not establish suffix-wide `.pss` coverage, exact retail A/V parity, or portable end-to-end
+  playback.
 
 ## Queue for Codex
 
-### 1. Evidence collection to unblock front-end decoding (highest priority)
+### 1. Evidence collection to unblock semantic front-end decoding (highest priority)
 
-The bounded size-only collector is now implemented and synthetically verified; see
+The bounded size-only collector is implemented and synthetically verified; see
 `tools/measure_member_structural_fingerprint.py`,
 `analysis/formats/MEMBER-STRUCTURAL-FINGERPRINT.md`, and ledger E-0097. The next step is a private
 owner-corpus run followed by independent review of only the fixed-schema aggregate. That result is
-not yet tracked. Size regularity is not sufficient by itself: consumer behavior and a falsifiable
-grammar still need independent corroboration before fields or a native decoder are proposed.
+not yet tracked. It is now a coverage aid for the passive descriptors, not a prerequisite for their
+existence and not a semantic promotion. Consumer behavior and a falsifiable deeper grammar still
+need independent corroboration before any opaque region becomes a typed field or IR.
 
 Frozen contract for the bounded, privacy-safe structural fingerprint collector:
 
@@ -55,10 +67,11 @@ Frozen contract for the bounded, privacy-safe structural fingerprint collector:
 - **Bounds:** bounded reads, checked arithmetic, fail closed; caller limits intersect with fixed
   hard ceilings and may only tighten them.
 - **Tests:** synthetic exact/malformed/truncated/limit/determinism/privacy, before any corpus run.
-- **Gate discipline:** a size-only result cannot justify an accept/reject parser. Only after a
-  corpus result motivates a falsifiable grammar, generated malformed boundaries, and independent
-  consumer evidence may a native `GuiEnvelopeIR`/decoder be considered. If those gates fail, stop
-  at the fingerprint and extend the gap note. A plausible invented decoder is a regression.
+- **Gate discipline:** a size-only result cannot widen the existing accept/reject boundaries or
+  justify semantic fields. Only after a corpus result motivates a falsifiable deeper grammar,
+  generated malformed boundaries, and independent consumer evidence may a semantic
+  `GuiEnvelopeIR`/font/UI decoder be considered. If those gates fail, preserve the passive
+  descriptors and extend the gap note. A plausible invented decoder is a regression.
 
 `.bnk` and `.gun` are optional explicit allowlist choices. Their spelling assigns no audio, weapon,
 or menu role.
@@ -73,6 +86,11 @@ Sources and their current tests:
 - SKAS — `native/include/omega/retail/skas_text_envelope_decoder.h`.
 - VPK — `native/include/omega/retail/vpk_wrapper_envelope_decoder.h` (see ledger `E-0094`).
 
+The newer FNT, GUI, and IE boundaries already have dedicated generated-fixture suites for accepted
+prefixes, truncation/malformed cases, hard and caller limits, determinism, unaligned input, and
+path-free typed failures. Extend those suites only when separately demonstrated structure widens a
+descriptor; do not use test construction to invent deeper payload semantics.
+
 Cases to cover for each, if not already present: truncated prefix at every signature byte; span one
 below the minimum and one above the fixed hard ceiling; an unaligned backing slice when the format
 does not require alignment (do not invent an alignment rule); a caller `DecodeLimits` more generous
@@ -86,9 +104,15 @@ and run focused + full CTest per the evidence bar in the AI brief.
 Confirm, mechanically, for every retail adapter: CMake source + focused-test registration;
 `tools/check_native_dependencies.py` coverage; `tools/check_public_tree.py` cleanliness; and
 documentation consistency. This workstream already found the CMake/test registration **clean** and
-recorded nine mechanical inconsistencies in `analysis/formats/DECODER-COVERAGE.md` (§ inconsistencies)
-to reconcile — including a decode-result contract fragmentation across `asset::DecodeResult<T>`,
+recorded mechanical inconsistencies in `analysis/formats/DECODER-COVERAGE.md` (§ inconsistencies) to
+reconcile — including decode-result contract fragmentation across `asset::DecodeResult<T>`,
 `std::expected<T,std::string>`, and the POP terrain types, and singular/plural test-name drift.
+
+For media work, keep `omega_media` and `openomega` presentation claims separate from the retail
+suffix matrix. The tracked path bounds MPEG-PS inspection, H.262 video decoding on Windows, one
+SShd/SSbd signed-PCM plan/deinterleave shape, the SDL audio ring, and the audio-demand presentation
+clock. Future tests should target demonstrated variants and lifecycle/fail-open behavior; they must
+not turn one accepted external stream into a general `.pss` or retail-sync claim.
 
 ### 4. AI-brief hot-file corrections
 
@@ -113,6 +137,10 @@ name/offset be promoted to a tracked claim without independent tracked-evidence 
 
 ## What remains explicitly unproven
 
-Retail menu role, lookup, field semantics, layout, state, timing, rendering, and audio for
-`.gui`/`.fnt`/`.ie`; any native front-end decoder; and owner-corpus, behavioral-oracle, runtime,
-packaged-host, and PCSX2-equivalence validation. None of these are claimed by this workstream.
+Retail menu role, lookup, field semantics beyond the project-defined prefix hypotheses, layout, state,
+timing, rendering, audio, and consumer binding for `.gui`/`.fnt`/`.ie`; any semantic native
+front-end decoder; retail provenance for the prefix constants; and owner-corpus or PCSX2-equivalence
+validation remain unproven. The project now
+has three passive front-end descriptors and a native opening-movie video/PCM presentation path, but
+that does not establish general `.pss` member compatibility, all private-stream variants, subtitles,
+seeking, exact retail A/V behavior, or non-Windows end-to-end playback.
