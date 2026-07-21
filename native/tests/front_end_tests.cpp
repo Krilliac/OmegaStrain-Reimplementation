@@ -98,6 +98,11 @@ void Check(const bool condition, const std::string_view message)
     {
         return FrontEndReduction{.state = omega::app::InitialFrontEndState()};
     }
+    if (state.mode == FrontEndMode::DiagnosticPlay &&
+        !capabilities.can_start_diagnostic_campaign)
+    {
+        return FrontEndReduction{.state = omega::app::InitialFrontEndState()};
+    }
 
     if (input.cancel_pressed)
     {
@@ -165,8 +170,23 @@ void Check(const bool condition, const std::string_view message)
         };
         if (state.mode == FrontEndMode::Main)
         {
+            if (state.selected_main_row == FrontEndMainRow::StartDiagnostic &&
+                !capabilities.can_start_diagnostic_campaign)
+            {
+                return FrontEndReduction{.state = state};
+            }
             state.mode = entered_modes[row_byte];
             state.selected_profile_slot = FrontEndProfileSlot::First;
+            if (state.selected_main_row == FrontEndMainRow::StartDiagnostic)
+            {
+                return FrontEndReduction{
+                    .state = state,
+                    .command = FrontEndCommand{
+                        .type = FrontEndCommandType::StartDiagnosticCampaign,
+                        .profile_slot = FrontEndProfileSlot::First,
+                    },
+                };
+            }
         }
         else
         {
@@ -237,9 +257,9 @@ void Check(const bool condition, const std::string_view message)
     return FrontEndReduction{.state = state};
 }
 
-// Independent gate oracle. It states the two documented gate deviations as
+// Independent gate oracle. It states the confirmation-gate deviations as
 // post-conditions over the table oracle above instead of calling any production
-// gate helper, so a production gate regression cannot hide inside it.
+// helper, so a production gate regression cannot hide inside it.
 [[nodiscard]] constexpr FrontEndReduction ReferenceReduceWithGate(
     const FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots,
     const FrontEndCapabilities capabilities, const bool active_profile_is_confirmed) noexcept
@@ -248,20 +268,14 @@ void Check(const bool condition, const std::string_view message)
     const auto row_byte = static_cast<std::uint8_t>(state.selected_main_row);
     const auto profile_slot_byte = static_cast<std::uint8_t>(state.selected_profile_slot);
     const bool state_is_valid = mode_byte <= 4U && row_byte <= 3U && profile_slot_byte <= 2U;
-    const bool gate_is_open =
+    const bool gate_is_satisfied =
         !capabilities.requires_active_profile_for_diagnostic_play || active_profile_is_confirmed;
-    if (state_is_valid && !gate_is_open)
+    if (state_is_valid && !gate_is_satisfied)
     {
         if (mode_byte == 2U)
             return FrontEndReduction{.state = omega::app::InitialFrontEndState()};
         if (mode_byte == 0U && row_byte == 0U && input.primary_pressed && !input.cancel_pressed)
-        {
-            return FrontEndReduction{.state = FrontEndState{
-                                         .mode = FrontEndMode::Profiles,
-                                         .selected_main_row = FrontEndMainRow::Profiles,
-                                         .selected_profile_slot = FrontEndProfileSlot::First,
-                                     }};
-        }
+            return FrontEndReduction{.state = state};
     }
     return ReferenceReduce(state, input, visible_profile_slots, capabilities);
 }
@@ -532,8 +546,13 @@ void CheckReducerAndViewContract()
     static_assert(static_cast<std::uint8_t>(FrontEndCommandType::None) == 0U);
     static_assert(static_cast<std::uint8_t>(FrontEndCommandType::SetActiveProfile) == 1U);
     static_assert(static_cast<std::uint8_t>(FrontEndCommandType::CreateFirstProfile) == 2U);
+    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::StartDiagnosticCampaign) == 3U);
     static_assert(std::is_trivially_copyable_v<FrontEndCapabilities>);
-    static_assert(FrontEndCapabilities{} == FrontEndCapabilities{.can_create_first_profile = false});
+    static_assert(FrontEndCapabilities{} == FrontEndCapabilities{
+        .can_create_first_profile = false,
+        .can_start_diagnostic_campaign = false,
+        .requires_active_profile_for_diagnostic_play = false,
+    });
     static_assert(noexcept(omega::app::ReduceFrontEnd({}, {}, 0U)));
     static_assert(noexcept(omega::app::ReduceFrontEnd(
         {}, {}, 0U, FrontEndCapabilities{.can_create_first_profile = true})));
@@ -570,8 +589,13 @@ void CheckReducerAndViewContract()
                 .selected_main_row = static_cast<FrontEndMainRow>(row),
             };
             const bool oracle_allows = mode == 2U && row <= 3U;
+            constexpr FrontEndCapabilities start_enabled{
+                .can_start_diagnostic_campaign = true,
+            };
             exhaustive_gate_matches =
-                exhaustive_gate_matches && omega::app::FrontEndAllowsSimulation(state) == oracle_allows;
+                exhaustive_gate_matches &&
+                !omega::app::FrontEndAllowsSimulation(state) &&
+                omega::app::FrontEndAllowsSimulation(state, start_enabled) == oracle_allows;
             for (const std::uint8_t profile_count : profile_counts)
             {
                 for (std::uint8_t mask = 0U; mask < 16U; ++mask)
@@ -613,8 +637,13 @@ void CheckReducerAndViewContract()
                     .selected_profile_slot = static_cast<FrontEndProfileSlot>(profile_slot),
                 };
                 const bool oracle_allows = mode == 2U && profile_slot <= 2U;
+                constexpr FrontEndCapabilities start_enabled{
+                    .can_start_diagnostic_campaign = true,
+                };
                 exhaustive_slot_gate_matches = exhaustive_slot_gate_matches &&
-                                               omega::app::FrontEndAllowsSimulation(state) == oracle_allows;
+                                               !omega::app::FrontEndAllowsSimulation(state) &&
+                                               omega::app::FrontEndAllowsSimulation(
+                                                   state, start_enabled) == oracle_allows;
                 for (const std::uint8_t profile_count : profile_counts)
                 {
                     for (std::uint8_t mask = 0U; mask < 16U; ++mask)
@@ -662,6 +691,37 @@ void CheckReducerAndViewContract()
                   },
               },
           "profile activation has priority over simultaneous navigation and publishes the pre-navigation slot");
+
+    Check(omega::app::ReduceFrontEnd(
+              omega::app::InitialFrontEndState(),
+              FrontEndInputEdges{
+                  .primary_pressed = true,
+                  .previous_pressed = true,
+                  .next_pressed = true,
+              },
+              3U,
+              FrontEndCapabilities{
+                  .can_create_first_profile = false,
+                  .can_start_diagnostic_campaign = true,
+              }) ==
+              FrontEndReduction{
+                  .state = FrontEndState{
+                      .mode = FrontEndMode::DiagnosticPlay,
+                      .selected_main_row = FrontEndMainRow::StartDiagnostic,
+                      .selected_profile_slot = FrontEndProfileSlot::First,
+                  },
+                  .command = FrontEndCommand{
+                      .type = FrontEndCommandType::StartDiagnosticCampaign,
+                      .profile_slot = FrontEndProfileSlot::First,
+                  },
+              },
+          "diagnostic activation has priority over navigation and publishes one project-owned start command");
+
+    Check(omega::app::ReduceFrontEnd(
+              omega::app::InitialFrontEndState(),
+              FrontEndInputEdges{.primary_pressed = true}, 3U) ==
+              FrontEndReduction{.state = omega::app::InitialFrontEndState()},
+          "diagnostic activation is inert while the explicit session capability is closed");
 
     Check(omega::app::ReduceFrontEnd(
               profiles_second,
@@ -903,7 +963,13 @@ void CheckActiveProfileGateContract()
               !omega::app::FrontEndConfirmedProfileSlot(adversarial, beyond_visible),
           "adversarial counts cannot resolve past the three fixed positions");
 
-    constexpr FrontEndCapabilities gate_enabled{.requires_active_profile_for_diagnostic_play = true};
+    constexpr FrontEndCapabilities start_enabled{
+        .can_start_diagnostic_campaign = true,
+    };
+    constexpr FrontEndCapabilities gate_enabled{
+        .can_start_diagnostic_campaign = true,
+        .requires_active_profile_for_diagnostic_play = true,
+    };
     Check(omega::app::FrontEndSatisfiesDiagnosticPlayGate({}, false) &&
               omega::app::FrontEndSatisfiesDiagnosticPlayGate({}, true) &&
               !omega::app::FrontEndSatisfiesDiagnosticPlayGate(gate_enabled, false) &&
@@ -919,11 +985,11 @@ void CheckActiveProfileGateContract()
         .selected_main_row = FrontEndMainRow::StartDiagnostic,
         .selected_profile_slot = FrontEndProfileSlot::First,
     };
-    Check(omega::app::FrontEndAllowsSimulation(diagnostic_play) &&
-              omega::app::FrontEndAllowsSimulation(diagnostic_play, {}, false) &&
-              !omega::app::FrontEndAllowsSimulation(diagnostic_play, gate_enabled, false) &&
-              omega::app::FrontEndAllowsSimulation(diagnostic_play, gate_enabled, true),
-          "simulation stays legacy by default and requires a confirmation once gated");
+    Check(!omega::app::FrontEndAllowsSimulation(diagnostic_play) &&
+               omega::app::FrontEndAllowsSimulation(diagnostic_play, start_enabled, false) &&
+               !omega::app::FrontEndAllowsSimulation(diagnostic_play, gate_enabled, false) &&
+               omega::app::FrontEndAllowsSimulation(diagnostic_play, gate_enabled, true),
+          "simulation requires explicit start support and then any enabled confirmation gate");
 
     bool unconfirmed_diagnostic_fails_closed = true;
     for (std::uint8_t mask = 0U; mask < 16U; ++mask)
@@ -944,16 +1010,18 @@ void CheckActiveProfileGateContract()
     };
     Check(omega::app::ReduceFrontEnd(main_start_diagnostic, FrontEndInputEdges{.primary_pressed = true}, 3U,
               gate_enabled, false) ==
-              FrontEndReduction{.state = FrontEndState{
-                                    .mode = FrontEndMode::Profiles,
-                                    .selected_main_row = FrontEndMainRow::Profiles,
-                                    .selected_profile_slot = FrontEndProfileSlot::First,
-                                }},
-          "the unsatisfied diagnostic row opens the Profiles surface and publishes no command");
+              FrontEndReduction{.state = main_start_diagnostic},
+          "the supported but unauthorized diagnostic row is inert and publishes no command");
     Check(omega::app::ReduceFrontEnd(main_start_diagnostic, FrontEndInputEdges{.primary_pressed = true}, 3U,
               gate_enabled, true) ==
-              FrontEndReduction{.state = diagnostic_play},
-          "a confirmation restores the exact legacy diagnostic entry");
+              FrontEndReduction{
+                  .state = diagnostic_play,
+                  .command = FrontEndCommand{
+                      .type = FrontEndCommandType::StartDiagnosticCampaign,
+                      .profile_slot = FrontEndProfileSlot::First,
+                  },
+              },
+          "a confirmation publishes the typed diagnostic start and enters play");
 
     constexpr FrontEndState profiles_second{
         .mode = FrontEndMode::Profiles,
@@ -970,6 +1038,7 @@ void CheckActiveProfileGateContract()
 
     constexpr FrontEndCapabilities creation_and_gate{
         .can_create_first_profile = true,
+        .can_start_diagnostic_campaign = true,
         .requires_active_profile_for_diagnostic_play = true,
     };
     constexpr FrontEndState empty_profiles{
@@ -997,7 +1066,7 @@ void CheckActiveProfileGateContract()
           "can satisfy the gate");
 
     bool gated_matches_oracle = true;
-    bool confirmed_gate_is_inert = true;
+    bool confirmed_gate_matches_open_start = true;
     constexpr std::array<std::uint8_t, 6U> profile_counts{0U, 1U, 2U, 3U, 4U, 0xffU};
     for (std::uint32_t mode = 0U; mode <= 5U; ++mode)
     {
@@ -1021,10 +1090,11 @@ void CheckActiveProfileGateContract()
                                 ReferenceReduceWithGate(state, input, profile_count, gate_enabled, false) &&
                             omega::app::ReduceFrontEnd(state, input, profile_count, creation_and_gate, false) ==
                                 ReferenceReduceWithGate(state, input, profile_count, creation_and_gate, false);
-                        confirmed_gate_is_inert =
-                            confirmed_gate_is_inert &&
+                        confirmed_gate_matches_open_start =
+                            confirmed_gate_matches_open_start &&
                             omega::app::ReduceFrontEnd(state, input, profile_count, gate_enabled, true) ==
-                                omega::app::ReduceFrontEnd(state, input, profile_count) &&
+                                omega::app::ReduceFrontEnd(
+                                    state, input, profile_count, start_enabled) &&
                             omega::app::ReduceFrontEnd(state, input, profile_count, {}, true) ==
                                 omega::app::ReduceFrontEnd(state, input, profile_count);
                     }
@@ -1035,9 +1105,9 @@ void CheckActiveProfileGateContract()
     Check(gated_matches_oracle,
           "all 11520 gated mode/row/slot/count/edge combinations match the "
           "independent gate oracle with and without first-profile creation");
-    Check(confirmed_gate_is_inert,
-          "a satisfied gate and an unconsulted confirmation both reproduce the exact "
-          "legacy reduction");
+    Check(confirmed_gate_matches_open_start,
+          "a satisfied gate reproduces the explicit synthetic start path while an "
+          "unconsulted confirmation cannot open closed start support");
 
     const auto active_view = omega::app::BuildFrontEndView(profiles_second, ContentStartupStage::NoContent, model,
                                                            second);

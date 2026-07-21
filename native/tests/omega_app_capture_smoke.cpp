@@ -91,6 +91,12 @@ struct OmegaAppTestAccess final
             debug_device, texture_config);
     }
 
+    [[nodiscard]] static std::expected<void, std::string> ApplyFrontEndCommand(
+        OmegaApp& app, const FrontEndCommand command)
+    {
+        return app.ApplyFrontEndCommand(command);
+    }
+
     [[nodiscard]] static bool InstallUnownedDiagnosticDraw(OmegaApp& app)
     {
         constexpr runtime::RenderTextureHandle unowned_texture{
@@ -1633,6 +1639,275 @@ void CheckActiveProfileConfirmation(
         "the generated capacity-rejected confirmation edge releases");
 }
 
+void CheckDiagnosticCampaignStart(
+    const std::filesystem::path& fixture_root,
+    const omega::runtime::RuntimeSettings& settings)
+{
+    using Access = omega::app::detail::OmegaAppTestAccess;
+    const auto profile_id = omega::profiles::ProfileId::Parse(
+        "10101010101010101010101010101010");
+    Check(profile_id.has_value(),
+        "the generated diagnostic-campaign profile ID parses");
+    if (!profile_id)
+        return;
+
+    constexpr omega::app::FrontEndState kProfilesFirst{
+        .mode = omega::app::FrontEndMode::Profiles,
+        .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+        .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+    };
+    constexpr omega::app::FrontEndState kMainStartDiagnostic{
+        .mode = omega::app::FrontEndMode::Main,
+        .selected_main_row = omega::app::FrontEndMainRow::StartDiagnostic,
+        .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+    };
+    constexpr omega::app::FrontEndState kDiagnosticPlay{
+        .mode = omega::app::FrontEndMode::DiagnosticPlay,
+        .selected_main_row = omega::app::FrontEndMainRow::StartDiagnostic,
+        .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+    };
+    const omega::profiles::ProfileMetadata metadata{
+        .display_name = "diagstart",
+        .created_unix_milliseconds = 1U,
+        .modified_unix_milliseconds = 1U,
+    };
+    const std::filesystem::path database_root =
+        fixture_root / "native-diagnostic-campaign-start";
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(database_root);
+        Check(persistence.has_value(),
+            "the generated diagnostic-campaign database bootstraps");
+        if (!persistence)
+            return;
+        const auto created = persistence->profiles().Create(*profile_id, metadata);
+        Check(created.has_value(),
+            "the generated diagnostic-campaign profile is created");
+        if (!created)
+            return;
+        const auto confirmed = persistence->ConfirmActiveProfile(*profile_id);
+        Check(created && confirmed && persistence->database().generation() == 2U &&
+                  persistence->database().record_count() == 2U &&
+                  persistence->database().logical_value_bytes() == 73U,
+            "the generated diagnostic-campaign fixture stores one profile and active pointer");
+        if (!created || !confirmed)
+            return;
+    }
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(database_root);
+        auto config = omega::runtime::ParseConfigText("");
+        Check(persistence && config &&
+                  persistence->persisted_confirmed_profile_id() == profile_id,
+            "the generated diagnostic-campaign fixture reopens with a validated durable confirmation");
+        if (!persistence || !config)
+            return;
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            omega::runtime::ContentStartupState{}, std::move(*persistence), false);
+        Check(app && Access::FrontEnd(*app) == kProfilesFirst &&
+                  !Access::ActiveProfile(*app),
+            "diagnostic-campaign app startup still requires explicit per-launch selection");
+        if (!app)
+            return;
+
+        Check(PushKey(SDL_SCANCODE_F1, true) &&
+                  app->RunWithCapture(1).has_value() &&
+                  Access::ActiveProfile(*app) == profile_id &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{2U},
+            "same-ID selection explicitly activates the generated session without another write");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the diagnostic-campaign selection edge releases");
+        Check(PushKey(SDL_SCANCODE_W, true) && app->Run(1).has_value() &&
+                  Access::FrontEnd(*app) == kMainStartDiagnostic,
+            "previous navigation selects the generated Start Diagnostic row");
+        Check(PushKey(SDL_SCANCODE_W, false) && app->Run(1).has_value(),
+            "the diagnostic-campaign navigation edge releases");
+
+        const omega::app::GpuHostSnapshot gpu_before = Access::GpuSnapshot(*app);
+        const bool pushed = PushKey(SDL_SCANCODE_F1, true);
+        auto started = app->RunWithCapture(1);
+        Check(pushed && started &&
+                  started->completion() ==
+                      omega::app::RunCaptureCompletion::FrameLimitReached &&
+                  !started->failure() &&
+                  Access::FrontEnd(*app) == kDiagnosticPlay &&
+                  Access::ActiveProfile(*app) == profile_id &&
+                  Access::PersistedConfirmedProfile(*app) == profile_id &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{3U} &&
+                  Access::PersistenceRecordCount(*app) ==
+                      std::optional<std::size_t>{3U} &&
+                  Access::PersistenceLogicalValueBytes(*app) ==
+                      std::optional<std::size_t>{105U} &&
+                  IsOneDiagnosticPlaySubmission(gpu_before,
+                      Access::GpuSnapshot(*app)),
+            "diagnostic start commits the 32-byte project checkpoint before publishing DiagnosticPlay and rendering it");
+
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the first generated diagnostic-start edge releases");
+        Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
+                  Access::FrontEnd(*app) == kMainStartDiagnostic,
+            "primary returns the generated diagnostic surface to Main");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the generated diagnostic-return edge releases");
+        const std::uint64_t before_idempotent =
+            Access::PersistenceGeneration(*app).value_or(0U);
+        Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
+                  Access::FrontEnd(*app) == kDiagnosticPlay &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{before_idempotent},
+            "a second generated diagnostic start is a no-write idempotent transition");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the idempotent diagnostic-start edge releases");
+    }
+
+    auto reopened = omega::app::NativePersistence::Bootstrap(database_root);
+    Check(reopened && reopened->database().generation() == 3U &&
+              reopened->database().record_count() == 3U &&
+              reopened->database().logical_value_bytes() == 105U,
+        "reopen validates the generated project diagnostic checkpoint and exact database totals");
+
+    const std::filesystem::path unconfirmed_root =
+        fixture_root / "native-diagnostic-campaign-unconfirmed";
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(unconfirmed_root);
+        Check(persistence.has_value(),
+            "the unconfirmed diagnostic-campaign database bootstraps");
+        if (!persistence)
+            return;
+        const auto created = persistence->profiles().Create(*profile_id, metadata);
+        Check(created.has_value(),
+            "the unconfirmed diagnostic-campaign profile is created");
+        if (!created)
+            return;
+    }
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(unconfirmed_root);
+        auto config = omega::runtime::ParseConfigText("");
+        if (!persistence || !config)
+        {
+            Check(false, "the unconfirmed diagnostic-campaign fixture reopens");
+            return;
+        }
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            omega::runtime::ContentStartupState{}, std::move(*persistence), false);
+        Check(app.has_value(), "the unconfirmed diagnostic-campaign app starts");
+        if (!app)
+            return;
+        Access::SetFrontEndState(*app, kMainStartDiagnostic);
+        const omega::app::GpuHostSnapshot gpu_before = Access::GpuSnapshot(*app);
+        auto invalid_slot = Access::ApplyFrontEndCommand(*app,
+            omega::app::FrontEndCommand{
+                .type = omega::app::FrontEndCommandType::StartDiagnosticCampaign,
+                .profile_slot = omega::app::FrontEndProfileSlot::Second,
+            });
+        auto direct_unconfirmed = Access::ApplyFrontEndCommand(*app,
+            omega::app::FrontEndCommand{
+                .type = omega::app::FrontEndCommandType::StartDiagnosticCampaign,
+                .profile_slot = omega::app::FrontEndProfileSlot::First,
+            });
+        Check(!invalid_slot && invalid_slot.error() ==
+                  "diagnostic campaign start selected an invalid slot" &&
+                  !direct_unconfirmed && direct_unconfirmed.error() ==
+                      "diagnostic campaign start failed: active-profile-required" &&
+                  Access::FrontEnd(*app) == kMainStartDiagnostic &&
+                  Access::GpuSnapshot(*app) == gpu_before,
+            "typed diagnostic-start application rejects malformed and unconfirmed requests without publication");
+        const bool pushed = PushKey(SDL_SCANCODE_F1, true);
+        auto suppressed = app->RunWithCapture(1);
+        Check(pushed && suppressed &&
+                  suppressed->completion() ==
+                      omega::app::RunCaptureCompletion::FrameLimitReached &&
+                  !suppressed->failure() &&
+                  Access::FrontEnd(*app) == kMainStartDiagnostic &&
+                  !Access::ActiveProfile(*app) &&
+                  !Access::PersistedConfirmedProfile(*app) &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{1U} &&
+                  Access::PersistenceRecordCount(*app) ==
+                      std::optional<std::size_t>{1U} &&
+                  IsOneVisibleMenuSubmission(
+                      gpu_before, Access::GpuSnapshot(*app)),
+            "the production reducer keeps Start inert without a confirmed session profile and renders the unchanged Main surface");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the suppressed unconfirmed diagnostic-start edge releases");
+    }
+
+    const std::filesystem::path constrained_root =
+        fixture_root / "native-diagnostic-campaign-capacity";
+    constexpr omega::persistence::SaveDatabaseLimits kTwoRecordLimit{
+        .max_records = 2U,
+    };
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(
+            constrained_root, kTwoRecordLimit);
+        Check(persistence.has_value(),
+            "the two-record diagnostic-campaign database bootstraps");
+        if (!persistence)
+            return;
+        const auto created = persistence->profiles().Create(*profile_id, metadata);
+        Check(created.has_value(),
+            "the constrained diagnostic-campaign profile is created");
+        if (!created)
+            return;
+        const auto confirmed = persistence->ConfirmActiveProfile(*profile_id);
+        Check(created && confirmed && persistence->database().record_count() == 2U,
+            "the capacity fixture fills its two records with profile and active pointer");
+        if (!created || !confirmed)
+            return;
+    }
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(
+            constrained_root, kTwoRecordLimit);
+        auto config = omega::runtime::ParseConfigText("");
+        if (!persistence || !config)
+        {
+            Check(false, "the constrained diagnostic-campaign fixture reopens");
+            return;
+        }
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            omega::runtime::ContentStartupState{}, std::move(*persistence), false);
+        Check(app.has_value(), "the constrained diagnostic-campaign app starts");
+        if (!app)
+            return;
+        Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
+                  Access::ActiveProfile(*app) == profile_id,
+            "the constrained app explicitly reactivates its confirmed profile");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the constrained profile-selection edge releases");
+        Access::SetFrontEndState(*app, kMainStartDiagnostic);
+        const omega::app::GpuHostSnapshot gpu_before = Access::GpuSnapshot(*app);
+        const bool pushed = PushKey(SDL_SCANCODE_F1, true);
+        auto rejected = app->RunWithCapture(1);
+        const std::optional<std::string_view> failure = rejected
+            ? rejected->failure()
+            : std::nullopt;
+        Check(pushed && rejected &&
+                  rejected->completion() ==
+                      omega::app::RunCaptureCompletion::OperationalFailure &&
+                  failure && *failure ==
+                      "diagnostic campaign start failed: storage-limit-exceeded" &&
+                  failure->find(constrained_root.string()) ==
+                      std::string_view::npos &&
+                  failure->find(profile_id->ToString()) ==
+                      std::string_view::npos &&
+                  Access::FrontEnd(*app) == kMainStartDiagnostic &&
+                  Access::ActiveProfile(*app) == profile_id &&
+                  Access::PersistedConfirmedProfile(*app) == profile_id &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{2U} &&
+                  Access::PersistenceRecordCount(*app) ==
+                      std::optional<std::size_t>{2U} &&
+                  Access::PersistenceLogicalValueBytes(*app) ==
+                      std::optional<std::size_t>{73U} &&
+                  Access::GpuSnapshot(*app) == gpu_before,
+            "checkpoint capacity failure preserves Main, active session, durable pointer, database totals, and exact GPU state");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the rejected capacity diagnostic-start edge releases");
+    }
+}
+
 void CheckExplicitFirstProfileCreation(
     const std::filesystem::path& fixture_root,
     const omega::runtime::RuntimeSettings& settings)
@@ -2028,8 +2303,8 @@ void CheckComposedGeneratedMenuAcceptance(
         return;
 
     // A durably created profile is still unconfirmed, so the gate must stay
-    // closed. Walk out to the START DIAGNOSTIC row and prove the entry edge
-    // redirects instead of playing.
+    // closed. Walk out to the START DIAGNOSTIC row and prove the entry edge is
+    // inert before explicitly navigating back to Profiles for confirmation.
     const bool unconfirmed_cancel_queued = PushKey(SDL_SCANCODE_BACKSPACE, true);
     auto unconfirmed_cancel = app->RunWithCapture(1);
     const omega::app::GpuHostSnapshot unconfirmed_cancel_gpu =
@@ -2079,57 +2354,71 @@ void CheckComposedGeneratedMenuAcceptance(
                   unconfirmed_navigated_gpu, Access::GpuSnapshot(*app)),
         "the unconfirmed navigation emits the action-2 release edge");
 
-    const auto persistence_generation_before_redirect =
+    const auto persistence_generation_before_inert_start =
         Access::PersistenceGeneration(*app);
-    const auto persistence_records_before_redirect =
+    const auto persistence_records_before_inert_start =
         Access::PersistenceRecordCount(*app);
-    const auto persistence_bytes_before_redirect =
+    const auto persistence_bytes_before_inert_start =
         Access::PersistenceLogicalValueBytes(*app);
-    const omega::app::GpuHostSnapshot redirect_gpu_before =
+    const omega::app::GpuHostSnapshot inert_start_gpu_before =
         Access::GpuSnapshot(*app);
-    const bool redirect_queued =
+    const bool inert_start_queued =
         Access::ArmNextRunElapsed(*app, settings.frame.simulation_step) &&
         PushKey(SDL_SCANCODE_F1, true);
-    auto redirected = app->RunWithCapture(1);
-    const omega::app::GpuHostSnapshot redirect_gpu_after =
+    auto inert_start = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot inert_start_gpu_after =
         Access::GpuSnapshot(*app);
-    Check(redirect_queued && redirected &&
-              redirected->completion() ==
+    Check(inert_start_queued && inert_start &&
+              inert_start->completion() ==
                   omega::app::RunCaptureCompletion::FrameLimitReached &&
-              !redirected->failure() &&
-              redirected->result().planned_simulation_steps == 0U &&
-              redirected->result().executed_simulation_steps == 0U &&
-              Access::FrontEnd(*app) == kProfilesFirst &&
+              !inert_start->failure() &&
+              inert_start->result().planned_simulation_steps == 0U &&
+              inert_start->result().executed_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kMainStart &&
               !Access::ActiveProfile(*app) &&
               !Access::PersistedConfirmedProfile(*app) &&
               Access::PersistenceGeneration(*app) ==
-                  persistence_generation_before_redirect &&
+                  persistence_generation_before_inert_start &&
               Access::PersistenceRecordCount(*app) ==
-                  persistence_records_before_redirect &&
+                  persistence_records_before_inert_start &&
               Access::PersistenceLogicalValueBytes(*app) ==
-                  persistence_bytes_before_redirect &&
+                  persistence_bytes_before_inert_start &&
               Access::SchedulerSnapshot(*app) == startup_scheduler &&
               SameSimulationState(
                   Access::SimulationSnapshot(*app), startup_simulation) &&
               Access::DebugLocomotionPosition(*app) == startup_position &&
               DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
-                  Access::FrontEndProfileSelectionDrawLists(*app)[0]) &&
-              IsOneVisibleMenuSubmission(redirect_gpu_before, redirect_gpu_after),
-        "an unconfirmed Start Diagnostic edge opens the unmarked Profiles surface, discards a full simulation step of elapsed time, and mutates no simulation, persistence, or GPU resource");
-    if (!redirected)
+                  Access::FrontEndMainDrawLists(*app)[0]) &&
+              IsOneVisibleMenuSubmission(
+                  inert_start_gpu_before, inert_start_gpu_after),
+        "an unconfirmed Start Diagnostic edge is inert, discards a full simulation step of elapsed time, and mutates no simulation, persistence, or GPU resource");
+    if (!inert_start)
         return;
 
-    const bool redirect_release_queued = PushKey(SDL_SCANCODE_F1, false);
-    auto redirect_released = app->RunWithCapture(1);
-    const omega::app::GpuHostSnapshot redirect_released_gpu =
+    const bool inert_start_release_queued = PushKey(SDL_SCANCODE_F1, false);
+    auto inert_start_released = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot inert_start_released_gpu =
         Access::GpuSnapshot(*app);
-    Check(redirect_release_queued && redirect_released &&
-              redirect_released->result().planned_simulation_steps == 0U &&
-              Access::FrontEnd(*app) == kProfilesFirst &&
+    Check(inert_start_release_queued && inert_start_released &&
+              inert_start_released->result().planned_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kMainStart &&
               !Access::ActiveProfile(*app) &&
               IsOneVisibleMenuSubmission(
-                  redirect_gpu_after, redirect_released_gpu),
-        "the redirected entry edge must release before the confirming press");
+                  inert_start_gpu_after, inert_start_released_gpu),
+        "the inert entry edge releases before explicit profile navigation");
+
+    Check(PushKey(SDL_SCANCODE_DOWN, true) && app->Run(1).has_value() &&
+              Access::FrontEnd(*app) == kMainProfiles,
+        "explicit downward navigation returns to the Profiles main row");
+    Check(PushKey(SDL_SCANCODE_DOWN, false) && app->Run(1).has_value(),
+        "the explicit Profiles navigation edge releases");
+    Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
+              Access::FrontEnd(*app) == kProfilesFirst,
+        "Primary explicitly opens the bounded Profiles surface");
+    Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+        "the explicit Profiles entry edge releases before confirmation");
+    const omega::app::GpuHostSnapshot profile_entry_released_gpu =
+        Access::GpuSnapshot(*app);
 
     const bool confirmation_queued = PushKey(SDL_SCANCODE_F1, true);
     auto confirmed = app->RunWithCapture(1);
@@ -2153,8 +2442,8 @@ void CheckComposedGeneratedMenuAcceptance(
               SameSimulationState(
                   Access::SimulationSnapshot(*app), startup_simulation) &&
               IsOneVisibleMenuSubmission(
-                  redirect_released_gpu, confirmed_gpu),
-        "the second Primary durably confirms PROFILE 1 and returns to the visible Main/Profiles row without advancing simulation");
+                  profile_entry_released_gpu, confirmed_gpu),
+        "the explicit Profiles confirmation durably confirms PROFILE 1 and returns to the visible Main/Profiles row without advancing simulation");
     if (!confirmed)
         return;
 
@@ -2318,6 +2607,12 @@ void CheckComposedGeneratedMenuAcceptance(
               play->result().planned_simulation_steps == 1U &&
               play->result().executed_simulation_steps == 1U &&
               Access::FrontEnd(*app) == kDiagnosticPlay &&
+              Access::PersistenceGeneration(*app) ==
+                  std::optional<std::uint64_t>{3U} &&
+              Access::PersistenceRecordCount(*app) ==
+                  std::optional<std::size_t>{3U} &&
+              Access::PersistenceLogicalValueBytes(*app) ==
+                  std::optional<std::size_t>{105U} &&
               play_simulation.completed_steps == 1U &&
               play_simulation.simulated_time == settings.frame.simulation_step &&
               play_simulation.alive_entities == 1U && play_position &&
@@ -2327,7 +2622,7 @@ void CheckComposedGeneratedMenuAcceptance(
                   actor_draw_list) &&
               SameTextureResidency(startup_gpu, play_gpu) &&
               IsOneDiagnosticPlaySubmission(navigation_released_gpu, play_gpu),
-        "a confirmed Primary plus a fresh action-2 forward press enters DiagnosticPlay, advances exactly one generated simulation step, and submits the visible positive-Z actor marker without GPU resource churn");
+        "a confirmed Primary commits the exact 32-byte checkpoint before entering DiagnosticPlay, advances exactly one generated simulation step, and submits the visible positive-Z actor marker without GPU resource churn");
     if (!play)
         return;
 
@@ -2374,11 +2669,11 @@ void CheckComposedGeneratedMenuAcceptance(
               Access::ActiveProfile(*app) == profile_id &&
               Access::PersistedConfirmedProfile(*app) == profile_id &&
               Access::PersistenceGeneration(*app) ==
-                  std::optional<std::uint64_t>{2U} &&
+                  std::optional<std::uint64_t>{3U} &&
               Access::PersistenceRecordCount(*app) ==
-                  std::optional<std::size_t>{2U} &&
+                  std::optional<std::size_t>{3U} &&
               Access::PersistenceLogicalValueBytes(*app) ==
-                  std::optional<std::size_t>{73U} &&
+                  std::optional<std::size_t>{105U} &&
               Access::SchedulerSnapshot(*app) == play_scheduler &&
               SameSimulationState(
                   Access::SimulationSnapshot(*app), play_simulation) &&
@@ -2395,19 +2690,32 @@ void CheckComposedGeneratedMenuAcceptance(
     const omega::app::GpuHostSnapshot stale_entry_gpu = Access::GpuSnapshot(*app);
     Check(stale_entry_queued && stale_entry && !stale_entry->failure() &&
               stale_entry->result().planned_simulation_steps == 0U &&
-              Access::FrontEnd(*app) == kProfilesFirst &&
+              Access::FrontEnd(*app) == kMainStart &&
               DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
-                  Access::FrontEndProfileSelectionDrawLists(*app)[0]) &&
+                  Access::FrontEndMainDrawLists(*app)[0]) &&
               IsOneVisibleMenuSubmission(stale_play_gpu, stale_entry_gpu),
-        "the stale confirmation also redirects Start Diagnostic and drops the active-row cue the model can no longer resolve");
+        "the stale confirmation also leaves Start Diagnostic inert and drops the active-row cue the model can no longer resolve");
 
     const bool stale_release_queued = PushKey(SDL_SCANCODE_F1, false);
     auto stale_released = app->RunWithCapture(1);
     const omega::app::GpuHostSnapshot stale_released_gpu =
         Access::GpuSnapshot(*app);
     Check(stale_release_queued && stale_released &&
+              Access::FrontEnd(*app) == kMainStart,
+        "the stale inert-start edge releases before explicit profile navigation");
+
+    Check(PushKey(SDL_SCANCODE_DOWN, true) && app->Run(1).has_value() &&
+              Access::FrontEnd(*app) == kMainProfiles,
+        "the stale fixture explicitly selects the Profiles row");
+    Check(PushKey(SDL_SCANCODE_DOWN, false) && app->Run(1).has_value(),
+        "the stale Profiles navigation edge releases");
+    Check(PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
               Access::FrontEnd(*app) == kProfilesFirst,
-        "the stale redirect edge releases before the failing confirmation");
+        "the stale fixture explicitly opens the Profiles surface");
+    Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+        "the stale Profiles entry edge releases before the failing confirmation");
+    const omega::app::GpuHostSnapshot stale_profiles_released_gpu =
+        Access::GpuSnapshot(*app);
 
     // The command is applied, and therefore persisted, before its projected
     // state is published. A rejected command must therefore leave the prior
@@ -2431,15 +2739,15 @@ void CheckComposedGeneratedMenuAcceptance(
               Access::ActiveProfile(*app) == profile_id &&
               Access::PersistedConfirmedProfile(*app) == profile_id &&
               Access::PersistenceGeneration(*app) ==
-                  std::optional<std::uint64_t>{2U} &&
+                  std::optional<std::uint64_t>{3U} &&
               Access::PersistenceRecordCount(*app) ==
-                  std::optional<std::size_t>{2U} &&
+                  std::optional<std::size_t>{3U} &&
               Access::PersistenceLogicalValueBytes(*app) ==
-                  std::optional<std::size_t>{73U} &&
+                  std::optional<std::size_t>{105U} &&
               Access::SchedulerSnapshot(*app) == play_scheduler &&
               SameSimulationState(
                   Access::SimulationSnapshot(*app), play_simulation) &&
-              Access::GpuSnapshot(*app) == stale_released_gpu,
+              Access::GpuSnapshot(*app) == stale_profiles_released_gpu,
         "a rejected confirmation publishes one bounded private error and leaves the reducer's projected Profiles transition, the prior activation, the durable pointer, and the exact GPU snapshot unpublished");
 
     Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
@@ -2573,6 +2881,7 @@ int main()
 
         CheckExplicitFirstProfileCreation(generated_content.root(), settings);
         CheckActiveProfileConfirmation(generated_content.root(), settings);
+        CheckDiagnosticCampaignStart(generated_content.root(), settings);
         CheckComposedGeneratedMenuAcceptance(generated_content.root(), settings);
 
         const std::filesystem::path profile_database_root =

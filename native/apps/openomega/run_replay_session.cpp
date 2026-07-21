@@ -227,6 +227,8 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             front_end_capabilities_.can_create_first_profile &&
             front_end_visible_profile_slots_ == 0U &&
             front_end_total_profile_count_ == 0U,
+        .can_start_diagnostic_campaign =
+            front_end_capabilities_.can_start_diagnostic_campaign,
         .requires_active_profile_for_diagnostic_play =
             front_end_capabilities_.requires_active_profile_for_diagnostic_play,
     };
@@ -274,6 +276,9 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
                 selected_profile_slot < front_end_visible_profile_slots_ &&
                 selected_profile_slot < front_end_total_profile_count_;
         }
+        // StartDiagnosticCampaign is deliberately publication-only here.
+        // Replay owns no profile identity or persistence boundary and therefore
+        // cannot create or validate a durable diagnostic checkpoint.
     }
     const bool simulation_allowed = !front_end_state_ ||
                                     FrontEndAllowsSimulation(

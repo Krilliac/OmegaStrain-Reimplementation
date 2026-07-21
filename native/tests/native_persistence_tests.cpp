@@ -1,4 +1,5 @@
 #include "native_persistence.h"
+#include "front_end.h"
 
 #include "omega/persistence/save_database.h"
 #include "omega/profiles/profile_catalog.h"
@@ -24,6 +25,8 @@ using namespace std::string_view_literals;
 
 using omega::app::ActiveProfileConfirmationError;
 using omega::app::ActiveProfileConfirmationErrorCode;
+using omega::app::DiagnosticCampaignStartError;
+using omega::app::DiagnosticCampaignStartErrorCode;
 using omega::app::NativePersistence;
 using omega::app::NativePersistenceStartupError;
 using omega::app::NativePersistenceStartupErrorCode;
@@ -38,9 +41,13 @@ using omega::profiles::ProfileMetadata;
 
 constexpr std::string_view kActiveProfileKey = "profiles/active";
 constexpr std::uint32_t kActiveProfileSchemaVersion = 1U;
+constexpr std::uint32_t kDiagnosticCheckpointSchemaVersion = 1U;
+constexpr std::string_view kDiagnosticCheckpointSuffix =
+    "/campaigns/diagnostic/checkpoint";
 
 static_assert(sizeof(NativePersistenceStartupErrorCode) == 1U);
 static_assert(sizeof(ActiveProfileConfirmationErrorCode) == 1U);
+static_assert(sizeof(DiagnosticCampaignStartErrorCode) == 1U);
 
 int failures = 0;
 
@@ -85,6 +92,25 @@ void CheckConfirmationError(
     ++failures;
 }
 
+void CheckDiagnosticStartError(
+    const std::expected<void, DiagnosticCampaignStartError>& result,
+    const DiagnosticCampaignStartErrorCode expected,
+    const std::string_view message)
+{
+    if (!result && result.error().code == expected)
+        return;
+    std::cerr << "FAILED: " << message
+              << "\n  expected: "
+              << omega::app::DiagnosticCampaignStartErrorCodeName(expected)
+              << "\n  actual:   "
+              << (result
+                      ? "<success>"
+                      : omega::app::DiagnosticCampaignStartErrorCodeName(
+                            result.error().code))
+              << '\n';
+    ++failures;
+}
+
 [[nodiscard]] std::vector<std::byte> Bytes(const std::string_view text)
 {
     std::vector<std::byte> result;
@@ -103,6 +129,17 @@ void CheckConfirmationError(
     return ProfileId::FromBytes({});
 }
 
+[[nodiscard]] constexpr ProfileId SequentialId(const std::size_t index) noexcept
+{
+    std::array<std::uint8_t, 16U> bytes{};
+    const std::uint32_t ordinal = static_cast<std::uint32_t>(index + 1U);
+    bytes[12] = static_cast<std::uint8_t>((ordinal >> 24U) & 0xffU);
+    bytes[13] = static_cast<std::uint8_t>((ordinal >> 16U) & 0xffU);
+    bytes[14] = static_cast<std::uint8_t>((ordinal >> 8U) & 0xffU);
+    bytes[15] = static_cast<std::uint8_t>(ordinal & 0xffU);
+    return ProfileId::FromBytes(bytes);
+}
+
 [[nodiscard]] std::vector<std::byte> ActiveProfileValue(const ProfileId id)
 {
     std::vector<std::byte> value = Bytes("OOACTPRF");
@@ -111,6 +148,23 @@ void CheckConfirmationError(
     for (const std::uint8_t id_byte : id.bytes())
         value.push_back(static_cast<std::byte>(id_byte));
     return value;
+}
+
+[[nodiscard]] std::vector<std::byte> DiagnosticCheckpointValue(
+    const ProfileId id)
+{
+    std::vector<std::byte> value = Bytes("OODIAGCP");
+    value.resize(16U, std::byte{0});
+    value[8U] = std::byte{1U};
+    for (const std::uint8_t id_byte : id.bytes())
+        value.push_back(static_cast<std::byte>(id_byte));
+    return value;
+}
+
+[[nodiscard]] std::string DiagnosticCheckpointKey(const ProfileId id)
+{
+    return "profiles/" + id.ToString() +
+           std::string(kDiagnosticCheckpointSuffix);
 }
 
 [[nodiscard]] std::string ProfileMetadataKey(const ProfileId id)
@@ -180,6 +234,22 @@ private:
     return *committed;
 }
 
+[[nodiscard]] std::optional<std::uint64_t> PutDiagnosticCheckpoint(
+    SaveDatabase& database, const ProfileId key_id,
+    const std::uint32_t schema_version, std::vector<std::byte> value,
+    const SaveWriteCondition condition = SaveWriteCondition::MustBeAbsent())
+{
+    std::array mutation{
+        SaveMutation::Put(DiagnosticCheckpointKey(key_id), schema_version,
+                          std::move(value), condition),
+    };
+    const auto committed = database.Commit(mutation);
+    Check(committed.has_value(), "the raw diagnostic-checkpoint fixture commits");
+    if (!committed)
+        return std::nullopt;
+    return *committed;
+}
+
 void CheckPrivateErrorMessage(const std::string_view actual,
                               const std::string_view exact,
                               const std::filesystem::path& root,
@@ -197,6 +267,22 @@ void CheckPrivateErrorMessage(const std::string_view actual,
           "a typed active-profile error does not expose persisted bytes");
 }
 
+void CheckDiagnosticPrivateErrorMessage(
+    const std::string_view actual, const std::string_view exact,
+    const std::filesystem::path& root, const ProfileId id,
+    const std::string_view context)
+{
+    Check(actual == exact, context);
+    Check(actual.find(root.string()) == std::string_view::npos,
+          "a typed diagnostic-start error does not expose its database path");
+    Check(actual.find(id.ToString()) == std::string_view::npos,
+          "a typed diagnostic-start error does not expose its profile ID");
+    Check(actual.find(kDiagnosticCheckpointSuffix) == std::string_view::npos,
+          "a typed diagnostic-start error does not expose its database key");
+    Check(actual.find("OODIAGCP") == std::string_view::npos,
+          "a typed diagnostic-start error does not expose persisted bytes");
+}
+
 void CheckErrorNames()
 {
     constexpr std::array startup_expected{
@@ -204,6 +290,7 @@ void CheckErrorNames()
         "profile-catalog-bootstrap"sv,
         "persisted-active-profile"sv,
         "resource-exhausted"sv,
+        "persisted-diagnostic-checkpoint"sv,
     };
     for (std::size_t index = 0U; index < startup_expected.size(); ++index)
     {
@@ -232,6 +319,26 @@ void CheckErrorNames()
     Check(omega::app::ActiveProfileConfirmationErrorCodeName(
               static_cast<ActiveProfileConfirmationErrorCode>(0xffU)) == "storage-failure",
           "an invalid active-profile confirmation error uses the fixed fallback");
+
+    constexpr std::array diagnostic_start_expected{
+        "active-profile-required"sv,
+        "profile-not-found"sv,
+        "revision-conflict"sv,
+        "storage-limit-exceeded"sv,
+        "storage-failure"sv,
+        "resource-exhausted"sv,
+    };
+    for (std::size_t index = 0U; index < diagnostic_start_expected.size(); ++index)
+    {
+        Check(omega::app::DiagnosticCampaignStartErrorCodeName(
+                  static_cast<DiagnosticCampaignStartErrorCode>(index)) ==
+                  diagnostic_start_expected[index],
+              "every diagnostic-campaign start error has a fixed name");
+    }
+    Check(omega::app::DiagnosticCampaignStartErrorCodeName(
+              static_cast<DiagnosticCampaignStartErrorCode>(0xffU)) ==
+              "storage-failure",
+          "an invalid diagnostic-campaign start error uses the fixed fallback");
 }
 
 void CheckAbsentBootstrapAndLimits()
@@ -248,8 +355,8 @@ void CheckAbsentBootstrapAndLimits()
 
     const SaveDatabaseLimits defaults;
     const auto* config = persistence->database().config();
-    Check(config && config->limits.max_records == 1'025U,
-          "production native persistence has capacity for 1,024 profile markers plus the active pointer when no other record consumes it");
+    Check(config && config->limits.max_records == 2'049U,
+          "production native persistence has capacity for 1,024 profile markers, 1,024 project diagnostic checkpoints, and the active pointer when no other record consumes it");
     Check(config && config->limits.max_mutations_per_commit ==
                         defaults.max_mutations_per_commit &&
               config->limits.max_key_bytes == defaults.max_key_bytes &&
@@ -272,6 +379,102 @@ void CheckAbsentBootstrapAndLimits()
           "missing-profile confirmation publishes no state");
     const auto pointer = persistence->database().Read(kActiveProfileKey);
     Check(pointer && !*pointer, "missing-profile confirmation writes no pointer record");
+}
+
+void CheckFrontEndStartupProfileBudget()
+{
+    TempDirectory tree("front-end-startup-profile-budget");
+    const auto database_root = tree.path() / "native-save";
+    constexpr std::size_t kStartupProfileMaximum =
+        omega::app::kFrontEndMaximumProfiles;
+    static_assert(kStartupProfileMaximum == 1'024U);
+
+    {
+        auto persistence = NativePersistence::Bootstrap(database_root);
+        Check(persistence.has_value(),
+              "the front-end startup-budget database bootstraps empty");
+        if (!persistence)
+            return;
+
+        const ProfileId first = SequentialId(0U);
+        const auto created = persistence->profiles().Create(
+            first, ProfileMetadata{
+                       .display_name = "bounded",
+                       .created_unix_milliseconds = 1'000U,
+                       .modified_unix_milliseconds = 1'000U,
+                   });
+        Check(created.has_value(),
+              "the startup-budget seed profile commits through the typed catalog");
+        if (!created)
+            return;
+
+        const auto encoded_seed =
+            persistence->database().Read(ProfileMetadataKey(first));
+        Check(encoded_seed && *encoded_seed,
+              "the generated startup-budget seed metadata is readable");
+        if (!encoded_seed || !*encoded_seed)
+            return;
+
+        const auto* config = persistence->database().config();
+        Check(config && config->limits.max_mutations_per_commit >= 1U,
+              "the startup-budget fixture exposes a nonzero mutation batch");
+        if (!config || config->limits.max_mutations_per_commit == 0U)
+            return;
+
+        std::vector<SaveMutation> batch;
+        batch.reserve(config->limits.max_mutations_per_commit);
+        bool populated = true;
+        for (std::size_t index = 1U; index < kStartupProfileMaximum; ++index)
+        {
+            batch.push_back(SaveMutation::Put(
+                ProfileMetadataKey(SequentialId(index)),
+                (**encoded_seed).schema_version, (**encoded_seed).value,
+                SaveWriteCondition::MustBeAbsent()));
+            if (batch.size() == config->limits.max_mutations_per_commit ||
+                index + 1U == kStartupProfileMaximum)
+            {
+                const auto committed = persistence->database().Commit(batch);
+                populated = populated && committed.has_value();
+                batch.clear();
+                if (!committed)
+                    break;
+            }
+        }
+        Check(populated && persistence->database().record_count() ==
+                               kStartupProfileMaximum,
+              "exactly 1,024 generated direct markers populate in bounded batches");
+        if (!populated)
+            return;
+
+        std::array noise{
+            SaveMutation::Put(
+                "profiles/not-a-profile-id/metadata", 0U, Bytes("unparsed"),
+                SaveWriteCondition::MustBeAbsent()),
+            SaveMutation::Put(
+                DiagnosticCheckpointKey(first),
+                kDiagnosticCheckpointSchemaVersion,
+                DiagnosticCheckpointValue(first),
+                SaveWriteCondition::MustBeAbsent()),
+            SaveMutation::Put(
+                "profiles/00000000000000000000000000000001/notes/generated",
+                1U, Bytes("noise"), SaveWriteCondition::MustBeAbsent()),
+        };
+        const auto committed_noise = persistence->database().Commit(noise);
+        Check(committed_noise && persistence->database().record_count() ==
+                                     kStartupProfileMaximum + noise.size(),
+              "the 1,025th malformed direct marker, valid checkpoint, and non-marker noise commit together");
+        if (!committed_noise)
+            return;
+    }
+
+    const auto rejected = NativePersistence::Bootstrap(database_root);
+    CheckStartupError(rejected,
+        NativePersistenceStartupErrorCode::ProfileCatalogBootstrap,
+        "startup rejects the 1,025th direct marker at the front-end budget");
+    Check(!rejected &&
+              rejected.error().message.starts_with(
+                  "profile catalog [resource-exhausted]:"),
+          "startup spends the direct-marker budget before parsing the malformed 1,025th marker while checkpoint and non-marker records spend no budget");
 }
 
 void CheckEncodeIdempotenceReplacementMoveAndReopen()
@@ -361,6 +564,165 @@ void CheckEncodeIdempotenceReplacementMoveAndReopen()
                   reopened->database().generation() == generation,
               "decoded confirmation remains idempotent after reopen");
     }
+}
+
+void CheckDiagnosticCampaignCheckpointLifecycle()
+{
+    TempDirectory tree("diagnostic-checkpoint-lifecycle");
+    const auto database_root = tree.path() / "native-save";
+    const ProfileId first = Id("0a0b0c0d0e0f10111213141516171819");
+    const ProfileId second = Id("191817161514131211100f0e0d0c0b0a");
+
+    {
+        auto persistence = NativePersistence::Bootstrap(database_root);
+        Check(persistence.has_value(),
+              "the diagnostic-checkpoint lifecycle fixture bootstraps");
+        if (!persistence || !CreateProfile(*persistence, first, "First") ||
+            !CreateProfile(*persistence, second, "Second"))
+        {
+            return;
+        }
+
+        const std::uint64_t before_unconfirmed =
+            persistence->database().generation();
+        const auto unconfirmed =
+            persistence->PrepareDiagnosticCampaignStart(first);
+        CheckDiagnosticStartError(
+            unconfirmed,
+            DiagnosticCampaignStartErrorCode::ActiveProfileRequired,
+            "diagnostic start requires an explicit active-profile confirmation");
+        Check(!unconfirmed &&
+                  unconfirmed.error().message ==
+                      "diagnostic campaign start requires the same confirmed active profile" &&
+                  persistence->database().generation() == before_unconfirmed,
+              "unconfirmed diagnostic start uses a fixed private error and writes nothing");
+        const auto absent_checkpoint =
+            persistence->database().Read(DiagnosticCheckpointKey(first));
+        Check(absent_checkpoint && !*absent_checkpoint,
+              "unconfirmed diagnostic start creates no checkpoint record");
+
+        if (!persistence->ConfirmActiveProfile(first))
+        {
+            Check(false,
+                  "the lifecycle fixture confirms its first active profile");
+            return;
+        }
+        const std::uint64_t before_wrong_profile =
+            persistence->database().generation();
+        const auto wrong_profile =
+            persistence->PrepareDiagnosticCampaignStart(second);
+        CheckDiagnosticStartError(
+            wrong_profile,
+            DiagnosticCampaignStartErrorCode::ActiveProfileRequired,
+            "diagnostic start rejects a profile other than the confirmed active profile");
+        Check(persistence->database().generation() == before_wrong_profile,
+              "same-profile prerequisite failure publishes no generation");
+
+        const auto prepared =
+            persistence->PrepareDiagnosticCampaignStart(first);
+        const auto checkpoint =
+            persistence->database().Read(DiagnosticCheckpointKey(first));
+        Check(prepared &&
+                  persistence->database().generation() ==
+                      before_wrong_profile + 1U &&
+                  checkpoint && *checkpoint &&
+                  (**checkpoint).key == DiagnosticCheckpointKey(first) &&
+                  (**checkpoint).schema_version ==
+                      kDiagnosticCheckpointSchemaVersion &&
+                  (**checkpoint).value == DiagnosticCheckpointValue(first) &&
+                  (**checkpoint).value.size() == 32U &&
+                  (**checkpoint).revision ==
+                      persistence->database().generation(),
+              "diagnostic preparation publishes the exact schema-1 32-byte profile-bound marker");
+
+        const std::uint64_t idempotent_generation =
+            persistence->database().generation();
+        const std::uint64_t checkpoint_revision =
+            checkpoint && *checkpoint ? (**checkpoint).revision : 0U;
+        const auto idempotent =
+            persistence->PrepareDiagnosticCampaignStart(first);
+        const auto after_idempotent =
+            persistence->database().Read(DiagnosticCheckpointKey(first));
+        Check(idempotent &&
+                  persistence->database().generation() ==
+                      idempotent_generation &&
+                  after_idempotent && *after_idempotent &&
+                  (**after_idempotent).revision == checkpoint_revision,
+              "an exact diagnostic checkpoint is a no-write idempotent success");
+
+        std::array unrelated_mutation{
+            SaveMutation::Put("fixture/diagnostic-unrelated", 1U,
+                              Bytes("generated"),
+                              SaveWriteCondition::MustBeAbsent()),
+        };
+        const auto unrelated =
+            persistence->database().Commit(unrelated_mutation);
+        const auto after_unrelated =
+            persistence->PrepareDiagnosticCampaignStart(first);
+        const auto stable_checkpoint =
+            persistence->database().Read(DiagnosticCheckpointKey(first));
+        Check(unrelated && after_unrelated &&
+                  persistence->database().generation() ==
+                      idempotent_generation + 1U &&
+                  stable_checkpoint && *stable_checkpoint &&
+                  (**stable_checkpoint).revision == checkpoint_revision,
+              "an unrelated generation does not turn idempotent diagnostic preparation into a write");
+
+        NativePersistence moved = std::move(*persistence);
+        const std::uint64_t moved_generation = moved.database().generation();
+        Check(moved.PrepareDiagnosticCampaignStart(first).has_value() &&
+                  moved.database().generation() == moved_generation,
+              "move construction preserves diagnostic checkpoint idempotence");
+    }
+
+    {
+        auto reopened = NativePersistence::Bootstrap(database_root);
+        Check(reopened && reopened->startup_profiles().size() == 2U &&
+                  reopened->persisted_confirmed_profile_id() == first,
+              "reopen validates the profile-bound diagnostic checkpoint beside the active pointer");
+        if (!reopened)
+            return;
+
+        const std::uint64_t before_idempotent =
+            reopened->database().generation();
+        Check(reopened->PrepareDiagnosticCampaignStart(first).has_value() &&
+                  reopened->database().generation() == before_idempotent,
+              "a validated reopened diagnostic checkpoint remains a no-write success");
+        if (!reopened->ConfirmActiveProfile(second))
+        {
+            Check(false,
+                  "the reopened lifecycle fixture confirms its second profile");
+            return;
+        }
+        const std::uint64_t before_second = reopened->database().generation();
+        const auto second_prepared =
+            reopened->PrepareDiagnosticCampaignStart(second);
+        const auto second_checkpoint =
+            reopened->database().Read(DiagnosticCheckpointKey(second));
+        Check(second_prepared &&
+                  reopened->database().generation() == before_second + 1U &&
+                  second_checkpoint && *second_checkpoint &&
+                  (**second_checkpoint).value ==
+                      DiagnosticCheckpointValue(second),
+              "each confirmed profile receives its own fixed diagnostic checkpoint key");
+    }
+
+    auto verified = NativePersistence::Bootstrap(database_root);
+    bool first_checkpoint_exists = false;
+    bool second_checkpoint_exists = false;
+    if (verified)
+    {
+        const auto first_checkpoint =
+            verified->database().Read(DiagnosticCheckpointKey(first));
+        const auto second_checkpoint =
+            verified->database().Read(DiagnosticCheckpointKey(second));
+        first_checkpoint_exists = first_checkpoint && *first_checkpoint;
+        second_checkpoint_exists = second_checkpoint && *second_checkpoint;
+    }
+    Check(verified && verified->startup_profiles().size() == 2U &&
+              verified->persisted_confirmed_profile_id() == second &&
+              first_checkpoint_exists && second_checkpoint_exists,
+          "a second reopen validates both independent project diagnostic checkpoints");
 }
 
 struct InvalidPointerFixture
@@ -471,6 +833,161 @@ void CheckGeneratedDecodeFailures()
                                      "persisted active profile validation failed", tree.path(), id,
                                      "invalid active-profile startup uses one fixed message");
         }
+    }
+}
+
+struct InvalidDiagnosticCheckpointFixture
+{
+    std::string label;
+    std::uint32_t schema_version = kDiagnosticCheckpointSchemaVersion;
+    std::vector<std::byte> value;
+    bool create_target = true;
+};
+
+void CheckGeneratedDiagnosticCheckpointDecodeFailures()
+{
+    const ProfileId id = Id("abcdef0123456789abcdef0123456789");
+    const ProfileId other = Id("9876543210fedcba9876543210fedcba");
+    const std::vector<std::byte> valid = DiagnosticCheckpointValue(id);
+    std::vector<InvalidDiagnosticCheckpointFixture> fixtures;
+
+    constexpr std::array invalid_sizes{0U, 7U, 8U, 15U, 16U, 31U, 33U};
+    for (const std::size_t size : invalid_sizes)
+    {
+        auto wrong_size = valid;
+        wrong_size.resize(size, std::byte{0U});
+        fixtures.push_back({
+            .label = "diagnostic-size-" + std::to_string(size),
+            .value = std::move(wrong_size),
+        });
+    }
+
+    for (std::size_t index = 0U; index < 8U; ++index)
+    {
+        auto bad_magic = valid;
+        bad_magic[index] ^= std::byte{1U};
+        fixtures.push_back({
+            .label = "diagnostic-magic-" + std::to_string(index),
+            .value = std::move(bad_magic),
+        });
+    }
+
+    for (const std::size_t index : {8U, 9U})
+    {
+        auto future_payload = valid;
+        future_payload[index] = index == 8U ? std::byte{2U} : std::byte{1U};
+        fixtures.push_back({
+            .label = "diagnostic-future-payload-" + std::to_string(index),
+            .value = std::move(future_payload),
+        });
+    }
+
+    for (const std::size_t index : {10U, 11U})
+    {
+        auto flags = valid;
+        flags[index] = std::byte{1U};
+        fixtures.push_back({
+            .label = "diagnostic-flags-" + std::to_string(index),
+            .value = std::move(flags),
+        });
+    }
+
+    for (const std::size_t index : {12U, 13U, 14U, 15U})
+    {
+        auto reserved = valid;
+        reserved[index] = std::byte{1U};
+        fixtures.push_back({
+            .label = "diagnostic-reserved-" + std::to_string(index),
+            .value = std::move(reserved),
+        });
+    }
+
+    fixtures.push_back({
+        .label = "diagnostic-future-schema",
+        .schema_version = 2U,
+        .value = valid,
+    });
+    fixtures.push_back({
+        .label = "diagnostic-key-value-id-mismatch",
+        .value = DiagnosticCheckpointValue(other),
+    });
+    fixtures.push_back({
+        .label = "diagnostic-stale-target",
+        .value = valid,
+        .create_target = false,
+    });
+
+    for (const InvalidDiagnosticCheckpointFixture& fixture : fixtures)
+    {
+        TempDirectory tree(fixture.label);
+        const auto database_root = tree.path() / "native-save";
+        {
+            auto database = SaveDatabase::Open({.directory = database_root});
+            Check(database.has_value(),
+                  "the invalid diagnostic-checkpoint fixture database opens");
+            if (!database)
+                continue;
+            ProfileCatalog catalog(*database);
+            if (fixture.create_target)
+            {
+                const auto created = catalog.Create(
+                    id, ProfileMetadata{
+                            .display_name = "Fixture",
+                            .created_unix_milliseconds = 1'000U,
+                            .modified_unix_milliseconds = 1'000U,
+                        });
+                Check(created.has_value(),
+                      "the invalid diagnostic-checkpoint target profile is created");
+            }
+            static_cast<void>(PutDiagnosticCheckpoint(
+                *database, id, fixture.schema_version, fixture.value));
+        }
+
+        const auto bootstrap = NativePersistence::Bootstrap(database_root);
+        CheckStartupError(
+            bootstrap,
+            NativePersistenceStartupErrorCode::PersistedDiagnosticCheckpoint,
+            "every invalid persisted diagnostic-checkpoint fixture fails in one category");
+        if (!bootstrap)
+        {
+            CheckDiagnosticPrivateErrorMessage(
+                bootstrap.error().message,
+                "persisted diagnostic checkpoint validation failed", tree.path(),
+                id,
+                "invalid diagnostic-checkpoint startup uses one fixed message");
+        }
+    }
+
+    TempDirectory malformed_tree("diagnostic-malformed-key-id");
+    const auto malformed_root = malformed_tree.path() / "native-save";
+    {
+        auto database = SaveDatabase::Open({.directory = malformed_root});
+        Check(database.has_value(),
+              "the malformed diagnostic-checkpoint key fixture opens");
+        if (database)
+        {
+            std::array mutation{
+                SaveMutation::Put(
+                    "profiles/not-a-profile-id/campaigns/diagnostic/checkpoint",
+                    kDiagnosticCheckpointSchemaVersion, valid,
+                    SaveWriteCondition::MustBeAbsent()),
+            };
+            Check(database->Commit(mutation).has_value(),
+                  "the malformed diagnostic-checkpoint key fixture commits through raw storage");
+        }
+    }
+    const auto malformed = NativePersistence::Bootstrap(malformed_root);
+    CheckStartupError(
+        malformed,
+        NativePersistenceStartupErrorCode::PersistedDiagnosticCheckpoint,
+        "a diagnostic-checkpoint-shaped key with a malformed profile ID fails bootstrap");
+    if (!malformed)
+    {
+        CheckDiagnosticPrivateErrorMessage(
+            malformed.error().message,
+            "persisted diagnostic checkpoint validation failed",
+            malformed_tree.path(), id,
+            "malformed diagnostic-checkpoint key failure stays private");
     }
 }
 
@@ -589,6 +1106,26 @@ void CheckConfirmationRevalidatesIdempotentTarget()
             return;
 
         const std::uint64_t before = persistence->database().generation();
+        const auto missing_profile_start =
+            persistence->PrepareDiagnosticCampaignStart(id);
+        CheckDiagnosticStartError(
+            missing_profile_start,
+            DiagnosticCampaignStartErrorCode::ProfileNotFound,
+            "diagnostic preparation revalidates current profile existence");
+        Check(!missing_profile_start &&
+                  missing_profile_start.error().message ==
+                      "diagnostic campaign start requires an existing profile" &&
+                  persistence->database().generation() == before,
+              "missing-profile diagnostic preparation publishes no checkpoint generation");
+        if (!missing_profile_start)
+        {
+            CheckDiagnosticPrivateErrorMessage(
+                missing_profile_start.error().message,
+                "diagnostic campaign start requires an existing profile",
+                tree.path(), id,
+                "missing-profile diagnostic preparation uses one fixed private message");
+        }
+
         const auto idempotent = persistence->ConfirmActiveProfile(id);
         CheckConfirmationError(idempotent, ActiveProfileConfirmationErrorCode::ProfileNotFound,
                                "same-ID confirmation revalidates current profile existence");
@@ -628,7 +1165,7 @@ void CheckCapacityRollback(const std::string_view label, SaveDatabaseLimits limi
               "capacity failure rolls back storage and the owned confirmation snapshot");
     }
 
-    const auto reopened = NativePersistence::Bootstrap(database_root, limits);
+    auto reopened = NativePersistence::Bootstrap(database_root, limits);
     Check(reopened && !reopened->persisted_confirmed_profile_id(),
           "constrained reopen observes no partial pointer after capacity rollback");
 }
@@ -643,6 +1180,189 @@ void CheckConstrainedLimits()
     logical_limit.max_value_bytes = 64U;
     logical_limit.max_logical_value_bytes = 64U;
     CheckCapacityRollback("logical-capacity", logical_limit);
+}
+
+void CheckDiagnosticCheckpointCapacityRollback(
+    const std::string_view label, SaveDatabaseLimits limits)
+{
+    TempDirectory tree(label);
+    const auto database_root = tree.path() / "native-save";
+    const ProfileId id = Id("67676767676767676767676767676767");
+    {
+        auto persistence = NativePersistence::Bootstrap(database_root, limits);
+        Check(persistence.has_value(),
+              "the constrained diagnostic-checkpoint fixture bootstraps");
+        if (!persistence || !CreateProfile(*persistence, id, "A") ||
+            !persistence->ConfirmActiveProfile(id))
+        {
+            return;
+        }
+
+        const std::uint64_t before = persistence->database().generation();
+        const auto prepared =
+            persistence->PrepareDiagnosticCampaignStart(id);
+        CheckDiagnosticStartError(
+            prepared,
+            DiagnosticCampaignStartErrorCode::StorageLimitExceeded,
+            "constrained storage rejects the project diagnostic checkpoint");
+        Check(!prepared &&
+                  prepared.error().message ==
+                      "diagnostic campaign checkpoint exceeds native storage limits",
+              "diagnostic checkpoint capacity failure uses a fixed sanitized message");
+        const auto checkpoint =
+            persistence->database().Read(DiagnosticCheckpointKey(id));
+        Check(persistence->database().generation() == before && checkpoint &&
+                  !*checkpoint,
+              "diagnostic checkpoint capacity failure rolls back storage completely");
+    }
+
+    auto reopened = NativePersistence::Bootstrap(database_root, limits);
+    bool checkpoint_absent = false;
+    if (reopened)
+    {
+        const auto checkpoint =
+            reopened->database().Read(DiagnosticCheckpointKey(id));
+        checkpoint_absent = checkpoint && !*checkpoint;
+    }
+    Check(reopened && reopened->persisted_confirmed_profile_id() == id &&
+              checkpoint_absent,
+          "constrained reopen observes the active profile and no partial diagnostic checkpoint");
+}
+
+void CheckDiagnosticCheckpointConstrainedLimits()
+{
+    SaveDatabaseLimits record_limit;
+    record_limit.max_records = 2U;
+    CheckDiagnosticCheckpointCapacityRollback(
+        "diagnostic-record-capacity", record_limit);
+
+    SaveDatabaseLimits logical_limit;
+    logical_limit.max_records = 3U;
+    logical_limit.max_value_bytes = 64U;
+    logical_limit.max_logical_value_bytes = 90U;
+    CheckDiagnosticCheckpointCapacityRollback(
+        "diagnostic-logical-capacity", logical_limit);
+}
+
+void CheckDiagnosticCheckpointConflictRollbackAndPrivacy()
+{
+    TempDirectory tree("diagnostic-conflict");
+    const auto database_root = tree.path() / "native-save";
+    const ProfileId id = Id("78787878787878787878787878787878");
+    {
+        auto persistence = NativePersistence::Bootstrap(database_root);
+        Check(persistence.has_value(),
+              "the diagnostic-conflict fixture bootstraps");
+        if (!persistence || !CreateProfile(*persistence, id, "Conflict") ||
+            !persistence->ConfirmActiveProfile(id))
+        {
+            return;
+        }
+
+        const auto active = persistence->database().Read(kActiveProfileKey);
+        Check(active && *active,
+              "the diagnostic-conflict fixture observes its active pointer");
+        if (!active || !*active)
+            return;
+        static_cast<void>(PutActiveProfile(
+            persistence->database(), kActiveProfileSchemaVersion,
+            ActiveProfileValue(id),
+            SaveWriteCondition::ExactRevision((**active).revision)));
+
+        const std::uint64_t before = persistence->database().generation();
+        const auto conflicted =
+            persistence->PrepareDiagnosticCampaignStart(id);
+        CheckDiagnosticStartError(
+            conflicted, DiagnosticCampaignStartErrorCode::RevisionConflict,
+            "diagnostic start rejects a replaced active-pointer revision");
+        const auto checkpoint =
+            persistence->database().Read(DiagnosticCheckpointKey(id));
+        Check(!conflicted &&
+                  conflicted.error().message ==
+                      "diagnostic campaign start observed changed persisted state" &&
+                  persistence->database().generation() == before && checkpoint &&
+                  !*checkpoint,
+              "active-pointer conflict leaves the diagnostic checkpoint absent and generation unchanged");
+        if (!conflicted)
+        {
+            CheckDiagnosticPrivateErrorMessage(
+                conflicted.error().message,
+                "diagnostic campaign start observed changed persisted state",
+                tree.path(), id,
+                "diagnostic active-pointer conflict uses one fixed private message");
+        }
+    }
+
+    {
+        auto reconciled = NativePersistence::Bootstrap(database_root);
+        Check(reconciled && reconciled->persisted_confirmed_profile_id() == id,
+              "reopen reconciles the independently replaced active pointer");
+        if (!reconciled ||
+            !reconciled->PrepareDiagnosticCampaignStart(id))
+        {
+            Check(false,
+                  "the reconciled fixture creates its valid diagnostic checkpoint");
+            return;
+        }
+
+        const auto valid_checkpoint =
+            reconciled->database().Read(DiagnosticCheckpointKey(id));
+        Check(valid_checkpoint && *valid_checkpoint,
+              "the reconciled fixture observes its diagnostic checkpoint");
+        if (!valid_checkpoint || !*valid_checkpoint)
+            return;
+        auto invalid_value = DiagnosticCheckpointValue(id);
+        invalid_value[0U] ^= std::byte{1U};
+        static_cast<void>(PutDiagnosticCheckpoint(
+            reconciled->database(), id, kDiagnosticCheckpointSchemaVersion,
+            std::move(invalid_value),
+            SaveWriteCondition::ExactRevision((**valid_checkpoint).revision)));
+
+        const std::uint64_t before_invalid = reconciled->database().generation();
+        const auto invalid = reconciled->PrepareDiagnosticCampaignStart(id);
+        CheckDiagnosticStartError(
+            invalid, DiagnosticCampaignStartErrorCode::RevisionConflict,
+            "runtime preparation rejects a replaced invalid checkpoint marker");
+        Check(reconciled->database().generation() == before_invalid,
+              "invalid existing checkpoint rejection publishes no additional generation");
+    }
+
+    const auto rejected_reopen = NativePersistence::Bootstrap(database_root);
+    CheckStartupError(
+        rejected_reopen,
+        NativePersistenceStartupErrorCode::PersistedDiagnosticCheckpoint,
+        "reopen rejects the same invalid diagnostic checkpoint through startup validation");
+}
+
+void CheckDiagnosticCheckpointStorageFailureRollbackAndPrivacy()
+{
+    TempDirectory tree("diagnostic-storage-failure");
+    const auto database_root = tree.path() / "native-save";
+    const ProfileId id = Id("89898989898989898989898989898989");
+    auto persistence = NativePersistence::Bootstrap(database_root);
+    Check(persistence.has_value(),
+          "the diagnostic storage-failure fixture bootstraps");
+    if (!persistence || !CreateProfile(*persistence, id, "Failure") ||
+        !persistence->ConfirmActiveProfile(id))
+    {
+        return;
+    }
+
+    SaveDatabase displaced = std::move(persistence->database());
+    const auto prepared = persistence->PrepareDiagnosticCampaignStart(id);
+    CheckDiagnosticStartError(
+        prepared, DiagnosticCampaignStartErrorCode::StorageFailure,
+        "a moved-from database becomes a typed diagnostic-start storage failure");
+    if (!prepared)
+    {
+        CheckDiagnosticPrivateErrorMessage(
+            prepared.error().message,
+            "diagnostic campaign checkpoint storage failed", tree.path(), id,
+            "diagnostic storage failure uses one fixed private message");
+    }
+    const auto durable = displaced.Read(DiagnosticCheckpointKey(id));
+    Check(durable && !*durable,
+          "the displaced live database proves failed diagnostic preparation changed no durable bytes");
 }
 
 void CheckStorageFailureRollbackAndPrivacy()
@@ -711,13 +1431,19 @@ int main()
 {
     CheckErrorNames();
     CheckAbsentBootstrapAndLimits();
+    CheckFrontEndStartupProfileBudget();
     CheckEncodeIdempotenceReplacementMoveAndReopen();
+    CheckDiagnosticCampaignCheckpointLifecycle();
     CheckGeneratedDecodeFailures();
+    CheckGeneratedDiagnosticCheckpointDecodeFailures();
     CheckReplacementConflictRollback();
     CheckAbsentPointerConflictRollback();
     CheckConfirmationRevalidatesIdempotentTarget();
     CheckConstrainedLimits();
+    CheckDiagnosticCheckpointConstrainedLimits();
+    CheckDiagnosticCheckpointConflictRollbackAndPrivacy();
     CheckStorageFailureRollbackAndPrivacy();
+    CheckDiagnosticCheckpointStorageFailureRollbackAndPrivacy();
     CheckExistingBootstrapFailuresRemainTyped();
     return failures == 0 ? 0 : 1;
 }

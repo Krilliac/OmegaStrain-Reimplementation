@@ -192,27 +192,26 @@ enum class FrontEndCommandType : std::uint8_t
     None = 0U,
     SetActiveProfile = 1U,
     CreateFirstProfile = 2U,
+    StartDiagnosticCampaign = 3U,
 };
 
-// Capability inputs default closed so existing callers retain their exact
-// behavior until persistence explicitly advertises first-profile creation and
-// until a caller explicitly opts into the gated diagnostic entry.
+// Independent capability inputs default closed. Persistence explicitly
+// advertises the commands that the current session can satisfy before the pure
+// reducer may publish their projected states. Diagnostic play is available
+// only when start support is open and its optional confirmation gate is
+// satisfied.
 struct FrontEndCapabilities
 {
     bool can_create_first_profile = false;
-    // Default closed. When a caller enables it, diagnostic play requires an
-    // already-confirmed active profile that the current bounded model still
-    // resolves; every caller that leaves it closed keeps the unguarded
-    // diagnostic entry byte-for-byte.
+    bool can_start_diagnostic_campaign = false;
     bool requires_active_profile_for_diagnostic_play = false;
 
     friend constexpr bool operator==(const FrontEndCapabilities &,
                                      const FrontEndCapabilities &) noexcept = default;
 };
 
-// [any thread; reentrant] True when the explicit diagnostic-play gate is
-// satisfied. The default capability leaves the gate open, so callers that do
-// not opt in observe the exact legacy result without supplying a confirmation.
+// [any thread; reentrant] True when the explicit diagnostic-play confirmation
+// gate is satisfied. This predicate does not advertise start support.
 // Live callers must derive `active_profile_is_confirmed` with
 // FrontEndHasConfirmedActiveProfile. The bounded replay adapter may instead
 // supply its private identity-free mirror, which begins closed and opens only
@@ -226,11 +225,23 @@ struct FrontEndCapabilities
     return !capabilities.requires_active_profile_for_diagnostic_play || active_profile_is_confirmed;
 }
 
+// [any thread; reentrant] Combines the two independent diagnostic inputs. A
+// caller may explicitly enable a synthetic persistence-free start by opening
+// support without requiring confirmation. No allocation, I/O, catalog access,
+// or persistence mutation occurs.
+[[nodiscard]] constexpr bool FrontEndAllowsDiagnosticPlay(
+    const FrontEndCapabilities capabilities, const bool active_profile_is_confirmed) noexcept
+{
+    return capabilities.can_start_diagnostic_campaign &&
+           FrontEndSatisfiesDiagnosticPlayGate(capabilities, active_profile_is_confirmed);
+}
+
 // Fully owned reducer publication. SetActiveProfile carries only one of the
-// three bounded startup-model positions. CreateFirstProfile carries no caller
-// data: its project-owned display name is kFrontEndFirstProfileDisplayName and
-// its slot remains First. Neither command carries a catalog view or performs
-// persistence work.
+// three bounded startup-model positions. CreateFirstProfile and
+// StartDiagnosticCampaign carry no caller data; the latter is a project-owned
+// diagnostic start request, not a retail campaign, save-slot, or gameplay
+// semantic claim. No command carries a catalog view or performs persistence
+// work.
 struct FrontEndCommand
 {
     FrontEndCommandType type = FrontEndCommandType::None;
@@ -329,21 +340,22 @@ struct FrontEndView
 // row. When the catalog is empty and the explicit capability is enabled,
 // Primary publishes CreateFirstProfile and remains in Profiles; the default
 // capability preserves the legacy empty return transition byte-for-byte.
+// Primary on Main/StartDiagnostic publishes the project-only
+// StartDiagnosticCampaign command with the projected DiagnosticPlay state only
+// when its explicit capability is enabled; otherwise that row is inert.
 // Out-of-range slots retain that legacy return transition. Empty
 // selection/navigation is otherwise inert. Simultaneous navigation edges are
 // neutral, and navigation is press-edge-only and clamps at both bounds.
 //
-// The confirmation participates only through the explicit diagnostic-play gate.
+// Start support and confirmation are independent inputs. Both must permit the
+// transition. A closed support capability or an unsatisfied confirmation gate
+// leaves Main/StartDiagnostic inert and publishes no command.
 // Live callers must derive it with FrontEndHasConfirmedActiveProfile; the
 // bounded replay adapter may use its private identity-free mirror, initialized
-// closed and opened only by a replayed SetActiveProfile command. With the
-// default capability it cannot change any result. With the gate enabled and
-// nothing confirmed, an already entered DiagnosticPlay state fails closed to
-// the initial front end before any edge is considered, and the Main diagnostic
-// row opens the Profiles surface that can satisfy the gate instead of starting
-// diagnostic play. That redirect publishes no command, so the gate can never
-// itself confirm, select, or create a profile. No allocation, I/O, catalog
-// access, or persistence mutation occurs.
+// closed and opened only by a replayed SetActiveProfile command. An already
+// entered DiagnosticPlay state fails closed to the initial front end whenever
+// either input closes it. No allocation, I/O, catalog access, or persistence
+// mutation occurs.
 [[nodiscard]] constexpr FrontEndReduction ReduceFrontEnd(
     FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots,
     const FrontEndCapabilities capabilities = {}, const bool active_profile_is_confirmed = false) noexcept
@@ -352,7 +364,7 @@ struct FrontEndView
         return FrontEndReduction{.state = InitialFrontEndState()};
 
     const bool diagnostic_play_is_permitted =
-        FrontEndSatisfiesDiagnosticPlayGate(capabilities, active_profile_is_confirmed);
+        FrontEndAllowsDiagnosticPlay(capabilities, active_profile_is_confirmed);
     if (!diagnostic_play_is_permitted && state.mode == FrontEndMode::DiagnosticPlay)
         return FrontEndReduction{.state = InitialFrontEndState()};
 
@@ -443,18 +455,24 @@ struct FrontEndView
             break;
         }
 
+        if (state.selected_main_row == FrontEndMainRow::StartDiagnostic &&
+            !diagnostic_play_is_permitted)
+        {
+            return FrontEndReduction{.state = state};
+        }
+
         state.selected_profile_slot = FrontEndProfileSlot::First;
         switch (state.selected_main_row)
         {
         case FrontEndMainRow::StartDiagnostic:
-            if (!diagnostic_play_is_permitted)
-            {
-                state.mode = FrontEndMode::Profiles;
-                state.selected_main_row = FrontEndMainRow::Profiles;
-                break;
-            }
             state.mode = FrontEndMode::DiagnosticPlay;
-            break;
+            return FrontEndReduction{
+                .state = state,
+                .command = FrontEndCommand{
+                    .type = FrontEndCommandType::StartDiagnosticCampaign,
+                    .profile_slot = FrontEndProfileSlot::First,
+                },
+            };
         case FrontEndMainRow::Profiles:
             state.mode = FrontEndMode::Profiles;
             state.selected_profile_slot = FrontEndProfileSlot::First;
@@ -505,15 +523,14 @@ struct FrontEndView
 }
 
 // [any thread; reentrant] Simulation is enabled only by a fully valid
-// DiagnosticPlay state that also satisfies the explicit diagnostic-play gate.
-// The default capability leaves the gate open, so callers that do not opt in
-// keep the exact legacy result without supplying a confirmation.
+// DiagnosticPlay state with explicit start support and a satisfied optional
+// confirmation gate.
 [[nodiscard]] constexpr bool FrontEndAllowsSimulation(const FrontEndState state,
                                                       const FrontEndCapabilities capabilities = {},
                                                       const bool active_profile_is_confirmed = false) noexcept
 {
     return IsValidFrontEndState(state) && state.mode == FrontEndMode::DiagnosticPlay &&
-           FrontEndSatisfiesDiagnosticPlayGate(capabilities, active_profile_is_confirmed);
+           FrontEndAllowsDiagnosticPlay(capabilities, active_profile_is_confirmed);
 }
 
 // [any thread; reentrant] Normalizes invalid state to InitialFrontEndState and
@@ -580,6 +597,6 @@ static_assert(sizeof(FrontEndMode) == 1U);
 static_assert(sizeof(FrontEndMainRow) == 1U);
 static_assert(sizeof(FrontEndProfileSlot) == 1U);
 static_assert(sizeof(FrontEndCommandType) == 1U);
-static_assert(sizeof(FrontEndCapabilities) == 2U);
+static_assert(sizeof(FrontEndCapabilities) == 3U);
 static_assert(sizeof(FrontEndModelError) == 1U);
 } // namespace omega::app
