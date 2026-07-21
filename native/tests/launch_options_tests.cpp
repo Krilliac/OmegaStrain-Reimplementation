@@ -33,6 +33,21 @@ void CheckError(const std::expected<omega::runtime::LaunchOptions, std::string>&
 {
     Check(!result && result.error() == expected, message);
 }
+
+void CheckSanitizedError(
+    const std::expected<omega::runtime::LaunchOptions, std::string>& result,
+    const std::string_view expected,
+    const std::initializer_list<std::string_view> forbidden_values,
+    const std::string_view message)
+{
+    bool sanitized = !result && result.error() == expected;
+    if (!result)
+    {
+        for (const std::string_view forbidden : forbidden_values)
+            sanitized = sanitized && result.error().find(forbidden) == std::string::npos;
+    }
+    Check(sanitized, message);
+}
 } // namespace
 
 int LaunchOptionsFailureCount()
@@ -172,10 +187,10 @@ int LaunchOptionsFailureCount()
         capture_range_error,
         "capture replay inherits capture's shared session maximum");
     CheckError(Parse({"--capture-run=true", "--frames=1"}),
-        "unknown option: --capture-run=true",
+        "unknown option: --capture-run",
         "capture is an exact boolean token and does not accept an attached value");
     CheckError(Parse({"--replay-capture=true", "--capture-run", "--frames=1"}),
-        "unknown option: --replay-capture=true",
+        "unknown option: --replay-capture",
         "capture replay is an exact boolean token without an attached value");
 
     auto ordinary_zero = Parse({"--frames=0"});
@@ -214,10 +229,17 @@ int LaunchOptionsFailureCount()
     Check(!Parse({"--config=A", "--config=B"}), "duplicate config paths are rejected");
     Check(!Parse({"--set=missing_separator"}), "configuration overrides require an equals sign");
     Check(!Parse({"--set==missing_key"}), "configuration overrides require a key");
-    Check(!Parse({"--set=jobs.worker_count=1", "--set=jobs.worker_count=2"}),
-        "duplicate configuration override keys are rejected");
+    CheckError(Parse({"--set=jobs.worker_count=1", "--set=jobs.worker_count=2"}),
+        "--set key may be specified only once",
+        "duplicate configuration override keys are rejected with a fixed diagnostic");
     Check(!Parse({"--set=jobs.worker_count=1", "--set=jobs.worker_count =2"}),
         "duplicate configuration override keys are compared after config-style trimming");
+    CheckSanitizedError(
+        Parse({"--set=credentials.api_token=sk-live-first-secret",
+            "--set=credentials.api_token=sk-live-second-secret"}),
+        "--set key may be specified only once",
+        {"credentials.api_token", "sk-live-first-secret", "sk-live-second-secret"},
+        "duplicate override diagnostics omit secret-looking keys and values");
     Check(!Parse({"--level=MINSK"}), "level selection requires an explicit data root");
     Check(!Parse({"--data-root=A", "--level=../MINSK"}),
         "unsafe level components are rejected by the launch boundary");
@@ -233,7 +255,24 @@ int LaunchOptionsFailureCount()
                          "--probe-only", "--frames=1"}),
         "--probe-only cannot be combined with --frames",
         "capture replay cannot bypass the existing probe and frame exclusion");
-    Check(!Parse({"--unknown"}), "unknown options are rejected instead of ignored");
+    CheckError(Parse({"--unknown"}), "unknown option: --unknown",
+        "unknown long-option names are rejected without being discarded");
+    CheckError(Parse({"--openomega-package-contract-sentinel"}),
+        "unknown option: --openomega-package-contract-sentinel",
+        "the package argument-forwarding sentinel retains its frozen diagnostic");
+    constexpr std::string_view private_path =
+        "C:/Users/private-user/Private Vault/opening.pss";
+    CheckSanitizedError(Parse({private_path}), "unknown option", {private_path},
+        "positional path diagnostics omit the complete private-looking value");
+    CheckSanitizedError(
+        Parse({"--opening-moviz=C:/Users/private-user/Private Vault/opening.pss"}),
+        "unknown option: --opening-moviz", {private_path},
+        "unknown option diagnostics retain only a validated name before equals");
+    constexpr std::string_view malformed_secret_option =
+        "--bad$name=sk-live-private-value";
+    CheckSanitizedError(Parse({malformed_secret_option}), "unknown option",
+        {malformed_secret_option, "sk-live-private-value"},
+        "malformed option names fall back to a fixed value-free diagnostic");
 
     auto help = Parse({"--help"});
     Check(help && help->show_help && !help->capture_run &&

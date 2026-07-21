@@ -18,6 +18,7 @@ constexpr std::string_view kLevelPrefix = "--level=";
 constexpr std::string_view kOpeningMoviePrefix = "--opening-movie=";
 constexpr std::string_view kConfigPrefix = "--config=";
 constexpr std::string_view kSetPrefix = "--set=";
+constexpr std::size_t kMaximumDiagnosticOptionNameBytes = 64U;
 static_assert(kMaximumRunCaptureSessionFrames <=
               static_cast<std::size_t>(std::numeric_limits<int>::max()));
 
@@ -52,6 +53,42 @@ static_assert(kMaximumRunCaptureSessionFrames <=
             return false;
     }
     return true;
+}
+
+[[nodiscard]] bool IsSafeDiagnosticOptionName(
+    const std::string_view value) noexcept
+{
+    if (value.size() < 3U || value.size() > kMaximumDiagnosticOptionNameBytes ||
+        !value.starts_with("--"))
+        return false;
+
+    const auto is_ascii_alphanumeric = [](const unsigned char character) {
+        const bool upper = character >= static_cast<unsigned char>('A') &&
+                           character <= static_cast<unsigned char>('Z');
+        const bool lower = character >= static_cast<unsigned char>('a') &&
+                           character <= static_cast<unsigned char>('z');
+        const bool digit = character >= static_cast<unsigned char>('0') &&
+                           character <= static_cast<unsigned char>('9');
+        return upper || lower || digit;
+    };
+
+    if (!is_ascii_alphanumeric(static_cast<unsigned char>(value[2U])))
+        return false;
+    for (const unsigned char character : value.substr(3U))
+    {
+        if (!is_ascii_alphanumeric(character) && character != '-')
+            return false;
+    }
+    return is_ascii_alphanumeric(static_cast<unsigned char>(value.back()));
+}
+
+[[nodiscard]] std::string UnknownOptionError(const std::string_view argument)
+{
+    const std::size_t separator = argument.find('=');
+    const std::string_view option_name = argument.substr(0U, separator);
+    if (IsSafeDiagnosticOptionName(option_name))
+        return "unknown option: " + std::string(option_name);
+    return "unknown option";
 }
 } // namespace
 
@@ -161,7 +198,7 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
             const auto duplicate = std::ranges::find(
                 result.config_overrides, override.key, &LaunchConfigOverride::key);
             if (duplicate != result.config_overrides.end())
-                return std::unexpected("--set key may be specified only once: " + override.key);
+                return std::unexpected("--set key may be specified only once");
             result.config_overrides.push_back(std::move(override));
             continue;
         }
@@ -197,7 +234,7 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
             result.show_help = true;
             continue;
         }
-        return std::unexpected("unknown option: " + std::string(argument));
+        return std::unexpected(UnknownOptionError(argument));
     }
 
     if (result.level_code && !result.data_root)
