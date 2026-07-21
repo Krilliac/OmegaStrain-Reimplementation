@@ -24,9 +24,10 @@ namespace
 // Refill when the 4,096-frame ring has at least this much space. The queued lead therefore stays
 // between roughly 53 and 85 ms at 48 kHz during steady playback.
 constexpr std::uint64_t kOpeningMovieAudioRefillFrames = 1'536U;
-constexpr std::uint64_t kNanosecondsPerSecond = 1'000'000'000U;
 static_assert(kOpeningMovieAudioRefillFrames <=
               SdlAudioService::kOpeningMovieQueueCapacityFrames);
+static_assert(kOpeningMovieAudioClockRateHz ==
+              static_cast<std::uint64_t>(SdlAudioService::kSampleRate));
 } // namespace
 
 std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore config,
@@ -877,11 +878,7 @@ bool OmegaApp::ContainOpeningMovieAudio() noexcept
 {
     std::fill(opening_movie_audio_scratch_.begin(), opening_movie_audio_scratch_.end(),
         std::int16_t{0});
-    opening_movie_audio_clock_started_ = false;
-    opening_movie_audio_timeline_baseline_ = 0U;
-    opening_movie_audio_timeline_applied_ = 0U;
-    opening_movie_audio_nanosecond_remainder_ = 0U;
-    opening_movie_audio_session_generation_ = 0U;
+    opening_movie_audio_clock_ = {};
     return audio_ == nullptr || audio_->DiscardOpeningMovieAudio();
 }
 
@@ -1091,69 +1088,25 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 else
                 {
                     std::chrono::nanoseconds presentation_elapsed{0};
-                    if (opening_movie_audio_clock_started_)
+                    const OpeningMovieAudioClockResult clock_step =
+                        AdvanceOpeningMovieAudioClock(
+                            opening_movie_audio_clock_,
+                            OpeningMovieAudioClockObservation{
+                                .session_generation =
+                                    movie_audio.opening_movie_session_generation,
+                                .timeline_frames =
+                                    movie_audio.opening_movie_timeline_frames,
+                            });
+                    if (!clock_step)
                     {
-                        if (movie_audio.opening_movie_session_generation !=
-                                opening_movie_audio_session_generation_ ||
-                            movie_audio.opening_movie_timeline_frames <
-                                opening_movie_audio_timeline_baseline_)
-                        {
-                            log_->Warning("opening_movie",
-                                "opening movie audio timeline generation changed unexpectedly");
-                            source_failed = true;
-                        }
-                        else
-                        {
-                            const std::uint64_t timeline_frames =
-                                movie_audio.opening_movie_timeline_frames -
-                                opening_movie_audio_timeline_baseline_;
-                            if (timeline_frames < opening_movie_audio_timeline_applied_)
-                            {
-                                log_->Warning("opening_movie",
-                                    "opening movie audio timeline moved backwards");
-                                source_failed = true;
-                            }
-                            else
-                            {
-                                const std::uint64_t delta_frames =
-                                    timeline_frames - opening_movie_audio_timeline_applied_;
-                                if (delta_frames >
-                                    (std::numeric_limits<std::uint64_t>::max() -
-                                        opening_movie_audio_nanosecond_remainder_) /
-                                        kNanosecondsPerSecond)
-                                {
-                                    log_->Warning("opening_movie",
-                                        "opening movie audio timeline exceeded its bounded clock");
-                                    source_failed = true;
-                                }
-                                else
-                                {
-                                    const std::uint64_t numerator =
-                                        delta_frames * kNanosecondsPerSecond +
-                                        opening_movie_audio_nanosecond_remainder_;
-                                    const std::uint64_t nanoseconds = numerator /
-                                        static_cast<std::uint64_t>(SdlAudioService::kSampleRate);
-                                    if (nanoseconds > static_cast<std::uint64_t>(
-                                            std::numeric_limits<
-                                                std::chrono::nanoseconds::rep>::max()))
-                                    {
-                                        log_->Warning("opening_movie",
-                                            "opening movie audio clock conversion overflowed");
-                                        source_failed = true;
-                                    }
-                                    else
-                                    {
-                                        opening_movie_audio_timeline_applied_ = timeline_frames;
-                                        opening_movie_audio_nanosecond_remainder_ = numerator %
-                                            static_cast<std::uint64_t>(
-                                                SdlAudioService::kSampleRate);
-                                        presentation_elapsed = std::chrono::nanoseconds{
-                                            static_cast<std::chrono::nanoseconds::rep>(
-                                                nanoseconds)};
-                                    }
-                                }
-                            }
-                        }
+                        log_->Warning("opening_movie",
+                            OpeningMovieAudioClockErrorMessage(clock_step.error()));
+                        source_failed = true;
+                    }
+                    else
+                    {
+                        opening_movie_audio_clock_ = clock_step->state;
+                        presentation_elapsed = clock_step->presentation_elapsed;
                     }
 
                     if (!source_failed)
@@ -1230,17 +1183,43 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                                                 "refill");
                                             source_failed = true;
                                         }
-                                        else if (!opening_movie_audio_clock_started_)
+                                        else if (!opening_movie_audio_clock_.started)
                                         {
-                                            const AudioServiceSnapshot started =
+                                            const AudioServiceSnapshot after_queue =
                                                 audio_->Snapshot();
-                                            opening_movie_audio_clock_started_ = true;
-                                            opening_movie_audio_timeline_baseline_ =
-                                                before_queue.opening_movie_timeline_frames;
-                                            opening_movie_audio_timeline_applied_ = 0U;
-                                            opening_movie_audio_nanosecond_remainder_ = 0U;
-                                            opening_movie_audio_session_generation_ =
-                                                started.opening_movie_session_generation;
+                                            const OpeningMovieAudioClockResult clock_start =
+                                                StartOpeningMovieAudioClock(
+                                                    opening_movie_audio_clock_,
+                                                    OpeningMovieAudioClockStartSignals{
+                                                        .video_frame_available =
+                                                            movie_update->current_frame != nullptr,
+                                                        .pcm_queue_accepted = true,
+                                                        .before_queue =
+                                                            OpeningMovieAudioClockObservation{
+                                                                .session_generation = before_queue
+                                                                    .opening_movie_session_generation,
+                                                                .timeline_frames = before_queue
+                                                                    .opening_movie_timeline_frames,
+                                                            },
+                                                        .after_queue =
+                                                            OpeningMovieAudioClockObservation{
+                                                                .session_generation = after_queue
+                                                                    .opening_movie_session_generation,
+                                                                .timeline_frames = after_queue
+                                                                    .opening_movie_timeline_frames,
+                                                            },
+                                                    });
+                                            if (!clock_start)
+                                            {
+                                                log_->Warning("opening_movie",
+                                                    OpeningMovieAudioClockErrorMessage(
+                                                        clock_start.error()));
+                                                source_failed = true;
+                                            }
+                                            else
+                                            {
+                                                opening_movie_audio_clock_ = clock_start->state;
+                                            }
                                         }
                                     }
                                 }

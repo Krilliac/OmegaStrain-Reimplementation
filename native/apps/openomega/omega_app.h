@@ -3,6 +3,7 @@
 #include "boot_sequence.h"
 #include "front_end.h"
 #include "native_persistence.h"
+#include "opening_movie_audio_clock.h"
 #include "run_capture.h"
 #include "sdl_audio_service.h"
 #include "sdl_gpu_host.h"
@@ -171,11 +172,7 @@ private:
         static_cast<std::size_t>(SdlAudioService::kOpeningMovieQueueCapacityFrames) *
             SdlAudioService::kChannelCount>
         opening_movie_audio_scratch_{};
-    bool opening_movie_audio_clock_started_ = false;
-    std::uint64_t opening_movie_audio_timeline_baseline_ = 0U;
-    std::uint64_t opening_movie_audio_timeline_applied_ = 0U;
-    std::uint64_t opening_movie_audio_nanosecond_remainder_ = 0U;
-    std::uint64_t opening_movie_audio_session_generation_ = 0U;
+    OpeningMovieAudioClockState opening_movie_audio_clock_{};
     // Non-owning generation-scoped identity. The host remains the backend-resource owner and a
     // default-moved-from app cannot release this copied value because its host_ is null.
     runtime::RenderTextureHandle diagnostic_texture_;
