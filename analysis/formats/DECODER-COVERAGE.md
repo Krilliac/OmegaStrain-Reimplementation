@@ -23,8 +23,8 @@ than one native code path):
   own doc comment states no semantic meaning is assigned to the decoded fields (an "envelope" or
   "wrapper" result, not a canonical semantic IR).
 - **passive descriptor only** — a native `Inspect*` function exists and is bounded/tested, but it
-  never claims to "decode" the payload; it returns a `*Descriptor` struct of observed extents and
-  raw header words only.
+  never claims to "decode" the payload; it returns a `*Descriptor` struct containing only neutral
+  structural summaries such as observed extents, counts, or raw header words.
 - **aggregate scanner only** — no native code exists; only Python tooling purpose-built to
   inventory game asset formats (`tools/fingerprint_assets.py`, `tools/validate_hogs.py`,
   `tools/measure_frontend_hog_topology.py`, `tools/inspect_so.py`) observes the suffix, at most as
@@ -57,6 +57,7 @@ unless separately demonstrated, independent of the classification below.
 | `.skl` | passive descriptor only | `InspectSklContainer` → `SklContainerDescriptor` (`native/include/omega/retail/skl_container_descriptor.h`, `native/src/retail/skl_container_descriptor.cpp`) | `native/tests/skl_container_descriptor_tests.cpp` (`omega_core_tests`, `CMakeLists.txt:1404`) |
 | `.skm` | passive descriptor only | `InspectSkmContainer` → `SkmContainerDescriptor` (`native/include/omega/retail/skm_container_descriptor.h`, `native/src/retail/skm_container_descriptor.cpp`) | `native/tests/skm_container_descriptor_tests.cpp` (`omega_core_tests`, `CMakeLists.txt:1403`) |
 | `.so` | passive descriptor only | `InspectSoModule` -> `SoModuleDescriptor` validates the tracked little-endian structural grammar through exact EOF while retaining bounded section ranges, counts, and neutral record summaries but no code cells, strings, or payload bytes (`native/include/omega/retail/so_module_descriptor.h`, `native/src/retail/so_module_descriptor.cpp`) | `native/tests/so_module_descriptor_tests.cpp` (own executable `omega_so_module_descriptor_tests`, registered in `CMakeLists.txt`) |
+| `.tbl` | passive descriptor only | `InspectTblEnvelope` -> `TblEnvelopeDescriptor` performs the bounded fixed-stride zero-sentinel observation while retaining only payload size, sentinel offset, preceding nonzero-probe count, and opaque trailing-byte count; inter-probe and trailing bytes remain opaque and no lane, integer, endianness, record, lookup, or front-end semantics are assigned (`native/include/omega/retail/tbl_envelope_descriptor.h`, `native/src/retail/tbl_envelope_descriptor.cpp`) | `native/tests/tbl_envelope_descriptor_tests.cpp` (own executable `omega_tbl_envelope_descriptor_tests`, registered in `CMakeLists.txt`; project-generated fixtures only) |
 | `.gui` | aggregate scanner only | Raw suffix count in `asset-fingerprints.json` (`scan.extensions[".gui"]`) and in `hog-validation.json` (`entry_extensions[".gui"]`); `tools/measure_frontend_hog_topology.py` currently maps `.gui` → category `gui` in `APPROVED_EXTENSION_CATEGORIES` (schema_version 2, observed in the tracked file at read time) — this is a container-topology label, not a structural field schema | `tools/tests/test_measure_frontend_hog_topology.py` covers the topology label only, not a `.gui` payload schema |
 | `.fnt` | aggregate scanner only | Raw suffix count only, in both `asset-fingerprints.json` and `hog-validation.json`; `analysis/formats/FRONTEND-TOPOLOGY.md` explicitly documents it as deliberately left out of the approved vocabulary ("menu-adjacent-sounding suffixes such as `.fnt` and `.ie` deliberately remain in the `other` bucket") | none |
 | `.ie` | aggregate scanner only | Same as `.fnt` — raw count only, explicitly named as excluded in `FRONTEND-TOPOLOGY.md` | none |
@@ -71,19 +72,18 @@ unless separately demonstrated, independent of the classification below.
 | `.skf` | aggregate scanner only | Raw suffix count only | none |
 | `.sub` | aggregate scanner only | Raw suffix count only | none |
 | `.txt` | aggregate scanner only | Raw suffix count in the recursive `asset-fingerprints.json` inventory (3 spans), but no `.txt` key in top-level `hog-validation.json` `entry_extensions`; `disc-summary.json` separately records 8 whole-disc occurrences. Also listed in `measure_frontend_hog_topology.py`'s `APPROVED_EXTENSION_CATEGORIES` as category `text` (topology label only) | Topology-label coverage only, via `test_measure_frontend_hog_topology.py` |
-| `.tbl` | unknown | Zero occurrences in `asset-fingerprints.json` or `hog-validation.json`'s in-archive inventories; appears only in `measure_frontend_hog_topology.py`'s `APPROVED_EXTENSION_CATEGORIES` (category `table`) and as one whole-disc, outside-any-HOG occurrence in `analysis/manifests/disc-summary.json` | none |
 | `.PF` (`.pf`) | unknown (hard-rule mandated) | Zero occurrences in either in-archive inventory; exactly 3 whole-disc occurrences in `analysis/manifests/disc-summary.json`, outside any HOG archive | none |
 | `.TM2` (`.tm2`) | unknown (hard-rule mandated) | Zero occurrences in either in-archive inventory; exactly 16 whole-disc occurrences in `analysis/manifests/disc-summary.json`, outside any HOG archive | none |
 
-Totals observed in this pass: **6 canonical decoder**, **4 structural envelope only**, **4 passive
-descriptor only**, **14 aggregate scanner only**, **3 unknown** — 31 families.
+Totals observed in this pass: **6 canonical decoder**, **4 structural envelope only**, **5 passive
+descriptor only**, **14 aggregate scanner only**, **2 unknown** — 31 families.
 
 ## 2. CMake / test registration cross-check
 
 Every native header listed above as canonical/envelope/descriptor has a matching `.cpp` under
 `native/src/retail/` (or `native/src/archive/`, `native/src/asset/`) in `CMakeLists.txt`, plus a
 matching focused test registered either through its own executable/CTest pair or as part of
-`omega_core_tests`. **No missing CMake registration was found** for any of the 14 retail-format
+`omega_core_tests`. **No missing CMake registration was found** for any of the 15 retail-format
 headers or `hog_archive`/`pop_terrain_index`/`container_descriptors`.
 
 The separate `omega_media` target registers the generic MPEG-2 Program Stream inspector and its

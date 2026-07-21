@@ -46,7 +46,7 @@
     {"suffix": ".so", "dossier": "SO.md", "scope": "decoder_matrix", "decoder_class": "passive_descriptor_only"},
     {"suffix": ".sub", "dossier": "SUB.md", "scope": "decoder_matrix", "decoder_class": "aggregate_scanner_only"},
     {"suffix": ".sys", "dossier": "SYS.md", "scope": "whole_disc_disposition", "decoder_class": null},
-    {"suffix": ".tbl", "dossier": "TBL.md", "scope": "decoder_matrix", "decoder_class": "unknown"},
+    {"suffix": ".tbl", "dossier": "TBL.md", "scope": "decoder_matrix", "decoder_class": "passive_descriptor_only"},
     {"suffix": ".tdx", "dossier": "TDX.md", "scope": "decoder_matrix", "decoder_class": "canonical_decoder"},
     {"suffix": ".tm2", "dossier": "TM2.md", "scope": "decoder_matrix", "decoder_class": "unknown"},
     {"suffix": ".txt", "dossier": "TXT.md", "scope": "decoder_matrix", "decoder_class": "aggregate_scanner_only"},
