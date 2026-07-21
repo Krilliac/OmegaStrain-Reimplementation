@@ -2698,8 +2698,6 @@ void CheckComposedGeneratedMenuAcceptance(
 
     const bool stale_release_queued = PushKey(SDL_SCANCODE_F1, false);
     auto stale_released = app->RunWithCapture(1);
-    const omega::app::GpuHostSnapshot stale_released_gpu =
-        Access::GpuSnapshot(*app);
     Check(stale_release_queued && stale_released &&
               Access::FrontEnd(*app) == kMainStart,
         "the stale inert-start edge releases before explicit profile navigation");
