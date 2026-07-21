@@ -189,6 +189,16 @@ void PrintNativePersistenceError(
         omega::app::StartupFailureStage::NativePersistence, category, error.message);
 }
 
+void PrintApplicationStartupError(const std::string_view detail)
+{
+    // Preserve the established stderr diagnostic while also making failures
+    // reached after native persistence visible to packaged users.
+    std::cerr << detail << '\n';
+    PresentStartupFailureDialogAfterStderr(
+        omega::app::StartupFailureStage::ApplicationStartup,
+        "application-startup", detail);
+}
+
 void PrintRunCaptureDiagnostics(const omega::app::RunCaptureOutcome& outcome)
 {
     const auto* const trace_pair = outcome.trace_pair();
@@ -500,7 +510,7 @@ int main(const int argc, char** argv)
         std::move(options->opening_movie_path));
     if (!app)
     {
-        std::cerr << app.error() << '\n';
+        PrintApplicationStartupError(app.error());
         return EXIT_FAILURE;
     }
     std::cout << "OpenOmega native shell: GPU driver=" << app->driver_name()

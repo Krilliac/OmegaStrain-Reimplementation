@@ -14,6 +14,7 @@ enum class StartupFailureStage : std::uint8_t
     ContentLaunchProfile,
     ContentStartup,
     NativePersistence,
+    ApplicationStartup,
 };
 
 enum class StartupFailureDialogPolicy : std::uint8_t
