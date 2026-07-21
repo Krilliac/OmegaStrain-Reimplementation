@@ -46,8 +46,10 @@ struct RunReplaySessionConfig
     // creation closed unless both published counts began empty. Replay may advance
     // the logical zero model to one; it performs no catalog or persistence work.
     std::size_t front_end_total_profile_count = 0U;
-    // Default closed preserves legacy replay. Create gates this capability against
-    // both startup counts before any frame can reach the pure reducer.
+    // Both commands default closed. Create additionally gates first-profile
+    // creation against both startup counts before any frame reaches the pure
+    // reducer. Diagnostic-start capability is replay context supplied by the
+    // caller; replay publishes the typed command but performs no persistence.
     FrontEndCapabilities front_end_capabilities{};
     // Replay authorization is intentionally not configurable: every new session
     // begins unconfirmed, and only its replayed SetActiveProfile command can

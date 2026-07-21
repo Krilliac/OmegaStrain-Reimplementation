@@ -21,6 +21,7 @@ enum class NativePersistenceStartupErrorCode : std::uint8_t
     ProfileCatalogBootstrap = 1U,
     PersistedActiveProfile = 2U,
     ResourceExhausted = 3U,
+    PersistedDiagnosticCheckpoint = 4U,
 };
 
 [[nodiscard]] std::string_view NativePersistenceStartupErrorCodeName(
@@ -51,6 +52,26 @@ struct ActiveProfileConfirmationError
     std::string message;
 };
 
+enum class DiagnosticCampaignStartErrorCode : std::uint8_t
+{
+    ActiveProfileRequired = 0U,
+    ProfileNotFound = 1U,
+    RevisionConflict = 2U,
+    StorageLimitExceeded = 3U,
+    StorageFailure = 4U,
+    ResourceExhausted = 5U,
+};
+
+[[nodiscard]] std::string_view DiagnosticCampaignStartErrorCodeName(
+    DiagnosticCampaignStartErrorCode code) noexcept;
+
+struct DiagnosticCampaignStartError
+{
+    DiagnosticCampaignStartErrorCode code =
+        DiagnosticCampaignStartErrorCode::StorageFailure;
+    std::string message;
+};
+
 // Non-hot-reloadable application persistence owner. SaveDatabase has one
 // stable heap address, ProfileCatalog borrows it, and OmegaApp becomes the sole
 // owner after startup. Declaration order guarantees the catalog is destroyed
@@ -59,9 +80,9 @@ class NativePersistence final
 {
 public:
     // [persistence/game thread, startup] Opens native storage, validates all
-    // typed profile markers and any durable active-profile confirmation, then
-    // produces one deterministic startup snapshot. This never creates or
-    // selects a default profile.
+    // typed profile markers, any durable active-profile confirmation, and all
+    // fixed project diagnostic checkpoints, then produces one deterministic
+    // startup snapshot. This never creates or selects a default profile.
     [[nodiscard]] static std::expected<NativePersistence, NativePersistenceStartupError> Bootstrap(
         std::filesystem::path directory);
 
@@ -97,6 +118,17 @@ public:
     // confirmed owned snapshot.
     [[nodiscard]] std::expected<void, ActiveProfileConfirmationError>
     ConfirmActiveProfile(profiles::ProfileId id);
+
+    // [owning persistence/game thread] Prepares exactly one project-generated
+    // diagnostic checkpoint for the same profile currently confirmed by the
+    // durable active pointer. The schema-1 marker is not a retail campaign,
+    // save, world serializer, or gameplay-semantic claim. An already valid
+    // marker is a no-write success. Definite validation, precondition, and
+    // limit failures commit nothing, and every returned error prevents app
+    // state publication. A lower storage error may represent indeterminate
+    // atomic publication and poisons the database until it is reopened.
+    [[nodiscard]] std::expected<void, DiagnosticCampaignStartError>
+    PrepareDiagnosticCampaignStart(profiles::ProfileId id);
 
 private:
     NativePersistence(std::unique_ptr<persistence::SaveDatabase> database,

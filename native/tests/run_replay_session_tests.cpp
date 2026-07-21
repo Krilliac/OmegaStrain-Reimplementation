@@ -488,6 +488,8 @@ void CheckContractAndTaxonomy()
     static_assert(default_config.front_end_total_profile_count == 0U);
     static_assert(!default_config.front_end_capabilities.can_create_first_profile);
     static_assert(!default_config.front_end_capabilities
+                       .can_start_diagnostic_campaign);
+    static_assert(!default_config.front_end_capabilities
                        .requires_active_profile_for_diagnostic_play);
     static_assert(
         !HasFrontEndActiveProfileConfirmationSeed<RunReplaySessionConfig>);
@@ -1104,6 +1106,28 @@ void CheckFrontEndModalGate()
     };
     constexpr std::array previous_up{
         InputTransition{.code = 0U, .pressed = false}};
+
+    const std::array closed_start_frames{
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+    };
+    RunCaptureTracePair closed_start_pair =
+        BuildScriptedPair(menu_actions, closed_start_frames);
+    RunReplaySessionConfig closed_start_config = ValidConfig();
+    closed_start_config.initial_front_end_state =
+        omega::app::InitialFrontEndState();
+    auto closed_start_created = RunReplaySession::Create(
+        std::move(closed_start_pair), closed_start_config);
+    RunReplaySession closed_start = TakeSession(
+        closed_start_created, "the capability-closed start replay is created");
+    auto suppressed_start = closed_start.Next();
+    Check(suppressed_start && suppressed_start->frame_plan() &&
+              suppressed_start->front_end_command() == FrontEndCommand{} &&
+              suppressed_start->frame_plan()->simulation_steps == 0U &&
+              closed_start.front_end_state() ==
+                  omega::app::InitialFrontEndState(),
+        "replay preserves an unconfirmed capability-closed Start as an inert modal frame");
+
     const std::array modal_frames{
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = no_transitions},
@@ -1168,6 +1192,10 @@ void CheckFrontEndModalGate()
     modal_config.initial_front_end_state =
         omega::app::InitialFrontEndState();
     modal_config.front_end_visible_profile_slots = 3U;
+    modal_config.front_end_capabilities = FrontEndCapabilities{
+        .can_create_first_profile = false,
+        .can_start_diagnostic_campaign = true,
+    };
     auto modal_created = RunReplaySession::Create(std::move(modal_pair), modal_config);
     RunReplaySession modal =
         TakeSession(modal_created, "the main-menu modal replay is created");
@@ -1217,6 +1245,10 @@ void CheckFrontEndModalGate()
     const auto activated_scheduler = modal.scheduler_state();
     const auto activated_world = modal.simulation_state();
     Check(activated && activated->elapsed() == milliseconds{15} && activated_plan &&
+              activated->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::StartDiagnosticCampaign,
+                  .profile_slot = FrontEndProfileSlot::First,
+              } &&
               activated_plan->simulation_steps == 1U &&
               activated_plan->interpolation_alpha == 0.5 &&
               !activated_plan->clamped_delta && !activated_plan->dropped_time &&
@@ -1309,6 +1341,10 @@ void CheckFrontEndModalGate()
     RunReplaySessionConfig topology_config = ValidConfig();
     topology_config.enable_debug_locomotion = true;
     topology_config.initial_front_end_state = main_asset_row;
+    topology_config.front_end_capabilities = FrontEndCapabilities{
+        .can_create_first_profile = false,
+        .can_start_diagnostic_campaign = true,
+    };
     auto topology_created =
         RunReplaySession::Create(std::move(topology_pair), topology_config);
     RunReplaySession topology =
@@ -1393,6 +1429,10 @@ void CheckFrontEndModalGate()
     RunReplaySessionConfig reopen_config = ValidConfig();
     reopen_config.enable_debug_locomotion = true;
     reopen_config.initial_front_end_state = FrontEndState{};
+    reopen_config.front_end_capabilities = FrontEndCapabilities{
+        .can_create_first_profile = false,
+        .can_start_diagnostic_campaign = true,
+    };
     auto reopen_created =
         RunReplaySession::Create(std::move(reopen_pair), reopen_config);
     RunReplaySession reopen =
@@ -1431,6 +1471,10 @@ void CheckFrontEndModalGate()
     auto resumed = reopen.Next();
     const auto resumed_plan = resumed ? resumed->frame_plan() : std::nullopt;
     Check(resumed && resumed->elapsed() == milliseconds{5} && resumed_plan &&
+              resumed->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::StartDiagnosticCampaign,
+                  .profile_slot = FrontEndProfileSlot::First,
+              } &&
               resumed_plan->simulation_steps == 1U &&
               resumed_plan->interpolation_alpha == 0.0 &&
               reopen.front_end_state() == FrontEndState{} &&
@@ -1768,6 +1812,10 @@ void CheckDiagnosticPlayGateReplay()
         InputTransition{.code = 0U, .pressed = true}};
     constexpr std::array previous_up{
         InputTransition{.code = 0U, .pressed = false}};
+    constexpr std::array next_down{
+        InputTransition{.code = 1U, .pressed = true}};
+    constexpr std::array next_up{
+        InputTransition{.code = 1U, .pressed = false}};
     constexpr std::array primary_down{
         InputTransition{.code = 2U, .pressed = true}};
     constexpr std::array primary_up{
@@ -1798,10 +1846,12 @@ void CheckDiagnosticPlayGateReplay()
         .selected_profile_slot = FrontEndProfileSlot::First,
     };
     constexpr FrontEndCapabilities gate_enabled{
+        .can_start_diagnostic_campaign = true,
         .requires_active_profile_for_diagnostic_play = true,
     };
     constexpr FrontEndCapabilities create_and_gate_enabled{
         .can_create_first_profile = true,
+        .can_start_diagnostic_campaign = true,
         .requires_active_profile_for_diagnostic_play = true,
     };
 
@@ -1873,9 +1923,18 @@ void CheckDiagnosticPlayGateReplay()
           "a replayed creation cannot initialize or publish active-profile "
           "confirmation");
 
-    // One existing bounded profile, nothing confirmed. Start Diagnostic must
-    // reach the surface that can satisfy the gate instead of starting play.
+    // One existing bounded profile, nothing confirmed. Start Diagnostic is
+    // inert; the replay must explicitly navigate to Profiles and publish a
+    // selection before the same supported start can enter play.
     const std::array unconfirmed_frames{
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = next_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = next_up},
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = primary_down},
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
@@ -1909,35 +1968,45 @@ void CheckDiagnosticPlayGateReplay()
               unconfirmed.front_end_state() == main_start,
         "an explicitly gated replay begins closed without copying any confirmation");
 
-    auto redirect_frame = unconfirmed.Next();
-    const auto redirect_plan =
-        redirect_frame ? redirect_frame->frame_plan() : std::nullopt;
-    Check(redirect_frame && redirect_plan &&
-              redirect_frame->input().WasPressed(
+    auto inert_start_frame = unconfirmed.Next();
+    const auto inert_start_plan =
+        inert_start_frame ? inert_start_frame->frame_plan() : std::nullopt;
+    Check(inert_start_frame && inert_start_plan &&
+              inert_start_frame->input().WasPressed(
                   omega::app::kFrontEndPrimaryAction) &&
-              redirect_frame->front_end_command() == FrontEndCommand{} &&
-              unconfirmed.front_end_state() == profiles_first &&
+              inert_start_frame->front_end_command() == FrontEndCommand{} &&
+              unconfirmed.front_end_state() == main_start &&
               !unconfirmed.front_end_active_profile_is_confirmed() &&
-              redirect_plan->simulation_steps == 0U &&
-              redirect_plan->interpolation_alpha == 0.0 &&
-              !redirect_plan->clamped_delta && !redirect_plan->dropped_time &&
+              inert_start_plan->simulation_steps == 0U &&
+              inert_start_plan->interpolation_alpha == 0.0 &&
+              !inert_start_plan->clamped_delta && !inert_start_plan->dropped_time &&
               unconfirmed.scheduler_state() == gate_scheduler_origin &&
               SameSimulation(unconfirmed.simulation_state(), gate_world_origin) &&
               unconfirmed.debug_locomotion_position() == Position3{} &&
               unconfirmed.diagnostic_actor_marker_destination() ==
                   kOriginMarkerDestination,
-        "an unconfirmed Start Diagnostic edge opens Profiles, publishes no command, "
+        "an unconfirmed Start Diagnostic edge is inert, publishes no command, "
         "discards its elapsed value, and freezes every simulation and marker value");
 
-    auto redirect_release = unconfirmed.Next();
-    Check(redirect_release && redirect_release->frame_plan() &&
-              redirect_release->input().WasReleased(
-                  omega::app::kFrontEndPrimaryAction) &&
-              redirect_release->front_end_command() == FrontEndCommand{} &&
-              unconfirmed.front_end_state() == profiles_first &&
-              !unconfirmed.front_end_active_profile_is_confirmed() &&
-              redirect_release->frame_plan()->simulation_steps == 0U,
-        "the redirected primary release is inert and leaves the gate closed");
+    constexpr std::array setup_states{
+        main_start,
+        main_profiles,
+        main_profiles,
+        profiles_first,
+        profiles_first,
+    };
+    for (const FrontEndState expected_state : setup_states)
+    {
+        auto setup_frame = unconfirmed.Next();
+        Check(setup_frame && setup_frame->frame_plan() &&
+                  setup_frame->front_end_command() == FrontEndCommand{} &&
+                  unconfirmed.front_end_state() == expected_state &&
+                  !unconfirmed.front_end_active_profile_is_confirmed() &&
+                  setup_frame->frame_plan()->simulation_steps == 0U &&
+                  unconfirmed.scheduler_state() == gate_scheduler_origin &&
+                  SameSimulation(unconfirmed.simulation_state(), gate_world_origin),
+            "explicit navigation to the bounded Profiles surface remains modal and leaves the gate closed");
+    }
 
     auto selection_frame = unconfirmed.Next();
     Check(selection_frame && selection_frame->frame_plan() &&
@@ -1989,7 +2058,10 @@ void CheckDiagnosticPlayGateReplay()
     const auto play_scheduler = confirmed_replay.scheduler_state();
     const auto play_world = confirmed_replay.simulation_state();
     Check(play_frame && play_plan && play_frame->elapsed() == milliseconds{15} &&
-              play_frame->front_end_command() == FrontEndCommand{} &&
+              play_frame->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::StartDiagnosticCampaign,
+                  .profile_slot = FrontEndProfileSlot::First,
+              } &&
               confirmed_replay.front_end_state() == diagnostic_play &&
               confirmed_replay.front_end_active_profile_is_confirmed() &&
               play_plan->simulation_steps == 1U &&
@@ -2010,8 +2082,9 @@ void CheckDiagnosticPlayGateReplay()
               confirmed_replay.diagnostic_actor_marker_destination() ==
                   kForwardOneMarkerDestination &&
               confirmed_replay.state() == RunReplaySessionState::Complete,
-        "the same Start Diagnostic edge enters play once the gate is open and advances "
-        "exactly one step and one derived marker position");
+        "the same Start Diagnostic edge publishes the persistence-free typed command "
+        "once the replay-local gate is open and advances exactly one step and one "
+        "derived marker position");
 
     // A replayed creation publishes no confirmation, so the gate stays closed even
     // though the logical model now holds one selectable profile.
@@ -2029,6 +2102,14 @@ void CheckDiagnosticPlayGateReplay()
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = previous_up},
         ScriptedElapsedFrame{.elapsed = milliseconds{15},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = next_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = next_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = primary_down},
         ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = primary_up},
@@ -2080,24 +2161,43 @@ void CheckDiagnosticPlayGateReplay()
             "cannot open the gate");
     }
 
-    auto creation_redirect = creation.Next();
-    Check(creation_redirect && creation_redirect->frame_plan() &&
-              creation_redirect->elapsed() == milliseconds{15} &&
-              creation_redirect->front_end_command() == FrontEndCommand{} &&
-              creation.front_end_state() == profiles_first &&
+    auto creation_inert_start = creation.Next();
+    Check(creation_inert_start && creation_inert_start->frame_plan() &&
+              creation_inert_start->elapsed() == milliseconds{15} &&
+              creation_inert_start->front_end_command() == FrontEndCommand{} &&
+              creation.front_end_state() == main_start &&
               !creation.front_end_active_profile_is_confirmed() &&
-              creation_redirect->frame_plan()->simulation_steps == 0U &&
+              creation_inert_start->frame_plan()->simulation_steps == 0U &&
               creation.scheduler_state() == creation_scheduler_origin &&
               SameSimulation(creation.simulation_state(), creation_world_origin),
-        "Start Diagnostic still redirects after a replayed creation because creation "
+        "Start Diagnostic remains inert after a replayed creation because creation "
         "never publishes a confirmation");
 
     auto creation_release = creation.Next();
     Check(creation_release && creation_release->frame_plan() &&
               creation_release->front_end_command() == FrontEndCommand{} &&
-              creation.front_end_state() == profiles_first &&
+              creation.front_end_state() == main_start &&
               !creation.front_end_active_profile_is_confirmed(),
-        "the redirected primary release after creation leaves the gate closed");
+        "the inert primary release after creation leaves the gate closed");
+
+    constexpr std::array creation_setup_states{
+        main_profiles,
+        main_profiles,
+        profiles_first,
+        profiles_first,
+    };
+    for (const FrontEndState expected_state : creation_setup_states)
+    {
+        auto setup_frame = creation.Next();
+        Check(setup_frame && setup_frame->frame_plan() &&
+                  setup_frame->front_end_command() == FrontEndCommand{} &&
+                  creation.front_end_state() == expected_state &&
+                  !creation.front_end_active_profile_is_confirmed() &&
+                  setup_frame->frame_plan()->simulation_steps == 0U &&
+                  creation.scheduler_state() == creation_scheduler_origin &&
+                  SameSimulation(creation.simulation_state(), creation_world_origin),
+            "post-creation navigation reaches Profiles without inventing confirmation");
+    }
 
     auto creation_selection = creation.Next();
     Check(creation_selection && creation_selection->frame_plan() &&
@@ -2113,37 +2213,37 @@ void CheckDiagnosticPlayGateReplay()
               creation.state() == RunReplaySessionState::Complete,
         "selecting the logically created profile is what opens the replay gate");
 
-    // The default capability must ignore the mirror entirely.
-    const std::array legacy_frames{
+    // Closed start support remains inert even when no confirmation gate is
+    // requested.
+    const std::array closed_support_frames{
         ScriptedElapsedFrame{.elapsed = milliseconds{15},
             .transitions = primary_down},
     };
-    RunCaptureTracePair legacy_pair =
-        BuildScriptedPair(menu_actions, legacy_frames);
-    RunReplaySessionConfig legacy_config = ValidConfig();
-    legacy_config.initial_front_end_state = main_start;
-    legacy_config.front_end_visible_profile_slots = 1U;
-    legacy_config.front_end_total_profile_count = 1U;
-    auto legacy_created =
-        RunReplaySession::Create(std::move(legacy_pair), legacy_config);
-    RunReplaySession legacy = TakeSession(
-        legacy_created, "the default-capability diagnostic-play replay is created");
-    auto legacy_frame = legacy.Next();
-    const auto legacy_plan = legacy_frame ? legacy_frame->frame_plan() : std::nullopt;
-    const auto legacy_world = legacy.simulation_state();
-    Check(legacy_frame && legacy_plan &&
-              legacy_frame->front_end_command() == FrontEndCommand{} &&
-              legacy.front_end_state() == diagnostic_play &&
-              !legacy.front_end_active_profile_is_confirmed() &&
-              legacy_plan->simulation_steps == 1U &&
-              legacy_plan->interpolation_alpha == 0.5 && legacy_world &&
-              SameSimulation(*legacy_world,
-                  SimulationState{
-                      .completed_steps = 1U,
-                      .simulated_time = milliseconds{10},
-                  }),
-        "the default closed capability keeps unguarded diagnostic entry without any "
-        "confirmation");
+    RunCaptureTracePair closed_support_pair =
+        BuildScriptedPair(menu_actions, closed_support_frames);
+    RunReplaySessionConfig closed_support_config = ValidConfig();
+    closed_support_config.initial_front_end_state = main_start;
+    closed_support_config.front_end_visible_profile_slots = 1U;
+    closed_support_config.front_end_total_profile_count = 1U;
+    auto closed_support_created = RunReplaySession::Create(
+        std::move(closed_support_pair), closed_support_config);
+    RunReplaySession closed_support = TakeSession(
+        closed_support_created, "the closed-support diagnostic replay is created");
+    const auto closed_support_scheduler = closed_support.scheduler_state();
+    const auto closed_support_world = closed_support.simulation_state();
+    auto closed_support_frame = closed_support.Next();
+    const auto closed_support_plan = closed_support_frame
+        ? closed_support_frame->frame_plan()
+        : std::nullopt;
+    Check(closed_support_frame && closed_support_plan &&
+              closed_support_frame->front_end_command() == FrontEndCommand{} &&
+              closed_support.front_end_state() == main_start &&
+              !closed_support.front_end_active_profile_is_confirmed() &&
+              closed_support_plan->simulation_steps == 0U &&
+              closed_support_plan->interpolation_alpha == 0.0 &&
+              closed_support.scheduler_state() == closed_support_scheduler &&
+              SameSimulation(closed_support.simulation_state(), closed_support_world),
+        "closed diagnostic-start support is inert and discards elapsed time");
 }
 
 void CheckMoveLifecycle()

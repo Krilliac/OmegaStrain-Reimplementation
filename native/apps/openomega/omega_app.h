@@ -123,10 +123,10 @@ private:
     // been contained or the run has become fatal.
     void ReleaseOpeningMovieForFrontEnd();
     // [game/main thread; no concurrent use] Applies a bounded menu command before
-    // its projected reducer state is published. Profile creation and explicit
-    // active-profile confirmation may touch persistence; neither mutates GPU state.
-    // A failed command leaves both the prior front-end state and session activation
-    // unpublished.
+    // its projected reducer state is published. Profile creation, explicit
+    // active-profile confirmation, and project diagnostic-start preparation may
+    // touch persistence; none mutates GPU state. A failed command leaves the
+    // prior front-end state and session activation unpublished.
     [[nodiscard]] std::expected<void, std::string> ApplyFrontEndCommand(
         FrontEndCommand command);
     [[nodiscard]] std::expected<void, std::string> CreateFirstProfile();
@@ -262,10 +262,10 @@ private:
     // the alternate presentation alone cannot express this because it then owns
     // the old empty presentation until teardown.
     bool can_create_first_profile_ = false;
-    // Explicit gate enablement. Production always composes a persistence owner,
-    // so production always enables it. A composition without persistence cannot
-    // reach ConfirmActiveProfile at all, so it has no authorization source to
-    // gate against and keeps the legacy unguarded diagnostic entry.
+    // Explicit confirmation-gate enablement. Production always composes a
+    // persistence owner and enables it. A private composition without
+    // persistence has no authorization source and uses the explicit synthetic,
+    // persistence-free diagnostic-start path instead.
     bool requires_active_profile_for_diagnostic_play_ = false;
     // Explicit per-launch activation only. The corresponding confirmation is
     // persisted before this value is published, but startup never copies a durable

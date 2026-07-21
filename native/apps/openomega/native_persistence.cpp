@@ -1,4 +1,5 @@
 #include "native_persistence.h"
+#include "front_end.h"
 
 #include <array>
 #include <cstddef>
@@ -18,9 +19,19 @@ constexpr std::uint32_t kPersistedActiveProfileSchemaVersion = 1U;
 constexpr std::uint16_t kPersistedActiveProfilePayloadVersion = 1U;
 constexpr std::string_view kPersistedActiveProfileMagic = "OOACTPRF";
 constexpr std::size_t kPersistedActiveProfileValueBytes = 32U;
+constexpr std::string_view kProfilesKeyPrefix = "profiles/";
+constexpr std::string_view kDiagnosticCheckpointKeySuffix =
+    "/campaigns/diagnostic/checkpoint";
+constexpr std::uint32_t kDiagnosticCheckpointSchemaVersion = 1U;
+constexpr std::uint16_t kDiagnosticCheckpointPayloadVersion = 1U;
+constexpr std::string_view kDiagnosticCheckpointMagic = "OODIAGCP";
+constexpr std::size_t kDiagnosticCheckpointValueBytes = 32U;
 static_assert(kPersistedActiveProfileMagic.size() == 8U);
 static_assert(16U + profiles::ProfileId::FromBytes({}).bytes().size() ==
               kPersistedActiveProfileValueBytes);
+static_assert(kDiagnosticCheckpointMagic.size() == 8U);
+static_assert(16U + profiles::ProfileId::FromBytes({}).bytes().size() ==
+              kDiagnosticCheckpointValueBytes);
 
 [[nodiscard]] NativePersistenceStartupError MakeError(const NativePersistenceStartupErrorCode code,
                                                       std::string message)
@@ -34,16 +45,43 @@ static_assert(16U + profiles::ProfileId::FromBytes({}).bytes().size() ==
     return {.code = code, .message = std::move(message)};
 }
 
+[[nodiscard]] DiagnosticCampaignStartError MakeDiagnosticStartError(
+    const DiagnosticCampaignStartErrorCode code, std::string message)
+{
+    return {.code = code, .message = std::move(message)};
+}
+
 [[nodiscard]] NativePersistenceStartupError PersistedActiveProfileStartupError()
 {
     return MakeError(NativePersistenceStartupErrorCode::PersistedActiveProfile,
                      "persisted active profile validation failed");
 }
 
+[[nodiscard]] NativePersistenceStartupError PersistedDiagnosticCheckpointStartupError()
+{
+    return MakeError(
+        NativePersistenceStartupErrorCode::PersistedDiagnosticCheckpoint,
+        "persisted diagnostic checkpoint validation failed");
+}
+
+[[nodiscard]] NativePersistenceStartupError PersistedDiagnosticCheckpointStartupError(
+    const persistence::SaveDatabaseErrorCode code)
+{
+    if (code == persistence::SaveDatabaseErrorCode::LimitExceeded)
+    {
+        return MakeError(NativePersistenceStartupErrorCode::ResourceExhausted,
+                         "native persistence startup allocation failed");
+    }
+    return PersistedDiagnosticCheckpointStartupError();
+}
+
 [[nodiscard]] persistence::SaveDatabaseLimits DefaultNativePersistenceLimits() noexcept
 {
     persistence::SaveDatabaseLimits limits;
-    limits.max_records = 1'025U;
+    // One bounded profile marker and one project diagnostic checkpoint per
+    // front-end profile, plus the single active-profile pointer. This remains
+    // a ceiling rather than a namespace reservation.
+    limits.max_records = 2'049U;
     return limits;
 }
 
@@ -124,6 +162,74 @@ void AppendU32(std::vector<std::byte>& bytes, const std::uint32_t value)
     return profiles::ProfileId::FromBytes(id_bytes);
 }
 
+[[nodiscard]] std::string DiagnosticCheckpointKey(const profiles::ProfileId id)
+{
+    return std::string(kProfilesKeyPrefix) + id.ToString() +
+           std::string(kDiagnosticCheckpointKeySuffix);
+}
+
+[[nodiscard]] bool IsDiagnosticCheckpointKeyCandidate(
+    const std::string_view key) noexcept
+{
+    return key.starts_with(kProfilesKeyPrefix) &&
+           key.ends_with(kDiagnosticCheckpointKeySuffix);
+}
+
+[[nodiscard]] std::optional<profiles::ProfileId>
+DiagnosticCheckpointProfileIdFromKey(std::string_view key) noexcept
+{
+    if (!IsDiagnosticCheckpointKeyCandidate(key))
+        return std::nullopt;
+    key.remove_prefix(kProfilesKeyPrefix.size());
+    key.remove_suffix(kDiagnosticCheckpointKeySuffix.size());
+    return profiles::ProfileId::Parse(key);
+}
+
+[[nodiscard]] std::vector<std::byte> EncodeDiagnosticCheckpoint(
+    const profiles::ProfileId id)
+{
+    std::vector<std::byte> bytes;
+    bytes.reserve(kDiagnosticCheckpointValueBytes);
+    for (const char value : kDiagnosticCheckpointMagic)
+        bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(value)));
+    AppendU16(bytes, kDiagnosticCheckpointPayloadVersion);
+    AppendU16(bytes, 0U);
+    AppendU32(bytes, 0U);
+    for (const std::uint8_t value : id.bytes())
+        bytes.push_back(static_cast<std::byte>(value));
+    return bytes;
+}
+
+[[nodiscard]] std::optional<profiles::ProfileId> DecodeDiagnosticCheckpoint(
+    const persistence::SaveRecord& record) noexcept
+{
+    if (record.schema_version != kDiagnosticCheckpointSchemaVersion ||
+        record.value.size() != kDiagnosticCheckpointValueBytes)
+    {
+        return std::nullopt;
+    }
+
+    const std::span<const std::byte> bytes(record.value);
+    for (std::size_t index = 0U; index < kDiagnosticCheckpointMagic.size(); ++index)
+    {
+        if (std::to_integer<unsigned char>(bytes[index]) !=
+            static_cast<unsigned char>(kDiagnosticCheckpointMagic[index]))
+        {
+            return std::nullopt;
+        }
+    }
+    if (LoadU16(bytes, 8U) != kDiagnosticCheckpointPayloadVersion ||
+        LoadU16(bytes, 10U) != 0U || LoadU32(bytes, 12U) != 0U)
+    {
+        return std::nullopt;
+    }
+
+    std::array<std::uint8_t, 16U> id_bytes{};
+    for (std::size_t index = 0U; index < id_bytes.size(); ++index)
+        id_bytes[index] = std::to_integer<std::uint8_t>(bytes[16U + index]);
+    return profiles::ProfileId::FromBytes(id_bytes);
+}
+
 [[nodiscard]] bool ContainsProfile(
     const std::span<const profiles::ProfileSummary> profile_summaries,
     const profiles::ProfileId id) noexcept
@@ -148,10 +254,33 @@ std::string_view NativePersistenceStartupErrorCodeName(
         return "profile-catalog-bootstrap";
     case NativePersistenceStartupErrorCode::PersistedActiveProfile:
         return "persisted-active-profile";
+    case NativePersistenceStartupErrorCode::PersistedDiagnosticCheckpoint:
+        return "persisted-diagnostic-checkpoint";
     case NativePersistenceStartupErrorCode::ResourceExhausted:
         return "resource-exhausted";
     }
     return "resource-exhausted";
+}
+
+std::string_view DiagnosticCampaignStartErrorCodeName(
+    const DiagnosticCampaignStartErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case DiagnosticCampaignStartErrorCode::ActiveProfileRequired:
+        return "active-profile-required";
+    case DiagnosticCampaignStartErrorCode::ProfileNotFound:
+        return "profile-not-found";
+    case DiagnosticCampaignStartErrorCode::RevisionConflict:
+        return "revision-conflict";
+    case DiagnosticCampaignStartErrorCode::StorageLimitExceeded:
+        return "storage-limit-exceeded";
+    case DiagnosticCampaignStartErrorCode::StorageFailure:
+        return "storage-failure";
+    case DiagnosticCampaignStartErrorCode::ResourceExhausted:
+        return "resource-exhausted";
+    }
+    return "storage-failure";
 }
 
 std::string_view ActiveProfileConfirmationErrorCodeName(
@@ -198,7 +327,8 @@ std::expected<NativePersistence, NativePersistenceStartupError> NativePersistenc
 
         auto database = std::make_unique<persistence::SaveDatabase>(std::move(*opened));
         auto profile_catalog = std::make_unique<profiles::ProfileCatalog>(*database);
-        auto startup_profiles = profile_catalog->List();
+        auto startup_profiles =
+            profile_catalog->ListBounded(kFrontEndMaximumProfiles);
         if (!startup_profiles)
         {
             std::string message = "profile catalog [";
@@ -221,6 +351,40 @@ std::expected<NativePersistence, NativePersistenceStartupError> NativePersistenc
                 return std::unexpected(PersistedActiveProfileStartupError());
             persisted_confirmed_profile_id = *decoded;
             persisted_confirmed_profile_revision = (**persisted_active_profile).revision;
+        }
+
+        auto profile_records = database->List(kProfilesKeyPrefix);
+        if (!profile_records)
+        {
+            return std::unexpected(PersistedDiagnosticCheckpointStartupError(
+                profile_records.error().code));
+        }
+        for (const persistence::SaveRecordInfo& info : *profile_records)
+        {
+            if (!IsDiagnosticCheckpointKeyCandidate(info.key))
+                continue;
+
+            const auto key_profile_id =
+                DiagnosticCheckpointProfileIdFromKey(info.key);
+            if (!key_profile_id)
+                return std::unexpected(PersistedDiagnosticCheckpointStartupError());
+
+            auto checkpoint = database->Read(info.key);
+            if (!checkpoint)
+            {
+                return std::unexpected(PersistedDiagnosticCheckpointStartupError(
+                    checkpoint.error().code));
+            }
+            if (!*checkpoint)
+                return std::unexpected(PersistedDiagnosticCheckpointStartupError());
+            const auto checkpoint_profile_id =
+                DecodeDiagnosticCheckpoint(**checkpoint);
+            if (!checkpoint_profile_id ||
+                *checkpoint_profile_id != *key_profile_id ||
+                !ContainsProfile(*startup_profiles, *key_profile_id))
+            {
+                return std::unexpected(PersistedDiagnosticCheckpointStartupError());
+            }
         }
 
         return NativePersistence(std::move(database), std::move(profile_catalog),
@@ -359,6 +523,121 @@ std::expected<void, ActiveProfileConfirmationError> NativePersistence::ConfirmAc
         return std::unexpected(MakeConfirmationError(
             ActiveProfileConfirmationErrorCode::ResourceExhausted,
             "active profile confirmation allocation failed"));
+    }
+}
+
+std::expected<void, DiagnosticCampaignStartError>
+NativePersistence::PrepareDiagnosticCampaignStart(const profiles::ProfileId id)
+{
+    try
+    {
+        if (!persisted_confirmed_profile_id_ ||
+            *persisted_confirmed_profile_id_ != id)
+        {
+            return std::unexpected(MakeDiagnosticStartError(
+                DiagnosticCampaignStartErrorCode::ActiveProfileRequired,
+                "diagnostic campaign start requires the same confirmed active profile"));
+        }
+
+        auto current_pointer = database_->Read(kPersistedActiveProfileKey);
+        if (!current_pointer)
+        {
+            const auto code = current_pointer.error().code ==
+                                      persistence::SaveDatabaseErrorCode::LimitExceeded
+                                  ? DiagnosticCampaignStartErrorCode::ResourceExhausted
+                                  : DiagnosticCampaignStartErrorCode::StorageFailure;
+            return std::unexpected(MakeDiagnosticStartError(
+                code, code == DiagnosticCampaignStartErrorCode::ResourceExhausted
+                          ? "diagnostic campaign start allocation failed"
+                          : "diagnostic campaign checkpoint storage failed"));
+        }
+        const auto current_profile = *current_pointer
+                                         ? DecodePersistedActiveProfile(**current_pointer)
+                                         : std::nullopt;
+        if (!*current_pointer || !current_profile || *current_profile != id ||
+            (**current_pointer).revision != persisted_confirmed_profile_revision_)
+        {
+            return std::unexpected(MakeDiagnosticStartError(
+                DiagnosticCampaignStartErrorCode::RevisionConflict,
+                "diagnostic campaign start observed changed persisted state"));
+        }
+
+        auto profile = profiles_->Read(id);
+        if (!profile)
+        {
+            const auto code = profile.error().code ==
+                                      profiles::ProfileCatalogErrorCode::ResourceExhausted
+                                  ? DiagnosticCampaignStartErrorCode::ResourceExhausted
+                                  : DiagnosticCampaignStartErrorCode::StorageFailure;
+            return std::unexpected(MakeDiagnosticStartError(
+                code, code == DiagnosticCampaignStartErrorCode::ResourceExhausted
+                          ? "diagnostic campaign start allocation failed"
+                          : "diagnostic campaign checkpoint storage failed"));
+        }
+        if (!*profile)
+        {
+            return std::unexpected(MakeDiagnosticStartError(
+                DiagnosticCampaignStartErrorCode::ProfileNotFound,
+                "diagnostic campaign start requires an existing profile"));
+        }
+
+        const std::string checkpoint_key = DiagnosticCheckpointKey(id);
+        auto existing = database_->Read(checkpoint_key);
+        if (!existing)
+        {
+            const auto code = existing.error().code ==
+                                      persistence::SaveDatabaseErrorCode::LimitExceeded
+                                  ? DiagnosticCampaignStartErrorCode::ResourceExhausted
+                                  : DiagnosticCampaignStartErrorCode::StorageFailure;
+            return std::unexpected(MakeDiagnosticStartError(
+                code, code == DiagnosticCampaignStartErrorCode::ResourceExhausted
+                          ? "diagnostic campaign start allocation failed"
+                          : "diagnostic campaign checkpoint storage failed"));
+        }
+        if (*existing)
+        {
+            const auto decoded = DecodeDiagnosticCheckpoint(**existing);
+            if (!decoded || *decoded != id)
+            {
+                return std::unexpected(MakeDiagnosticStartError(
+                    DiagnosticCampaignStartErrorCode::RevisionConflict,
+                    "diagnostic campaign start observed changed persisted state"));
+            }
+            return {};
+        }
+
+        std::array mutation{
+            persistence::SaveMutation::Put(
+                checkpoint_key, kDiagnosticCheckpointSchemaVersion,
+                EncodeDiagnosticCheckpoint(id),
+                persistence::SaveWriteCondition::MustBeAbsent()),
+        };
+        const auto committed = database_->Commit(mutation);
+        if (!committed)
+        {
+            switch (committed.error().code)
+            {
+            case persistence::SaveDatabaseErrorCode::PreconditionFailed:
+                return std::unexpected(MakeDiagnosticStartError(
+                    DiagnosticCampaignStartErrorCode::RevisionConflict,
+                    "diagnostic campaign start observed changed persisted state"));
+            case persistence::SaveDatabaseErrorCode::LimitExceeded:
+                return std::unexpected(MakeDiagnosticStartError(
+                    DiagnosticCampaignStartErrorCode::StorageLimitExceeded,
+                    "diagnostic campaign checkpoint exceeds native storage limits"));
+            default:
+                return std::unexpected(MakeDiagnosticStartError(
+                    DiagnosticCampaignStartErrorCode::StorageFailure,
+                    "diagnostic campaign checkpoint storage failed"));
+            }
+        }
+        return {};
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected(MakeDiagnosticStartError(
+            DiagnosticCampaignStartErrorCode::ResourceExhausted,
+            "diagnostic campaign start allocation failed"));
     }
 }
 } // namespace omega::app

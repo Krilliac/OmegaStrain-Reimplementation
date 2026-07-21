@@ -2010,8 +2010,11 @@ std::expected<void, std::string> OmegaApp::CreateFirstProfile()
 
 FrontEndCapabilities OmegaApp::CurrentFrontEndCapabilities() const noexcept
 {
+    const bool active_profile_is_confirmed = ActiveProfileIsConfirmed();
     return FrontEndCapabilities{
         .can_create_first_profile = can_create_first_profile_,
+        .can_start_diagnostic_campaign =
+            native_persistence_ == nullptr || active_profile_is_confirmed,
         .requires_active_profile_for_diagnostic_play =
             requires_active_profile_for_diagnostic_play_,
     };
@@ -2034,6 +2037,41 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
                 std::string{"first profile command selected an invalid slot"});
         }
         return CreateFirstProfile();
+    }
+    if (command.type == FrontEndCommandType::StartDiagnosticCampaign)
+    {
+        if (command.profile_slot != FrontEndProfileSlot::First)
+        {
+            return std::unexpected(std::string{
+                "diagnostic campaign start selected an invalid slot"});
+        }
+        // Only private renderer/capture tests can construct OmegaApp without
+        // NativePersistence. Production Create always owns the persistence
+        // boundary, so this compatibility seam cannot bypass the runtime
+        // active-profile prerequisite.
+        if (native_persistence_ == nullptr)
+            return {};
+
+        constexpr std::string_view start_failure_prefix =
+            "diagnostic campaign start failed: ";
+        const auto start_failure = [start_failure_prefix](
+                                       const DiagnosticCampaignStartErrorCode code) {
+            return std::string(start_failure_prefix) +
+                   std::string(DiagnosticCampaignStartErrorCodeName(code));
+        };
+        if (!ActiveProfileIsConfirmed())
+        {
+            return std::unexpected(start_failure(
+                DiagnosticCampaignStartErrorCode::ActiveProfileRequired));
+        }
+
+        // ActiveProfileIsConfirmed resolves this same identity against the
+        // current bounded startup model on the serialized game thread.
+        auto prepared = native_persistence_->PrepareDiagnosticCampaignStart(
+            *active_profile_id_);
+        if (!prepared)
+            return std::unexpected(start_failure(prepared.error().code));
+        return {};
     }
     if (command.type != FrontEndCommandType::SetActiveProfile)
         return {};
