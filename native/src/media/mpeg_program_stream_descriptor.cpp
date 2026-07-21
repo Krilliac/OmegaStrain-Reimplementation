@@ -32,6 +32,8 @@ struct ScanSummary
     std::uint64_t video_pes_packet_count = 0;
     std::uint64_t private_data_packet_count = 0;
     bool has_program_end = false;
+
+    [[nodiscard]] bool operator==(const ScanSummary&) const = default;
 };
 
 [[nodiscard]] asset::DecodeError Error(
@@ -443,7 +445,7 @@ struct ScanSummary
 
 [[nodiscard]] asset::DecodeResult<ScanSummary> ScanProgramStream(
     const std::span<const std::byte> bytes, const std::uint64_t maximum_packets,
-    MpegProgramStreamPacketDescriptor* const output)
+    MpegProgramStreamPacketDescriptor* const output, const std::uint64_t output_capacity)
 {
     ScanSummary summary;
     std::uint64_t offset = 0;
@@ -466,7 +468,14 @@ struct ScanSummary
         }
 
         if (output != nullptr)
+        {
+            if (summary.packet_count >= output_capacity)
+            {
+                return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
+                    "MPEG-PS output capacity was exhausted", offset));
+            }
             output[static_cast<std::size_t>(summary.packet_count)] = *packet;
+        }
         ++summary.packet_count;
 
         switch (packet->kind)
@@ -542,7 +551,7 @@ asset::DecodeResult<MpegProgramStreamDescriptor> InspectMpegProgramStream(
     const std::uint64_t maximum_packets = std::min(
         kMpegProgramStreamMaximumPacketDescriptors, std::min(maximum_by_items, maximum_by_output));
 
-    auto scan = ScanProgramStream(bytes, maximum_packets, nullptr);
+    auto scan = ScanProgramStream(bytes, maximum_packets, nullptr, 0U);
     if (!scan)
         return std::unexpected(scan.error());
 
@@ -550,9 +559,15 @@ asset::DecodeResult<MpegProgramStreamDescriptor> InspectMpegProgramStream(
     {
         std::vector<MpegProgramStreamPacketDescriptor> packets(
             static_cast<std::size_t>(scan->packet_count));
-        auto populated = ScanProgramStream(bytes, maximum_packets, packets.data());
+        auto populated = ScanProgramStream(bytes, maximum_packets, packets.data(),
+            static_cast<std::uint64_t>(packets.size()));
         if (!populated)
             return std::unexpected(populated.error());
+        if (*populated != *scan)
+        {
+            return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                "MPEG-PS scan summary changed between validation passes"));
+        }
 
         return MpegProgramStreamDescriptor{
             .packets = std::move(packets),

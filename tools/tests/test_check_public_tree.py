@@ -88,11 +88,28 @@ class PublicTreeGateTests(unittest.TestCase):
     def test_safe_text_file_passes(self) -> None:
         self.assertEqual(self.errors("native/src/example.cpp"), [])
 
-    def test_private_and_generated_roots_are_blocked(self) -> None:
-        self.assertTrue(any("blocked root" in error for error in self.errors("private/input.txt")))
-        self.assertTrue(
-            any("blocked root" in error for error in self.errors("analysis/output/result.json"))
+    def test_every_policy_root_and_descendant_is_blocked(self) -> None:
+        expected_roots = (
+            "analysis/output",
+            "build",
+            "downloads",
+            "private",
+            "runtime",
+            "third_party",
         )
+        self.assertEqual(set(expected_roots), gate.BLOCKED_ROOTS)
+        for root in expected_roots:
+            with self.subTest(root=root, shape="root"):
+                self.assertTrue(
+                    any("blocked root" in error for error in self.errors(root))
+                )
+            with self.subTest(root=root, shape="descendant"):
+                self.assertTrue(
+                    any(
+                        "blocked root" in error
+                        for error in self.errors(f"{root}/synthetic.txt")
+                    )
+                )
 
     def test_payload_extensions_and_boot_names_are_blocked(self) -> None:
         self.assertTrue(any("payload extension" in error for error in self.errors("fixture.iso")))
@@ -127,10 +144,18 @@ class PublicTreeGateTests(unittest.TestCase):
                 )
             )
         )
-        synthetic_token = b"gh" + b"p_" + (b"A" * 24)
-        self.assertTrue(
-            any("GitHub token" in error for error in self.errors("notes.txt", synthetic_token))
-        )
+        synthetic_markers = {
+            "private-key marker": b"-----BEGIN " + b"PRIVATE " + b"KEY-----",
+            "GitHub token": b"gh" + b"p_" + (b"A" * 24),
+            "OpenAI-style token": b"sk" + b"-proj-" + (b"A" * 24),
+            "AWS access key": b"AK" + b"IA" + (b"A" * 16),
+        }
+        self.assertEqual(set(synthetic_markers), set(gate.SECRET_PATTERNS))
+        for label, marker in synthetic_markers.items():
+            with self.subTest(label=label):
+                self.assertTrue(
+                    any(label in error for error in self.errors("notes.txt", marker))
+                )
 
     def test_retail_executable_name_is_blocked_even_with_extra_suffix(self) -> None:
         # A suffixed disc-executable name (e.g. re-encoded as text) previously

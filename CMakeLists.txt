@@ -688,6 +688,34 @@ if(BUILD_TESTING)
         COMMAND omega_sdl_gpu_exception_boundary_tests)
     set_tests_properties(omega_sdl_gpu_exception_boundary_tests PROPERTIES TIMEOUT 5)
 
+    if(TARGET omega_app_host)
+        add_executable(omega_opening_movie_player_boundary_tests
+            native/tests/opening_movie_player_boundary_tests.cpp
+        )
+        target_link_libraries(omega_opening_movie_player_boundary_tests PRIVATE omega_app_host)
+        if(MSVC)
+            target_compile_options(omega_opening_movie_player_boundary_tests PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_opening_movie_player_boundary_tests PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+        add_test(NAME omega_opening_movie_player_boundary_tests
+            COMMAND omega_opening_movie_player_boundary_tests)
+        set_tests_properties(omega_opening_movie_player_boundary_tests PROPERTIES TIMEOUT 10)
+    endif()
+
     add_executable(omega_save_database_tests
         native/tests/save_database_tests.cpp
     )
@@ -1865,6 +1893,7 @@ if(BUILD_TESTING)
         target_compile_options(omega_core_tests PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
     endif()
     add_test(NAME omega_core_tests COMMAND omega_core_tests)
+    set_tests_properties(omega_core_tests PROPERTIES TIMEOUT 30)
 
     add_executable(omega_lpd_envelope_decoder_tests
         native/tests/lpd_envelope_decoder_tests.cpp
@@ -1955,11 +1984,15 @@ if(BUILD_TESTING)
         omega_tool_rejects_empty_level_texture_store_tree
         omega_tool_rejects_empty_asset_service_tree
         omega_tool_rejects_empty_asset_metadata_tree
-        PROPERTIES WILL_FAIL TRUE
+        PROPERTIES
+            WILL_FAIL TRUE
+            TIMEOUT 10
     )
     set_tests_properties(
         omega_tool_empty_level_material_catalogs_signature
-        PROPERTIES PASS_REGULAR_EXPRESSION "\"catalogs\":0"
+        PROPERTIES
+            PASS_REGULAR_EXPRESSION "\"catalogs\":0"
+            TIMEOUT 10
     )
 endif()
 
