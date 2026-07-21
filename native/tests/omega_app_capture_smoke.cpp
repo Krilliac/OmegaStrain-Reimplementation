@@ -129,6 +129,15 @@ struct OmegaAppTestAccess final
         for (runtime::RenderDrawList& draw_list :
              app.front_end_presentation_.profile_selection_draw_lists)
             draw_list = *created;
+        // The nested selected/active matrix is the list a confirmed Profiles
+        // frame actually submits, so it must be poisoned too or the fixture
+        // silently leaves one reachable surface holding owned handles.
+        for (auto& active_draw_lists :
+             app.front_end_presentation_.profile_active_draw_lists)
+        {
+            for (runtime::RenderDrawList& draw_list : active_draw_lists)
+                draw_list = *created;
+        }
         app.diagnostic_controls_draw_list_ = *created;
         app.diagnostic_asset_topology_draw_list_ = *created;
         return true;
@@ -144,6 +153,12 @@ struct OmegaAppTestAccess final
         for (runtime::RenderDrawList& draw_list :
              app.front_end_presentation_.profile_selection_draw_lists)
             draw_list = {};
+        for (auto& active_draw_lists :
+             app.front_end_presentation_.profile_active_draw_lists)
+        {
+            for (runtime::RenderDrawList& draw_list : active_draw_lists)
+                draw_list = {};
+        }
         app.diagnostic_controls_draw_list_ = {};
         app.diagnostic_asset_topology_draw_list_ = {};
     }
@@ -295,6 +310,17 @@ struct OmegaAppTestAccess final
         const OmegaApp& app) noexcept
     {
         return app.front_end_presentation_.profile_selection_draw_lists;
+    }
+
+    // [selected position][confirmed active position]. Exposes the preloaded
+    // matrix so a test can prove which exact list a confirmed Profiles frame
+    // submits without reconstructing the presentation policy.
+    [[nodiscard]] static const std::array<
+        std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>,
+        kFrontEndVisibleProfiles>&
+    FrontEndProfileActiveDrawLists(const OmegaApp& app) noexcept
+    {
+        return app.front_end_presentation_.profile_active_draw_lists;
     }
 
     [[nodiscard]] static const runtime::RenderDrawList& DiagnosticControlsDrawList(
@@ -572,6 +598,24 @@ void Check(const bool condition, const std::string_view message)
            after.frame_submissions == before.frame_submissions + 1U &&
            after.blit_submissions == before.blit_submissions + 1U &&
            after.successful_blit_draws == before.successful_blit_draws + 3U &&
+           after.clear_submissions == before.clear_submissions &&
+           after.unavailable_swapchain_submissions ==
+               before.unavailable_swapchain_submissions &&
+           after.rejected_nondefault_texture_handles ==
+               before.rejected_nondefault_texture_handles;
+}
+
+// The Profiles surface adds the project-owned active-row cue on top of its
+// selection cue, so a confirmed Profiles frame submits exactly one more draw
+// than the unconfirmed one and still uploads nothing.
+[[nodiscard]] bool IsOneActiveProfileMenuSubmission(
+    const omega::app::GpuHostSnapshot& before,
+    const omega::app::GpuHostSnapshot& after) noexcept
+{
+    return SameTextureResidency(before, after) &&
+           after.frame_submissions == before.frame_submissions + 1U &&
+           after.blit_submissions == before.blit_submissions + 1U &&
+           after.successful_blit_draws == before.successful_blit_draws + 4U &&
            after.clear_submissions == before.clear_submissions &&
            after.unavailable_swapchain_submissions ==
                before.unavailable_swapchain_submissions &&
@@ -1302,6 +1346,34 @@ void CheckPackedTransferUploadBudgetFallback(omega::app::OmegaApp& app,
     return SDL_PushEvent(&event);
 }
 
+// Logical action state recorded by a one-frame capture. Physical aliases share
+// logical actions here, so only the trace can show whether a later alias really
+// produced a fresh press edge or merely continued a held action.
+[[nodiscard]] std::optional<omega::runtime::InputTraceActionState>
+CapturedActionState(
+    const std::expected<omega::app::RunCaptureOutcome, std::string>& capture,
+    const std::uint32_t action)
+{
+    if (!capture)
+        return std::nullopt;
+    const auto* const pair = capture->trace_pair();
+    if (pair == nullptr)
+        return std::nullopt;
+    return pair->input_trace().ActionAt(0U, action);
+}
+
+[[nodiscard]] bool IsFreshPress(
+    const std::optional<omega::runtime::InputTraceActionState>& state) noexcept
+{
+    return state && state->held && state->pressed && !state->released;
+}
+
+[[nodiscard]] bool IsRelease(
+    const std::optional<omega::runtime::InputTraceActionState>& state) noexcept
+{
+    return state && !state->held && !state->pressed && state->released;
+}
+
 void CheckActiveProfileConfirmation(
     const std::filesystem::path& fixture_root,
     const omega::runtime::RuntimeSettings& settings)
@@ -1826,6 +1898,33 @@ void CheckComposedGeneratedMenuAcceptance(
         .right = 33'792U,
         .bottom = 32'768U,
     };
+    // Fixed project-owned Profiles layout. The card fills the menu panel, the
+    // selection cursor sits at the left of its row band, and the active-row cue
+    // reuses the same band at the opposite edge so the two never overlap.
+    constexpr omega::runtime::RenderSourceRectQ16 kProfileCueSource{
+        .left = 0U,
+        .top = 0U,
+        .right = 512U,
+        .bottom = 512U,
+    };
+    constexpr omega::runtime::RenderTargetRectQ16 kMenuDestination{
+        .left = 2048U,
+        .top = 2048U,
+        .right = 26'624U,
+        .bottom = 15'872U,
+    };
+    constexpr omega::runtime::RenderTargetRectQ16 kFirstRowSelectionTarget{
+        .left = 3584U,
+        .top = 7424U,
+        .right = 4352U,
+        .bottom = 8960U,
+    };
+    constexpr omega::runtime::RenderTargetRectQ16 kFirstRowActiveTarget{
+        .left = 25'280U,
+        .top = 7424U,
+        .right = 26'048U,
+        .bottom = 8960U,
+    };
     constexpr std::uint64_t kFrontEndCardLogicalBytes =
         128ULL * 72ULL * 4ULL;
     constexpr std::uint64_t kTopologyLogicalBytes = 96ULL * 32ULL * 4ULL;
@@ -1840,8 +1939,12 @@ void CheckComposedGeneratedMenuAcceptance(
     auto config = omega::runtime::ParseConfigText("");
     Check(profile_id && persistence && config &&
               persistence->startup_profiles().empty() &&
-              !persistence->persisted_confirmed_profile_id(),
-        "the composed generated menu fixture starts from exact empty persistence");
+              !persistence->persisted_confirmed_profile_id() &&
+              persistence->database().generation() == 0U &&
+              persistence->database().record_count() == 0U &&
+              persistence->database().logical_value_bytes() == 0U,
+        "the composed generated menu fixture starts from an exact zero-generation, "
+        "zero-record, zero-byte database with no durable confirmation");
     if (!profile_id || !persistence || !config)
         return;
 
@@ -1859,6 +1962,7 @@ void CheckComposedGeneratedMenuAcceptance(
         Access::SchedulerSnapshot(*app);
     const omega::simulation::SimulationState startup_simulation =
         Access::SimulationSnapshot(*app);
+    const auto startup_position = Access::DebugLocomotionPosition(*app);
     const omega::runtime::RenderTextureHandle marker_texture =
         Access::DiagnosticActorMarkerTexture(*app);
     Check(marker_texture.valid() && startup_gpu.successful_uploads == 8U &&
@@ -1889,11 +1993,16 @@ void CheckComposedGeneratedMenuAcceptance(
                   std::optional<std::size_t>{1U} &&
               Access::PersistenceGeneration(*app) ==
                   std::optional<std::uint64_t>{1U} &&
+              Access::PersistenceRecordCount(*app) ==
+                  std::optional<std::size_t>{1U} &&
+              Access::PersistenceLogicalValueBytes(*app) ==
+                  std::optional<std::size_t>{41U} &&
+              !Access::PersistedConfirmedProfile(*app) &&
               Access::SchedulerSnapshot(*app) == startup_scheduler &&
               SameSimulationState(
                   Access::SimulationSnapshot(*app), startup_simulation) &&
               IsOneVisibleMenuSubmission(startup_gpu, created_gpu),
-        "the first Primary creates PROFILE 1 while the modal scheduler stays frozen and the preloaded presentation only swaps ownership");
+        "the first Primary creates PROFILE 1 as exactly one 41-byte generation-one metadata record with no durable confirmation, while the modal scheduler stays frozen and the preloaded presentation only swaps ownership");
     if (!created)
         return;
 
@@ -1912,6 +2021,110 @@ void CheckComposedGeneratedMenuAcceptance(
         "the required creation-key release is inert and visibly preserves Profiles/First");
     if (!creation_released)
         return;
+
+    // A durably created profile is still unconfirmed, so the gate must stay
+    // closed. Walk out to the START DIAGNOSTIC row and prove the entry edge
+    // redirects instead of playing.
+    const bool unconfirmed_cancel_queued = PushKey(SDL_SCANCODE_BACKSPACE, true);
+    auto unconfirmed_cancel = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot unconfirmed_cancel_gpu =
+        Access::GpuSnapshot(*app);
+    Check(unconfirmed_cancel_queued && unconfirmed_cancel &&
+              unconfirmed_cancel->result().planned_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kMainProfiles &&
+              !Access::ActiveProfile(*app) &&
+              IsOneVisibleMenuSubmission(
+                  creation_released_gpu, unconfirmed_cancel_gpu),
+        "Cancel leaves the unconfirmed Profiles surface for its visible Main row");
+
+    const bool unconfirmed_cancel_release_queued =
+        PushKey(SDL_SCANCODE_BACKSPACE, false);
+    auto unconfirmed_cancel_released = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot unconfirmed_cancel_released_gpu =
+        Access::GpuSnapshot(*app);
+    Check(unconfirmed_cancel_release_queued && unconfirmed_cancel_released &&
+              Access::FrontEnd(*app) == kMainProfiles &&
+              IsOneVisibleMenuSubmission(
+                  unconfirmed_cancel_gpu, unconfirmed_cancel_released_gpu),
+        "the unconfirmed cancel release is inert");
+
+    const bool unconfirmed_navigation_queued = PushKey(SDL_SCANCODE_UP, true);
+    auto unconfirmed_navigated = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot unconfirmed_navigated_gpu =
+        Access::GpuSnapshot(*app);
+    Check(unconfirmed_navigation_queued && unconfirmed_navigated &&
+              IsFreshPress(CapturedActionState(
+                  unconfirmed_navigated, omega::app::kDebugMoveForwardAction)) &&
+              unconfirmed_navigated->result().planned_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kMainStart &&
+              Access::SchedulerSnapshot(*app) == startup_scheduler &&
+              IsOneVisibleMenuSubmission(
+                  unconfirmed_cancel_released_gpu, unconfirmed_navigated_gpu),
+        "a fresh action-2 press selects the START DIAGNOSTIC row while unconfirmed");
+
+    const bool unconfirmed_navigation_release_queued =
+        PushKey(SDL_SCANCODE_UP, false);
+    auto unconfirmed_navigation_released = app->RunWithCapture(1);
+    Check(unconfirmed_navigation_release_queued &&
+              unconfirmed_navigation_released &&
+              IsRelease(CapturedActionState(unconfirmed_navigation_released,
+                  omega::app::kDebugMoveForwardAction)) &&
+              Access::FrontEnd(*app) == kMainStart &&
+              IsOneVisibleMenuSubmission(
+                  unconfirmed_navigated_gpu, Access::GpuSnapshot(*app)),
+        "the unconfirmed navigation emits the action-2 release edge");
+
+    const auto persistence_generation_before_redirect =
+        Access::PersistenceGeneration(*app);
+    const auto persistence_records_before_redirect =
+        Access::PersistenceRecordCount(*app);
+    const auto persistence_bytes_before_redirect =
+        Access::PersistenceLogicalValueBytes(*app);
+    const omega::app::GpuHostSnapshot redirect_gpu_before =
+        Access::GpuSnapshot(*app);
+    const bool redirect_queued =
+        Access::ArmNextRunElapsed(*app, settings.frame.simulation_step) &&
+        PushKey(SDL_SCANCODE_F1, true);
+    auto redirected = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot redirect_gpu_after =
+        Access::GpuSnapshot(*app);
+    Check(redirect_queued && redirected &&
+              redirected->completion() ==
+                  omega::app::RunCaptureCompletion::FrameLimitReached &&
+              !redirected->failure() &&
+              redirected->result().planned_simulation_steps == 0U &&
+              redirected->result().executed_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kProfilesFirst &&
+              !Access::ActiveProfile(*app) &&
+              !Access::PersistedConfirmedProfile(*app) &&
+              Access::PersistenceGeneration(*app) ==
+                  persistence_generation_before_redirect &&
+              Access::PersistenceRecordCount(*app) ==
+                  persistence_records_before_redirect &&
+              Access::PersistenceLogicalValueBytes(*app) ==
+                  persistence_bytes_before_redirect &&
+              Access::SchedulerSnapshot(*app) == startup_scheduler &&
+              SameSimulationState(
+                  Access::SimulationSnapshot(*app), startup_simulation) &&
+              Access::DebugLocomotionPosition(*app) == startup_position &&
+              DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                  Access::FrontEndProfileSelectionDrawLists(*app)[0]) &&
+              IsOneVisibleMenuSubmission(redirect_gpu_before, redirect_gpu_after),
+        "an unconfirmed Start Diagnostic edge opens the unmarked Profiles surface, discards a full simulation step of elapsed time, and mutates no simulation, persistence, or GPU resource");
+    if (!redirected)
+        return;
+
+    const bool redirect_release_queued = PushKey(SDL_SCANCODE_F1, false);
+    auto redirect_released = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot redirect_released_gpu =
+        Access::GpuSnapshot(*app);
+    Check(redirect_release_queued && redirect_released &&
+              redirect_released->result().planned_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kProfilesFirst &&
+              !Access::ActiveProfile(*app) &&
+              IsOneVisibleMenuSubmission(
+                  redirect_gpu_after, redirect_released_gpu),
+        "the redirected entry edge must release before the confirming press");
 
     const bool confirmation_queued = PushKey(SDL_SCANCODE_F1, true);
     auto confirmed = app->RunWithCapture(1);
@@ -1935,24 +2148,120 @@ void CheckComposedGeneratedMenuAcceptance(
               SameSimulationState(
                   Access::SimulationSnapshot(*app), startup_simulation) &&
               IsOneVisibleMenuSubmission(
-                  creation_released_gpu, confirmed_gpu),
+                  redirect_released_gpu, confirmed_gpu),
         "the second Primary durably confirms PROFILE 1 and returns to the visible Main/Profiles row without advancing simulation");
     if (!confirmed)
         return;
 
-    const bool navigation_queued = PushKey(SDL_SCANCODE_F1, false) &&
-                                   PushKey(SDL_SCANCODE_UP, true);
+    const bool confirmation_release_queued = PushKey(SDL_SCANCODE_F1, false);
+    auto confirmation_released = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot confirmation_released_gpu =
+        Access::GpuSnapshot(*app);
+    Check(confirmation_release_queued && confirmation_released &&
+              Access::FrontEnd(*app) == kMainProfiles &&
+              Access::ActiveProfile(*app) == profile_id &&
+              IsOneVisibleMenuSubmission(
+                  confirmed_gpu, confirmation_released_gpu),
+        "the confirming edge releases without republishing the durable pointer");
+
+    // Re-entering Profiles now that a confirmation resolves must select the
+    // preloaded selected-plus-active list rather than the unmarked one.
+    const bool marked_profiles_queued = PushKey(SDL_SCANCODE_F1, true);
+    auto marked_profiles = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot marked_profiles_gpu =
+        Access::GpuSnapshot(*app);
+    const omega::runtime::RenderTextureHandle profiles_texture =
+        Access::FrontEndProfilesTexture(*app);
+    const auto active_commands =
+        Access::FrontEndProfileActiveDrawLists(*app)[0][0].commands();
+    const auto base_commands = Access::DiagnosticHiddenDrawList(*app).commands();
+    const bool active_list_is_exact =
+        active_commands.size() == 4U && base_commands.size() == 1U &&
+        active_commands[0] == base_commands[0] &&
+        active_commands[1] == omega::runtime::RenderTextureBlitCommand{
+            .texture = profiles_texture,
+            .source = kFullSource,
+            .destination = kMenuDestination,
+            .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+        } &&
+        active_commands[2] == omega::runtime::RenderTextureBlitCommand{
+            .texture = profiles_texture,
+            .source = kProfileCueSource,
+            .destination = kFirstRowSelectionTarget,
+            .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+        } &&
+        active_commands[3] == omega::runtime::RenderTextureBlitCommand{
+            .texture = profiles_texture,
+            .source = kProfileCueSource,
+            .destination = kFirstRowActiveTarget,
+            .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+        };
+    Check(marked_profiles_queued && marked_profiles &&
+              marked_profiles->completion() ==
+                  omega::app::RunCaptureCompletion::FrameLimitReached &&
+              !marked_profiles->failure() &&
+              Access::FrontEnd(*app) == kProfilesFirst &&
+              Access::ActiveProfile(*app) == profile_id &&
+              Access::PersistenceGeneration(*app) ==
+                  std::optional<std::uint64_t>{2U} &&
+              active_list_is_exact &&
+              DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                  Access::FrontEndProfileActiveDrawLists(*app)[0][0]) &&
+              !DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                  Access::FrontEndProfileSelectionDrawLists(*app)[0]) &&
+              IsOneActiveProfileMenuSubmission(
+                  confirmation_released_gpu, marked_profiles_gpu),
+        "a confirmed Profiles surface submits the exact four-command selected-plus-active list, adding only the fixed active-row cue and uploading nothing");
+
+    const bool marked_release_queued = PushKey(SDL_SCANCODE_F1, false);
+    auto marked_released = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot marked_released_gpu =
+        Access::GpuSnapshot(*app);
+    Check(marked_release_queued && marked_released &&
+              Access::FrontEnd(*app) == kProfilesFirst &&
+              DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                  Access::FrontEndProfileActiveDrawLists(*app)[0][0]) &&
+              IsOneActiveProfileMenuSubmission(
+                  marked_profiles_gpu, marked_released_gpu),
+        "the marked Profiles surface persists across the release frame");
+
+    const bool marked_cancel_queued = PushKey(SDL_SCANCODE_BACKSPACE, true);
+    auto marked_cancelled = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot marked_cancelled_gpu =
+        Access::GpuSnapshot(*app);
+    Check(marked_cancel_queued && marked_cancelled &&
+              Access::FrontEnd(*app) == kMainProfiles &&
+              Access::ActiveProfile(*app) == profile_id &&
+              IsOneVisibleMenuSubmission(
+                  marked_released_gpu, marked_cancelled_gpu),
+        "Cancel returns the confirmed session to its visible Main/Profiles row");
+
+    const bool marked_cancel_release_queued =
+        PushKey(SDL_SCANCODE_BACKSPACE, false);
+    auto marked_cancel_released = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot confirmed_main_gpu =
+        Access::GpuSnapshot(*app);
+    Check(marked_cancel_release_queued && marked_cancel_released &&
+              Access::FrontEnd(*app) == kMainProfiles,
+        "the confirmed cancel release is inert");
+
+    const bool navigation_queued = PushKey(SDL_SCANCODE_UP, true);
     auto navigated = app->RunWithCapture(1);
     const omega::app::GpuHostSnapshot navigated_gpu = Access::GpuSnapshot(*app);
     Check(navigation_queued && navigated &&
+              IsFreshPress(CapturedActionState(
+                  navigated, omega::app::kDebugMoveForwardAction)) &&
               navigated->result().planned_simulation_steps == 0U &&
               navigated->result().executed_simulation_steps == 0U &&
               Access::FrontEnd(*app) == kMainStart &&
               Access::SchedulerSnapshot(*app) == startup_scheduler &&
               SameSimulationState(
                   Access::SimulationSnapshot(*app), startup_simulation) &&
-              IsOneVisibleMenuSubmission(confirmed_gpu, navigated_gpu),
-        "a fresh Up edge after confirmation selects the visible START DIAGNOSTIC row while releasing Primary");
+              IsOneVisibleMenuSubmission(confirmed_main_gpu, navigated_gpu),
+        "a fresh action-2 press after confirmation selects the visible START DIAGNOSTIC row");
     if (!navigated)
         return;
 
@@ -1961,12 +2270,14 @@ void CheckComposedGeneratedMenuAcceptance(
     const omega::app::GpuHostSnapshot navigation_released_gpu =
         Access::GpuSnapshot(*app);
     Check(navigation_release_queued && navigation_released &&
+              IsRelease(CapturedActionState(
+                  navigation_released, omega::app::kDebugMoveForwardAction)) &&
               navigation_released->result().planned_simulation_steps == 0U &&
               navigation_released->result().executed_simulation_steps == 0U &&
               Access::FrontEnd(*app) == kMainStart &&
               Access::SchedulerSnapshot(*app) == startup_scheduler &&
               IsOneVisibleMenuSubmission(navigated_gpu, navigation_released_gpu),
-        "the navigation release preserves START DIAGNOSTIC and the frozen modal scheduler");
+        "the navigation release emits the action-2 release edge and preserves START DIAGNOSTIC with the frozen modal scheduler");
     if (!navigation_released)
         return;
 
@@ -1997,6 +2308,8 @@ void CheckComposedGeneratedMenuAcceptance(
                   omega::app::RunCaptureCompletion::FrameLimitReached &&
               !play->failure() && play->result().input_frames == 1U &&
               play->result().rendered_frames == 1 &&
+              IsFreshPress(CapturedActionState(
+                  play, omega::app::kDebugMoveForwardAction)) &&
               play->result().planned_simulation_steps == 1U &&
               play->result().executed_simulation_steps == 1U &&
               Access::FrontEnd(*app) == kDiagnosticPlay &&
@@ -2009,7 +2322,7 @@ void CheckComposedGeneratedMenuAcceptance(
                   actor_draw_list) &&
               SameTextureResidency(startup_gpu, play_gpu) &&
               IsOneDiagnosticPlaySubmission(navigation_released_gpu, play_gpu),
-        "Primary plus forward enters DiagnosticPlay, advances exactly one generated simulation step, and submits the visible positive-Z actor marker without GPU resource churn");
+        "a confirmed Primary plus a fresh action-2 forward press enters DiagnosticPlay, advances exactly one generated simulation step, and submits the visible positive-Z actor marker without GPU resource churn");
     if (!play)
         return;
 
@@ -2018,16 +2331,114 @@ void CheckComposedGeneratedMenuAcceptance(
                                      Access::ArmNextRunElapsed(
                                          *app, std::chrono::nanoseconds::zero());
     auto play_released = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot play_released_gpu =
+        Access::GpuSnapshot(*app);
+    const omega::runtime::FrameSchedulerState play_scheduler =
+        Access::SchedulerSnapshot(*app);
     Check(play_release_queued && play_released &&
+              IsRelease(CapturedActionState(
+                  play_released, omega::app::kDebugMoveForwardAction)) &&
               play_released->result().planned_simulation_steps == 0U &&
               play_released->result().executed_simulation_steps == 0U &&
               Access::FrontEnd(*app) == kDiagnosticPlay &&
               SameSimulationState(
                   Access::SimulationSnapshot(*app), play_simulation) &&
               Access::DebugLocomotionPosition(*app) == play_position &&
-              IsOneDiagnosticPlaySubmission(
-                  play_gpu, Access::GpuSnapshot(*app)),
-        "the composed acceptance releases its held inputs at zero elapsed without changing simulation, marker placement, or GPU residency");
+              IsOneDiagnosticPlaySubmission(play_gpu, play_released_gpu),
+        "the composed acceptance emits the action-2 release edge at zero elapsed without changing simulation, marker placement, or GPU residency");
+    if (!play_released)
+        return;
+
+    // The confirmation is the only authorization source, so a confirmed ID the
+    // bounded model no longer presents must close the gate again. Erasing the
+    // model's stored identifier is the existing seam for that: nothing else in
+    // this composition can make a live confirmation stale.
+    const bool stale_armed =
+        Access::EraseStartupProfileId(
+            *app, omega::app::FrontEndProfileSlot::First) &&
+        Access::ArmNextRunElapsed(*app, settings.frame.simulation_step);
+    auto stale_play = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot stale_play_gpu = Access::GpuSnapshot(*app);
+    Check(stale_armed && stale_play &&
+              stale_play->completion() ==
+                  omega::app::RunCaptureCompletion::FrameLimitReached &&
+              !stale_play->failure() &&
+              stale_play->result().planned_simulation_steps == 0U &&
+              stale_play->result().executed_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kMainStart &&
+              Access::ActiveProfile(*app) == profile_id &&
+              Access::PersistedConfirmedProfile(*app) == profile_id &&
+              Access::PersistenceGeneration(*app) ==
+                  std::optional<std::uint64_t>{2U} &&
+              Access::PersistenceRecordCount(*app) ==
+                  std::optional<std::size_t>{2U} &&
+              Access::PersistenceLogicalValueBytes(*app) ==
+                  std::optional<std::size_t>{73U} &&
+              Access::SchedulerSnapshot(*app) == play_scheduler &&
+              SameSimulationState(
+                  Access::SimulationSnapshot(*app), play_simulation) &&
+              Access::DebugLocomotionPosition(*app) == play_position &&
+              DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                  Access::FrontEndMainDrawLists(*app)[0]) &&
+              IsOneVisibleMenuSubmission(play_released_gpu, stale_play_gpu),
+        "a confirmed identifier the model no longer presents fails an entered DiagnosticPlay closed to the initial front end, discards a full simulation step of elapsed time, and leaves the durable pointer and every simulation value untouched");
+    if (!stale_play)
+        return;
+
+    const bool stale_entry_queued = PushKey(SDL_SCANCODE_F1, true);
+    auto stale_entry = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot stale_entry_gpu = Access::GpuSnapshot(*app);
+    Check(stale_entry_queued && stale_entry && !stale_entry->failure() &&
+              stale_entry->result().planned_simulation_steps == 0U &&
+              Access::FrontEnd(*app) == kProfilesFirst &&
+              DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                  Access::FrontEndProfileSelectionDrawLists(*app)[0]) &&
+              IsOneVisibleMenuSubmission(stale_play_gpu, stale_entry_gpu),
+        "the stale confirmation also redirects Start Diagnostic and drops the active-row cue the model can no longer resolve");
+
+    const bool stale_release_queued = PushKey(SDL_SCANCODE_F1, false);
+    auto stale_released = app->RunWithCapture(1);
+    const omega::app::GpuHostSnapshot stale_released_gpu =
+        Access::GpuSnapshot(*app);
+    Check(stale_release_queued && stale_released &&
+              Access::FrontEnd(*app) == kProfilesFirst,
+        "the stale redirect edge releases before the failing confirmation");
+
+    // The command is applied, and therefore persisted, before its projected
+    // state is published. A rejected command must therefore leave the prior
+    // front-end state, the prior activation, and the durable pointer in place.
+    const bool stale_confirm_queued = PushKey(SDL_SCANCODE_F1, true);
+    auto stale_confirm = app->RunWithCapture(1);
+    std::optional<std::string_view> stale_failure;
+    if (stale_confirm)
+        stale_failure = stale_confirm->failure();
+    const std::string database_root_text = database_root.string();
+    const std::string profile_id_text = profile_id->ToString();
+    Check(stale_confirm_queued && stale_confirm &&
+              stale_confirm->completion() ==
+                  omega::app::RunCaptureCompletion::OperationalFailure &&
+              stale_failure &&
+              *stale_failure == "active profile confirmation failed: profile-not-found" &&
+              stale_failure->size() < 96U &&
+              stale_failure->find(database_root_text) == std::string_view::npos &&
+              stale_failure->find(profile_id_text) == std::string_view::npos &&
+              Access::FrontEnd(*app) == kProfilesFirst &&
+              Access::ActiveProfile(*app) == profile_id &&
+              Access::PersistedConfirmedProfile(*app) == profile_id &&
+              Access::PersistenceGeneration(*app) ==
+                  std::optional<std::uint64_t>{2U} &&
+              Access::PersistenceRecordCount(*app) ==
+                  std::optional<std::size_t>{2U} &&
+              Access::PersistenceLogicalValueBytes(*app) ==
+                  std::optional<std::size_t>{73U} &&
+              Access::SchedulerSnapshot(*app) == play_scheduler &&
+              SameSimulationState(
+                  Access::SimulationSnapshot(*app), play_simulation) &&
+              Access::GpuSnapshot(*app) == stale_released_gpu,
+        "a rejected confirmation publishes one bounded private error and leaves the reducer's projected Profiles transition, the prior activation, the durable pointer, and the exact GPU snapshot unpublished");
+
+    Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+        "the composed acceptance releases its failing confirmation edge before teardown");
 }
 } // namespace
 
