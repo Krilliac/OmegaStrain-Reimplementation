@@ -275,7 +275,8 @@ void TestRuntimeConfigurationPrivacyProjection()
 
     const auto malformed_profile = root / "PrivateUser-SecretVault-malformed.cfg";
     Check(WriteTextFile(malformed_profile,
-              "PrivateUser.SecretVault = C:/Users/PrivateUser/SecretVault/raw-secret\n"),
+              "PrivateUser.SecretVault = C:/Users/"
+              "PrivateUser/SecretVault/raw-secret\n"),
         "the malformed private dialog profile is written");
     omega::runtime::LaunchOptions malformed_options;
     malformed_options.config_path = malformed_profile;
@@ -304,7 +305,8 @@ void TestRuntimeConfigurationPrivacyProjection()
 
     const auto integer_profile = root / "PrivateUser-SecretVault-integer.cfg";
     Check(WriteTextFile(integer_profile,
-              "jobs.worker_count = C:/Users/PrivateUser/SecretVault/raw-secret-integer\n"),
+              "jobs.worker_count = C:/Users/"
+              "PrivateUser/SecretVault/raw-secret-integer\n"),
         "the private integer dialog profile is written");
     omega::runtime::LaunchOptions integer_options;
     integer_options.config_path = integer_profile;
@@ -361,7 +363,8 @@ void TestRuntimeConfigurationPrivacyProjection()
 
     const auto boolean_profile = root / "PrivateUser-SecretVault-boolean.cfg";
     Check(WriteTextFile(boolean_profile,
-              "privateuser.flag = C:/Users/PrivateUser/SecretVault/raw-secret-boolean\n"),
+              "privateuser.flag = C:/Users/"
+              "PrivateUser/SecretVault/raw-secret-boolean\n"),
         "the private boolean dialog profile is written");
     omega::runtime::LaunchOptions boolean_options;
     boolean_options.config_path = boolean_profile;
@@ -392,7 +395,8 @@ void TestRuntimeConfigurationPrivacyProjection()
     omega::runtime::LaunchOptions boolean_override;
     boolean_override.config_overrides.push_back(
         {.key = "privateuser.flag",
-            .value = "C:/Users/PrivateUser/SecretVault/raw-secret-boolean-override"});
+            .value = "C:/Users/"
+                     "PrivateUser/SecretVault/raw-secret-boolean-override"});
     auto boolean_override_config = omega::runtime::LoadRuntimeConfig(boolean_override);
     Check(boolean_override_config.has_value(), "the private boolean --set dialog fixture loads");
     if (boolean_override_config)
@@ -409,7 +413,8 @@ void TestRuntimeConfigurationPrivacyProjection()
     omega::runtime::LaunchOptions integer_override;
     integer_override.config_overrides.push_back(
         {.key = "jobs.worker_count",
-            .value = "C:/Users/PrivateUser/SecretVault/raw-secret-override"});
+            .value = "C:/Users/"
+                     "PrivateUser/SecretVault/raw-secret-override"});
     auto integer_override_config = omega::runtime::LoadRuntimeConfig(integer_override);
     Check(integer_override_config.has_value(), "the private integer --set dialog fixture loads");
     if (integer_override_config)

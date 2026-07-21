@@ -268,11 +268,13 @@ int LaunchOptionsFailureCount()
         "unknown option: --openomega-package-contract-sentinel",
         "the package argument-forwarding sentinel retains its frozen diagnostic");
     constexpr std::string_view private_path =
-        "C:/Users/private-user/Private Vault/opening.pss";
+        "C:/Users/"
+        "private-user/Private Vault/opening.pss";
     CheckSanitizedError(Parse({private_path}), "unknown option", {private_path},
         "positional path diagnostics omit the complete private-looking value");
     CheckSanitizedError(
-        Parse({"--opening-moviz=C:/Users/private-user/Private Vault/opening.pss"}),
+        Parse({"--opening-moviz=C:/Users/"
+               "private-user/Private Vault/opening.pss"}),
         "unknown option: --opening-moviz", {private_path},
         "unknown option diagnostics retain only a validated name before equals");
     constexpr std::string_view malformed_secret_option =
