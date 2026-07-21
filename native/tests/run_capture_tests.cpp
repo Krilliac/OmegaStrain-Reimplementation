@@ -43,6 +43,7 @@ using std::chrono::nanoseconds;
 using omega::app::RunCaptureCompletion;
 using omega::app::RunCaptureOutcome;
 using omega::app::RunResult;
+using omega::app::detail::CheckedNextRenderedFrameCount;
 using omega::app::detail::FiniteRunCapturePlanError;
 using omega::app::detail::RunCaptureOutcomeTestAccess;
 using omega::runtime::FrameSchedulerConfig;
@@ -335,6 +336,35 @@ void CheckContract()
     constexpr RunResult first{.rendered_frames = 2, .input_frames = 2U};
     constexpr RunResult second{.rendered_frames = 2, .input_frames = 2U};
     static_assert(first == second);
+}
+
+void CheckRenderedFrameCount()
+{
+    constexpr int minimum = std::numeric_limits<int>::min();
+    constexpr int maximum = std::numeric_limits<int>::max();
+    static_assert(noexcept(CheckedNextRenderedFrameCount(0)));
+
+    constexpr auto after_minimum = CheckedNextRenderedFrameCount(minimum);
+    constexpr auto after_negative_one = CheckedNextRenderedFrameCount(-1);
+    constexpr auto after_zero = CheckedNextRenderedFrameCount(0);
+    constexpr auto at_maximum = CheckedNextRenderedFrameCount(maximum - 1);
+    constexpr auto exhausted = CheckedNextRenderedFrameCount(maximum);
+    static_assert(after_minimum && *after_minimum == minimum + 1);
+    static_assert(after_negative_one && *after_negative_one == 0);
+    static_assert(after_zero && *after_zero == 1);
+    static_assert(at_maximum && *at_maximum == maximum);
+    static_assert(!exhausted);
+
+    Check(after_minimum && *after_minimum == minimum + 1,
+        "the rendered-frame counter increments from int minimum");
+    Check(after_negative_one && *after_negative_one == 0,
+        "the rendered-frame counter crosses from negative to zero");
+    Check(after_zero && *after_zero == 1,
+        "the rendered-frame counter increments from zero");
+    Check(at_maximum && *at_maximum == maximum,
+        "the rendered-frame counter reaches int maximum exactly");
+    Check(!exhausted,
+        "the rendered-frame counter rejects an increment beyond int maximum");
 }
 
 template <typename Value>
@@ -800,6 +830,7 @@ void CheckCompleteOutcomePolicy()
 int main()
 {
     CheckContract();
+    CheckRenderedFrameCount();
     CheckPlanning();
     CheckFormatter();
     CheckEmptyAndNormalOutcomes();

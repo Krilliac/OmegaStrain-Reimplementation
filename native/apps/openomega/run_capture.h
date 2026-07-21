@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -57,6 +58,14 @@ enum class RunCaptureCompletion
 
 namespace detail
 {
+[[nodiscard]] constexpr std::optional<int> CheckedNextRenderedFrameCount(
+    const int rendered_frame_count) noexcept
+{
+    if (rendered_frame_count == std::numeric_limits<int>::max())
+        return std::nullopt;
+    return rendered_frame_count + 1;
+}
+
 struct FiniteRunCapturePlan
 {
     std::size_t requested_frames = 0U;
