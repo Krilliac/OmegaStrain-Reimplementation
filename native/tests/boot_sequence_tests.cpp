@@ -11,6 +11,7 @@
 int main()
 {
     using omega::app::BootSequenceConfig;
+    using omega::app::BootSequenceCompletionCause;
     using omega::app::BootSequenceInput;
     using omega::app::BootSequencePhase;
     using omega::app::BootSequenceReduction;
@@ -73,6 +74,7 @@ int main()
                 .position_ticks = 10U,
                 .duration_ticks = 10U,
             },
+        .completion_cause = BootSequenceCompletionCause::SafetyTimeout,
         .entered_front_end = true,
     };
     Check(completed_exact == expected_completed && completed_overshoot == expected_completed,
@@ -81,8 +83,20 @@ int main()
 
     const BootSequenceReduction completed_by_source =
         omega::app::ReduceBootSequence(advanced.state, BootSequenceInput{.source_completed = true});
-    Check(completed_by_source == expected_completed,
+    const BootSequenceReduction expected_source_completed{
+        .state = expected_completed.state,
+        .completion_cause = BootSequenceCompletionCause::SourceCompleted,
+        .entered_front_end = true,
+    };
+    Check(completed_by_source == expected_source_completed,
           "decoder completion enters the front end without waiting for the time limit");
+    Check(omega::app::ReduceBootSequence(
+              advanced.state,
+              BootSequenceInput{
+                  .elapsed_ticks = std::numeric_limits<std::uint64_t>::max(),
+                  .source_completed = true,
+              }) == expected_source_completed,
+        "source completion retains priority over the independent safety deadline");
 
     const BootSequenceReduction skipped = omega::app::ReduceBootSequence(
         advanced.state,

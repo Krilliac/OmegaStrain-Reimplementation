@@ -1282,6 +1282,11 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             boot_sequence_state_ = boot.state;
             if (boot.entered_front_end)
             {
+                if (boot.completion_cause == BootSequenceCompletionCause::SafetyTimeout)
+                {
+                    log_->Warning("opening_movie",
+                        "opening movie safety timeout reached; entering front end");
+                }
                 const bool contained = ContainOpeningMovieAudio();
                 if (!contained)
                 {
