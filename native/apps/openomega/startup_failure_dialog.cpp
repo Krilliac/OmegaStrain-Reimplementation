@@ -39,6 +39,8 @@ static_assert(kStartupFailureDialogMaximumTextSize + 1U <=
         return "content startup";
     case StartupFailureStage::NativePersistence:
         return "native persistence";
+    case StartupFailureStage::ApplicationStartup:
+        return "application startup";
     }
     return "startup";
 }

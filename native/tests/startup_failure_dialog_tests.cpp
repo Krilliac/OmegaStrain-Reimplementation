@@ -78,6 +78,8 @@ void TestStageLabelsAndFallbacks()
                   "content startup"},
         StageCase{omega::app::StartupFailureStage::NativePersistence,
                   "native persistence"},
+        StageCase{omega::app::StartupFailureStage::ApplicationStartup,
+                  "application startup"},
     };
 
     for (const StageCase& test : cases)
@@ -510,6 +512,7 @@ int main()
     static_assert(static_cast<std::uint8_t>(StartupFailureStage::ContentLaunchProfile) == 2U);
     static_assert(static_cast<std::uint8_t>(StartupFailureStage::ContentStartup) == 3U);
     static_assert(static_cast<std::uint8_t>(StartupFailureStage::NativePersistence) == 4U);
+    static_assert(static_cast<std::uint8_t>(StartupFailureStage::ApplicationStartup) == 5U);
     static_assert(static_cast<std::uint8_t>(StartupFailureDialogPolicy::Allow) == 0U);
     static_assert(static_cast<std::uint8_t>(StartupFailureDialogPolicy::Suppress) == 1U);
     static_assert(static_cast<std::uint8_t>(StartupFailureDialogOutcome::Suppressed) == 0U);
