@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -67,6 +68,52 @@ int main() {
             {kMpegTimestampWrap - 1U, 0U, kMpegTimestampWrap - 1U, 0U})) ==
             omega::app::kOpeningMovieMaximumSafetyTicks,
         "repeated timestamp wraps saturate at the fixed watchdog ceiling");
+
+  Check(!omega::app::ConvertMpegTimestampToDecoderTicks(std::nullopt),
+        "an absent presentation timestamp stays absent");
+  Check(omega::app::ConvertMpegTimestampToDecoderTicks(0U) ==
+            std::optional<std::int64_t>{0},
+        "the zero presentation timestamp converts to the decoder origin");
+  Check(omega::app::ConvertMpegTimestampToDecoderTicks(
+            kMpegTimestampTicksPerSecond) ==
+            std::optional<std::int64_t>{static_cast<std::int64_t>(
+                omega::app::kOpeningMovieDecoderTicksPerSecond)},
+        "one presentation second converts to one decoder second");
+  Check(omega::app::ConvertMpegTimestampToDecoderTicks(1U) ==
+            std::optional<std::int64_t>{111},
+        "a sub-tick presentation timestamp truncates toward the origin");
+
+  // The 33-bit MPEG clock domain is the whole defined input range. Everything
+  // above it must decline to produce a decoder timestamp rather than wrap into
+  // a negative or otherwise meaningless signed value.
+  const std::optional<std::int64_t> domain_maximum =
+      omega::app::ConvertMpegTimestampToDecoderTicks(
+          omega::media::kMpegTimestampMaximum90Khz);
+  Check(domain_maximum && *domain_maximum > 0,
+        "the largest in-domain presentation timestamp converts positively");
+  for (const std::uint64_t out_of_domain :
+       {omega::media::kMpegTimestampMaximum90Khz + 1U, kMpegTimestampWrap + 1U,
+        std::numeric_limits<std::uint64_t>::max(),
+        std::numeric_limits<std::uint64_t>::max() / 2U}) {
+    Check(!omega::app::ConvertMpegTimestampToDecoderTicks(out_of_domain),
+          "a presentation timestamp outside the 33-bit clock domain converts "
+          "to no decoder timestamp");
+  }
+
+  // Monotonicity across the defined domain is what keeps decoder-side frame
+  // ordering derived from these timestamps stable.
+  std::optional<std::int64_t> previous;
+  for (std::uint64_t timestamp = 0U;
+       timestamp <= omega::media::kMpegTimestampMaximum90Khz;
+       timestamp += omega::media::kMpegTimestampMaximum90Khz / 977U + 1U) {
+    const std::optional<std::int64_t> converted =
+        omega::app::ConvertMpegTimestampToDecoderTicks(timestamp);
+    Check(converted.has_value() && *converted >= 0,
+          "every in-domain presentation timestamp converts non-negatively");
+    if (converted && previous)
+      Check(*converted > *previous, "conversion is strictly increasing");
+    previous = converted;
+  }
 
   if (failures != 0)
     std::cerr << failures << " opening-movie safety test(s) failed\n";

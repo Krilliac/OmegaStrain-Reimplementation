@@ -31,8 +31,6 @@ constexpr media::MediaFoundationH262DecoderLimits kDecoderLimits =
 constexpr std::size_t kMaximumQueuedFrames =
     static_cast<std::size_t>(kDecoderLimits.maximum_frames_per_call);
 constexpr std::size_t kMaximumDecoderFeedsPerAdvance = 64U;
-constexpr std::uint64_t kMpegTimestampTicksPerSecond = 90'000U;
-constexpr std::uint64_t kMediaFoundationTicksPerSecond = 10'000'000U;
 constexpr std::uint32_t kOpeningMovieAudioSampleRateHz = 48'000U;
 constexpr std::uint32_t kOpeningMovieAudioChannelCount = 2U;
 
@@ -91,18 +89,6 @@ ReadSource(const std::filesystem::path &path) {
   } catch (...) {
     return std::unexpected(MakeError(ErrorCode::FileReadFailed));
   }
-}
-
-[[nodiscard]] constexpr std::optional<std::int64_t>
-Convert90KhzTo100ns(const std::optional<std::uint64_t> timestamp) noexcept {
-  if (!timestamp)
-    return std::nullopt;
-  const std::uint64_t whole_seconds = *timestamp / kMpegTimestampTicksPerSecond;
-  const std::uint64_t remainder = *timestamp % kMpegTimestampTicksPerSecond;
-  const std::uint64_t converted =
-      whole_seconds * kMediaFoundationTicksPerSecond +
-      remainder * kMediaFoundationTicksPerSecond / kMpegTimestampTicksPerSecond;
-  return static_cast<std::int64_t>(converted);
 }
 
 [[nodiscard]] Error MapDecoderCreationError(
@@ -269,7 +255,8 @@ struct OpeningMoviePlayer::Impl {
         static_cast<std::size_t>(chunk_bytes));
     const std::optional<std::int64_t> timestamp =
         payload_byte_offset == 0U
-            ? Convert90KhzTo100ns(payload.presentation_timestamp_90khz)
+            ? ConvertMpegTimestampToDecoderTicks(
+                  payload.presentation_timestamp_90khz)
             : std::nullopt;
 
     auto pushed = decoder.Push(bytes, timestamp);
