@@ -41,7 +41,7 @@ EXPECTED_MATRIX = {
     ".sub": "aggregate_scanner_only",
     ".txt": "aggregate_scanner_only",
     ".pf": "unknown",
-    ".tbl": "unknown",
+    ".tbl": "passive_descriptor_only",
     ".tm2": "unknown",
 }
 
@@ -67,9 +67,9 @@ EXPECTED_WHOLE_DISC = {
 EXPECTED_PARTITIONS = {
     "canonical_decoder": 6,
     "structural_envelope_only": 4,
-    "passive_descriptor_only": 4,
+    "passive_descriptor_only": 5,
     "aggregate_scanner_only": 14,
-    "unknown": 3,
+    "unknown": 2,
     "whole_disc_disposition": 16,
 }
 

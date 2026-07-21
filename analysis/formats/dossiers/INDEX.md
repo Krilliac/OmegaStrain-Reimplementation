@@ -48,7 +48,7 @@ disc placement alone does not establish a decoder class, system role, or out-of-
 | `.skas` | [SKAS.md](SKAS.md) |
 | `.vpk` | [VPK.md](VPK.md) |
 
-### passive_descriptor_only (4)
+### passive_descriptor_only (5)
 
 | Suffix | Dossier |
 | --- | --- |
@@ -56,6 +56,7 @@ disc placement alone does not establish a decoder class, system role, or out-of-
 | `.skl` | [SKL.md](SKL.md) |
 | `.skm` | [SKM.md](SKM.md) |
 | `.so` | [SO.md](SO.md) |
+| `.tbl` | [TBL.md](TBL.md) |
 
 ### aggregate_scanner_only (14)
 
@@ -76,12 +77,11 @@ disc placement alone does not establish a decoder class, system role, or out-of-
 | `.sub` | [SUB.md](SUB.md) |
 | `.txt` | [TXT.md](TXT.md) |
 
-### unknown (3)
+### unknown (2)
 
 | Suffix | Dossier |
 | --- | --- |
 | `.pf` | [PF.md](PF.md) |
-| `.tbl` | [TBL.md](TBL.md) |
 | `.tm2` | [TM2.md](TM2.md) |
 
 `.pf` and `.tm2` remain Unknown by the campaign's explicit hard rule. Whole-disc placement and
@@ -124,9 +124,9 @@ proving that every file sharing its suffix is one format family.
    grammar or justify `GuiEnvelopeIR`; a native descriptor requires stable structure plus malformed
    boundaries and independent consumer evidence.
 3. Run metadata-only owner-corpus validation for existing synthetic-only LPD, PAR, VPK, SKAS, SKL,
-   and VAG boundaries where their authoritative format notes still leave that validation unclaimed.
+   TBL, and VAG boundaries where their authoritative format notes still leave that validation unclaimed.
    Their publication on main is already established and must not be re-opened as a work item.
-4. Treat `.tbl`, `.pf`, and `.tm2` as Unknown until a designed experiment produces tracked evidence.
+4. Treat `.pf` and `.tm2` as Unknown until a designed experiment produces tracked evidence.
    Do not promote the 16 whole-disc-only families from placement or public suffix convention alone.
 5. Use `docs/native-scaffolds/README.md` before proposing a native descriptor. Occurrence and size
    ranges are evidence inputs, not accept/reject grammars or API designs.
