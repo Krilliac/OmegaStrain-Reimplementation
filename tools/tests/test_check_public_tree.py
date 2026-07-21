@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import contextlib
+import io
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -11,10 +14,76 @@ from tools import check_public_tree as gate  # noqa: E402
 
 
 class PublicTreeGateTests(unittest.TestCase):
+    @staticmethod
+    def invoke_main() -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = gate.main()
+        return result, stdout.getvalue(), stderr.getvalue()
+
     def errors(self, path: str, data: bytes = b"safe text\n", mode: str = "100644") -> list[str]:
         blob = gate.TrackedBlob(mode=mode, object_id="synthetic", path=Path(path))
         with mock.patch.object(gate, "read_blob", return_value=data):
             return gate.check_blob(blob)
+
+    def test_main_reports_success_for_one_safe_blob(self) -> None:
+        object_id = "a" * 40
+        inventory = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=f"100644 {object_id} 0\tnative/src/example.cpp\0".encode(),
+        )
+        contents = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"safe text\n"
+        )
+        with mock.patch.object(gate.subprocess, "run", side_effect=[inventory, contents]):
+            result, stdout, stderr = self.invoke_main()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout, "public-tree gate: OK (1 indexed text blobs checked)\n")
+        self.assertEqual(stderr, "")
+
+    def test_main_classifies_missing_git_without_leaking_exception_text(self) -> None:
+        private_detail = r"C:\private\owner-disc.iso"
+        with mock.patch.object(
+            gate.subprocess, "run", side_effect=FileNotFoundError(private_detail)
+        ):
+            result, stdout, stderr = self.invoke_main()
+
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            stdout,
+            "public-tree gate: FAILED (1 issue(s))\n"
+            "- Git repository could not be inspected safely\n",
+        )
+        self.assertEqual(stderr, "")
+        self.assertNotIn(private_detail, stdout)
+
+    def test_main_classifies_blob_read_failure_without_leaking_git_stderr(self) -> None:
+        object_id = "b" * 40
+        inventory = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=f"100644 {object_id} 0\tnative/src/example.cpp\0".encode(),
+        )
+        private_detail = b"fatal: private owner path C:/private/owner-disc.iso"
+        failure = subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["git", "cat-file"],
+            stderr=private_detail,
+        )
+        with mock.patch.object(gate.subprocess, "run", side_effect=[inventory, failure]):
+            result, stdout, stderr = self.invoke_main()
+
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            stdout,
+            "public-tree gate: FAILED (1 issue(s))\n"
+            "- Git repository could not be inspected safely\n",
+        )
+        self.assertEqual(stderr, "")
+        self.assertNotIn(private_detail.decode(), stdout)
 
     def test_safe_text_file_passes(self) -> None:
         self.assertEqual(self.errors("native/src/example.cpp"), [])

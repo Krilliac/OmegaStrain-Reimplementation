@@ -109,30 +109,42 @@ class TrackedBlob:
     path: Path
 
 
+class GitInspectionError(RuntimeError):
+    """Raised when the tracked Git tree cannot be inspected safely."""
+
+
+def run_git(*arguments: str) -> bytes:
+    try:
+        return subprocess.run(
+            ["git", *arguments],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        raise GitInspectionError from None
+
+
 def tracked_blobs() -> list[TrackedBlob]:
-    result = subprocess.run(
-        ["git", "ls-files", "--cached", "--stage", "-z"],
-        check=True,
-        stdout=subprocess.PIPE,
-    )
+    output = run_git("ls-files", "--cached", "--stage", "-z")
     blobs: list[TrackedBlob] = []
-    for raw in result.stdout.split(b"\0"):
+    for raw in output.split(b"\0"):
         if not raw:
             continue
-        metadata, path_bytes = raw.split(b"\t", 1)
-        mode, object_id, stage = metadata.decode("ascii").split(" ")
+        try:
+            metadata, path_bytes = raw.split(b"\t", 1)
+            mode, object_id, stage = metadata.decode("ascii").split(" ")
+            path = Path(path_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            raise GitInspectionError from None
         if stage != "0":
-            raise RuntimeError("Git index contains unresolved merge stages")
-        blobs.append(TrackedBlob(mode, object_id, Path(path_bytes.decode("utf-8"))))
+            raise GitInspectionError
+        blobs.append(TrackedBlob(mode, object_id, path))
     return blobs
 
 
 def read_blob(object_id: str) -> bytes:
-    return subprocess.run(
-        ["git", "cat-file", "blob", object_id],
-        check=True,
-        stdout=subprocess.PIPE,
-    ).stdout
+    return run_git("cat-file", "blob", object_id)
 
 
 def check_blob(blob: TrackedBlob) -> list[str]:
@@ -181,8 +193,13 @@ def check_blob(blob: TrackedBlob) -> list[str]:
 
 
 def main() -> int:
-    blobs = tracked_blobs()
-    errors = [error for blob in blobs for error in check_blob(blob)]
+    try:
+        blobs = tracked_blobs()
+        errors = [error for blob in blobs for error in check_blob(blob)]
+    except GitInspectionError:
+        print("public-tree gate: FAILED (1 issue(s))")
+        print("- Git repository could not be inspected safely")
+        return 1
     if errors:
         print(f"public-tree gate: FAILED ({len(errors)} issue(s))")
         for error in errors:
