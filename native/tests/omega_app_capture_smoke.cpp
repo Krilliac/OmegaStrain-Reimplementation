@@ -279,6 +279,18 @@ struct OmegaAppTestAccess final
         return app.frame_scheduler_->Snapshot();
     }
 
+    [[nodiscard]] static bool ArmNextRunElapsed(
+        OmegaApp& app, const std::chrono::nanoseconds elapsed) noexcept
+    {
+        if (elapsed < std::chrono::nanoseconds::zero() ||
+            app.next_run_elapsed_override_for_testing_)
+        {
+            return false;
+        }
+        app.next_run_elapsed_override_for_testing_ = elapsed;
+        return true;
+    }
+
     [[nodiscard]] static simulation::SimulationState SimulationSnapshot(
         const OmegaApp& app) noexcept
     {
@@ -1151,6 +1163,9 @@ int main()
     settings.frame.max_steps_per_frame = 8U;
     settings.frame.max_frame_delta =
         omega::runtime::kMinimumSimulationStep * 8;
+    const std::chrono::nanoseconds one_step_elapsed = settings.frame.simulation_step;
+    const std::chrono::nanoseconds modal_proof_elapsed =
+        settings.frame.simulation_step * 2;
     settings.max_input_events_per_frame =
         omega::runtime::InputTracker::kMaxEventsPerFrameLimit;
 
@@ -2145,6 +2160,8 @@ int main()
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     Check(PushQuit(), "a host-quit event enters the SDL queue");
 
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, one_step_elapsed),
+        "the negative capture-path clock override arms");
     const auto negative = app->RunWithCapture(-1);
     Check(!negative, "negative capture planning rejects before event consumption");
     if (!negative)
@@ -2155,6 +2172,8 @@ int main()
             "negative planning returns its fixed pre-loop error");
     }
 
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, one_step_elapsed),
+        "negative capture planning discards its unobserved clock override");
     auto empty = app->RunWithCapture(0);
     Check(empty.has_value(), "zero-frame capture publishes without entering the loop");
     if (!empty)
@@ -2177,6 +2196,8 @@ int main()
             "zero-frame capture retains capacity one without advancing input");
     }
 
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, one_step_elapsed),
+        "zero-frame capture discards its unobserved clock override");
     auto host = app->RunWithCapture(1);
     Check(host.has_value(), "the queued host quit publishes a terminal capture");
     if (!host)
@@ -2204,6 +2225,8 @@ int main()
             "host quit owns the exact first terminal input and both reason flags");
     }
 
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, one_step_elapsed),
+        "terminal host capture discards its unobserved clock override");
     Check(PushEscape(true), "an Escape press enters the SDL queue");
     auto logical = app->RunWithCapture(1);
     Check(logical.has_value(), "logical quit publishes a terminal capture");
@@ -2229,15 +2252,13 @@ int main()
             "logical quit retains its distinct owned reason and continued index");
     }
 
-    bool movement_events_queued = PushEscape(false) &&
-                                  PushKey(SDL_SCANCODE_RETURN, true) &&
-                                  PushKey(SDL_SCANCODE_W, true);
-    // Keep the real SDL pump busy for longer than the minimum synthetic step without sleeping.
-    // Duplicate level reports are explicitly accepted no-ops after the first held transition.
-    for (std::size_t index = 0U; movement_events_queued && index < 2'048U; ++index)
-        movement_events_queued = PushKey(SDL_SCANCODE_W, true);
+    const bool movement_events_queued = PushEscape(false) &&
+                                        PushKey(SDL_SCANCODE_RETURN, true) &&
+                                        PushKey(SDL_SCANCODE_W, true);
     Check(movement_events_queued,
         "the same-frame Return and movement fixture enters the real SDL event queue");
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, one_step_elapsed),
+        "the exact one-step capture clock override arms without replacing pending state");
     auto normal = app->RunWithCapture(1);
     Check(normal.has_value(), "a released quit action permits one captured render");
     if (!normal)
@@ -2250,12 +2271,14 @@ int main()
               !normal->failure() && normal_pair != nullptr &&
               normal_result.input_frames == 1U && normal_result.rendered_frames == 1 &&
               !normal_result.quit_requested &&
-              normal_result.executed_simulation_steps > 0U &&
+              normal_result.planned_simulation_steps == 1U &&
+              normal_result.executed_simulation_steps == 1U &&
               normal_debug_position &&
               normal_debug_position->x == 0 && normal_debug_position->y == 0 &&
               normal_debug_position->z == static_cast<std::int64_t>(
                   normal_result.executed_simulation_steps),
-        "one Return-plus-W frame enters diagnostic play and applies movement nonmodally");
+        "one Return-plus-W frame enters diagnostic play and applies one deterministic "
+        "movement step nonmodally");
     const omega::app::GpuHostSnapshot normal_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(OmegaAppTestAccess::FrontEnd(*app) ==
@@ -2348,6 +2371,7 @@ int main()
                   normal_pair->scheduler_elapsed_trace().frame_count() == 1U &&
                   captured_input && captured_elapsed && captured_action_count == 7U &&
                   captured_action_schema_exact && captured_action_states_valid &&
+                  captured_elapsed->elapsed == one_step_elapsed &&
                   captured_forward && captured_menu_toggle &&
                   captured_forward->held && captured_forward->pressed &&
                   !captured_forward->released && captured_menu_toggle->held &&
@@ -2617,11 +2641,11 @@ int main()
         OmegaAppTestAccess::DebugLocomotionPosition(*app);
     const omega::app::GpuHostSnapshot modal_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    bool modal_events_queued = PushKey(SDL_SCANCODE_DOWN, true);
-    for (std::size_t index = 0U; modal_events_queued && index < 4'095U; ++index)
-        modal_events_queued = PushKey(SDL_SCANCODE_DOWN, true);
+    const bool modal_events_queued = PushKey(SDL_SCANCODE_DOWN, true);
     Check(modal_events_queued,
-        "the Down-arrow next-row edge and timing workload enter the SDL queue");
+        "the Down-arrow next-row edge enters the SDL queue");
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, modal_proof_elapsed),
+        "the next-row modal clock proof arms");
     auto next_edge = app->RunWithCapture(1);
     Check(next_edge.has_value(), "next-row edge captures");
     if (!next_edge)
@@ -2642,8 +2666,7 @@ int main()
     Check(next_pair != nullptr &&
               next_pair->input_trace().first_frame_index() == next_edge_index &&
               next_action && next_action->held && next_action->pressed &&
-              next_elapsed &&
-              next_elapsed->elapsed > settings.frame.simulation_step &&
+              next_elapsed && next_elapsed->elapsed == modal_proof_elapsed &&
               next_result.input_frames == 1U && next_result.rendered_frames == 1 &&
               next_result.planned_simulation_steps == 0U &&
               next_result.executed_simulation_steps == 0U &&
@@ -2735,13 +2758,13 @@ int main()
 
     const omega::app::GpuHostSnapshot controls_entry_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    bool controls_entry_events = PushKey(SDL_SCANCODE_S, false) &&
-                                 PushKey(SDL_SCANCODE_F1, true) &&
-                                 PushKey(SDL_SCANCODE_W, true);
-    for (std::size_t index = 0U; controls_entry_events && index < 4'093U; ++index)
-        controls_entry_events = PushKey(SDL_SCANCODE_W, true);
+    const bool controls_entry_events = PushKey(SDL_SCANCODE_S, false) &&
+                                       PushKey(SDL_SCANCODE_F1, true) &&
+                                       PushKey(SDL_SCANCODE_W, true);
     Check(controls_entry_events,
-        "primary, previous, and Profiles timing events enter together");
+        "primary, previous, and Profiles events enter together");
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, modal_proof_elapsed),
+        "the Profiles-entry modal clock proof arms");
     auto controls_entry = app->RunWithCapture(1);
     Check(controls_entry.has_value(), "Main-to-Profiles activation captures");
     if (!controls_entry)
@@ -2762,7 +2785,7 @@ int main()
     const omega::app::GpuHostSnapshot controls_entry_gpu_after =
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(controls_entry_pair != nullptr && controls_entry_elapsed &&
-              controls_entry_elapsed->elapsed > settings.frame.simulation_step &&
+              controls_entry_elapsed->elapsed == modal_proof_elapsed &&
               controls_entry_primary && controls_entry_primary->held &&
               controls_entry_primary->pressed &&
               controls_entry_next && !controls_entry_next->held &&
@@ -2847,10 +2870,10 @@ int main()
 
     const omega::app::GpuHostSnapshot controls_exit_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    bool controls_exit_events = PushKey(SDL_SCANCODE_BACKSPACE, true);
-    for (std::size_t index = 0U; controls_exit_events && index < 4'095U; ++index)
-        controls_exit_events = PushKey(SDL_SCANCODE_BACKSPACE, true);
-    Check(controls_exit_events, "fresh Profiles cancel edge and timing workload enter");
+    const bool controls_exit_events = PushKey(SDL_SCANCODE_BACKSPACE, true);
+    Check(controls_exit_events, "fresh Profiles cancel edge enters");
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, modal_proof_elapsed),
+        "the Profiles-exit modal clock proof arms");
     auto controls_exit = app->RunWithCapture(1);
     Check(controls_exit.has_value(), "Profiles-to-Main return captures");
     if (!controls_exit)
@@ -2867,9 +2890,9 @@ int main()
     const omega::app::GpuHostSnapshot controls_exit_gpu_after =
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(controls_exit_pair != nullptr && controls_exit_elapsed &&
+              controls_exit_elapsed->elapsed == modal_proof_elapsed &&
               controls_exit_cancel && controls_exit_cancel->held &&
               controls_exit_cancel->pressed && !controls_exit_cancel->released &&
-              controls_exit_elapsed->elapsed > settings.frame.simulation_step &&
               controls_exit_result.input_frames == 1U &&
               controls_exit_result.rendered_frames == 1 &&
               controls_exit_result.planned_simulation_steps == 0U &&
@@ -2968,12 +2991,12 @@ int main()
     };
     const omega::app::GpuHostSnapshot topology_entry_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    bool topology_entry_events = PushKey(SDL_SCANCODE_F1, true) &&
-                                 PushKey(SDL_SCANCODE_W, true);
-    for (std::size_t index = 0U; topology_entry_events && index < 4'094U; ++index)
-        topology_entry_events = PushKey(SDL_SCANCODE_W, true);
+    const bool topology_entry_events = PushKey(SDL_SCANCODE_F1, true) &&
+                                       PushKey(SDL_SCANCODE_W, true);
     Check(topology_entry_events,
-        "primary, previous, and asset-topology timing events enter together");
+        "primary, previous, and asset-topology events enter together");
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, modal_proof_elapsed),
+        "the AssetTopology-entry modal clock proof arms");
     auto topology_entry = app->RunWithCapture(1);
     Check(topology_entry.has_value(), "MainMenu-to-AssetTopology activation captures");
     if (!topology_entry)
@@ -2990,7 +3013,7 @@ int main()
     const omega::app::GpuHostSnapshot topology_entry_gpu_after =
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(topology_entry_pair != nullptr && topology_entry_elapsed &&
-              topology_entry_elapsed->elapsed > settings.frame.simulation_step &&
+              topology_entry_elapsed->elapsed == modal_proof_elapsed &&
               topology_entry_primary && topology_entry_primary->held &&
               topology_entry_primary->pressed &&
               topology_entry_result.input_frames == 1U &&
@@ -3120,11 +3143,11 @@ int main()
 
     const omega::app::GpuHostSnapshot topology_exit_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    bool topology_exit_events = PushKey(SDL_SCANCODE_BACKSPACE, true);
-    for (std::size_t index = 0U; topology_exit_events && index < 4'095U; ++index)
-        topology_exit_events = PushKey(SDL_SCANCODE_BACKSPACE, true);
+    const bool topology_exit_events = PushKey(SDL_SCANCODE_BACKSPACE, true);
     Check(topology_exit_events,
-        "fresh AssetTopology cancel edge and timing workload enter");
+        "fresh AssetTopology cancel edge enters");
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(*app, modal_proof_elapsed),
+        "the AssetTopology-exit modal clock proof arms");
     auto topology_exit = app->RunWithCapture(1);
     Check(topology_exit.has_value(), "AssetTopology-to-Main return captures");
     if (!topology_exit)
@@ -3137,7 +3160,7 @@ int main()
     const omega::app::GpuHostSnapshot topology_exit_gpu_after =
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(topology_exit_pair != nullptr && topology_exit_elapsed &&
-              topology_exit_elapsed->elapsed > settings.frame.simulation_step &&
+              topology_exit_elapsed->elapsed == modal_proof_elapsed &&
               topology_exit_result.input_frames == 1U &&
               topology_exit_result.rendered_frames == 1 &&
               topology_exit_result.planned_simulation_steps == 0U &&
