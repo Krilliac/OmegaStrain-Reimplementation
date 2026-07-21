@@ -59,6 +59,10 @@ public:
         runtime::ContentStartupState content, NativePersistence native_persistence,
         bool debug_device,
         std::optional<std::filesystem::path> opening_movie_path = std::nullopt);
+    [[nodiscard]] static std::expected<OmegaApp, std::string> Create(
+        runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
+        runtime::ContentStartupState content, NativePersistence native_persistence,
+        bool debug_device, asset::OpeningMovieSource opening_movie_source);
 
     // [game/main thread, after all worker clients have stopped]
     ~OmegaApp() noexcept;
@@ -102,9 +106,9 @@ private:
 
     static constexpr std::uint32_t kQuitAction = 1U;
 
-    // Test-only seams for exercising renderer-pool policy and a generated opening-movie source
-    // without widening the production composition-root API. Production Create always supplies
-    // the default pool configuration and creates playback only from its explicit path.
+    // Test-only seams for exercising renderer-pool policy and generated playback. Production
+    // Create always supplies the default pool configuration and accepts exactly one explicit path
+    // or one already-owned archive member source.
     [[nodiscard]] static std::expected<OmegaApp, std::string> CreateWithTextureConfig(
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
         runtime::ContentStartupState content,
@@ -118,6 +122,7 @@ private:
         std::unique_ptr<NativePersistence> native_persistence, bool debug_device,
         runtime::RenderTexturePoolConfig texture_config,
         std::optional<std::filesystem::path> opening_movie_path,
+        std::optional<asset::OpeningMovieSource> opening_movie_source,
         std::unique_ptr<OpeningMoviePlayback> opening_movie_playback);
 
     struct RunLoopResult

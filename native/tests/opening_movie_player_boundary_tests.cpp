@@ -1,5 +1,7 @@
 #include "opening_movie_player.h"
 
+#include "omega/asset/opening_movie_source.h"
+
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -11,11 +13,13 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace {
 using omega::app::OpeningMoviePlayer;
 using omega::app::OpeningMoviePlayerErrorCode;
+using omega::asset::OpeningMovieSource;
 
 int failures = 0;
 
@@ -116,6 +120,29 @@ void CheckCreateError(const std::filesystem::path &path,
         "opening movie failure does not echo its source filename");
 }
 
+void CheckOwnedCreateError(std::vector<std::byte> bytes,
+                           const OpeningMoviePlayerErrorCode expected_code,
+                           const std::string_view label) {
+  auto source = OpeningMovieSource::Create(std::move(bytes));
+  Check(source.has_value(), "bounded owned movie fixture creates a source value");
+  if (!source)
+    return;
+  auto result = OpeningMoviePlayer::Create(std::move(*source));
+  Check(!result, label);
+  if (result)
+    return;
+
+  const auto expected_message =
+      omega::app::OpeningMoviePlayerErrorMessage(expected_code);
+  Check(result.error().code == expected_code, label);
+  Check(result.error().message == expected_message,
+        "owned opening movie failure matches the path boundary category");
+  Check(result.error().message.find('/') == std::string_view::npos &&
+            result.error().message.find('\\') == std::string_view::npos &&
+            result.error().message.find("PrivateOwner") == std::string_view::npos,
+        "owned opening movie failure contains no path or member identity");
+}
+
 [[nodiscard]] std::filesystem::path CreateSyntheticDirectory() {
   std::error_code error;
   const auto seed = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -156,6 +183,8 @@ int main() {
   Check(WriteFixture(empty_path, {}), "opening movie writes an empty synthetic fixture");
   CheckCreateError(empty_path, OpeningMoviePlayerErrorCode::ProgramStreamRejected,
                    "opening movie rejects an empty program stream");
+  CheckOwnedCreateError({}, OpeningMoviePlayerErrorCode::ProgramStreamRejected,
+                        "owned opening movie rejects an empty program stream identically");
 
   const std::array malformed_bytes{std::byte{0x7FU}};
   const auto malformed_path = root / "malformed.pss";
@@ -164,6 +193,10 @@ int main() {
   CheckCreateError(malformed_path,
                    OpeningMoviePlayerErrorCode::ProgramStreamRejected,
                    "opening movie rejects malformed program-stream framing");
+  CheckOwnedCreateError(std::vector<std::byte>(malformed_bytes.begin(),
+                            malformed_bytes.end()),
+                        OpeningMoviePlayerErrorCode::ProgramStreamRejected,
+                        "owned opening movie rejects malformed framing identically");
 
   const auto no_video = PackOnlyProgram();
   const auto no_video_path = root / "no-video.pss";
@@ -172,6 +205,8 @@ int main() {
   CheckCreateError(no_video_path,
                    OpeningMoviePlayerErrorCode::VideoStreamRejected,
                    "opening movie rejects a program stream without video");
+  CheckOwnedCreateError(no_video, OpeningMoviePlayerErrorCode::VideoStreamRejected,
+                        "owned opening movie rejects missing video identically");
 
   constexpr std::array<std::uint8_t, 7> malformed_h262{{
       0x00U, 0x00U, 0x01U, 0xB3U, 0x2DU, 0x01U, 0xE0U,
@@ -183,6 +218,8 @@ int main() {
   CheckCreateError(bad_h262_path,
                    OpeningMoviePlayerErrorCode::H262StreamRejected,
                    "opening movie rejects malformed H.262 before decoder creation");
+  CheckOwnedCreateError(bad_h262, OpeningMoviePlayerErrorCode::H262StreamRejected,
+                        "owned opening movie rejects malformed H.262 identically");
 
   constexpr std::array<std::uint8_t, 12> valid_sequence_header{{
       0x00U, 0x00U, 0x01U, 0xB3U, 0x2DU, 0x01U,
@@ -195,6 +232,8 @@ int main() {
   CheckCreateError(no_audio_path,
                    OpeningMoviePlayerErrorCode::AudioStreamRejected,
                    "opening movie rejects missing audio before decoder creation");
+  CheckOwnedCreateError(no_audio, OpeningMoviePlayerErrorCode::AudioStreamRejected,
+                        "owned opening movie rejects missing audio identically");
 
   std::error_code cleanup_error;
   std::filesystem::remove_all(root, cleanup_error);

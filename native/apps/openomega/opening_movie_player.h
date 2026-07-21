@@ -10,9 +10,18 @@
 #include <span>
 #include <string_view>
 
+namespace omega::asset {
+// The app boundary may not depend on omega_assets directly; the owned source
+// arrives through the runtime/content composition edge. Declaring it is enough
+// for the by-value overload below, and the defining translation unit pins this
+// ceiling to the asset-owned one.
+class OpeningMovieSource;
+} // namespace omega::asset
+
 namespace omega::app {
-// Project-owned ceiling for one explicitly selected external opening movie.
-// The player never searches for media and never persists its source path.
+// Project-owned ceiling for one explicitly selected opening movie, external or
+// archive-backed. The player never searches for media and never persists its
+// source path or member name.
 inline constexpr std::uint64_t kOpeningMovieMaximumSourceBytes =
     512ULL * 1024ULL * 1024ULL;
 
@@ -165,6 +174,12 @@ public:
   [[nodiscard]] static std::expected<OpeningMoviePlayer,
                                      OpeningMoviePlayerError>
   Create(const std::filesystem::path &path);
+
+  // [creating game/main thread, startup] Consumes one bounded, identity-free owned source from the
+  // content boundary. Validation and decoder behavior are identical to the explicit-path route.
+  [[nodiscard]] static std::expected<OpeningMoviePlayer,
+                                     OpeningMoviePlayerError>
+  Create(asset::OpeningMovieSource source);
 
   // [creating game/main thread] Advances the project-owned playback clock,
   // incrementally feeds bounded PES payload slices, and publishes the newest

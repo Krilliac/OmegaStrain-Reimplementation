@@ -252,6 +252,18 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
         debug_device, {}, std::move(opening_movie_path));
 }
 
+std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore config,
+    const runtime::RuntimeSettings& settings, runtime::ContentStartupState content,
+    NativePersistence native_persistence, const bool debug_device,
+    asset::OpeningMovieSource opening_movie_source)
+{
+    return CreateWithTextureConfigAndOpeningMoviePlayback(std::move(config), settings,
+        std::move(content),
+        std::make_unique<NativePersistence>(std::move(native_persistence)), debug_device, {},
+        std::nullopt,
+        std::optional<asset::OpeningMovieSource>{std::move(opening_movie_source)}, nullptr);
+}
+
 std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
     runtime::ContentStartupState content,
@@ -261,7 +273,7 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
 {
     return CreateWithTextureConfigAndOpeningMoviePlayback(std::move(config),
         settings, std::move(content), std::move(native_persistence), debug_device,
-        texture_config, std::move(opening_movie_path), nullptr);
+        texture_config, std::move(opening_movie_path), std::nullopt, nullptr);
 }
 
 std::expected<OmegaApp, std::string>
@@ -271,9 +283,13 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     std::unique_ptr<NativePersistence> native_persistence, const bool debug_device,
     const runtime::RenderTexturePoolConfig texture_config,
     std::optional<std::filesystem::path> opening_movie_path,
+    std::optional<asset::OpeningMovieSource> opening_movie_source,
     std::unique_ptr<OpeningMoviePlayback> opening_movie_playback)
 {
-    if (opening_movie_path && opening_movie_playback)
+    const unsigned source_selection_count = static_cast<unsigned>(opening_movie_path.has_value()) +
+        static_cast<unsigned>(opening_movie_source.has_value()) +
+        static_cast<unsigned>(opening_movie_playback != nullptr);
+    if (source_selection_count > 1U)
     {
         return std::unexpected(
             std::string{"opening movie source selection is ambiguous"});
@@ -1148,9 +1164,11 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     runtime::RenderTextureHandle opening_movie_texture;
     runtime::RenderDrawList opening_movie_draw_list;
     BootSequenceState boot_sequence_state{};
-    if (opening_movie_path)
+    if (opening_movie_path || opening_movie_source)
     {
-        auto created_opening_movie = OpeningMoviePlayer::Create(*opening_movie_path);
+        auto created_opening_movie = opening_movie_path
+            ? OpeningMoviePlayer::Create(*opening_movie_path)
+            : OpeningMoviePlayer::Create(std::move(*opening_movie_source));
         if (!created_opening_movie)
         {
             log->Warning("opening_movie",

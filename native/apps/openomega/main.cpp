@@ -699,10 +699,44 @@ int main(const int argc, char** argv)
 #else
     constexpr bool debug_device = false;
 #endif
-    auto app = omega::app::OmegaApp::Create(
-        std::move(*config), *settings, std::move(content),
-        std::move(*native_persistence), debug_device,
-        std::move(options->opening_movie_path));
+    std::optional<omega::asset::OpeningMovieSource> opening_movie_source;
+    if (options->opening_movie_member)
+    {
+        if (!content.game_data)
+        {
+            std::cerr << "opening movie member: "
+                      << omega::content::GameDataErrorCodeName(
+                             omega::content::GameDataErrorCode::MissingRequiredFile)
+                      << '\n';
+        }
+        else
+        {
+            auto loaded = content.game_data->LoadOpeningMovieSource(
+                *options->opening_movie_member);
+            if (!loaded)
+            {
+                std::cerr << "opening movie member: "
+                          << omega::content::GameDataErrorCodeName(loaded.error().code)
+                          << '\n';
+            }
+            else
+            {
+                opening_movie_source.emplace(std::move(*loaded));
+            }
+        }
+    }
+
+    auto app = [&]() -> std::expected<omega::app::OmegaApp, std::string> {
+        if (opening_movie_source)
+        {
+            return omega::app::OmegaApp::Create(std::move(*config), *settings,
+                std::move(content), std::move(*native_persistence), debug_device,
+                std::move(*opening_movie_source));
+        }
+        return omega::app::OmegaApp::Create(std::move(*config), *settings,
+            std::move(content), std::move(*native_persistence), debug_device,
+            std::move(options->opening_movie_path));
+    }();
     if (!app)
     {
         PrintApplicationStartupError(app.error());

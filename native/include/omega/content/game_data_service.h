@@ -5,6 +5,7 @@
 #include "omega/asset/level_ir.h"
 #include "omega/asset/level_material_catalogs_ir.h"
 #include "omega/asset/level_spatial_ir.h"
+#include "omega/asset/opening_movie_source.h"
 #include "omega/asset/source_locator.h"
 
 #include <cstddef>
@@ -94,6 +95,12 @@ public:
 
     // [any thread after Open(); immutable]
     [[nodiscard]] const GameDataIdentity& identity() const noexcept;
+
+    // [game/main thread after Open(); no concurrent mutation] Resolves exactly one explicitly
+    // selected member from the fixed opening-movie archive. The returned move-only value owns only
+    // bounded bytes; neither it nor any failure diagnostic retains a path or member name.
+    [[nodiscard]] std::expected<asset::OpeningMovieSource, GameDataError>
+    LoadOpeningMovieSource(std::string_view member_name) const;
 
     // [any worker thread after Open(); thread-safe] Returns canonical owned data only. The caller
     // never receives archive views or retail-format storage.

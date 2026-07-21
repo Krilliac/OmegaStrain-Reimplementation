@@ -49,7 +49,19 @@ struct OmegaAppTestAccess final
         return OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             std::move(config), settings, runtime::ContentStartupState{},
             std::move(native_persistence), false, {}, std::move(opening_movie_path),
-            std::move(opening_movie_playback));
+            std::nullopt, std::move(opening_movie_playback));
+    }
+
+    [[nodiscard]] static std::expected<OmegaApp, std::string> CreateFromSource(
+        runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
+        asset::OpeningMovieSource opening_movie_source,
+        std::unique_ptr<NativePersistence> native_persistence)
+    {
+        return OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
+            std::move(config), settings, runtime::ContentStartupState{},
+            std::move(native_persistence), false, {}, std::nullopt,
+            std::optional<asset::OpeningMovieSource>{std::move(opening_movie_source)},
+            nullptr);
     }
 
     [[nodiscard]] static BootSequenceState BootSequence(
@@ -649,6 +661,17 @@ private:
         return std::unexpected("test config: " + config.error());
     return OmegaAppTestAccess::Create(std::move(*config), TestSettings(),
         std::move(playback), std::nullopt,
+        std::make_unique<NativePersistence>(std::move(persistence)));
+}
+
+[[nodiscard]] std::expected<OmegaApp, std::string> CreatePersistentAppFromSource(
+    omega::asset::OpeningMovieSource source, NativePersistence persistence)
+{
+    auto config = omega::runtime::ParseConfigText("");
+    if (!config)
+        return std::unexpected("test config: " + config.error());
+    return OmegaAppTestAccess::CreateFromSource(std::move(*config), TestSettings(),
+        std::move(source),
         std::make_unique<NativePersistence>(std::move(persistence)));
 }
 
@@ -1757,6 +1780,71 @@ void CheckPersistenceBackedMovieFailureRoute()
     Check(reopened && reopened->startup_profiles().empty(), context,
         "the fail-open route leaves the isolated durable catalog empty");
 }
+
+void CheckOwnedSourceCreationFailureRoute()
+{
+    constexpr std::string_view context = "owned-source-create-fail-open-profiles";
+    TempDirectory directory(context);
+    if (directory.path().empty())
+        return;
+
+    auto persistence = NativePersistence::Bootstrap(directory.path());
+    Check(persistence && persistence->startup_profiles().empty(), context,
+        "the owned-source failure route starts with empty native persistence");
+    if (!persistence || !persistence->startup_profiles().empty())
+        return;
+
+    std::vector<std::byte> malformed_bytes{std::byte{0x7FU}};
+    auto source = omega::asset::OpeningMovieSource::Create(
+        std::move(malformed_bytes));
+    Check(source.has_value(), context,
+        "the malformed generated payload is still a bounded owned source");
+    if (!source)
+        return;
+
+    {
+        auto app = CreatePersistentAppFromSource(
+            std::move(*source), std::move(*persistence));
+        Check(app.has_value(), context,
+            "owned movie-source validation failure does not fail app creation");
+        if (!app)
+            return;
+
+        Check(OmegaAppTestAccess::BootSequence(*app) ==
+                  omega::app::BootSequenceState{} &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  OmegaAppTestAccess::CanCreateFirstProfile(*app) &&
+                  !OmegaAppTestAccess::ActiveProfile(*app) &&
+                  OmegaAppTestAccess::ProfileCatalogCount(*app) ==
+                      std::optional<std::size_t>{0U},
+            context,
+            "owned source creation failure opens Profiles without profile mutation");
+        Check(!OmegaAppTestAccess::HasOpeningMoviePlayback(*app) &&
+                  !OmegaAppTestAccess::HasOpeningMovieTexture(*app) &&
+                  OmegaAppTestAccess::OpeningMovieDrawCommandCount(*app) == 0U,
+            context,
+            "owned source creation failure publishes no movie resource");
+
+        std::size_t canonical_warning_count = 0U;
+        for (const omega::runtime::LogRecord& record :
+            OmegaAppTestAccess::Logs(*app))
+        {
+            if (record.category == "opening_movie" &&
+                record.severity == omega::runtime::LogSeverity::Warning &&
+                record.message == omega::app::OpeningMoviePlayerErrorMessage(
+                    OpeningMoviePlayerErrorCode::ProgramStreamRejected))
+            {
+                ++canonical_warning_count;
+            }
+        }
+        Check(canonical_warning_count == 1U, context,
+            "owned source creation failure logs one identity-free categorical warning");
+    }
+
+    auto reopened = NativePersistence::Bootstrap(directory.path());
+    Check(reopened && reopened->startup_profiles().empty(), context,
+        "the owned-source fail-open route leaves durable profiles empty");
+}
 } // namespace
 
 int main()
@@ -1779,6 +1867,7 @@ int main()
         PersistentMovieEntry::PrimarySkip,
         "persistent-primary-skip", 1'725'000'000'124ULL);
     CheckPersistenceBackedMovieFailureRoute();
+    CheckOwnedSourceCreationFailureRoute();
 
     if (failures == 0)
         std::cout << "omega_app_opening_movie_smoke: all checks passed\n";

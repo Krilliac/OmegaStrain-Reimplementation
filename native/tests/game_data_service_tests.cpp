@@ -14,11 +14,13 @@
 #include <fstream>
 #include <iostream>
 #include <initializer_list>
+#include <limits>
 #include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -94,6 +96,10 @@ struct HogMember
     std::string_view name;
     std::vector<std::byte> payload;
 };
+
+constexpr std::string_view kSyntheticOpeningMovieMember = "MiXeD-Opening.PSS";
+constexpr std::string_view kSyntheticOpeningMoviePayload =
+    "synthetic opening movie bytes";
 
 class StreamCapture final
 {
@@ -180,6 +186,37 @@ std::vector<std::byte> MakeHog(
         bytes.insert(bytes.end(), member.payload.begin(), member.payload.end());
     bytes.resize(bytes.size() + trailing_zero_bytes, std::byte{0});
     return bytes;
+}
+
+bool WriteSparseSingleMemberHog(const std::filesystem::path& path,
+    const std::string_view member_name, const std::uint32_t payload_bytes)
+{
+    const std::size_t names_offset = 0x14U + 2U * sizeof(std::uint32_t);
+    const std::size_t names_end = names_offset + member_name.size() + 1U;
+    const std::size_t data_offset = (names_end + 15U) & ~std::size_t{15U};
+    std::vector<std::byte> prefix(data_offset, std::byte{0});
+    WriteU32(prefix, 0x00U, 0x4052673D);
+    WriteU32(prefix, 0x04U, 1U);
+    WriteU32(prefix, 0x08U, 0x14U);
+    WriteU32(prefix, 0x0CU, static_cast<std::uint32_t>(names_offset));
+    WriteU32(prefix, 0x10U, static_cast<std::uint32_t>(data_offset));
+    WriteU32(prefix, 0x14U, 0U);
+    WriteU32(prefix, 0x18U, payload_bytes);
+    WriteText(prefix, names_offset, member_name);
+
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output)
+        return false;
+    output.write(reinterpret_cast<const char*>(prefix.data()),
+        static_cast<std::streamsize>(prefix.size()));
+    if (payload_bytes != 0U)
+    {
+        const std::uint64_t last_byte = data_offset +
+            static_cast<std::uint64_t>(payload_bytes) - 1U;
+        output.seekp(static_cast<std::streamoff>(last_byte), std::ios::beg);
+        output.put('\0');
+    }
+    return output.good();
 }
 
 std::vector<std::byte> MakeDataHog()
@@ -466,6 +503,9 @@ bool MakeValidTree(const std::filesystem::path& root)
 {
     std::error_code error;
     std::filesystem::create_directories(root / "GAMEDATA" / "MINSK", error);
+    if (error)
+        return false;
+    std::filesystem::create_directories(root / "ZMEDIA", error);
     return !error &&
            WriteText(root / "SYSTEM.CNF",
                "BOOT2 = cdrom0:\\SCUS_972.64;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n") &&
@@ -473,7 +513,10 @@ bool MakeValidTree(const std::filesystem::path& root)
            WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG", MakeDataHog()) &&
            WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.POP", MakePop()) &&
            WriteBytes(root / "GAMEDATA" / "MINSK" / "TEX.HOG", MakeEmptyHog()) &&
-           WriteBytes(root / "GAMEDATA" / "MINSK" / "MAPTEX.HOG", MakeEmptyHog());
+           WriteBytes(root / "GAMEDATA" / "MINSK" / "MAPTEX.HOG", MakeEmptyHog()) &&
+           WriteBytes(root / "ZMEDIA" / "ZMOVIES.HOG",
+               MakeHog({HogMember{.name = kSyntheticOpeningMovieMember,
+                   .payload = Bytes(kSyntheticOpeningMoviePayload)}}));
 }
 
 int failures = 0;
@@ -922,6 +965,12 @@ void RunSourceResolverTests(const std::filesystem::path& root)
 
 int GameDataServiceFailureCount()
 {
+    static_assert(std::is_move_constructible_v<omega::asset::OpeningMovieSource>);
+    static_assert(!std::is_move_assignable_v<omega::asset::OpeningMovieSource>);
+    static_assert(!std::is_copy_constructible_v<omega::asset::OpeningMovieSource>);
+    static_assert(!std::is_copy_assignable_v<omega::asset::OpeningMovieSource>);
+    static_assert(omega::asset::kOpeningMovieMaximumSourceBytes ==
+                  512ULL * 1024ULL * 1024ULL);
     static_assert(sizeof(omega::runtime::ContentStartupStage) == 1U);
     static_assert(sizeof(omega::runtime::ContentStartupStateErrorCode) == 1U);
     static_assert(sizeof(omega::runtime::ContentStartupDiagnosticErrorCode) == 1U);
@@ -1005,6 +1054,38 @@ int GameDataServiceFailureCount()
         Check(service->identity().build == omega::content::RetailBuild::NtscUScus97264 &&
                   service->identity().boot_executable == "SCUS_972.64",
             "validated retail identity is published without executable contents");
+        auto opening_movie = service->LoadOpeningMovieSource(
+            kSyntheticOpeningMovieMember);
+        Check(opening_movie &&
+                  std::ranges::equal(opening_movie->bytes(),
+                      Bytes(kSyntheticOpeningMoviePayload)),
+            "the fixed movie archive returns exactly the explicitly selected owned member");
+        if (opening_movie)
+        {
+            omega::asset::OpeningMovieSource moved = std::move(*opening_movie);
+            Check(opening_movie->empty() &&
+                      std::ranges::equal(moved.bytes(),
+                          Bytes(kSyntheticOpeningMoviePayload)),
+                "opening movie bytes have one observable move-only owner");
+        }
+        auto mixed_case_opening_movie = service->LoadOpeningMovieSource(
+            "mixed-opening.pss");
+        Check(mixed_case_opening_movie &&
+                  std::ranges::equal(mixed_case_opening_movie->bytes(),
+                      Bytes(kSyntheticOpeningMoviePayload)),
+            "explicit archive-member lookup follows the existing case-insensitive game path rule");
+        auto missing_opening_movie = service->LoadOpeningMovieSource(
+            "PrivateOwner-MissingMovie.pss");
+        CheckDecodeError(missing_opening_movie,
+            omega::asset::DecodeErrorCode::InvalidReference,
+            "a missing explicit movie member has a typed invalid-reference failure");
+        Check(!missing_opening_movie &&
+                  missing_opening_movie.error().message.find("PrivateOwner") ==
+                      std::string::npos &&
+                  (!missing_opening_movie.error().decode_error ||
+                      missing_opening_movie.error().decode_error->message.find(
+                          "PrivateOwner") == std::string::npos),
+            "missing movie-member diagnostics do not echo the selected identity");
         auto manifest = service->LoadLevelManifest("minsk");
         Check(manifest.has_value(), "named level loads through the frozen VFS");
         if (manifest)
@@ -1988,6 +2069,72 @@ int GameDataServiceFailureCount()
     Check(WriteBytes(root / "GAMEDATA" / "MINSK" / "DATA.HOG",
               spatial_fixture.data_hog),
         "valid material fixture is restored after aggregate-tool failure coverage");
+
+    const auto movie_archive_path = root / "ZMEDIA" / "ZMOVIES.HOG";
+    std::error_code movie_archive_error;
+    Check(std::filesystem::remove(movie_archive_path, movie_archive_error) &&
+              !movie_archive_error,
+        "synthetic opening movie archive is removed");
+    auto missing_movie_archive_service =
+        omega::content::GameDataService::Open({.root = root});
+    Check(missing_movie_archive_service.has_value(),
+        "an absent optional opening movie archive does not block game-data startup");
+    if (missing_movie_archive_service)
+    {
+        auto missing_archive = missing_movie_archive_service->LoadOpeningMovieSource(
+            "PrivateOwner-Movie.pss");
+        CheckError(missing_archive,
+            omega::content::GameDataErrorCode::MissingRequiredFile,
+            "an absent fixed movie archive fails only the explicit movie request");
+        Check(!missing_archive &&
+                  missing_archive.error().message.find("PrivateOwner") == std::string::npos &&
+                  missing_archive.error().message.find("ZMEDIA") == std::string::npos,
+            "missing movie-archive diagnostics contain no path or member identity");
+    }
+
+    Check(WriteText(movie_archive_path, "not a HOG"),
+        "malformed opening movie archive fixture is written");
+    auto malformed_movie_archive_service =
+        omega::content::GameDataService::Open({.root = root});
+    Check(malformed_movie_archive_service.has_value(),
+        "a malformed optional opening movie archive does not block game-data startup");
+    if (malformed_movie_archive_service)
+    {
+        auto malformed_archive = malformed_movie_archive_service->LoadOpeningMovieSource(
+            "PrivateOwner-Movie.pss");
+        CheckError(malformed_archive,
+            omega::content::GameDataErrorCode::MalformedArchive,
+            "a malformed fixed movie archive fails only the explicit movie request");
+        Check(!malformed_archive &&
+                  malformed_archive.error().message.find("PrivateOwner") ==
+                      std::string::npos &&
+                  malformed_archive.error().message.find("ZMEDIA") == std::string::npos,
+            "malformed movie-archive diagnostics contain no path or member identity");
+    }
+
+    constexpr std::uint64_t oversized_movie_bytes =
+        omega::asset::kOpeningMovieMaximumSourceBytes + 1U;
+    static_assert(oversized_movie_bytes <=
+                  std::numeric_limits<std::uint32_t>::max());
+    Check(WriteSparseSingleMemberHog(movie_archive_path, "Synthetic-Oversized.pss",
+              static_cast<std::uint32_t>(oversized_movie_bytes)),
+        "a sparse oversized movie-member fixture is written without allocating its payload");
+    auto oversized_movie_archive_service =
+        omega::content::GameDataService::Open({.root = root});
+    Check(oversized_movie_archive_service.has_value(),
+        "an indexed archive with an oversized member does not block game-data startup");
+    if (oversized_movie_archive_service)
+    {
+        auto oversized_member = oversized_movie_archive_service->LoadOpeningMovieSource(
+            "synthetic-oversized.pss");
+        CheckDecodeError(oversized_member,
+            omega::asset::DecodeErrorCode::LimitExceeded,
+            "a movie member one byte above 512 MiB is rejected before payload allocation");
+    }
+    Check(WriteBytes(movie_archive_path,
+              MakeHog({HogMember{.name = kSyntheticOpeningMovieMember,
+                  .payload = Bytes(kSyntheticOpeningMoviePayload)}})),
+        "valid opening movie archive fixture is restored");
 
     Check(WriteText(root / "SYSTEM.CNF", "BOOT2 = cdrom0:\\SLES_000.00;1\r\n"),
         "wrong-region system configuration is written");

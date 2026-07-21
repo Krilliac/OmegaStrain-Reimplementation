@@ -16,6 +16,7 @@ constexpr std::string_view kFramesPrefix = "--frames=";
 constexpr std::string_view kDataRootPrefix = "--data-root=";
 constexpr std::string_view kLevelPrefix = "--level=";
 constexpr std::string_view kOpeningMoviePrefix = "--opening-movie=";
+constexpr std::string_view kOpeningMovieMemberPrefix = "--opening-movie-member=";
 constexpr std::string_view kConfigPrefix = "--config=";
 constexpr std::string_view kSetPrefix = "--set=";
 constexpr std::size_t kMaximumDiagnosticOptionNameBytes = 64U;
@@ -100,6 +101,7 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     bool saw_data_root = false;
     bool saw_level = false;
     bool saw_opening_movie = false;
+    bool saw_opening_movie_member = false;
     bool saw_config = false;
     bool saw_capture_run = false;
     bool saw_replay_capture = false;
@@ -164,6 +166,19 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
             if (value.empty())
                 return std::unexpected("--opening-movie requires a path");
             result.opening_movie_path = std::filesystem::path(value);
+            continue;
+        }
+        if (argument.starts_with(kOpeningMovieMemberPrefix))
+        {
+            if (saw_opening_movie_member)
+                return std::unexpected(
+                    "--opening-movie-member may be specified only once");
+            saw_opening_movie_member = true;
+            const std::string_view value =
+                argument.substr(kOpeningMovieMemberPrefix.size());
+            if (value.empty())
+                return std::unexpected("--opening-movie-member requires a name");
+            result.opening_movie_member = std::string(value);
             continue;
         }
         if (argument.starts_with(kConfigPrefix))
@@ -243,10 +258,19 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
         return std::unexpected("--probe-only cannot be combined with --frames");
     if (result.probe_only && result.opening_movie_path)
         return std::unexpected("--probe-only cannot be combined with --opening-movie");
+    if (result.probe_only && result.opening_movie_member)
+        return std::unexpected(
+            "--probe-only cannot be combined with --opening-movie-member");
     if (result.show_help && arguments.size() != 1U)
         return std::unexpected("--help cannot be combined with other options");
+    if (result.opening_movie_path && result.opening_movie_member)
+        return std::unexpected(
+            "--opening-movie and --opening-movie-member are mutually exclusive");
     if (result.opening_movie_path && result.capture_run)
         return std::unexpected("--opening-movie cannot be combined with --capture-run");
+    if (result.opening_movie_member && result.capture_run)
+        return std::unexpected(
+            "--opening-movie-member cannot be combined with --capture-run");
     if (result.replay_capture && !result.capture_run)
         return std::unexpected("--replay-capture requires --capture-run");
     if (result.capture_run && !saw_frames)
@@ -265,6 +289,6 @@ std::string_view LaunchUsage() noexcept
            "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
            "[--frames=N [--capture-run [--replay-capture]]] "
            "[--data-root=PATH [--level=CODE]] [--probe-only] "
-           "[--opening-movie=PATH]\n";
+           "[--opening-movie=PATH | --opening-movie-member=NAME]\n";
 }
 } // namespace omega::runtime
