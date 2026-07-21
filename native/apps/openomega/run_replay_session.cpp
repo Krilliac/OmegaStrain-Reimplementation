@@ -262,11 +262,17 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
         else if (front_end_command.type == FrontEndCommandType::SetActiveProfile)
         {
             // The reducer publishes this command only for a selectable bounded
-            // position, which is the replay-local counterpart of the app's
-            // durable confirmation. The mirror opens after that command, before
-            // this frame's simulation authorization, exactly as the app applies
-            // its command before consulting the gate.
-            front_end_active_profile_is_confirmed_ = true;
+            // visible position. The live app also resolves the position against
+            // the complete startup model before publishing durable confirmation,
+            // so replay must keep an impossible visible/total combination closed.
+            // The mirror opens after the accepted command, before this frame's
+            // simulation authorization, exactly as the app applies its command
+            // before consulting the gate.
+            const std::size_t selected_profile_slot =
+                static_cast<std::size_t>(front_end_command.profile_slot);
+            front_end_active_profile_is_confirmed_ =
+                selected_profile_slot < front_end_visible_profile_slots_ &&
+                selected_profile_slot < front_end_total_profile_count_;
         }
     }
     const bool simulation_allowed = !front_end_state_ ||

@@ -1683,6 +1683,7 @@ void CheckFirstProfileCreationReplay()
     nonempty_visible_config.front_end_total_profile_count = 0U;
     nonempty_visible_config.front_end_capabilities = FrontEndCapabilities{
         .can_create_first_profile = true,
+        .requires_active_profile_for_diagnostic_play = true,
     };
     auto nonempty_visible_created = RunReplaySession::Create(
         std::move(nonempty_visible_pair), nonempty_visible_config);
@@ -1694,8 +1695,9 @@ void CheckFirstProfileCreationReplay()
                   .type = FrontEndCommandType::SetActiveProfile,
                   .profile_slot = FrontEndProfileSlot::First,
               } &&
-              nonempty_visible.front_end_state() == main_profiles,
-        "a nonzero startup visible count keeps creation closed and preserves ordinary first-slot selection");
+              nonempty_visible.front_end_state() == main_profiles &&
+              !nonempty_visible.front_end_active_profile_is_confirmed(),
+        "a nonzero startup visible count keeps creation closed and an impossible zero-total selection cannot open the confirmation gate");
 
     constexpr std::array<std::uint32_t, 2U> primary_cancel_actions{
         omega::app::kFrontEndPrimaryAction,
