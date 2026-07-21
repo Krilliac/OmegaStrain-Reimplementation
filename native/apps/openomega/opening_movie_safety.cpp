@@ -9,7 +9,8 @@ namespace omega::app {
 namespace {
 constexpr std::uint64_t kMpegTimestampWrap = 1ULL << 33U;
 constexpr std::uint64_t kMpegTimestampHalfWrap = kMpegTimestampWrap / 2U;
-constexpr std::uint64_t kMpegTimestampTicksPerSecond = 90'000U;
+constexpr std::uint64_t kMpegTimestampTicksPerSecond =
+    kMpegPresentationTicksPerSecond;
 
 [[nodiscard]] constexpr std::uint64_t
 SaturatingAdd(const std::uint64_t left, const std::uint64_t right) noexcept {
