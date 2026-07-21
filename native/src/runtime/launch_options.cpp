@@ -239,8 +239,6 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
 
     if (result.level_code && !result.data_root)
         return std::unexpected("--level requires --data-root");
-    if (result.probe_only && !result.data_root)
-        return std::unexpected("--probe-only requires --data-root");
     if (result.probe_only && saw_frames)
         return std::unexpected("--probe-only cannot be combined with --frames");
     if (result.probe_only && result.opening_movie_path)
@@ -266,7 +264,7 @@ std::string_view LaunchUsage() noexcept
     return "usage: openomega [-h|--help]\n"
            "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
            "[--frames=N [--capture-run [--replay-capture]]] "
-           "[--data-root=PATH [--level=CODE] [--probe-only]] "
+           "[--data-root=PATH [--level=CODE]] [--probe-only] "
            "[--opening-movie=PATH]\n";
 }
 } // namespace omega::runtime

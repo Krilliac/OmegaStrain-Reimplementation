@@ -158,7 +158,7 @@ string(CONCAT openomega_usage
     "usage: openomega [-h|--help]\n"
     "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
     "[--frames=N [--capture-run [--replay-capture]]] "
-    "[--data-root=PATH [--level=CODE] [--probe-only]] "
+    "[--data-root=PATH [--level=CODE]] [--probe-only] "
     "[--opening-movie=PATH]\n"
 )
 # E-0089's empty-profile startup exercises the bounded front-end model without entering the frame
@@ -226,12 +226,40 @@ set(openomega_forbidden_diagnostic_fragments
     "${default_profile}"
 )
 
+# Keep every probe-root precedence case before the first startup that may create native state.
 run_openomega_case(probe_failure_precedes_persistence FALSE ""
     "content startup [missing-required-file]: game-data root is missing SYSTEM.CNF\n"
     "--data-root=${empty_data_root}" --probe-only
 )
 if(EXISTS "${native_save_directory}" OR IS_SYMLINK "${native_save_directory}")
     message(FATAL_ERROR "probe-only failure touched native persistence")
+endif()
+
+run_openomega_case(probe_explicit_config_root_reaches_startup FALSE ""
+    "content startup [missing-required-file]: game-data root is missing SYSTEM.CNF\n"
+    "--config=${configured_root_config}" --probe-only
+)
+if(EXISTS "${native_save_directory}" OR IS_SYMLINK "${native_save_directory}")
+    message(FATAL_ERROR "explicit-config probe touched native persistence")
+endif()
+
+file(MAKE_DIRECTORY "${default_profile_directory}")
+file(WRITE "${default_profile}" "content.data_root = ${empty_data_root}\n")
+run_openomega_case(probe_default_config_root_reaches_startup FALSE ""
+    "content startup [missing-required-file]: game-data root is missing SYSTEM.CNF\n"
+    --probe-only
+)
+if(EXISTS "${native_save_directory}" OR IS_SYMLINK "${native_save_directory}")
+    message(FATAL_ERROR "default-config probe touched native persistence")
+endif()
+file(REMOVE "${default_profile}")
+
+run_openomega_case(probe_without_effective_root_fails_late FALSE ""
+    "content startup [invalid-options]: content startup requires a data root\n"
+    --probe-only
+)
+if(EXISTS "${native_save_directory}" OR IS_SYMLINK "${native_save_directory}")
+    message(FATAL_ERROR "rootless probe touched native persistence")
 endif()
 
 run_openomega_case(zero_frames TRUE "${zero_frame_stdout}" "" --frames=0)

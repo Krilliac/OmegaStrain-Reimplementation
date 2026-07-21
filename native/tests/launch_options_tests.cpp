@@ -243,7 +243,10 @@ int LaunchOptionsFailureCount()
     Check(!Parse({"--level=MINSK"}), "level selection requires an explicit data root");
     Check(!Parse({"--data-root=A", "--level=../MINSK"}),
         "unsafe level components are rejected by the launch boundary");
-    Check(!Parse({"--probe-only"}), "headless probing requires a data root");
+    auto deferred_probe_root = Parse({"--probe-only"});
+    Check(deferred_probe_root && deferred_probe_root->probe_only &&
+              !deferred_probe_root->data_root && !deferred_probe_root->level_code,
+        "headless probing defers data-root validation until configuration is merged");
     Check(!Parse({"--probe-only", "--probe-only", "--data-root=A"}),
         "duplicate probe flags are rejected");
     Check(!Parse({"--data-root=A", "--probe-only", "--frames=1"}),
@@ -303,8 +306,8 @@ int LaunchOptionsFailureCount()
     Check(usage == "usage: openomega [-h|--help]\n"
                    "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
                    "[--frames=N [--capture-run [--replay-capture]]] "
-                   "[--data-root=PATH [--level=CODE] [--probe-only]] "
+                   "[--data-root=PATH [--level=CODE]] [--probe-only] "
                    "[--opening-movie=PATH]\n",
-        "usage exactly documents standalone help and nested replay dependencies");
+        "usage documents standalone help and probe plus nested replay and level dependencies");
     return failures;
 }

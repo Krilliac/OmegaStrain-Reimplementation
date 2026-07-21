@@ -983,7 +983,7 @@ string(CONCAT launch_usage
     "usage: openomega [-h|--help]\n"
     "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
     "[--frames=N [--capture-run [--replay-capture]]] "
-    "[--data-root=PATH [--level=CODE] [--probe-only]] "
+    "[--data-root=PATH [--level=CODE]] [--probe-only] "
     "[--opening-movie=PATH]\n"
 )
 string(CONCAT sentinel_stderr
