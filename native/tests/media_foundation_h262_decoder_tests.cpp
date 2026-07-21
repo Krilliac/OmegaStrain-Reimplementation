@@ -101,6 +101,46 @@ void RunConfigurationChecks() {
             widened.error().code ==
                 MediaFoundationH262DecoderErrorCode::InvalidConfiguration,
         "callers cannot widen the hard Media Foundation dimension ceiling");
+
+  H262SequenceHeaderFacts excessive_rate = SyntheticSequenceFacts();
+  excessive_rate.frame_rate_numerator = 10'000'001U;
+  excessive_rate.frame_rate_denominator = 1U;
+  auto zero_cadence = MediaFoundationH262Decoder::Create(excessive_rate);
+  Check(!zero_cadence &&
+            zero_cadence.error().code ==
+                MediaFoundationH262DecoderErrorCode::InvalidConfiguration,
+        "frame rates that synthesize a zero 100ns duration are rejected before "
+        "platform setup");
+}
+
+void RunOutputPolicyChecks() {
+  using omega::media::detail::MediaFoundationH262FrameRateHasPositiveCadence;
+  using omega::media::detail::MediaFoundationH262OutputProgress;
+
+  static_assert(
+      MediaFoundationH262FrameRateHasPositiveCadence(10'000'000U, 1U));
+  static_assert(
+      !MediaFoundationH262FrameRateHasPositiveCadence(10'000'001U, 1U));
+  static_assert(!MediaFoundationH262FrameRateHasPositiveCadence(0U, 1U));
+  static_assert(!MediaFoundationH262FrameRateHasPositiveCadence(1U, 0U));
+
+  MediaFoundationH262OutputProgress progress;
+  bool accepted_limit = true;
+  for (std::uint32_t index = 0U;
+       index < omega::media::detail::
+                   kMediaFoundationH262MaximumConsecutiveFormatChanges;
+       ++index) {
+    accepted_limit =
+        accepted_limit && progress.RecordFormatChangeWithoutOutput();
+  }
+  Check(accepted_limit,
+        "the bounded number of consecutive format changes is accepted");
+  Check(!progress.RecordFormatChangeWithoutOutput(),
+        "a format-change loop is rejected at the deterministic policy limit");
+  progress.RecordOutput();
+  Check(progress.consecutive_format_changes() == 0U &&
+            progress.RecordFormatChangeWithoutOutput(),
+        "only real output resets the consecutive format-change policy");
 }
 
 void RunPlatformChecks() {
@@ -200,6 +240,7 @@ void RunPlatformChecks() {
 
 int main() {
   RunConfigurationChecks();
+  RunOutputPolicyChecks();
   RunPlatformChecks();
   if (failures != 0) {
     std::cerr << failures << " Media Foundation H.262 decoder test(s) failed\n";
