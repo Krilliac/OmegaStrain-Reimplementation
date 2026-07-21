@@ -43,6 +43,7 @@ void RunConfigurationChecks() {
   static_assert(
       std::is_nothrow_move_constructible_v<MediaFoundationH262Decoder>);
   static_assert(!std::is_move_assignable_v<MediaFoundationH262Decoder>);
+  static_assert(std::is_nothrow_destructible_v<MediaFoundationH262Decoder>);
 
   const auto defaults = omega::media::DefaultMediaFoundationH262DecoderLimits();
   Check(defaults.maximum_input_chunk_bytes != 0U &&
@@ -111,6 +112,18 @@ void RunConfigurationChecks() {
                 MediaFoundationH262DecoderErrorCode::InvalidConfiguration,
         "frame rates that synthesize a zero 100ns duration are rejected before "
         "platform setup");
+}
+
+void RunThreadAffinityPolicyChecks() {
+  using omega::media::detail::MediaFoundationH262LifetimeThreadMatches;
+
+  static_assert(MediaFoundationH262LifetimeThreadMatches(17U, 17U));
+  static_assert(!MediaFoundationH262LifetimeThreadMatches(17U, 29U));
+  Check(MediaFoundationH262LifetimeThreadMatches(1U, 1U),
+        "live decoder lifetime operations are allowed on the creator thread");
+  Check(!MediaFoundationH262LifetimeThreadMatches(1U, 2U),
+        "wrong-thread lifetime operations select the fail-fast path before "
+        "COM/MF state is touched");
 }
 
 void RunOutputPolicyChecks() {
@@ -240,6 +253,7 @@ void RunPlatformChecks() {
 
 int main() {
   RunConfigurationChecks();
+  RunThreadAffinityPolicyChecks();
   RunOutputPolicyChecks();
   RunPlatformChecks();
   if (failures != 0) {

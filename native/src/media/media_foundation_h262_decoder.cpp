@@ -1,10 +1,10 @@
 #include "omega/media/media_foundation_h262_decoder.h"
 
 #include <algorithm>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -106,7 +106,7 @@ MediaFoundationH262Decoder::MediaFoundationH262Decoder(
 
 MediaFoundationH262Decoder::MediaFoundationH262Decoder(
     MediaFoundationH262Decoder &&) noexcept = default;
-MediaFoundationH262Decoder::~MediaFoundationH262Decoder() = default;
+MediaFoundationH262Decoder::~MediaFoundationH262Decoder() noexcept = default;
 
 std::expected<MediaFoundationH262Decoder, MediaFoundationH262DecoderError>
 MediaFoundationH262Decoder::Create(
@@ -655,8 +655,17 @@ struct MediaFoundationH262Decoder::Impl {
   Impl(const Impl &) = delete;
   Impl &operator=(const Impl &) = delete;
 
-  ~Impl() {
-    assert(GetCurrentThreadId() == creator_thread_id);
+  [[nodiscard]] bool IsCurrentThread() const noexcept {
+    return detail::MediaFoundationH262LifetimeThreadMatches(
+        creator_thread_id, GetCurrentThreadId());
+  }
+
+  ~Impl() noexcept {
+    if (!IsCurrentThread()) {
+      // CoUninitialize must balance this instance's successful CoInitializeEx
+      // on the creating thread. Do not attempt partial COM/MF cleanup here.
+      std::terminate();
+    }
     if (streaming_started && transform) {
       static_cast<void>(
           SendMessage(*transform.Get(), MFT_MESSAGE_NOTIFY_END_STREAMING));
@@ -670,7 +679,7 @@ struct MediaFoundationH262Decoder::Impl {
   }
 
   [[nodiscard]] std::optional<Error> CheckThread() const {
-    if (GetCurrentThreadId() == creator_thread_id)
+    if (IsCurrentThread())
       return std::nullopt;
     return MakeError(
         ErrorCode::WrongThread, 0,
@@ -875,8 +884,12 @@ MediaFoundationH262Decoder::MediaFoundationH262Decoder(
     : impl_(std::move(impl)) {}
 
 MediaFoundationH262Decoder::MediaFoundationH262Decoder(
-    MediaFoundationH262Decoder &&) noexcept = default;
-MediaFoundationH262Decoder::~MediaFoundationH262Decoder() = default;
+    MediaFoundationH262Decoder &&other) noexcept {
+  if (other.impl_ && !other.impl_->IsCurrentThread())
+    std::terminate();
+  impl_ = std::move(other.impl_);
+}
+MediaFoundationH262Decoder::~MediaFoundationH262Decoder() noexcept = default;
 
 std::expected<MediaFoundationH262Decoder, MediaFoundationH262DecoderError>
 MediaFoundationH262Decoder::Create(

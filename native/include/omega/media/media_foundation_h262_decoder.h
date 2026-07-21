@@ -25,6 +25,14 @@ inline constexpr std::uint64_t kMediaFoundationTicksPerSecond = 10'000'000ULL;
 inline constexpr std::uint32_t
     kMediaFoundationH262MaximumConsecutiveFormatChanges = 16U;
 
+// Platform-neutral seam for the live-instance lifetime contract. A mismatch
+// requires fail-fast handling before any COM/MF state is moved or released.
+[[nodiscard]] constexpr bool MediaFoundationH262LifetimeThreadMatches(
+    const std::uint64_t creator_thread_id,
+    const std::uint64_t current_thread_id) noexcept {
+  return creator_thread_id == current_thread_id;
+}
+
 // Internal policy helpers kept here so the platform-independent test target can
 // verify the exact cadence and output-progress invariants without requiring an
 // installed MPEG-2 Media Foundation transform.
@@ -132,9 +140,14 @@ using MediaFoundationH262DecodeResult =
 // caller span. Returned frames own every pixel byte and are independent of the
 // decoder and input storage.
 //
-// Thread affinity: Create, Push, Drain, move construction, and destruction must
-// all occur on the creating OS thread. The instance is not thread-safe. Moving
-// the C++ object does not transfer that affinity to another thread.
+// Thread affinity: Create, Push, Drain, move construction, and destruction of a
+// live instance must all occur on the creating OS thread. The instance is not
+// thread-safe. Moving the C++ object does not transfer that affinity to another
+// thread. Push and Drain report WrongThread without touching platform state;
+// wrong-thread move construction or destruction cannot return an error and
+// therefore terminates before touching owned COM/MF state. A moved-from object
+// owns no platform state and may be destroyed on any thread. The creating
+// thread must remain alive until every live instance it created is destroyed.
 //
 // Hot reload: non-hot-reloadable while an instance is alive because its opaque
 // implementation owns COM interfaces. Drain/destroy every instance before a
@@ -144,9 +157,13 @@ public:
   MediaFoundationH262Decoder(const MediaFoundationH262Decoder &) = delete;
   MediaFoundationH262Decoder &
   operator=(const MediaFoundationH262Decoder &) = delete;
+  // [creator thread, live source] Transfers ownership without changing thread
+  // affinity. A wrong-thread attempt terminates before ownership is moved.
   MediaFoundationH262Decoder(MediaFoundationH262Decoder &&) noexcept;
   MediaFoundationH262Decoder &operator=(MediaFoundationH262Decoder &&) = delete;
-  ~MediaFoundationH262Decoder();
+  // [creator thread, live instance] Releases COM/MF state. Wrong-thread
+  // destruction terminates before any platform cleanup is attempted.
+  ~MediaFoundationH262Decoder() noexcept;
 
   // [creator thread] Configures a synchronous software/system MPEG-2 MFT and
   // negotiates NV12. The sequence facts describe the elementary stream; no
