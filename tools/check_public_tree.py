@@ -57,20 +57,45 @@ URI_PREFIX = re.compile(
     re.IGNORECASE,
 )
 
+# These exact path components identify shared/system locations or lexical
+# traversal, not a concrete developer account. Windows profiles with a space
+# (for example, "Default User") are represented by their first matched
+# component here.
+NON_OWNER_HOME_SEGMENTS = frozenset(
+    {
+        ".",
+        "..",
+        "all",
+        "default",
+        "guest",
+        "public",
+        "shared",
+    }
+)
+
+
+def is_named_owner_segment(segment: str) -> bool:
+    return segment.casefold() not in NON_OWNER_HOME_SEGMENTS
+
 
 def contains_owner_home_path(text: str) -> bool:
     """Return whether text contains a concrete absolute developer-home path.
 
     Non-file URI path components are not filesystem roots; ``file:`` URIs are.
-    Dot-only segments are not concrete user names. Placeholder forms such as
-    ``<user>``, ``$HOME``, and ``%USERNAME%`` are excluded by the username
-    character class.
+    Exact shared/system and traversal components are not concrete user names.
+    Placeholder forms such as ``<user>``, ``$HOME``, and ``%USERNAME%`` are
+    excluded by the username character class.
     """
-    for match in OWNER_HOME_WINDOWS_PATH.finditer(text):
-        if match.group("user").strip("."):
-            return True
-    for match in OWNER_HOME_UNIX_PATH.finditer(text):
-        uri = URI_PREFIX.search(text[: match.start() + 1])
+    owner_path_view = text
+    while "\\\\" in owner_path_view:
+        owner_path_view = owner_path_view.replace("\\\\", "\\")
+
+    for match in OWNER_HOME_WINDOWS_PATH.finditer(owner_path_view):
+        if not is_named_owner_segment(match.group("user")):
+            continue
+        return True
+    for match in OWNER_HOME_UNIX_PATH.finditer(owner_path_view):
+        uri = URI_PREFIX.search(owner_path_view[: match.start() + 1])
         if (
             uri is not None
             and uri.group("scheme").lower() != "file"
@@ -80,11 +105,12 @@ def contains_owner_home_path(text: str) -> bool:
         if (
             uri is None
             and match.start() > 0
-            and re.fullmatch(r"[\w/.-]", text[match.start() - 1])
+            and re.fullmatch(r"[\w/.-]", owner_path_view[match.start() - 1])
         ):
             continue
-        if match.group("user").strip("."):
-            return True
+        if not is_named_owner_segment(match.group("user")):
+            continue
+        return True
     return False
 
 
