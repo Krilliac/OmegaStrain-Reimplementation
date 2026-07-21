@@ -16,6 +16,15 @@
 #include <vector>
 
 namespace omega::profiles {
+// The project-owned catalog ceiling must stay inside the storage layer's own
+// record ceiling, so a full profiles/ namespace can never be legal to the
+// database yet unrepresentable to a bounded enumeration.
+static_assert(kProfileCatalogMaxProfiles > 0U &&
+                  kProfileCatalogMaxProfiles <=
+                      persistence::SaveDatabase::kHardMaxRecords,
+              "the project-owned profile ceiling must be a nonzero bound at or "
+              "below SaveDatabase::kHardMaxRecords");
+
 namespace {
 using persistence::SaveDatabaseError;
 using persistence::SaveDatabaseErrorCode;
@@ -275,12 +284,33 @@ DecodeMetadata(const SaveRecord &record) {
   return key;
 }
 
-[[nodiscard]] std::expected<std::optional<ProfileId>, ProfileCatalogError>
-ParseMetadataKey(const std::string_view key) {
+// Shape test only: true when the key occupies a direct profile marker slot,
+// whether or not the identifier it carries is canonical. A malformed direct
+// marker is still a marker, so it must spend enumeration budget before it is
+// parsed; that ordering is what makes an over-populated namespace report
+// ResourceExhausted rather than a corruption verdict it cannot afford to reach.
+[[nodiscard]] bool IsDirectMarkerKey(const std::string_view key) noexcept {
   if (!key.starts_with(kProfileKeyPrefix) ||
       !key.ends_with(kProfileMetadataKeySuffix)) {
-    return std::optional<ProfileId>{};
+    return false;
   }
+  if (key.size() <
+      kProfileKeyPrefix.size() + kProfileMetadataKeySuffix.size()) {
+    // The prefix and suffix overlap, leaving no identifier at all. This is a
+    // degenerate direct marker, not a nested record.
+    return true;
+  }
+
+  const std::size_t middle_bytes =
+      key.size() - kProfileKeyPrefix.size() - kProfileMetadataKeySuffix.size();
+  return key.substr(kProfileKeyPrefix.size(), middle_bytes)
+             .find('/') == std::string_view::npos;
+}
+
+// Precondition: IsDirectMarkerKey(key). Fails closed on any identifier the
+// canonical grammar rejects.
+[[nodiscard]] std::expected<ProfileId, ProfileCatalogError>
+ParseDirectMarkerId(const std::string_view key) {
   if (key.size() <
       kProfileKeyPrefix.size() + kProfileMetadataKeySuffix.size()) {
     return std::unexpected(MakeError(
@@ -290,18 +320,14 @@ ParseMetadataKey(const std::string_view key) {
 
   const std::size_t middle_bytes =
       key.size() - kProfileKeyPrefix.size() - kProfileMetadataKeySuffix.size();
-  const std::string_view middle =
-      key.substr(kProfileKeyPrefix.size(), middle_bytes);
-  if (middle.find('/') != std::string_view::npos)
-    return std::optional<ProfileId>{};
-
-  const std::optional<ProfileId> id = ProfileId::Parse(middle);
+  const std::optional<ProfileId> id =
+      ProfileId::Parse(key.substr(kProfileKeyPrefix.size(), middle_bytes));
   if (!id) {
     return std::unexpected(MakeError(
         ProfileCatalogErrorCode::CorruptMetadata,
         "profile metadata marker has a noncanonical profile identifier"));
   }
-  return id;
+  return *id;
 }
 
 [[nodiscard]] std::expected<ProfileSummary, ProfileCatalogError>
@@ -421,7 +447,22 @@ ProfileCatalog::Read(const ProfileId id) const {
 
 std::expected<std::vector<ProfileSummary>, ProfileCatalogError>
 ProfileCatalog::List() const {
+  return ListBounded(kProfileCatalogMaxProfiles);
+}
+
+std::expected<std::vector<ProfileSummary>, ProfileCatalogError>
+ProfileCatalog::ListBounded(const std::size_t max_profiles) const {
   try {
+    if (max_profiles > kProfileCatalogMaxProfiles) {
+      return std::unexpected(
+          MakeError(ProfileCatalogErrorCode::ResourceExhausted,
+                    "requested profile enumeration budget exceeds the "
+                    "project-owned catalog ceiling"));
+    }
+
+    // SaveDatabase::List still materializes prefix metadata for the whole
+    // profiles/ namespace under its own hard record cap; max_profiles bounds
+    // only what this catalog admits from that listing.
     const auto records = database_->List(kProfileKeyPrefix);
     if (!records) {
       return std::unexpected(
@@ -429,13 +470,23 @@ ProfileCatalog::List() const {
     }
 
     std::vector<ProfileSummary> summaries;
-    summaries.reserve(records->size());
+    summaries.reserve(std::min(records->size(), max_profiles));
+    std::size_t marker_candidates = 0U;
     for (const auto &record_info : *records) {
-      auto marker_id = ParseMetadataKey(record_info.key);
+      if (!IsDirectMarkerKey(record_info.key))
+        continue;
+
+      ++marker_candidates;
+      if (marker_candidates > max_profiles) {
+        return std::unexpected(
+            MakeError(ProfileCatalogErrorCode::ResourceExhausted,
+                      "profile namespace holds more markers than the "
+                      "enumeration budget admits"));
+      }
+
+      auto marker_id = ParseDirectMarkerId(record_info.key);
       if (!marker_id)
         return std::unexpected(std::move(marker_id.error()));
-      if (!*marker_id)
-        continue;
 
       auto record = database_->Read(record_info.key);
       if (!record) {
@@ -447,7 +498,7 @@ ProfileCatalog::List() const {
             ProfileCatalogErrorCode::CorruptMetadata,
             "listed profile marker disappeared during serialized access"));
       }
-      auto summary = DecodeSummary(**marker_id, **record);
+      auto summary = DecodeSummary(*marker_id, **record);
       if (!summary)
         return std::unexpected(std::move(summary.error()));
       summaries.push_back(std::move(*summary));

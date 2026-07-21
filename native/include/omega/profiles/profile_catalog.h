@@ -20,6 +20,13 @@ inline constexpr std::size_t kProfileDisplayNameMaxBytes = 64U;
 inline constexpr std::uint64_t kProfileTimestampMaxUnixMilliseconds =
     253'402'300'799'999ULL;
 
+// Project-owned ceiling on how many profile markers one enumeration will
+// admit. This is an invented application limit chosen for this reimplementation
+// — it does not model a memory-card capacity, a save-slot count, or any retail
+// quantity. It is deliberately far below the storage layer's own record
+// ceiling; profile_catalog.cpp static_asserts that relationship.
+inline constexpr std::size_t kProfileCatalogMaxProfiles = 64U;
+
 // A native OpenOmega profile identifier. Text form is exactly 32 lowercase
 // hexadecimal bytes. The identifier is application-owned and does not model a
 // PS2 memory-card directory, game save slot, or emulator identity.
@@ -114,9 +121,27 @@ public:
   Read(ProfileId id) const;
 
   // [owning persistence/game thread] Returns summaries sorted by ProfileId.
-  // Non-marker records beneath profiles/ are deliberately ignored.
+  // Non-marker records beneath profiles/ are deliberately ignored. Exactly
+  // equivalent to ListBounded(kProfileCatalogMaxProfiles).
   [[nodiscard]] std::expected<std::vector<ProfileSummary>, ProfileCatalogError>
   List() const;
+
+  // [owning persistence/game thread] Returns summaries sorted by ProfileId,
+  // admitting at most max_profiles profile markers. Every record beneath
+  // profiles/ whose key is shaped like a direct <id>/metadata marker spends one
+  // unit of the budget *before* its identifier is parsed or its payload read,
+  // so an over-populated namespace fails closed with ResourceExhausted rather
+  // than silently truncating. Non-marker records beneath profiles/ are
+  // deliberately ignored and cost no budget. A max_profiles above
+  // kProfileCatalogMaxProfiles is itself rejected with ResourceExhausted.
+  //
+  // This bounds what the catalog materializes, not the storage layer beneath
+  // it. SaveDatabase::List still materializes prefix record metadata for the
+  // whole profiles/ namespace — bounded only by its own
+  // SaveDatabase::kHardMaxRecords cap — before this budget is applied, so this
+  // is not a lower-memory enumeration path.
+  [[nodiscard]] std::expected<std::vector<ProfileSummary>, ProfileCatalogError>
+  ListBounded(std::size_t max_profiles) const;
 
   // [owning persistence/game thread] Optimistically replaces typed metadata.
   // Creation time is immutable and modification time cannot move backwards.
