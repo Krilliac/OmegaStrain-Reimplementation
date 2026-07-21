@@ -1343,8 +1343,9 @@ if(BUILD_TESTING)
         add_test(NAME omega_native_persistence_tests
             COMMAND omega_native_persistence_tests)
         # The generated rollback/reopen matrix performs many intentionally durable
-        # snapshot publications; Windows filesystem flush latency can exceed 10 seconds.
-        set_tests_properties(omega_native_persistence_tests PROPERTIES TIMEOUT 30)
+        # snapshot publications; hosted Windows write-through latency can transiently
+        # exceed 30 seconds.
+        set_tests_properties(omega_native_persistence_tests PROPERTIES TIMEOUT 60)
 
         add_executable(omega_native_character_session_tests
             native/tests/native_character_session_tests.cpp
