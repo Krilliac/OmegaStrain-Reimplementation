@@ -941,8 +941,11 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     `OPENOMEGA_DISABLE_STARTUP_DIALOG=1` suppresses presentation; invalid policy enum values are
     also suppressed. CMake injects suppression into the synthetic process and capture contracts,
     and the dedicated unit source calls the presentation function only under suppressed or invalid
-    policy while checking that SDL remains uninitialized. Parse/help, app creation, SDL/GPU/audio,
-    loop, capture, and replay errors remain console-only. Serialized local validation passed:
+    policy while checking that SDL remains uninitialized. A later hardening step presents
+    app-creation failures, including SDL/GPU/audio setup, using fixed code `application-startup` and
+    fixed detail `Application components could not be initialized.`; raw component text remains
+    stderr-only. Parse/help, loop, capture, and replay errors remain console-only. The E-0076
+    baseline validation passed:
     focused and full MSVC builds; the direct dialog unit and exact process contract; CTest 31/35/31;
     runtime-off direct and focused `omega_core_tests` with 27 registrations and no dialog target;
     the 163-file dependency gate; all 209 tooling tests; Python compile-all; and the staged

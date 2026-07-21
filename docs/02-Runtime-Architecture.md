@@ -743,15 +743,17 @@ It performs no SDL initialization, shutdown, metadata, or window work and owns n
 suppression reads SDL's cached environment view. The returned Presented, Suppressed, or Unavailable
 outcome does not alter process control flow.
 
-Main invokes the adapter only after writing and flushing an existing fatal stderr diagnostic, and
-only for default-profile capture or runtime-config load (`runtime-configuration`), runtime-settings
+Main invokes the adapter only after writing and flushing an existing fatal stderr diagnostic.
+Default-profile capture or runtime-config load (`runtime-configuration`), runtime-settings
 resolution (`runtime-settings`), E-0074 content-profile resolution (its typed code name), and E-0072
-content startup (its projected category or `inconsistent-error`). Runtime configuration, runtime
-settings, content launch profile, and content startup use fixed stage labels; an invalid stage
-projects to `startup`. The exact body begins `OpenOmega could not reach the main menu.`, includes
-Stage, Code, and Detail lines, and ends with a fixed configuration/game-data/arguments prompt with
-no trailing newline. Parse/help, app creation, SDL/GPU/audio setup, loop, capture, and replay errors
-remain console-only.
+content startup (its projected category or `inconsistent-error`) use their already-sanitized
+details. App-creation failure, including SDL/GPU/audio setup, retains the exact component diagnostic
+only on stderr and presents the fixed `application startup` stage, code `application-startup`, and
+detail `Application components could not be initialized.`. Raw backend text never enters that
+dialog. An invalid stage projects to `startup`. The exact body begins
+`OpenOmega could not reach the main menu.`, includes Stage, Code, and Detail lines, and ends with a
+fixed configuration/game-data/arguments prompt with no trailing newline. Parse/help, loop, capture,
+and replay errors remain console-only.
 
 Category and detail projection is nonallocating and retains no source view. Printable bytes
 `0x21..0x7e` survive, space/tab/CR/LF runs collapse to one trimmed space, and NUL, controls, DEL,
@@ -762,7 +764,7 @@ bytes. Only exact `OPENOMEGA_DISABLE_STARTUP_DIALOG=1` suppresses the dialog; in
 fail closed as suppressed. CMake supplies that environment value to existing synthetic process and
 capture tests. The dedicated unit source exercises text and policy projection and calls the dialog
 boundary only when presentation is suppressed, including a check that SDL remains uninitialized.
-Serialized local validation passed: focused and full MSVC builds; the direct dialog unit and exact
+The E-0076 baseline validation passed: focused and full MSVC builds; the direct dialog unit and exact
 process contract; CTest 31/35/31; runtime-off direct and focused `omega_core_tests` with 27
 registrations and no dialog target; the 163-file dependency gate; all 209 tooling tests; Python
 compile-all; and the staged public-tree gate checked 250 indexed text blobs. Interactive dialog

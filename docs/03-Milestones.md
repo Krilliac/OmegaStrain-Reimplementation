@@ -934,8 +934,11 @@ storage to produce an owned 640-byte result, sanitize hostile bytes to bounded A
 source text. Only exact
 `OPENOMEGA_DISABLE_STARTUP_DIALOG=1` suppresses presentation, invalid policies fail closed, and
 CMake suppresses all automated process/capture presentation. The unit source exercises only
-suppressed calls and verifies no SDL initialization. Later startup and runtime failures stay
-console-only. Serialized local validation passed: focused and full MSVC builds; the direct dialog
+suppressed calls and verifies no SDL initialization. A later hardening step presents app-creation
+failures with fixed code `application-startup` and fixed detail
+`Application components could not be initialized.` while retaining raw component diagnostics only
+on stderr. Later run-loop, capture, and replay failures stay console-only. The E-0076 baseline
+validation passed: focused and full MSVC builds; the direct dialog
 unit and exact process contract; CTest 31/35/31; runtime-off direct and focused `omega_core_tests`
 with 27 registrations and no dialog target; the 163-file dependency gate; all 209 tooling tests;
 Python compile-all; and the staged public-tree gate checked 250 indexed text blobs. Interactive

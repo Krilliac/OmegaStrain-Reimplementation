@@ -191,12 +191,12 @@ void PrintNativePersistenceError(
 
 void PrintApplicationStartupError(const std::string_view detail)
 {
-    // Preserve the established stderr diagnostic while also making failures
-    // reached after native persistence visible to packaged users.
+    // Preserve the established stderr diagnostic. The packaged dialog is deliberately fixed:
+    // SDL and backend messages can contain host paths or device identifiers.
     std::cerr << detail << '\n';
+    constexpr auto request = omega::app::ApplicationStartupFailureDialogRequest();
     PresentStartupFailureDialogAfterStderr(
-        omega::app::StartupFailureStage::ApplicationStartup,
-        "application-startup", detail);
+        request.stage, request.category, request.detail);
 }
 
 void PrintRunCaptureDiagnostics(const omega::app::RunCaptureOutcome& outcome)

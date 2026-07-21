@@ -37,6 +37,22 @@ struct StartupFailureDialogRequest
     std::string_view detail;
 };
 
+inline constexpr char kApplicationStartupFailureDialogCategory[] = "application-startup";
+inline constexpr char kApplicationStartupFailureDialogDetail[] =
+    "Application components could not be initialized.";
+
+// Raw component and SDL diagnostics remain stderr-only. Packaged presentation uses this fixed,
+// identity-free request so a backend message cannot disclose a host path or device identifier.
+[[nodiscard]] inline constexpr StartupFailureDialogRequest
+ApplicationStartupFailureDialogRequest() noexcept
+{
+    return {
+        .stage = StartupFailureStage::ApplicationStartup,
+        .category = kApplicationStartupFailureDialogCategory,
+        .detail = kApplicationStartupFailureDialogDetail,
+    };
+}
+
 inline constexpr char kStartupFailureDialogTitle[] = "OpenOmega startup error";
 inline constexpr char kStartupFailureDialogDisableEnvironmentVariable[] =
     "OPENOMEGA_DISABLE_STARTUP_DIALOG";
