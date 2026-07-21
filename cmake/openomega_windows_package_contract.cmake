@@ -669,6 +669,32 @@ function(validate_payload_tree container output_root)
     set(${output_root} "${container}/${root}" PARENT_SCOPE)
 endfunction()
 
+function(validate_readme_media_capability_contract readme)
+    file(READ "${readme}" readme_contents)
+    string(REPLACE "\r" " " readme_contents "${readme_contents}")
+    string(REPLACE "\n" " " readme_contents "${readme_contents}")
+    string(REGEX REPLACE " +" " " readme_contents "${readme_contents}")
+    string(CONCAT media_foundation_phrase
+        "Optional opening-movie playback requires Windows Media Foundation and an "
+        "available synchronous MPEG-2 decoder MFT."
+    )
+    string(CONCAT fail_open_phrase
+        "If that decoder capability is unavailable, OpenOmega skips the optional "
+        "opening movie and continues to the native menu."
+    )
+    foreach(required_phrase IN ITEMS
+            "${media_foundation_phrase}"
+            "${fail_open_phrase}")
+        string(FIND "${readme_contents}" "${required_phrase}" required_phrase_offset)
+        if(required_phrase_offset EQUAL -1)
+            message(FATAL_ERROR
+                "packaged README-WINDOWS.md omits the opening-movie media capability contract: "
+                "${required_phrase}"
+            )
+        endif()
+    endforeach()
+endfunction()
+
 function(validate_launcher_bytes launcher)
     string(CONCAT expected_launcher
         "@echo off\r\n"
@@ -781,6 +807,8 @@ endif()
 validate_payload_tree("${release_install_prefix}" installed_package_root)
 set(installed_executable "${installed_package_root}/openomega.exe")
 set(installed_launcher "${installed_package_root}/launch-openomega.cmd")
+validate_readme_media_capability_contract(
+    "${installed_package_root}/README-WINDOWS.md")
 validate_launcher_bytes("${installed_launcher}")
 validate_pe_contract("${installed_executable}")
 require_no_private_workspace_paths("${installed_executable}")
@@ -942,6 +970,7 @@ file(ARCHIVE_EXTRACT
 validate_payload_tree("${OPENOMEGA_PACKAGE_EXTRACT_DIRECTORY}" package_root)
 set(package_executable "${package_root}/openomega.exe")
 set(package_launcher "${package_root}/launch-openomega.cmd")
+validate_readme_media_capability_contract("${package_root}/README-WINDOWS.md")
 validate_launcher_bytes("${package_launcher}")
 
 validate_pe_contract("${package_executable}")

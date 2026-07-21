@@ -11,7 +11,9 @@ immutability)`. That historical result predates native persistence. The current 
 contract instead requires first zero-frame startup to create an exact native-save genesis under the
 isolated profile and a second startup to reopen it without further mutation. This is not general
 clean-machine, interactive, owner-data, GPU, audio, or broader Windows-version compatibility
-validation. The package has exactly this layout:
+validation. Optional opening-movie playback requires Windows Media Foundation and an available
+synchronous MPEG-2 decoder MFT. If that decoder capability is unavailable, OpenOmega skips the
+optional opening movie and continues to the native menu. The package has exactly this layout:
 
 ```text
 OpenOmega-0.1.0-windows-x86_64/
