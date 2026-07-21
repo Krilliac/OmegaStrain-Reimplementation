@@ -160,10 +160,15 @@ native-dependency (247 files); ledger-format (102 records); Python compile-all; 
 ## Follow-on implementation: E-0113 passive-envelope coverage
 
 `omega_tool frontend-envelope-coverage-verify-tree <root>` now provides identity-guarded traversal
-and identity-bound HOG reads for aggregate project-passive FNT/GUI/IE descriptor coverage. Its
-schema-version-1 output contains only family acceptance and typed-rejection totals, and generated
-fixtures cover nested HOGs, path-free deterministic reporting, limits, unsafe entries, and identity
-races. No owner-corpus run is recorded. The semantic GUI/font/menu gate remains closed.
+and content-pinned HOG reads for aggregate project-passive FNT/GUI/IE descriptor coverage.
+Successful discovery reads every admitted top-level HOG and retains SHA-256 per 64 KiB chunk through
+an exactly 8 MiB digest-payload cap; parsing uses one verified 64 KiB cache with bounded
+chunk-rounded nested-span allowances. Its schema-version-1 output contains only family acceptance
+and typed-rejection totals, and generated fixtures cover digest answers/budgets, cache reuse, padded
+nested HOGs, path-free deterministic reporting, limits, unsafe entries, and identity/content races.
+The unkeyed digests do not authenticate source, establish provenance, or provide an atomic
+filesystem snapshot. No owner-corpus run is recorded. The semantic GUI/font/menu gate remains
+closed.
 
 ## Remaining cutscene/menu blockers (honest)
 - Cutscene playback is Windows-only and selected through an external `--opening-movie` path; retail-

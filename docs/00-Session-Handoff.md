@@ -1581,16 +1581,21 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
 
 89. E-0113 adds one bounded project-passive coverage command for the existing FNT, GUI, and IE
     prefix/envelope descriptors. `omega_tool frontend-envelope-coverage-verify-tree <root>` performs
-    identity-guarded traversal and identity-bound HOG reads, rejects links/reparse points and
-    identity changes, ignores loose candidates, and follows nested members classified by an
-    ASCII-case-insensitive `.hog` suffix to depth 32. Its deterministic schema-version-1 JSON
-    retains only per-family candidate, acceptance,
-    and typed-rejection totals; it is distinct from E-0110 topology schema version 3, where `.fnt`
+    identity-guarded traversal, a complete discovery read with SHA-256 per 64 KiB HOG chunk, and
+    parser reads through one verified 64 KiB cache. The retained 32-byte digest payload is capped at
+    exactly 8 MiB; top-level sizes and chunk-rounded nested spans bound parser raw reads while
+    admitting padded nested archives. Links/reparse points, identity changes, and parser-consumed
+    chunk mismatches fail closed; loose candidates are ignored, and nested `.hog` members are
+    followed case-insensitively to depth 32. Its deterministic schema-version-1 JSON retains only
+    per-family candidate, acceptance, and
+    typed-rejection totals; it is distinct from E-0110 topology schema version 3, where `.fnt`
     remains `other`. Infrastructure failures discard partial observations and emit a zero report
-    plus one fixed path-free category. Generated fixtures exercise nested exact/padded HOGs, typed
-    rejection counts, privacy equivalence, unsafe entries, resource limits, and replacement/mutation
-    races. No owner-corpus run is recorded. This is not retail validity, semantic decoding,
-    font/widget/layout/binding/rendering evidence, a retail menu reconstruction, or PCSX2 parity.
+    plus one fixed path-free category. Generated fixtures exercise digest answers and budgets, cache
+    reuse, nested exact/padded HOGs, typed rejection counts, privacy equivalence, unsafe entries, and
+    replacement/mutation races. The unkeyed digests are consistency pins, not source authentication,
+    provenance, or an atomic filesystem snapshot. No owner-corpus run is recorded. This is not retail
+    validity, semantic decoding, font/widget/layout/binding/rendering evidence, a retail menu
+    reconstruction, or PCSX2 parity.
 
 ## Disc observations
 
