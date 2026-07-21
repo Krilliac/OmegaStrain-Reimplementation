@@ -10,8 +10,15 @@
 
 #include <SDL3/SDL.h>
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +31,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -35,11 +43,12 @@ struct OmegaAppTestAccess final
     [[nodiscard]] static std::expected<OmegaApp, std::string> Create(
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
         std::unique_ptr<OpeningMoviePlayback> opening_movie_playback,
-        std::optional<std::filesystem::path> opening_movie_path = std::nullopt)
+        std::optional<std::filesystem::path> opening_movie_path = std::nullopt,
+        std::unique_ptr<NativePersistence> native_persistence = nullptr)
     {
         return OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
-            std::move(config), settings, runtime::ContentStartupState{}, nullptr,
-            false, {}, std::move(opening_movie_path),
+            std::move(config), settings, runtime::ContentStartupState{},
+            std::move(native_persistence), false, {}, std::move(opening_movie_path),
             std::move(opening_movie_playback));
     }
 
@@ -113,6 +122,58 @@ struct OmegaAppTestAccess final
             app.opening_movie_audio_scratch_.end(),
             [](const std::int16_t sample) { return sample == 0; });
     }
+
+    [[nodiscard]] static FrontEndStartupModel FrontEndModel(
+        const OmegaApp& app) noexcept
+    {
+        return app.front_end_startup_model_;
+    }
+
+    [[nodiscard]] static bool CanCreateFirstProfile(
+        const OmegaApp& app) noexcept
+    {
+        return app.can_create_first_profile_;
+    }
+
+    [[nodiscard]] static std::optional<profiles::ProfileId> ActiveProfile(
+        const OmegaApp& app) noexcept
+    {
+        return app.active_profile_id_;
+    }
+
+    [[nodiscard]] static bool ArmFirstProfileTimestamp(
+        OmegaApp& app, const std::uint64_t timestamp) noexcept
+    {
+        if (timestamp > profiles::kProfileTimestampMaxUnixMilliseconds ||
+            app.first_profile_timestamp_override_for_testing_)
+        {
+            return false;
+        }
+        app.first_profile_timestamp_override_for_testing_ = timestamp;
+        return true;
+    }
+
+    [[nodiscard]] static std::optional<std::size_t> ProfileCatalogCount(
+        OmegaApp& app)
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        auto listed = app.native_persistence_->profiles().List();
+        if (!listed)
+            return std::nullopt;
+        return listed->size();
+    }
+
+    [[nodiscard]] static std::optional<profiles::ProfileSummary> ReadProfile(
+        OmegaApp& app, const profiles::ProfileId id)
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        auto read = app.native_persistence_->profiles().Read(id);
+        if (!read || !*read)
+            return std::nullopt;
+        return std::move(**read);
+    }
 };
 } // namespace omega::app::detail
 
@@ -125,6 +186,7 @@ using omega::app::FrontEndMode;
 using omega::app::FrontEndProfileSlot;
 using omega::app::FrontEndState;
 using omega::app::GpuHostSnapshot;
+using omega::app::NativePersistence;
 using omega::app::OpeningMoviePlayback;
 using omega::app::OpeningMoviePlayerError;
 using omega::app::OpeningMoviePlayerErrorCode;
@@ -139,6 +201,19 @@ constexpr std::uint32_t kGeneratedHeight = 2U;
 constexpr std::uint64_t kGeneratedLogicalBytes =
     static_cast<std::uint64_t>(kGeneratedWidth) * kGeneratedHeight * 4U;
 constexpr std::uint64_t kGeneratedSafetyTicks = 60'000'000U;
+constexpr std::uint64_t kEmptyProfilePresentationLogicalBytes = 233'476U;
+constexpr std::uint64_t kEmptyProfileMoviePresentationLogicalBytes =
+    kEmptyProfilePresentationLogicalBytes + kGeneratedLogicalBytes;
+constexpr FrontEndState kProfilesFirst{
+    .mode = FrontEndMode::Profiles,
+    .selected_main_row = FrontEndMainRow::Profiles,
+    .selected_profile_slot = FrontEndProfileSlot::First,
+};
+constexpr FrontEndState kReturnedProfilesRow{
+    .mode = FrontEndMode::Main,
+    .selected_main_row = FrontEndMainRow::Profiles,
+    .selected_profile_slot = FrontEndProfileSlot::First,
+};
 
 int failures = 0;
 
@@ -151,6 +226,69 @@ void Check(const bool condition, const std::string_view context,
         ++failures;
     }
 }
+
+class TempDirectory final
+{
+public:
+    explicit TempDirectory(const std::string_view label)
+    {
+        static std::atomic<std::uint64_t> next{0U};
+        std::error_code error;
+        const std::filesystem::path temporary =
+            std::filesystem::temp_directory_path(error);
+        if (!error)
+        {
+            const std::uint64_t process_id = static_cast<std::uint64_t>(
+#if defined(_WIN32)
+                _getpid()
+#else
+                getpid()
+#endif
+            );
+            for (std::size_t attempt = 0U; attempt < 32U; ++attempt)
+            {
+                const auto tick =
+                    std::chrono::steady_clock::now().time_since_epoch().count();
+                const std::filesystem::path candidate = temporary /
+                    ("openomega-opening-movie-smoke-" + std::string(label) + "-" +
+                        std::to_string(process_id) + "-" +
+                        std::to_string(tick) + "-" +
+                        std::to_string(next.fetch_add(1U)));
+                error.clear();
+                if (std::filesystem::create_directory(candidate, error))
+                {
+                    root_ = candidate;
+                    break;
+                }
+                if (error)
+                    break;
+            }
+        }
+        Check(!error && !root_.empty(), label,
+            "the generated native-persistence directory is created");
+    }
+
+    ~TempDirectory()
+    {
+        if (root_.empty())
+            return;
+        std::error_code error;
+        std::filesystem::remove_all(root_, error);
+        Check(!error, "temporary-persistence-cleanup",
+            "the generated native-persistence directory is removed");
+    }
+
+    TempDirectory(const TempDirectory&) = delete;
+    TempDirectory& operator=(const TempDirectory&) = delete;
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept
+    {
+        return root_;
+    }
+
+private:
+    std::filesystem::path root_;
+};
 
 [[nodiscard]] bool PushKey(
     const SDL_Scancode scancode, const bool pressed)
@@ -383,6 +521,18 @@ private:
         std::move(playback), std::move(path));
 }
 
+[[nodiscard]] std::expected<OmegaApp, std::string> CreatePersistentApp(
+    std::unique_ptr<OpeningMoviePlayback> playback,
+    NativePersistence persistence)
+{
+    auto config = omega::runtime::ParseConfigText("");
+    if (!config)
+        return std::unexpected("test config: " + config.error());
+    return OmegaAppTestAccess::Create(std::move(*config), TestSettings(),
+        std::move(playback), std::nullopt,
+        std::make_unique<NativePersistence>(std::move(persistence)));
+}
+
 [[nodiscard]] bool SameSimulationState(
     const omega::simulation::SimulationState& left,
     const omega::simulation::SimulationState& right) noexcept
@@ -413,7 +563,8 @@ void CheckTransitionCleanup(const OmegaApp& app, const AppBaseline& before,
     const std::uint64_t expected_rendered_frames,
     const std::uint64_t expected_movie_frames,
     const std::string_view context,
-    const std::uint64_t expected_control_failure_delta = 0U)
+    const std::uint64_t expected_control_failure_delta = 0U,
+    const std::uint64_t expected_front_end_draws = 3U)
 {
     const GpuHostSnapshot gpu = OmegaAppTestAccess::Gpu(app);
     const AudioServiceSnapshot audio = OmegaAppTestAccess::Audio(app);
@@ -459,8 +610,72 @@ void CheckTransitionCleanup(const OmegaApp& app, const AppBaseline& before,
                   before.gpu.blit_submissions + expected_rendered_frames,
         context, "every scripted frame submits one nonempty draw list");
     Check(gpu.successful_blit_draws ==
-              before.gpu.successful_blit_draws + expected_movie_frames + 3U,
-        context, "movie frames precede one three-blit menu transition frame");
+              before.gpu.successful_blit_draws + expected_movie_frames +
+                  expected_front_end_draws,
+        context,
+        "movie frames precede the exact project front-end transition draw count");
+}
+
+[[nodiscard]] bool SameGpuResourceState(
+    const GpuHostSnapshot& left, const GpuHostSnapshot& right) noexcept
+{
+    return left.textures == right.textures &&
+           left.successful_uploads == right.successful_uploads &&
+           left.successful_upload_logical_bytes ==
+               right.successful_upload_logical_bytes &&
+           left.successful_updates == right.successful_updates &&
+           left.successful_update_logical_bytes ==
+               right.successful_update_logical_bytes &&
+           left.successful_releases == right.successful_releases;
+}
+
+void CheckPersistentMovieStartup(OmegaApp& app, const std::string_view context)
+{
+    const GpuHostSnapshot gpu = OmegaAppTestAccess::Gpu(app);
+    Check(OmegaAppTestAccess::FrontEnd(app) == kProfilesFirst &&
+              OmegaAppTestAccess::FrontEndModel(app) ==
+                  omega::app::FrontEndStartupModel{} &&
+              OmegaAppTestAccess::CanCreateFirstProfile(app) &&
+              !OmegaAppTestAccess::ActiveProfile(app) &&
+              OmegaAppTestAccess::ProfileCatalogCount(app) ==
+                  std::optional<std::size_t>{0U},
+        context,
+        "empty native persistence derives Profiles without creating or selecting a profile");
+    Check(gpu.successful_uploads == 9U &&
+              gpu.successful_upload_logical_bytes ==
+                  kEmptyProfileMoviePresentationLogicalBytes &&
+              gpu.successful_releases == 0U &&
+              gpu.textures.resident_slots == 9U &&
+              gpu.textures.reserved_slots == 0U &&
+              gpu.textures.resident_logical_bytes ==
+                  kEmptyProfileMoviePresentationLogicalBytes,
+        context,
+        "the generated 2x2 movie coexists with the exact nine-slot empty-profile presentation");
+}
+
+[[nodiscard]] bool RunOneModalFrameWithExactDraws(OmegaApp& app,
+    const std::uint64_t expected_draws, const std::string_view context)
+{
+    const GpuHostSnapshot before_gpu = OmegaAppTestAccess::Gpu(app);
+    const auto before_simulation = OmegaAppTestAccess::Simulation(app);
+    auto run = app.Run(1);
+    const GpuHostSnapshot after_gpu = OmegaAppTestAccess::Gpu(app);
+    const bool ran = run && run->rendered_frames == 1 &&
+        run->input_frames == 1U && run->planned_simulation_steps == 0U &&
+        run->executed_simulation_steps == 0U && !run->quit_requested;
+    Check(ran, context,
+        "the scripted project front-end frame renders once without simulation or quit");
+    Check(SameSimulationState(
+              before_simulation, OmegaAppTestAccess::Simulation(app)),
+        context, "the scripted project front-end frame remains modal");
+    Check(SameGpuResourceState(before_gpu, after_gpu), context,
+        "the scripted project front-end command performs no GPU resource mutation");
+    Check(after_gpu.frame_submissions == before_gpu.frame_submissions + 1U &&
+              after_gpu.blit_submissions == before_gpu.blit_submissions + 1U &&
+              after_gpu.successful_blit_draws ==
+                  before_gpu.successful_blit_draws + expected_draws,
+        context, "the scripted project front-end frame has the exact draw count");
+    return ran;
 }
 
 void CheckAmbiguousSourceRejection()
@@ -887,6 +1102,256 @@ void CheckLateControlFaultRebaselinesForMenu()
         context, "the control fault enters the initial main menu");
     CheckTransitionCleanup(*app, before, 1U, 2U, 1U, context, 1U);
 }
+
+enum class PersistentMovieEntry
+{
+    NaturalCompletion,
+    PrimarySkip,
+};
+
+void CheckPersistenceBackedMovieProfileFlow(
+    const PersistentMovieEntry entry, const std::string_view context,
+    const std::uint64_t creation_timestamp)
+{
+    TempDirectory directory(context);
+    if (directory.path().empty())
+        return;
+
+    const auto first_profile_id = omega::profiles::ProfileId::Parse(
+        "00000000000000000000000000000001");
+    auto persistence = NativePersistence::Bootstrap(directory.path());
+    Check(first_profile_id && persistence &&
+              persistence->startup_profiles().empty(),
+        context,
+        "a fresh generated native-persistence database starts exactly empty");
+    if (!first_profile_id || !persistence ||
+        !persistence->startup_profiles().empty())
+    {
+        return;
+    }
+
+    auto observation = std::make_shared<GeneratedPlaybackObservation>();
+    GeneratedPlaybackConfig playback_config{
+        .mode = entry == PersistentMovieEntry::NaturalCompletion
+            ? GeneratedPlaybackMode::NaturalCompletion
+            : GeneratedPlaybackMode::ScheduledSkip,
+        .complete_after_advance = 2U,
+    };
+    {
+        auto app = CreatePersistentApp(
+            std::make_unique<GeneratedOpeningMovie>(
+                playback_config, observation),
+            std::move(*persistence));
+        Check(app.has_value(), context,
+            "the generated movie starts with empty native persistence");
+        if (!app)
+            return;
+
+        CheckPersistentMovieStartup(*app, context);
+        const AppBaseline before_transition = CaptureBaseline(*app);
+        if (entry == PersistentMovieEntry::NaturalCompletion)
+        {
+            auto completed = app->Run(2);
+            Check(completed && completed->rendered_frames == 2 &&
+                      completed->input_frames == 2U &&
+                      completed->planned_simulation_steps == 0U &&
+                      completed->executed_simulation_steps == 0U &&
+                      !completed->quit_requested,
+                context,
+                "natural EOS renders one movie frame and one Profiles transition frame");
+            Check(observation->advance_calls == 2U &&
+                      observation->audio_read_calls == 0U &&
+                      observation->destruction_count == 1U &&
+                      OmegaAppTestAccess::BootSequence(*app).phase ==
+                          BootSequencePhase::Completed,
+                context,
+                "natural EOS owns the exact generated playback lifetime");
+            CheckTransitionCleanup(*app, before_transition, 1U, 2U, 1U,
+                context, 0U, 2U);
+        }
+        else
+        {
+            Check(PushKey(SDL_SCANCODE_F1, true), context,
+                "the movie-skip Primary edge enters the SDL queue");
+            auto skipped = app->Run(1);
+            Check(skipped && skipped->rendered_frames == 1 &&
+                      skipped->input_frames == 1U &&
+                      skipped->planned_simulation_steps == 0U &&
+                      skipped->executed_simulation_steps == 0U &&
+                      !skipped->quit_requested,
+                context,
+                "the Primary skip renders one Profiles transition frame without simulation");
+            Check(observation->advance_calls == 0U &&
+                      observation->audio_read_calls == 0U &&
+                      observation->destruction_count == 1U &&
+                      OmegaAppTestAccess::BootSequence(*app).phase ==
+                          BootSequencePhase::Skipped,
+                context,
+                "the early Primary edge skips before movie publication");
+            CheckTransitionCleanup(*app, before_transition, 0U, 1U, 0U,
+                context, 0U, 2U);
+        }
+
+        const GpuHostSnapshot after_transition = OmegaAppTestAccess::Gpu(*app);
+        Check(OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  OmegaAppTestAccess::CanCreateFirstProfile(*app) &&
+                  !OmegaAppTestAccess::ActiveProfile(*app) &&
+                  OmegaAppTestAccess::ProfileCatalogCount(*app) ==
+                      std::optional<std::size_t>{0U},
+            context,
+            "movie completion enters Profiles without an implicit create or selection");
+        Check(after_transition.successful_uploads == 9U &&
+                  after_transition.successful_upload_logical_bytes ==
+                      kEmptyProfileMoviePresentationLogicalBytes &&
+                  after_transition.successful_releases == 1U &&
+                  after_transition.textures.resident_slots == 8U &&
+                  after_transition.textures.reserved_slots == 0U &&
+                  after_transition.textures.resident_logical_bytes ==
+                      kEmptyProfilePresentationLogicalBytes,
+            context,
+            "front-end entry releases exactly the 16-byte movie texture from the nine-slot coexistence budget");
+
+        if (entry == PersistentMovieEntry::PrimarySkip)
+        {
+            const bool released_skip = PushKey(SDL_SCANCODE_F1, false) &&
+                RunOneModalFrameWithExactDraws(*app, 2U, context);
+            Check(released_skip &&
+                      OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                      OmegaAppTestAccess::ProfileCatalogCount(*app) ==
+                          std::optional<std::size_t>{0U} &&
+                      !OmegaAppTestAccess::ActiveProfile(*app),
+                context,
+                "the swallowed skip edge must release before a distinct create press");
+        }
+
+        const bool timestamp_armed =
+            OmegaAppTestAccess::ArmFirstProfileTimestamp(
+                *app, creation_timestamp);
+        const bool create_pressed = PushKey(SDL_SCANCODE_F1, true);
+        const bool create_frame =
+            RunOneModalFrameWithExactDraws(*app, 3U, context);
+        const auto created_profile =
+            OmegaAppTestAccess::ReadProfile(*app, *first_profile_id);
+        const auto created_model = OmegaAppTestAccess::FrontEndModel(*app);
+        Check(timestamp_armed && create_pressed && create_frame &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  !OmegaAppTestAccess::CanCreateFirstProfile(*app) &&
+                  !OmegaAppTestAccess::ActiveProfile(*app) &&
+                  OmegaAppTestAccess::ProfileCatalogCount(*app) ==
+                      std::optional<std::size_t>{1U} &&
+                  created_model.total_profiles == 1U &&
+                  created_model.visible_profiles == 1U &&
+                  created_model.profiles[0].id == *first_profile_id &&
+                  created_profile && created_profile->id == *first_profile_id &&
+                  created_profile->metadata.display_name ==
+                      omega::app::kFrontEndFirstProfileDisplayName &&
+                  created_profile->metadata.created_unix_milliseconds ==
+                      creation_timestamp &&
+                  created_profile->metadata.modified_unix_milliseconds ==
+                      creation_timestamp &&
+                  created_profile->metadata_revision == 1U,
+            context,
+            "only the explicit post-movie create edge durably publishes fixed-ID PROFILE 1 without activation");
+
+        const bool create_released = PushKey(SDL_SCANCODE_F1, false) &&
+            RunOneModalFrameWithExactDraws(*app, 3U, context);
+        Check(create_released &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  !OmegaAppTestAccess::ActiveProfile(*app) &&
+                  OmegaAppTestAccess::ProfileCatalogCount(*app) ==
+                      std::optional<std::size_t>{1U},
+            context,
+            "the explicit create release is inert and leaves PROFILE 1 unselected");
+
+        const bool select_pressed = PushKey(SDL_SCANCODE_F1, true) &&
+            RunOneModalFrameWithExactDraws(*app, 3U, context);
+        Check(select_pressed &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kReturnedProfilesRow &&
+                  OmegaAppTestAccess::ActiveProfile(*app) == *first_profile_id &&
+                  OmegaAppTestAccess::ProfileCatalogCount(*app) ==
+                      std::optional<std::size_t>{1U},
+            context,
+            "a later distinct Primary edge explicitly activates PROFILE 1 and returns to Main");
+
+        const bool select_released = PushKey(SDL_SCANCODE_F1, false) &&
+            RunOneModalFrameWithExactDraws(*app, 3U, context);
+        Check(select_released &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kReturnedProfilesRow &&
+                  OmegaAppTestAccess::ActiveProfile(*app) == *first_profile_id,
+            context,
+            "the explicit selection release preserves the active profile and Main route");
+    }
+
+    auto reopened = NativePersistence::Bootstrap(directory.path());
+    Check(reopened && reopened->startup_profiles().size() == 1U &&
+              reopened->startup_profiles()[0].id == *first_profile_id &&
+              reopened->startup_profiles()[0].metadata.display_name ==
+                  omega::app::kFrontEndFirstProfileDisplayName &&
+              reopened->startup_profiles()[0].metadata.created_unix_milliseconds ==
+                  creation_timestamp &&
+              reopened->startup_profiles()[0].metadata.modified_unix_milliseconds ==
+                  creation_timestamp &&
+              reopened->startup_profiles()[0].metadata_revision == 1U,
+        context,
+        "reopening the isolated database observes exactly the explicitly created PROFILE 1");
+}
+
+void CheckPersistenceBackedMovieFailureRoute()
+{
+    constexpr std::string_view context = "persistent-fail-open-profiles";
+    TempDirectory directory(context);
+    if (directory.path().empty())
+        return;
+
+    auto persistence = NativePersistence::Bootstrap(directory.path());
+    Check(persistence && persistence->startup_profiles().empty(), context,
+        "the generated failure-route native persistence starts exactly empty");
+    if (!persistence || !persistence->startup_profiles().empty())
+        return;
+
+    auto observation = std::make_shared<GeneratedPlaybackObservation>();
+    {
+        auto app = CreatePersistentApp(
+            std::make_unique<GeneratedOpeningMovie>(
+                GeneratedPlaybackConfig{
+                    .mode = GeneratedPlaybackMode::AdvanceFailure,
+                },
+                observation),
+            std::move(*persistence));
+        Check(app.has_value(), context,
+            "the generated failing movie starts with empty native persistence");
+        if (!app)
+            return;
+
+        CheckPersistentMovieStartup(*app, context);
+        const AppBaseline before = CaptureBaseline(*app);
+        auto failed_open = app->Run(1);
+        Check(failed_open && failed_open->rendered_frames == 1 &&
+                  failed_open->input_frames == 1U &&
+                  failed_open->planned_simulation_steps == 0U &&
+                  failed_open->executed_simulation_steps == 0U &&
+                  !failed_open->quit_requested,
+            context,
+            "the bounded decoder failure renders one Profiles transition frame");
+        Check(observation->advance_calls == 1U &&
+                  observation->destruction_count == 1U &&
+                  OmegaAppTestAccess::BootSequence(*app).phase ==
+                      BootSequencePhase::Failed &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  OmegaAppTestAccess::CanCreateFirstProfile(*app) &&
+                  !OmegaAppTestAccess::ActiveProfile(*app) &&
+                  OmegaAppTestAccess::ProfileCatalogCount(*app) ==
+                      std::optional<std::size_t>{0U},
+            context,
+            "movie failure fails open to Profiles without profile mutation");
+        CheckTransitionCleanup(*app, before, 0U, 1U, 0U,
+            context, 0U, 2U);
+    }
+
+    auto reopened = NativePersistence::Bootstrap(directory.path());
+    Check(reopened && reopened->startup_profiles().empty(), context,
+        "the fail-open route leaves the isolated durable catalog empty");
+}
 } // namespace
 
 int main()
@@ -901,6 +1366,13 @@ int main()
     CheckHostileRuntimeErrorRedaction();
     CheckLateAudioFaultFailsOpenToActionableMenu();
     CheckLateControlFaultRebaselinesForMenu();
+    CheckPersistenceBackedMovieProfileFlow(
+        PersistentMovieEntry::NaturalCompletion,
+        "persistent-natural-completion", 1'725'000'000'123ULL);
+    CheckPersistenceBackedMovieProfileFlow(
+        PersistentMovieEntry::PrimarySkip,
+        "persistent-primary-skip", 1'725'000'000'124ULL);
+    CheckPersistenceBackedMovieFailureRoute();
 
     if (failures == 0)
         std::cout << "omega_app_opening_movie_smoke: all checks passed\n";

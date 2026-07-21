@@ -40,7 +40,8 @@ string(CONCAT expected_stdout_pattern
     "after_dropped_time_ns=[0-9]+\n"
     "OpenOmega fresh replay: replayed_frames=2 planned_simulation_steps=[0-9]+ "
     "completed_simulation_steps=[0-9]+ clamped_frames=[0-9]+ "
-    "dropped_frames=[0-9]+ completion=complete\n$"
+    "dropped_frames=[0-9]+ front_end=Profiles/Profiles/First "
+    "completion=complete\n$"
 )
 if(NOT openomega_stdout MATCHES "${expected_stdout_pattern}")
     message(FATAL_ERROR

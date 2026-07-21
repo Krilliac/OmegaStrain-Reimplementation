@@ -1301,6 +1301,11 @@ void CheckExplicitFirstProfileCreation(
             constexpr std::uint64_t kTopologyLogicalBytes = 96ULL * 32ULL * 4ULL;
             constexpr std::uint64_t kPreloadedLogicalBytes =
                 kFrontEndCardLogicalBytes * 6ULL + kTopologyLogicalBytes + 4ULL;
+            constexpr omega::app::FrontEndState kProfilesFirst{
+                .mode = omega::app::FrontEndMode::Profiles,
+                .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+                .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+            };
             const auto initial_model = Access::FrontEndModel(*app);
             const auto initial_gpu = Access::GpuSnapshot(*app);
             const std::array initial_active_textures{
@@ -1322,6 +1327,7 @@ void CheckExplicitFirstProfileCreation(
                 (*initial_inactive_textures)[0] != (*initial_inactive_textures)[1];
             Check(initial_model == omega::app::FrontEndStartupModel{} &&
                       Access::CanCreateFirstProfile(*app) &&
+                      Access::FrontEnd(*app) == kProfilesFirst &&
                       !Access::ActiveProfile(*app) &&
                       Access::ProfileCatalogCount(*app) ==
                           std::optional<std::size_t>{0U} &&
@@ -1331,26 +1337,16 @@ void CheckExplicitFirstProfileCreation(
                           kPreloadedLogicalBytes &&
                       initial_gpu.textures.resident_slots == 8U &&
                       initial_gpu.textures.resident_logical_bytes ==
-                          kPreloadedLogicalBytes,
-                "empty startup retains distinct complete empty and one-profile GPU presentations before mutation");
+                          kPreloadedLogicalBytes &&
+                      DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                          Access::FrontEndProfilesDrawList(*app)),
+                "exact-empty startup opens Profiles with distinct complete empty and one-profile GPU presentations before mutation");
 
             const auto run_plain_frame = [&app]() {
                 auto run = app->Run(1);
                 return run && run->input_frames == 1U &&
                        run->rendered_frames == 1 && !run->quit_requested;
             };
-            const bool entered_profiles =
-                PushKey(SDL_SCANCODE_DOWN, true) && run_plain_frame() &&
-                PushKey(SDL_SCANCODE_DOWN, false) && run_plain_frame() &&
-                PushKey(SDL_SCANCODE_F1, true) && run_plain_frame() &&
-                PushKey(SDL_SCANCODE_F1, false) && run_plain_frame();
-            constexpr omega::app::FrontEndState kProfilesFirst{
-                .mode = omega::app::FrontEndMode::Profiles,
-                .selected_main_row = omega::app::FrontEndMainRow::Profiles,
-                .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
-            };
-            Check(entered_profiles && Access::FrontEnd(*app) == kProfilesFirst,
-                "fresh logical edges navigate Main row one into the empty Profiles screen");
 
             const bool timestamp_armed = Access::ArmFirstProfileTimestamp(
                 *app, kCreationTimestamp);
@@ -1676,14 +1672,41 @@ int main()
                     std::move(*profile_config), settings,
                     omega::runtime::ContentStartupState{},
                     std::move(*profile_persistence), false);
+            constexpr omega::app::FrontEndState kProfilesFirst{
+                .mode = omega::app::FrontEndMode::Profiles,
+                .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+                .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+            };
+            constexpr std::uint64_t kProfileStartupLogicalBytes =
+                128ULL * 72ULL * 4ULL * 4ULL + 96ULL * 32ULL * 4ULL + 4ULL;
+            const omega::app::GpuHostSnapshot profile_startup_gpu = profile_app
+                ? omega::app::detail::OmegaAppTestAccess::GpuSnapshot(*profile_app)
+                : omega::app::GpuHostSnapshot{};
             Check(expected_model && profile_app &&
                       omega::app::detail::OmegaAppTestAccess::FrontEndModel(
                           *profile_app) == *expected_model &&
+                      omega::app::detail::OmegaAppTestAccess::FrontEnd(
+                          *profile_app) == kProfilesFirst &&
+                      !omega::app::detail::OmegaAppTestAccess::CanCreateFirstProfile(
+                          *profile_app) &&
+                      !omega::app::detail::OmegaAppTestAccess::ActiveProfile(
+                          *profile_app) &&
                       expected_model->total_profiles == 4U &&
                       expected_model->visible_profiles == 3U &&
                       omega::app::detail::OmegaAppTestAccess::ProfileCatalogCount(
-                          *profile_app) == std::optional<std::size_t>{4U},
-                "OmegaApp owns the bounded profile snapshot and performs no implicit profile creation");
+                          *profile_app) == std::optional<std::size_t>{4U} &&
+                      profile_startup_gpu.successful_uploads == 6U &&
+                      profile_startup_gpu.successful_upload_logical_bytes ==
+                          kProfileStartupLogicalBytes &&
+                      profile_startup_gpu.textures.resident_slots == 6U &&
+                      profile_startup_gpu.textures.resident_logical_bytes ==
+                          kProfileStartupLogicalBytes &&
+                      DrawListsEqual(
+                          omega::app::detail::OmegaAppTestAccess::CurrentFrontEndDrawList(
+                              *profile_app),
+                          omega::app::detail::OmegaAppTestAccess::FrontEndProfileSelectionDrawLists(
+                              *profile_app)[0]),
+                "OmegaApp opens valid existing profiles at the first slot without implicit selection, mutation, or additional GPU resources");
             if (expected_model && profile_app)
             {
                 const auto selected_id = omega::profiles::ProfileId::Parse(
@@ -1693,18 +1716,11 @@ int main()
                     return run && run->rendered_frames == 1 &&
                            !run->quit_requested;
                 };
-                bool entered_profiles = PushKey(SDL_SCANCODE_DOWN, true) &&
-                                        run_plain_profile_frame() &&
-                                        PushKey(SDL_SCANCODE_DOWN, false) &&
-                                        run_plain_profile_frame() &&
-                                        PushKey(SDL_SCANCODE_F1, true) &&
-                                        run_plain_profile_frame() &&
-                                        PushKey(SDL_SCANCODE_F1, false) &&
-                                        run_plain_profile_frame() &&
-                                        PushKey(SDL_SCANCODE_DOWN, true) &&
-                                        run_plain_profile_frame() &&
-                                        PushKey(SDL_SCANCODE_DOWN, false) &&
-                                        run_plain_profile_frame();
+                const bool highlighted_second_frame =
+                    PushKey(SDL_SCANCODE_DOWN, true) &&
+                    run_plain_profile_frame() &&
+                    PushKey(SDL_SCANCODE_DOWN, false) &&
+                    run_plain_profile_frame();
                 const omega::app::FrontEndState highlighted_second{
                     .mode = omega::app::FrontEndMode::Profiles,
                     .selected_main_row = omega::app::FrontEndMainRow::Profiles,
@@ -1713,7 +1729,7 @@ int main()
                 const auto profile_selection_lists =
                     omega::app::detail::OmegaAppTestAccess::FrontEndProfileSelectionDrawLists(
                         *profile_app);
-                Check(entered_profiles && selected_id &&
+                Check(highlighted_second_frame && selected_id &&
                           expected_model->profiles[1].id == selected_id &&
                           !omega::app::detail::OmegaAppTestAccess::ActiveProfile(
                               *profile_app) &&
@@ -1723,7 +1739,7 @@ int main()
                               omega::app::detail::OmegaAppTestAccess::CurrentFrontEndDrawList(
                                   *profile_app),
                               profile_selection_lists[1]),
-                    "profile navigation highlights only the second bounded startup slot without implicit selection");
+                    "profile navigation advances from the startup-first slot to the second bounded slot without implicit selection");
 
                 const auto scheduler_before_terminal =
                     omega::app::detail::OmegaAppTestAccess::SchedulerSnapshot(
@@ -1785,6 +1801,7 @@ int main()
                 replay_config.maximum_entities = 1U;
                 replay_config.initial_front_end_state = highlighted_second;
                 replay_config.front_end_visible_profile_slots = 3U;
+                replay_config.front_end_total_profile_count = 4U;
                 bool replay_matches = false;
                 if (replay_traces)
                 {
@@ -2197,6 +2214,8 @@ int main()
               diagnostic_actor_marker_texture.slot_index == 5U &&
               OmegaAppTestAccess::FrontEndModel(*app) ==
                   omega::app::FrontEndStartupModel{} &&
+              !OmegaAppTestAccess::CanCreateFirstProfile(*app) &&
+              !OmegaAppTestAccess::ActiveProfile(*app) &&
               OmegaAppTestAccess::FrontEnd(*app) ==
                   omega::app::InitialFrontEndState() &&
               hidden_list_is_exact && actor_list_is_exact &&
@@ -2206,7 +2225,7 @@ int main()
               asset_topology_list_is_exact &&
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   initial_visible_draw_lists[0]),
-        "the zero-file host uploads distinct diagnostic, main, profiles, controls, topology, and actor textures in exact order and owns every immutable list");
+        "the zero-file host without persistence fails closed to Main while uploading distinct diagnostic, main, profiles, controls, topology, and actor textures in exact order and owning every immutable list");
 
     OmegaAppTestAccess::SetFrontEndState(*app,
         omega::app::FrontEndState{

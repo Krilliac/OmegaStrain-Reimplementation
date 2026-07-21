@@ -2037,6 +2037,40 @@ player, coordinate axes or units, camera, transform, level placement, collision,
 animation, asset binding, framebuffer identity, physical-pixel result, owner-corpus result, PCSX2
 equivalence, or behavioral parity.
 
+### E-0108 project-owned profile-gated startup
+
+`PlanProjectFrontEndStartupState` is a pure `constexpr`/`noexcept` policy over an already-owned
+profile-count snapshot and explicit front-end capabilities. It returns exactly `Profiles / Profiles /
+First` for either a valid bounded nonempty snapshot or an exact `0 / 0` snapshot whose
+`can_create_first_profile` capability is true. It returns the established `Main /
+StartDiagnostic / First` state for every malformed or out-of-bounds representation, including a
+visible count greater than the total, either count zero while the other is nonzero, a total above
+1,024, a visible count above three, or an exact empty snapshot without creation capability. Planning
+performs no allocation, command publication, persistence, identity, renderer, or platform work.
+
+`OmegaApp` derives its initial front-end state from the captured `FrontEndStartupModel` and the
+already-prepared first-profile presentation capability. Production fresh-replay setup supplies its
+captured total and visible counts plus the same explicit capability to the same planner. Both paths
+therefore begin a supported profile-shell startup state on the first Profiles slot, while retaining
+the existing fail-closed Main state for invalid or unsupported input. Entering Profiles never creates
+or selects a profile: E-0106 creation and E-0096 session-only selection still require separate
+Primary press edges.
+
+The generated acceptance route composes the existing opening-movie boundary with native
+persistence as `movie -> Profiles -> explicit create -> release -> explicit select -> Main` for both
+natural completion and Primary skip. A Primary edge consumed by movie skip is not reused by the
+front end; it must be released before a distinct create press. A generated bounded playback failure
+also fails open to Profiles, advances no simulation, publishes no profile or active selection, and
+leaves the reopened durable catalog empty. The modal route's create/select commands mutate no GPU
+resource. No new texture or draw list is introduced. Tested `NoContent` no-opening-movie totals
+remain 8 resident slots / 233,476 logical bytes for an exact empty catalog and 6 / 159,748 for a valid
+nonempty catalog. The generated `NoContent` 2x2 movie fixture coexists with the empty presentation at
+9 / 233,492, then transition releases exactly its one slot and 16 logical bytes. Implementation and
+generated fixtures are present but compilation and execution validation
+remain pending. This policy establishes no retail startup, menu, profile, save, active-profile
+persistence, campaign, checkpoint, PS2, memory-card, savestate, emulator, proprietary-input, or
+behavioral-parity semantics.
+
 ### Project-owned front-end cancel action
 
 Logical action 7 is a distinct project-owned cancel edge. Keyboard Backspace and gamepad East map

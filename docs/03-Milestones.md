@@ -245,6 +245,18 @@ Fresh replay derives the same optional rectangle from its owned position without
 state or changing the trace schema. This is a project-authored diagnostic presentation, not actor,
 camera, scene-placement, collision, animation, physical-pixel, owner-corpus, PCSX2, or retail-parity
 evidence.
+E-0108 adds a pure project-owned profile-gated startup policy. Valid bounded nonempty snapshots and
+exact empty snapshots with explicit first-profile-creation capability open Profiles on its first
+slot; malformed, out-of-bounds, or unsupported zero-profile representations fail closed to Main.
+Live startup and fresh replay use the same planner without automatic profile creation or selection.
+Generated fixtures compose natural movie completion and Primary skip with the explicit
+`movie -> Profiles -> create -> release -> select -> Main` route; the skip press is swallowed and
+must be released before creation. A bounded generated playback failure also fails open to Profiles
+without durable profile mutation. No GPU resource is added: tested `NoContent` no-opening-movie
+empty/nonempty totals remain 8 / 233,476 and 6 / 159,748, while the generated `NoContent` 2x2 movie
+fixture temporarily coexists at 9 / 233,492 before releasing one slot / 16 bytes. Compilation and
+execution validation remain pending. This is not retail startup, menu, profile, save, PS2,
+proprietary-input, or parity evidence.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
@@ -1190,8 +1202,8 @@ implementation.
 
 ## M6: Campaign coverage
 
-Status: native persistence foundation, profile-catalog startup composition, and one explicit
-first-profile creation path implemented. The
+Status: native persistence foundation, profile-catalog startup composition, explicit profile-gated
+entry, and one explicit first-profile creation path implemented. The
 versioned transactional `SaveDatabase` stores only project-owned native records. `ProfileCatalog`
 adds bounded metadata at `profiles/<32-lower-hex-id>/metadata`, lists it before platform startup, and
 never creates or selects a profile implicitly. `OmegaApp` owns the database/catalog lifetime through
@@ -1205,8 +1217,10 @@ resolves and owns the selected ID on its game thread. Selection never mutates th
 writes the database, or creates/selects an implicit default. Only DiagnosticPlay advances
 simulation. E-0106 adds the explicit empty-catalog `CreateFirstProfile` transition with one fixed
 project ID/name, transactional persistence, preloaded empty/one-profile presentations, and no
-automatic active selection; a later Primary selects it session-locally. Persistent active-profile
-policy, general profile mutation UI, campaign schemas, and the
+automatic active selection; a later Primary selects it session-locally. E-0108 routes valid
+nonempty or explicitly creatable exact-empty startup snapshots into Profiles through one shared live
+and replay planner, while malformed or unsupported snapshots fail closed to Main. Persistent
+active-profile confirmation and persistence, general profile mutation UI, campaign schemas, and the
 independently evidenced Omega Strain payload mapping remain in progress. No PS2 memory-card device
 or emulator savestate is part of the shipping-runtime design, and the synthetic shell is not a
 retail-fidelity claim.

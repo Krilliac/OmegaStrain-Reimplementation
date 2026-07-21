@@ -121,6 +121,25 @@ Studio's historical engine source or internal toolchain.
   deterministic logical or raw card without patching an existing image. Owner saves and exported
   card images stay outside version control; Omega Strain payload interpretation remains a separate
   evidence-backed mapping slice.
+- E-0108 makes entry into that project-owned shell explicitly profile-gated. The pure
+  `constexpr`/`noexcept` `PlanProjectFrontEndStartupState` opens `Profiles` on its first slot only
+  for a bounded, internally consistent nonempty snapshot or an exact empty snapshot with explicit
+  first-profile-creation capability. A malformed or out-of-bounds count pair, or zero profiles
+  without that capability, fails closed to the established `Main` startup state. Live `OmegaApp`
+  startup and fresh replay call the same planner; neither path creates or selects a profile
+  automatically. The fresh-replay summary publishes only its bounded final project-owned
+  `front_end=<mode>/<row>/<slot>` state, and the existing CLI smoke pins the exact empty-profile
+  route to `Profiles/Profiles/First` without changing capture schema. Generated acceptance
+  fixtures compose the existing opening-movie and profile
+  lanes as `movie -> Profiles -> explicit create -> release -> explicit select -> Main`, including
+  a swallowed skip press that must be released before creation. A generated bounded playback failure
+  also fails open to `Profiles` while leaving the durable catalog empty. This policy adds no GPU
+  resource: tested `NoContent` no-opening-movie accounting remains 8 slots / 233,476 logical bytes
+  for an empty catalog and 6 / 159,748 for a nonempty catalog; the generated `NoContent` 2x2 movie
+  fixture temporarily raises the empty case to 9 / 233,492, then releases exactly one slot and 16
+  bytes on transition. Compilation and execution of the new fixtures remain pending. This is
+  project-owned startup composition, not retail
+  startup, menu, profile, save, PS2, proprietary-input, or behavioral-parity evidence.
 - E-0103 gives that project-owned front end a distinct cancel action without changing the global
   quit path. Backspace and gamepad East publish action 7; Escape and gamepad Back remain action 1
   quit controls. Cancel is inert on Main, otherwise returns Profiles, DiagnosticPlay, Controls, or
