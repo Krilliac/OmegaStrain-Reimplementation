@@ -28,6 +28,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -119,7 +120,8 @@ struct OmegaAppTestAccess final
             },
         };
         auto created = runtime::RenderDrawList::Create(commands);
-        if (!created)
+        if (!created ||
+            !app.front_end_presentation_.profile_active_draw_lists)
             return false;
         app.diagnostic_hidden_draw_list_ = *created;
         for (runtime::RenderDrawList& draw_list :
@@ -133,7 +135,7 @@ struct OmegaAppTestAccess final
         // frame actually submits, so it must be poisoned too or the fixture
         // silently leaves one reachable surface holding owned handles.
         for (auto& active_draw_lists :
-             app.front_end_presentation_.profile_active_draw_lists)
+             *app.front_end_presentation_.profile_active_draw_lists)
         {
             for (runtime::RenderDrawList& draw_list : active_draw_lists)
                 draw_list = *created;
@@ -153,11 +155,14 @@ struct OmegaAppTestAccess final
         for (runtime::RenderDrawList& draw_list :
              app.front_end_presentation_.profile_selection_draw_lists)
             draw_list = {};
-        for (auto& active_draw_lists :
-             app.front_end_presentation_.profile_active_draw_lists)
+        if (app.front_end_presentation_.profile_active_draw_lists)
         {
-            for (runtime::RenderDrawList& draw_list : active_draw_lists)
-                draw_list = {};
+            for (auto& active_draw_lists :
+                 *app.front_end_presentation_.profile_active_draw_lists)
+            {
+                for (runtime::RenderDrawList& draw_list : active_draw_lists)
+                    draw_list = {};
+            }
         }
         app.diagnostic_controls_draw_list_ = {};
         app.diagnostic_asset_topology_draw_list_ = {};
@@ -320,7 +325,7 @@ struct OmegaAppTestAccess final
         kFrontEndVisibleProfiles>&
     FrontEndProfileActiveDrawLists(const OmegaApp& app) noexcept
     {
-        return app.front_end_presentation_.profile_active_draw_lists;
+        return *app.front_end_presentation_.profile_active_draw_lists;
     }
 
     [[nodiscard]] static const runtime::RenderDrawList& DiagnosticControlsDrawList(

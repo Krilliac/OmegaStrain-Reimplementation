@@ -15,6 +15,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <new>
 #include <span>
 #include <string>
 #include <type_traits>
@@ -533,7 +534,21 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             const FrontEndCapabilities capabilities)
         -> std::expected<FrontEndPresentation, std::string>
     {
+        static_assert(
+            std::is_nothrow_move_constructible_v<FrontEndPresentation>);
+        static_assert(std::is_nothrow_move_assignable_v<FrontEndPresentation>);
+        static_assert(sizeof(std::unique_ptr<ProfileActiveDrawListMatrix>) <
+                      sizeof(ProfileActiveDrawListMatrix));
         FrontEndPresentation presentation;
+        presentation.profile_active_draw_lists.reset(
+            new (std::nothrow) ProfileActiveDrawListMatrix{});
+        if (!presentation.profile_active_draw_lists)
+        {
+            return std::unexpected(std::string{
+                "SDL/GPU front-end active profile draw-list allocation failed"});
+        }
+        ProfileActiveDrawListMatrix& profile_active_draw_lists =
+            *presentation.profile_active_draw_lists;
         const runtime::DebugImage menu_image =
             BuildProjectFrontEndMainImage(content_stage, model.total_profiles);
         auto uploaded_menu = host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
@@ -631,7 +646,7 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                 std::move(*created_draw_list);
 
             for (std::size_t active_slot = 0U;
-                 active_slot < presentation.profile_active_draw_lists[slot].size();
+                 active_slot < profile_active_draw_lists[slot].size();
                  ++active_slot)
             {
                 diagnostic_commands[diagnostic_base_command_count + 2U] =
@@ -651,11 +666,12 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                     return std::unexpected(std::string{
                         "SDL/GPU front-end active profile draw-list creation failed"});
                 }
-                presentation.profile_active_draw_lists[slot][active_slot] =
+                profile_active_draw_lists[slot][active_slot] =
                     std::move(*created_active_draw_list);
             }
         }
-        return presentation;
+        return std::expected<FrontEndPresentation, std::string>{
+            std::in_place, std::move(presentation)};
     };
 
     const bool can_create_first_profile = native_persistence != nullptr &&
@@ -1051,10 +1067,14 @@ OmegaApp::~OmegaApp() noexcept
     diagnostic_actor_draw_list_ = {};
     const auto clear_front_end_draw_lists = [](FrontEndPresentation& presentation) noexcept
     {
-        for (auto& active_draw_lists : presentation.profile_active_draw_lists)
+        if (presentation.profile_active_draw_lists)
         {
-            for (runtime::RenderDrawList& draw_list : active_draw_lists)
-                draw_list = {};
+            for (auto& active_draw_lists :
+                 *presentation.profile_active_draw_lists)
+            {
+                for (runtime::RenderDrawList& draw_list : active_draw_lists)
+                    draw_list = {};
+            }
         }
         for (runtime::RenderDrawList& draw_list :
              presentation.profile_selection_draw_lists)
@@ -2123,15 +2143,17 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
             // The cue position comes only from the identifier the view resolved
             // against the model it publishes, so an unresolvable confirmation
             // simply falls back to the unmarked selection list.
-            if (view.active_profile_slot)
+            if (view.active_profile_slot &&
+                front_end_presentation_.profile_active_draw_lists)
             {
                 const std::size_t active_slot =
                     static_cast<std::size_t>(*view.active_profile_slot);
                 if (active_slot <
-                    front_end_presentation_.profile_active_draw_lists[profile_slot].size())
+                    (*front_end_presentation_.profile_active_draw_lists)[profile_slot]
+                        .size())
                 {
-                    return front_end_presentation_
-                        .profile_active_draw_lists[profile_slot][active_slot];
+                    return (*front_end_presentation_.profile_active_draw_lists)
+                        [profile_slot][active_slot];
                 }
             }
             return front_end_presentation_.profile_selection_draw_lists[profile_slot];
