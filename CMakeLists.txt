@@ -553,6 +553,60 @@ if(BUILD_TESTING)
         )
     endfunction()
 
+    if(WIN32)
+        unset(OMEGA_LAUNCH_TEST_POWERSHELL CACHE)
+        unset(OMEGA_LAUNCH_TEST_POWERSHELL)
+        find_program(OMEGA_LAUNCH_TEST_POWERSHELL
+            NAMES powershell.exe pwsh.exe
+            REQUIRED
+            NO_CACHE
+        )
+        if(NOT IS_ABSOLUTE "${OMEGA_LAUNCH_TEST_POWERSHELL}" OR
+           NOT EXISTS "${OMEGA_LAUNCH_TEST_POWERSHELL}")
+            message(FATAL_ERROR
+                "OpenOmega launcher tests require an absolute existing PowerShell host"
+            )
+        endif()
+
+        add_executable(omega_windows_argv_capture
+            native/tests/windows_argv_capture.cpp
+        )
+        target_compile_features(omega_windows_argv_capture PRIVATE cxx_std_23)
+        if(MSVC)
+            target_compile_options(omega_windows_argv_capture PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_windows_argv_capture PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+            )
+            if(MINGW)
+                target_link_options(omega_windows_argv_capture PRIVATE -municode)
+            endif()
+        endif()
+
+        add_test(NAME omega_launch_quoting_tests
+            COMMAND "${OMEGA_LAUNCH_TEST_POWERSHELL}"
+                -NoProfile
+                -NonInteractive
+                -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/test-launch-omega-quoting.ps1"
+                -ArgvCaptureExecutable "$<TARGET_FILE:omega_windows_argv_capture>"
+        )
+        set_tests_properties(omega_launch_quoting_tests PROPERTIES
+            LABELS "integration;windows"
+            RUN_SERIAL TRUE
+            TIMEOUT 30
+        )
+    endif()
+
     add_executable(omega_boot_sequence_tests
         native/tests/boot_sequence_tests.cpp
     )
