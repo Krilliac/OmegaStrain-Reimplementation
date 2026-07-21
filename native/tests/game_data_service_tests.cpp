@@ -1509,6 +1509,17 @@ int GameDataServiceFailureCount()
             auto nested_content = spatial_service->LoadLevelContent(nested_manifest);
             Check(nested_content && content && *nested_content == *content,
                 "single-pass content resolves a non-empty container-only source chain");
+            constexpr std::uint64_t nested_material_items = 34;
+            auto nested_material_limits = omega::asset::DecodeLimits{};
+            nested_material_limits.maximum_items = nested_material_items;
+            Check(LoadMaterialCatalogsWithLimits(
+                      root, nested_manifest, nested_material_limits).has_value(),
+                "exact nested-source level-material item budget succeeds");
+            nested_material_limits.maximum_items = nested_material_items - 1U;
+            CheckDecodeError(
+                LoadMaterialCatalogsWithLimits(root, nested_manifest, nested_material_limits),
+                omega::asset::DecodeErrorCode::LimitExceeded,
+                "one-below nested-source level-material item budget fails");
             auto nested_limits = omega::asset::DecodeLimits{};
             nested_limits.maximum_nesting_depth = 1;
             CheckDecodeError(LoadContentWithLimits(root, nested_manifest, nested_limits),
@@ -1784,11 +1795,39 @@ int GameDataServiceFailureCount()
                 omega::asset::DecodeErrorCode::LimitExceeded,
                 "one-below shared level-material input budget fails");
 
-            constexpr std::uint64_t material_items = 30;
+            auto empty_material_manifest = *spatial_manifest;
+            empty_material_manifest.terrain_cells.clear();
+            constexpr std::uint64_t empty_material_items = 2;
+            limits = omega::asset::DecodeLimits{};
+            limits.maximum_items = empty_material_items;
+            Check(LoadMaterialCatalogsWithLimits(
+                      root, empty_material_manifest, limits).has_value(),
+                "exact zero-cell level-material item budget charges only the source directory");
+            limits.maximum_items = empty_material_items - 1U;
+            CheckDecodeError(
+                LoadMaterialCatalogsWithLimits(root, empty_material_manifest, limits),
+                omega::asset::DecodeErrorCode::LimitExceeded,
+                "one-below zero-cell level-material item budget fails");
+
+            auto one_cell_material_manifest = *spatial_manifest;
+            one_cell_material_manifest.terrain_cells.resize(1U);
+            constexpr std::uint64_t one_cell_material_items = 17;
+            limits = omega::asset::DecodeLimits{};
+            limits.maximum_items = one_cell_material_items;
+            Check(LoadMaterialCatalogsWithLimits(
+                      root, one_cell_material_manifest, limits).has_value(),
+                "exact one-cell level-material item budget includes the manifest cell");
+            limits.maximum_items = one_cell_material_items - 1U;
+            CheckDecodeError(
+                LoadMaterialCatalogsWithLimits(root, one_cell_material_manifest, limits),
+                omega::asset::DecodeErrorCode::LimitExceeded,
+                "one-below one-cell level-material item budget fails");
+
+            constexpr std::uint64_t material_items = 32;
             limits = omega::asset::DecodeLimits{};
             limits.maximum_items = material_items;
             Check(LoadMaterialCatalogsWithLimits(root, *spatial_manifest, limits).has_value(),
-                "exact shared level-material item budget succeeds without resetting per cell");
+                "exact two-cell level-material item budget includes both manifest cells");
             limits.maximum_items = material_items - 1U;
             CheckDecodeError(
                 LoadMaterialCatalogsWithLimits(root, *spatial_manifest, limits),

@@ -126,10 +126,10 @@ public:
     [[nodiscard]] static asset::DecodeResult<LevelDecodeBudget> CreateMaterialCatalogs(
         const asset::LevelManifestIR& manifest, const asset::DecodeLimits limits)
     {
-        const std::uint64_t initial_items = manifest.data_hog_source.hog_entries.size();
-        std::uint64_t minimum_items = 0;
-        if (!Add(initial_items, manifest.terrain_cells.size(), minimum_items) ||
-            minimum_items > limits.maximum_items)
+        std::uint64_t initial_items = 0;
+        if (!Add(manifest.terrain_cells.size(), manifest.data_hog_source.hog_entries.size(),
+                initial_items) ||
+            initial_items > limits.maximum_items)
             return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
                 "level cells and source chain exceed the shared item limit"));
 
