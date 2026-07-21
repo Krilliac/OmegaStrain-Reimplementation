@@ -1381,6 +1381,16 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     compatibility path, not a general mixer, full PSS grammar, perceptual-sync proof, frame-exact
     retail timing claim, or non-Windows end-to-end playback claim. Proprietary inputs and private
     validation artifacts remain outside version control.
+80. E-0103 adds a separate project-owned cancel edge to the current native front end. Keyboard
+    Backspace and gamepad East publish logical action 7; Escape and gamepad Back remain global quit
+    controls. Cancel is inert on Main and returns Profiles, DiagnosticPlay, Controls, and
+    AssetTopology to their matching Main rows without publishing a profile command. It has priority
+    over simultaneous primary and navigation edges. Live capture and replay route the same action,
+    while terminal input continues to resolve before front-end reduction. The host binding table is
+    now 19 physical bindings over seven logical actions. Exhaustive generated reducer coverage,
+    focused replay tests, and the direct SDL/GPU capture smoke exercise the slice. This is
+    project-authored shell policy and establishes no retail control, menu-graph, timing, or fidelity
+    claim; private and proprietary inputs were not used.
 
 ## Disc observations
 

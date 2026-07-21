@@ -79,6 +79,7 @@ void Check(const bool condition, const std::string_view message)
         .primary_pressed = (mask & 1U) != 0U,
         .previous_pressed = (mask & 2U) != 0U,
         .next_pressed = (mask & 4U) != 0U,
+        .cancel_pressed = (mask & 8U) != 0U,
     };
 }
 
@@ -93,6 +94,23 @@ void Check(const bool condition, const std::string_view message)
     if (mode_byte > 4U || row_byte > 3U || profile_slot_byte > 2U)
     {
         return FrontEndReduction{.state = omega::app::InitialFrontEndState()};
+    }
+
+    if (input.cancel_pressed)
+    {
+        if (state.mode == FrontEndMode::Main)
+            return FrontEndReduction{.state = state};
+        constexpr std::array returned_rows{
+            FrontEndMainRow::StartDiagnostic,
+            FrontEndMainRow::Profiles,
+            FrontEndMainRow::StartDiagnostic,
+            FrontEndMainRow::Controls,
+            FrontEndMainRow::AssetTopology,
+        };
+        state.mode = FrontEndMode::Main;
+        state.selected_main_row = returned_rows[mode_byte];
+        state.selected_profile_slot = FrontEndProfileSlot::First;
+        return FrontEndReduction{.state = state};
     }
 
     const std::uint8_t selectable_profiles = visible_profile_slots > 3U ? 3U : visible_profile_slots;
@@ -361,6 +379,7 @@ void CheckReducerAndViewContract()
     static_assert(omega::app::kFrontEndPrimaryAction == 6U);
     static_assert(omega::app::kFrontEndPreviousAction == 2U);
     static_assert(omega::app::kFrontEndNextAction == 3U);
+    static_assert(omega::app::kFrontEndCancelAction == 7U);
     static_assert(omega::app::kFrontEndMainRowCount == 4U);
     static_assert(noexcept(omega::app::ReduceFrontEnd({}, {}, 0U)));
     static_assert(noexcept(omega::app::FrontEndAllowsSimulation({})));
@@ -399,7 +418,7 @@ void CheckReducerAndViewContract()
                 exhaustive_gate_matches && omega::app::FrontEndAllowsSimulation(state) == oracle_allows;
             for (const std::uint8_t profile_count : profile_counts)
             {
-                for (std::uint8_t mask = 0U; mask < 8U; ++mask)
+                for (std::uint8_t mask = 0U; mask < 16U; ++mask)
                 {
                     exhaustive_matches = exhaustive_matches &&
                                          omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count) ==
@@ -408,7 +427,7 @@ void CheckReducerAndViewContract()
             }
         }
     }
-    Check(exhaustive_matches, "all 3145728 mode/row/count/edge combinations match "
+    Check(exhaustive_matches, "all 6291456 mode/row/count/edge combinations match "
                               "the independent reducer oracle");
     Check(exhaustive_gate_matches, "all 65536 byte-representable states allow "
                                    "simulation only in valid DiagnosticPlay");
@@ -431,7 +450,7 @@ void CheckReducerAndViewContract()
                                                omega::app::FrontEndAllowsSimulation(state) == oracle_allows;
                 for (const std::uint8_t profile_count : profile_counts)
                 {
-                    for (std::uint8_t mask = 0U; mask < 8U; ++mask)
+                    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
                     {
                         exhaustive_slot_matches = exhaustive_slot_matches &&
                                                   omega::app::ReduceFrontEnd(
@@ -443,7 +462,7 @@ void CheckReducerAndViewContract()
         }
     }
     Check(exhaustive_slot_matches,
-          "all 245760 valid-mode/row and byte-slot/count/edge combinations match the independent oracle");
+          "all 491520 valid-mode/row and byte-slot/count/edge combinations match the independent oracle");
     Check(exhaustive_slot_gate_matches,
           "every byte-representable profile slot gates simulation only when the complete state is valid");
 
@@ -468,17 +487,84 @@ void CheckReducerAndViewContract()
               },
           "profile activation has priority over simultaneous navigation and publishes the pre-navigation slot");
 
+    Check(omega::app::ReduceFrontEnd(
+              profiles_second,
+              FrontEndInputEdges{
+                  .primary_pressed = true,
+                  .previous_pressed = true,
+                  .next_pressed = true,
+                  .cancel_pressed = true,
+              },
+              3U) ==
+              FrontEndReduction{.state = FrontEndState{
+                                    .mode = FrontEndMode::Main,
+                                    .selected_main_row = FrontEndMainRow::Profiles,
+                                    .selected_profile_slot = FrontEndProfileSlot::First,
+                                }},
+          "cancel has priority over activation and navigation and publishes no profile command");
+
+    constexpr std::array cancel_origins{
+        FrontEndState{.mode = FrontEndMode::DiagnosticPlay,
+            .selected_main_row = FrontEndMainRow::AssetTopology,
+            .selected_profile_slot = FrontEndProfileSlot::Third},
+        FrontEndState{.mode = FrontEndMode::Profiles,
+            .selected_main_row = FrontEndMainRow::StartDiagnostic,
+            .selected_profile_slot = FrontEndProfileSlot::Second},
+        FrontEndState{.mode = FrontEndMode::Controls,
+            .selected_main_row = FrontEndMainRow::Profiles,
+            .selected_profile_slot = FrontEndProfileSlot::Third},
+        FrontEndState{.mode = FrontEndMode::AssetTopology,
+            .selected_main_row = FrontEndMainRow::Controls,
+            .selected_profile_slot = FrontEndProfileSlot::Second},
+    };
+    constexpr std::array cancel_rows{
+        FrontEndMainRow::StartDiagnostic,
+        FrontEndMainRow::Profiles,
+        FrontEndMainRow::Controls,
+        FrontEndMainRow::AssetTopology,
+    };
+    bool every_modal_cancel_returns_to_its_row = true;
+    for (std::size_t index = 0U; index < cancel_origins.size(); ++index)
+    {
+        every_modal_cancel_returns_to_its_row =
+            every_modal_cancel_returns_to_its_row &&
+            omega::app::ReduceFrontEnd(cancel_origins[index],
+                FrontEndInputEdges{.cancel_pressed = true}, 3U) ==
+                FrontEndReduction{.state = FrontEndState{
+                                      .mode = FrontEndMode::Main,
+                                      .selected_main_row = cancel_rows[index],
+                                      .selected_profile_slot = FrontEndProfileSlot::First,
+                                  }};
+    }
+    Check(every_modal_cancel_returns_to_its_row,
+        "cancel returns every modal mode to its corresponding Main row without a command");
+
+    const FrontEndState main_controls{
+        .mode = FrontEndMode::Main,
+        .selected_main_row = FrontEndMainRow::Controls,
+        .selected_profile_slot = FrontEndProfileSlot::Second,
+    };
+    Check(omega::app::ReduceFrontEnd(main_controls,
+              FrontEndInputEdges{
+                  .primary_pressed = true,
+                  .previous_pressed = true,
+                  .next_pressed = true,
+                  .cancel_pressed = true,
+              },
+              3U) == FrontEndReduction{.state = main_controls},
+        "Main cancel is inert and consumes simultaneous activation and navigation edges");
+
     bool empty_is_fail_closed = true;
     const FrontEndState empty_profiles{
         .mode = FrontEndMode::Profiles,
         .selected_main_row = FrontEndMainRow::Profiles,
         .selected_profile_slot = FrontEndProfileSlot::First,
     };
-    for (std::uint8_t mask = 0U; mask < 8U; ++mask)
+    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
     {
         const FrontEndReduction reduced =
             omega::app::ReduceFrontEnd(empty_profiles, InputFromMask(mask), 0U);
-        const FrontEndState expected_state = (mask & 1U) != 0U
+        const FrontEndState expected_state = (mask & 9U) != 0U
                                                  ? FrontEndState{
                                                        .mode = FrontEndMode::Main,
                                                        .selected_main_row = FrontEndMainRow::Profiles,
@@ -489,7 +575,7 @@ void CheckReducerAndViewContract()
                                reduced.command == FrontEndCommand{};
     }
     Check(empty_is_fail_closed,
-          "all empty-profile action combinations publish no command; navigation is inert and primary only returns");
+          "all empty-profile action combinations publish no command; navigation is inert and primary or cancel returns");
 
     Check(omega::app::ReduceFrontEnd(
               FrontEndState{

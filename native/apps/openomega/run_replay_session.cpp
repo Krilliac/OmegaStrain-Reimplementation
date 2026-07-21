@@ -210,6 +210,8 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
                     replay_frame->input().WasPressed(kFrontEndPreviousAction),
                 .next_pressed =
                     replay_frame->input().WasPressed(kFrontEndNextAction),
+                .cancel_pressed =
+                    replay_frame->input().WasPressed(kFrontEndCancelAction),
             },
             front_end_visible_profile_slots_);
         *front_end_state_ = front_end.state;

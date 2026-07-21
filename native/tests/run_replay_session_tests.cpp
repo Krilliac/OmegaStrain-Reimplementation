@@ -950,10 +950,11 @@ void CheckDebugLocomotionOptIn()
 
 void CheckFrontEndModalGate()
 {
-    constexpr std::array<std::uint32_t, 3U> menu_actions{
+    constexpr std::array<std::uint32_t, 4U> menu_actions{
         omega::app::kFrontEndPreviousAction,
         omega::app::kFrontEndNextAction,
         omega::app::kFrontEndPrimaryAction,
+        omega::app::kFrontEndCancelAction,
     };
     constexpr std::array<InputTransition, 0U> no_transitions{};
 
@@ -985,10 +986,14 @@ void CheckFrontEndModalGate()
                   omega::app::kFrontEndNextAction &&
               legacy_frame->input().actions()[2] ==
                   omega::app::kFrontEndPrimaryAction &&
+              legacy_frame->input().actions()[3] ==
+                  omega::app::kFrontEndCancelAction &&
               legacy_frame->input().WasPressed(
                   omega::app::kFrontEndPreviousAction) &&
               legacy_frame->input().WasPressed(
                   omega::app::kFrontEndPrimaryAction) &&
+              !legacy_frame->input().WasPressed(
+                  omega::app::kFrontEndCancelAction) &&
               legacy_plan->simulation_steps == 2U &&
               !legacy.front_end_state() &&
               legacy.debug_locomotion_position() == Position3{.z = 2} &&
@@ -998,7 +1003,7 @@ void CheckFrontEndModalGate()
                       .simulated_time = milliseconds{20},
                       .alive_entities = 1U,
                   }),
-        "default-null menu ownership leaves actions 2, 3, and 6 on legacy nonmodal replay");
+        "default-null menu ownership leaves actions 2, 3, 6, and 7 on legacy nonmodal replay");
 
     constexpr std::array next_down{
         InputTransition{.code = 1U, .pressed = true}};
@@ -1334,12 +1339,67 @@ void CheckFrontEndModalGate()
               reopen.debug_locomotion_position() == Position3{.z = 1},
         "reactivation combines the preserved remainder with only its own elapsed and then resumes held movement");
 
-    constexpr std::array terminal_transition{
-        InputTransition{.code = 0U, .pressed = true}};
+    constexpr std::array cancel_priority_transitions{
+        InputTransition{.code = 0U, .pressed = true},
+        InputTransition{.code = 1U, .pressed = true},
+        InputTransition{.code = 2U, .pressed = true},
+        InputTransition{.code = 3U, .pressed = true},
+    };
+    const std::array cancel_priority_frames{
+        ScriptedElapsedFrame{
+            .elapsed = std::chrono::seconds{4},
+            .transitions = cancel_priority_transitions,
+        },
+    };
+    RunCaptureTracePair cancel_priority_pair =
+        BuildScriptedPair(menu_actions, cancel_priority_frames);
+    RunReplaySessionConfig cancel_priority_config = ValidConfig();
+    cancel_priority_config.enable_debug_locomotion = true;
+    cancel_priority_config.initial_front_end_state = FrontEndState{
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::StartDiagnostic,
+        .selected_profile_slot = FrontEndProfileSlot::Second,
+    };
+    cancel_priority_config.front_end_visible_profile_slots = 3U;
+    auto cancel_priority_created = RunReplaySession::Create(
+        std::move(cancel_priority_pair), cancel_priority_config);
+    RunReplaySession cancel_priority = TakeSession(
+        cancel_priority_created, "the cancel-priority menu replay is created");
+    const auto cancel_scheduler_origin = cancel_priority.scheduler_state();
+    const auto cancel_world_origin = cancel_priority.simulation_state();
+    const auto cancel_position_origin = cancel_priority.debug_locomotion_position();
+    auto cancel_frame = cancel_priority.Next();
+    const auto cancel_plan = cancel_frame ? cancel_frame->frame_plan() : std::nullopt;
+    Check(cancel_frame && cancel_plan &&
+              cancel_frame->input().WasPressed(
+                  omega::app::kFrontEndCancelAction) &&
+              cancel_frame->input().WasPressed(
+                  omega::app::kFrontEndPrimaryAction) &&
+              cancel_frame->input().WasPressed(
+                  omega::app::kFrontEndPreviousAction) &&
+              cancel_frame->input().WasPressed(
+                  omega::app::kFrontEndNextAction) &&
+              cancel_frame->front_end_command() == FrontEndCommand{} &&
+              cancel_priority.front_end_state() ==
+                  FrontEndState{
+                      .mode = FrontEndMode::Main,
+                      .selected_main_row = FrontEndMainRow::Profiles,
+                      .selected_profile_slot = FrontEndProfileSlot::First,
+                  } &&
+              cancel_plan->simulation_steps == 0U &&
+              cancel_priority.scheduler_state() == cancel_scheduler_origin &&
+              SameSimulation(cancel_priority.simulation_state(), cancel_world_origin) &&
+              cancel_priority.debug_locomotion_position() == cancel_position_origin,
+        "replay cancel has priority over confirm and navigation, returns Profiles to its Main row, and emits no command");
+
+    constexpr std::array terminal_transitions{
+        InputTransition{.code = 0U, .pressed = true},
+        InputTransition{.code = 1U, .pressed = true},
+    };
     const std::span<const ScriptedElapsedFrame> no_elapsed_frames;
     RunCaptureTracePair terminal_pair = BuildScriptedPair(
         std::span<const std::uint32_t>{menu_actions}.subspan(2U), no_elapsed_frames,
-        TerminalReasons{.host_quit_requested = true}, terminal_transition);
+        TerminalReasons{.host_quit_requested = true}, terminal_transitions);
     RunReplaySessionConfig terminal_config = ValidConfig();
     terminal_config.enable_debug_locomotion = true;
     terminal_config.initial_front_end_state = FrontEndState{
@@ -1360,6 +1420,8 @@ void CheckFrontEndModalGate()
     Check(terminal_frame && terminal_frame->terminal_input() &&
               terminal_frame->input().WasPressed(
                   omega::app::kFrontEndPrimaryAction) &&
+              terminal_frame->input().WasPressed(
+                  omega::app::kFrontEndCancelAction) &&
               terminal_frame->front_end_command() == FrontEndCommand{} &&
               !terminal_frame->elapsed() && !terminal_frame->frame_plan() &&
               terminal.front_end_state() == terminal_menu_before &&
@@ -1368,7 +1430,7 @@ void CheckFrontEndModalGate()
               terminal.debug_locomotion_position() == terminal_position_before &&
               terminal.state() == RunReplaySessionState::Complete &&
               terminal.remaining_frames() == 0U,
-        "terminal resolution precedes the reducer and cannot select the highlighted profile or mutate any simulation owner");
+        "terminal resolution precedes the reducer and cannot cancel, select the highlighted profile, or mutate any simulation owner");
 }
 
 void CheckMoveLifecycle()

@@ -43,9 +43,12 @@ outside this archive and can be selected with the documented `--data-root` and o
 arguments or configuration.
 
 Interactive startup uses a project-generated native Main screen with Start Diagnostic, Profiles,
-Controls, and Asset Topology rows. Profiles are a bounded read-only startup snapshot: this preview
-does not create, select, import, or export one from the front end. The screen is development shell
-UI, not reproduced retail artwork or a retail-behavior claim.
+Controls, and Asset Topology rows. Use W/S, Up/Down, or the gamepad D-pad to navigate; F1, Enter,
+keypad Enter, gamepad Start, or gamepad South confirms. Backspace or gamepad East returns from a
+subscreen, while Escape or gamepad Back quits. Profiles are a bounded read-only startup snapshot:
+choosing a populated slot selects it only for the current process and never creates, updates,
+imports, exports, or persists a profile. The screen and its controls are development-shell policy,
+not reproduced retail artwork or a retail-behavior claim.
 
 The adjacent `.zip.sha256` file records the archive's SHA-256 digest for integrity checks. This preview is not code-signed
 and may trigger Windows reputation warnings. It is an early native clean-room runtime, not a claim

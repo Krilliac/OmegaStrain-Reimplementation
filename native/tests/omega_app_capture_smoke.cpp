@@ -319,6 +319,11 @@ struct OmegaAppTestAccess final
         return app.input_ ? app.input_->bindings().actions().size() : 0U;
     }
 
+    [[nodiscard]] static constexpr std::uint32_t QuitAction() noexcept
+    {
+        return OmegaApp::kQuitAction;
+    }
+
     [[nodiscard]] static std::uint64_t NextInputFrameIndex(
         const OmegaApp& app) noexcept
     {
@@ -1524,6 +1529,12 @@ int main()
                   omega::app::kDebugMoveRightAction),
         "the synthetic W/S, Up/Down, A/D, and gamepad dpad bindings expose action IDs 2 through 5");
     Check(OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+              static_cast<std::uint16_t>(SDL_SCANCODE_ESCAPE),
+              OmegaAppTestAccess::QuitAction()) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
+                  static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_BACK),
+                  OmegaAppTestAccess::QuitAction()) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
               static_cast<std::uint16_t>(SDL_SCANCODE_F1),
               omega::app::kFrontEndPrimaryAction) &&
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
@@ -1538,10 +1549,16 @@ int main()
               OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
                   static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_SOUTH),
                   omega::app::kFrontEndPrimaryAction) &&
-              OmegaAppTestAccess::InputBindingCount(*app) == 17U &&
-              OmegaAppTestAccess::InputActionCount(*app) == 6U,
-        "seventeen physical bindings preserve the six-action schema while "
-        "five confirmation controls share action 6");
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
+                  static_cast<std::uint16_t>(SDL_SCANCODE_BACKSPACE),
+                  omega::app::kFrontEndCancelAction) &&
+              OmegaAppTestAccess::HasInputBinding(*app, InputDevice::GamepadButton,
+                  static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_EAST),
+                  omega::app::kFrontEndCancelAction) &&
+              OmegaAppTestAccess::InputBindingCount(*app) == 19U &&
+              OmegaAppTestAccess::InputActionCount(*app) == 7U,
+        "nineteen physical bindings expose seven logical actions; five confirmation controls "
+        "share action 6 while Backspace and gamepad East share cancel action 7");
 
     const omega::runtime::RenderTextureHandle diagnostic_texture =
         OmegaAppTestAccess::DiagnosticTexture(*app);
@@ -2298,13 +2315,14 @@ int main()
             0U, omega::app::kFrontEndPrimaryAction);
         const auto action_schema = normal_pair->input_trace().actions();
         captured_action_count = action_schema.size();
-        constexpr std::array<std::uint32_t, 6U> kExpectedActions{
+        constexpr std::array<std::uint32_t, 7U> kExpectedActions{
             1U,
             omega::app::kDebugMoveForwardAction,
             omega::app::kDebugMoveBackwardAction,
             omega::app::kDebugMoveLeftAction,
             omega::app::kDebugMoveRightAction,
             omega::app::kFrontEndPrimaryAction,
+            omega::app::kFrontEndCancelAction,
         };
         captured_action_schema_exact =
             action_schema.size() == kExpectedActions.size();
@@ -2328,13 +2346,13 @@ int main()
         Check(normal_pair->input_trace().first_frame_index() == 2U &&
                   normal_pair->input_trace().frame_count() == 1U &&
                   normal_pair->scheduler_elapsed_trace().frame_count() == 1U &&
-                  captured_input && captured_elapsed && captured_action_count == 6U &&
+                  captured_input && captured_elapsed && captured_action_count == 7U &&
                   captured_action_schema_exact && captured_action_states_valid &&
                   captured_forward && captured_menu_toggle &&
                   captured_forward->held && captured_forward->pressed &&
                   !captured_forward->released && captured_menu_toggle->held &&
                   captured_menu_toggle->pressed && !captured_menu_toggle->released,
-            "normal capture records the exact six-action schema and simultaneous Return/W edges");
+            "normal capture records the exact seven-action schema and simultaneous Return/W edges");
         if (captured_elapsed)
         {
             auto replay = omega::runtime::FrameScheduler::Create(normal_before.config);
@@ -2829,10 +2847,10 @@ int main()
 
     const omega::app::GpuHostSnapshot controls_exit_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    bool controls_exit_events = PushKey(SDL_SCANCODE_F1, true);
+    bool controls_exit_events = PushKey(SDL_SCANCODE_BACKSPACE, true);
     for (std::size_t index = 0U; controls_exit_events && index < 4'095U; ++index)
-        controls_exit_events = PushKey(SDL_SCANCODE_F1, true);
-    Check(controls_exit_events, "fresh Profiles return edge and timing workload enter");
+        controls_exit_events = PushKey(SDL_SCANCODE_BACKSPACE, true);
+    Check(controls_exit_events, "fresh Profiles cancel edge and timing workload enter");
     auto controls_exit = app->RunWithCapture(1);
     Check(controls_exit.has_value(), "Profiles-to-Main return captures");
     if (!controls_exit)
@@ -2841,10 +2859,16 @@ int main()
     const auto controls_exit_elapsed = controls_exit_pair != nullptr
                                            ? controls_exit_pair->scheduler_elapsed_trace().FrameAt(0U)
                                            : std::nullopt;
+    const auto controls_exit_cancel = controls_exit_pair != nullptr
+                                          ? controls_exit_pair->input_trace().ActionAt(
+                                                0U, omega::app::kFrontEndCancelAction)
+                                          : std::nullopt;
     const RunResult controls_exit_result = controls_exit->result();
     const omega::app::GpuHostSnapshot controls_exit_gpu_after =
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(controls_exit_pair != nullptr && controls_exit_elapsed &&
+              controls_exit_cancel && controls_exit_cancel->held &&
+              controls_exit_cancel->pressed && !controls_exit_cancel->released &&
               controls_exit_elapsed->elapsed > settings.frame.simulation_step &&
               controls_exit_result.input_frames == 1U &&
               controls_exit_result.rendered_frames == 1 &&
@@ -2861,8 +2885,8 @@ int main()
                   initial_visible_draw_lists[1]) &&
               IsOneVisibleMenuSubmission(
                   controls_exit_gpu_before, controls_exit_gpu_after),
-        "fresh primary returns Profiles to Main row one on the same frame without advancing accumulated menu time");
-    Check(PushKey(SDL_SCANCODE_F1, false), "returned Main primary releases");
+        "fresh cancel returns Profiles to Main row one without a command or accumulated-menu-time advance");
+    Check(PushKey(SDL_SCANCODE_BACKSPACE, false), "returned Main cancel releases");
     Check(RunPlainFrame() &&
               OmegaAppTestAccess::FrontEnd(*app) == kMainRowOne,
         "return release preserves Main row one");
@@ -2900,17 +2924,17 @@ int main()
               OmegaAppTestAccess::FrontEnd(*app) == kControlsRowTwo &&
               OmegaAppTestAccess::SchedulerSnapshot(*app) == modal_scheduler_before,
         "Controls release preserves the modal screen and scheduler baseline");
-    Check(PushKey(SDL_SCANCODE_F1, true),
-        "fresh Controls return edge enters the queue");
+    Check(PushKey(SDL_SCANCODE_BACKSPACE, true),
+        "fresh Controls cancel edge enters the queue");
     Check(RunPlainFrame() &&
               OmegaAppTestAccess::FrontEnd(*app) == kMainRowTwo &&
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   initial_visible_draw_lists[2]) &&
               SameSimulationState(OmegaAppTestAccess::SimulationSnapshot(*app),
                   modal_simulation_before),
-        "fresh primary returns Controls to Main row two without advancing simulation");
-    Check(PushKey(SDL_SCANCODE_F1, false),
-        "returned Controls primary releases");
+        "fresh cancel returns Controls to Main row two without advancing simulation");
+    Check(PushKey(SDL_SCANCODE_BACKSPACE, false),
+        "returned Controls cancel releases");
     Check(RunPlainFrame() &&
               OmegaAppTestAccess::FrontEnd(*app) == kMainRowTwo,
         "Controls return release preserves Main row two");
@@ -3096,11 +3120,11 @@ int main()
 
     const omega::app::GpuHostSnapshot topology_exit_gpu_before =
         OmegaAppTestAccess::GpuSnapshot(*app);
-    bool topology_exit_events = PushKey(SDL_SCANCODE_F1, true);
+    bool topology_exit_events = PushKey(SDL_SCANCODE_BACKSPACE, true);
     for (std::size_t index = 0U; topology_exit_events && index < 4'095U; ++index)
-        topology_exit_events = PushKey(SDL_SCANCODE_F1, true);
+        topology_exit_events = PushKey(SDL_SCANCODE_BACKSPACE, true);
     Check(topology_exit_events,
-        "fresh AssetTopology return edge and timing workload enter");
+        "fresh AssetTopology cancel edge and timing workload enter");
     auto topology_exit = app->RunWithCapture(1);
     Check(topology_exit.has_value(), "AssetTopology-to-Main return captures");
     if (!topology_exit)
@@ -3129,9 +3153,9 @@ int main()
                   initial_visible_draw_lists[3]) &&
               IsOneVisibleMenuSubmission(
                   topology_exit_gpu_before, topology_exit_gpu_after),
-        "fresh primary returns AssetTopology to Main row three on the same frame without advancing accumulated modal time");
-    Check(PushKey(SDL_SCANCODE_F1, false),
-        "returned AssetTopology Main primary releases");
+        "fresh cancel returns AssetTopology to Main row three without advancing accumulated modal time");
+    Check(PushKey(SDL_SCANCODE_BACKSPACE, false),
+        "returned AssetTopology Main cancel releases");
     Check(RunPlainFrame() &&
               OmegaAppTestAccess::FrontEnd(*app) == kMainRowThree,
         "AssetTopology return release preserves Main row three");
@@ -3228,8 +3252,9 @@ int main()
         ready_for_terminal->scheduler_state_after();
     const std::uint64_t terminal_frame_index =
         OmegaAppTestAccess::NextInputFrameIndex(*app);
-    Check(PushKey(SDL_SCANCODE_F1, true) && PushEscape(true) && PushQuit(),
-        "a fresh menu edge and simultaneous quit reasons enter the SDL queue");
+    Check(PushKey(SDL_SCANCODE_F1, true) &&
+              PushKey(SDL_SCANCODE_BACKSPACE, true) && PushEscape(true) && PushQuit(),
+        "fresh confirm/cancel edges and simultaneous quit reasons enter the SDL queue");
     auto both = app->RunWithCapture(1);
     Check(both.has_value(), "simultaneous quit reasons publish a terminal capture");
     if (!both)
@@ -3241,6 +3266,11 @@ int main()
                                                 0U,
                                                 omega::app::kFrontEndPrimaryAction)
                                           : std::nullopt;
+    const auto terminal_cancel_action = both_pair != nullptr
+                                            ? both_pair->input_trace().ActionAt(
+                                                  0U,
+                                                  omega::app::kFrontEndCancelAction)
+                                            : std::nullopt;
     const omega::app::GpuHostSnapshot terminal_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(both->completion() == RunCaptureCompletion::QuitRequested && both_terminal &&
@@ -3250,6 +3280,8 @@ int main()
               both_terminal->logical_quit_pressed &&
               terminal_menu_action && terminal_menu_action->held &&
               terminal_menu_action->pressed && !terminal_menu_action->released &&
+              terminal_cancel_action && terminal_cancel_action->held &&
+              terminal_cancel_action->pressed && !terminal_cancel_action->released &&
               both->scheduler_state_before() == scheduler_before_terminal &&
               both->scheduler_state_after() == scheduler_before_terminal &&
               OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
@@ -3280,10 +3312,11 @@ int main()
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   initial_hidden_draw_list) &&
               terminal_gpu == ready_gpu,
-        "a terminal action-6 edge performs no render or menu/resource mutation");
+        "terminal action-6 and action-7 edges perform no render or menu/resource mutation");
 
-    Check(PushEscape(false) && PushKey(SDL_SCANCODE_F1, false),
-        "the final Escape and F1 releases enter the SDL queue");
+    Check(PushEscape(false) && PushKey(SDL_SCANCODE_F1, false) &&
+              PushKey(SDL_SCANCODE_BACKSPACE, false),
+        "the final Escape, confirm, and cancel releases enter the SDL queue");
     Check(omega::app::detail::OmegaAppTestAccess::InstallUnownedDiagnosticDraw(*app),
         "the operational-failure fixture installs an unowned diagnostic draw");
     const omega::app::GpuHostSnapshot failure_gpu_before =

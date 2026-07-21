@@ -213,6 +213,12 @@ and supports skip, EOS, safety timeout, and fail-open transition to the existing
 scheduler catch-up. Capture/replay remains mutually exclusive. This does not establish general media
 selection/mixing, non-Windows end-to-end playback, perceptual synchronization, or exact retail
 audiovisual timing.
+E-0103 adds a distinct project-owned cancel action to that existing synthetic front end. Backspace
+and gamepad East publish action 7, while Escape and gamepad Back remain global quit. Cancel is inert
+on Main, otherwise returns each modal mode to its corresponding Main row without a profile command,
+and precedes simultaneous confirm/navigation. Live capture and replay route the same bounded schema;
+terminal input still resolves first. These controls and transitions are native shell policy rather
+than a retail-menu or retail-input claim.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-

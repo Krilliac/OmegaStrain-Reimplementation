@@ -17,11 +17,12 @@ namespace omega::app
 {
 // Project-owned logical actions used by the synthetic native front-end. They
 // are not retail input identifiers or control-layout claims. Actions 2 and 3
-// remain shared with diagnostic locomotion; action 6 remains the sole
-// primary/confirm edge.
+// remain shared with diagnostic locomotion; action 6 is primary/confirm and
+// action 7 is the distinct cancel edge.
 inline constexpr std::uint32_t kFrontEndPrimaryAction = 6U;
 inline constexpr std::uint32_t kFrontEndPreviousAction = 2U;
 inline constexpr std::uint32_t kFrontEndNextAction = 3U;
+inline constexpr std::uint32_t kFrontEndCancelAction = 7U;
 
 inline constexpr std::size_t kFrontEndMaximumProfiles = 1'024U;
 inline constexpr std::size_t kFrontEndVisibleProfiles = 3U;
@@ -134,6 +135,7 @@ struct FrontEndInputEdges
     bool primary_pressed = false;
     bool previous_pressed = false;
     bool next_pressed = false;
+    bool cancel_pressed = false;
 
     friend constexpr bool operator==(const FrontEndInputEdges &, const FrontEndInputEdges &) noexcept = default;
 };
@@ -203,10 +205,12 @@ struct FrontEndView
 // [any thread; reentrant] Consumes already-routed logical press edges and a
 // caller-owned startup-model count. Invalid input state fails closed to the
 // initial front-end before considering any edge. The count is clamped to the
-// three project-owned slots. Primary has priority over navigation. A selectable
-// Profiles slot publishes one typed command and returns to its Main row; an
-// empty or out-of-range slot publishes no command and retains the existing
-// return transition. Empty selection/navigation is otherwise inert. Simultaneous
+// three project-owned slots. Cancel has priority over primary and navigation;
+// it is inert on Main and returns every other mode to its corresponding Main
+// row without publishing a command. Primary has priority over navigation. A
+// selectable Profiles slot publishes one typed command and returns to its Main
+// row; an empty or out-of-range slot publishes no command and retains the
+// existing return transition. Empty selection/navigation is otherwise inert. Simultaneous
 // navigation edges are neutral, and navigation is press-edge-only and clamps at
 // both bounds. No allocation, I/O, catalog access, or persistence mutation occurs.
 [[nodiscard]] constexpr FrontEndReduction ReduceFrontEnd(
@@ -214,6 +218,30 @@ struct FrontEndView
 {
     if (!IsValidFrontEndState(state))
         return FrontEndReduction{.state = InitialFrontEndState()};
+
+    if (input.cancel_pressed)
+    {
+        switch (state.mode)
+        {
+        case FrontEndMode::Main:
+            return FrontEndReduction{.state = state};
+        case FrontEndMode::Profiles:
+            state.selected_main_row = FrontEndMainRow::Profiles;
+            break;
+        case FrontEndMode::DiagnosticPlay:
+            state.selected_main_row = FrontEndMainRow::StartDiagnostic;
+            break;
+        case FrontEndMode::Controls:
+            state.selected_main_row = FrontEndMainRow::Controls;
+            break;
+        case FrontEndMode::AssetTopology:
+            state.selected_main_row = FrontEndMainRow::AssetTopology;
+            break;
+        }
+        state.mode = FrontEndMode::Main;
+        state.selected_profile_slot = FrontEndProfileSlot::First;
+        return FrontEndReduction{.state = state};
+    }
 
     constexpr std::uint8_t kMaximumSelectableProfiles = static_cast<std::uint8_t>(kFrontEndVisibleProfiles);
     const std::uint8_t selectable_profiles =
