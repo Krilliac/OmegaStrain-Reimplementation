@@ -980,6 +980,20 @@ int GameDataServiceFailureCount()
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
         ("openomega-game-data-tests-" + std::to_string(nonce));
+    const auto private_missing_root = root.parent_path() /
+        ("PrivateUser-SecretVault-missing-game-data-" + std::to_string(nonce));
+    std::error_code missing_root_error;
+    std::filesystem::remove_all(private_missing_root, missing_root_error);
+    auto missing_root_service =
+        omega::content::GameDataService::Open({.root = private_missing_root});
+    Check(!missing_root_service &&
+              missing_root_service.error().code ==
+                  omega::content::GameDataErrorCode::MountFailed &&
+              missing_root_service.error().message == "unable to mount game-data root" &&
+              missing_root_service.error().message.find("PrivateUser") == std::string::npos &&
+              missing_root_service.error().message.find(private_missing_root.string()) ==
+                  std::string::npos,
+        "missing private-looking roots fail with a fixed host-path-free diagnostic");
     Check(MakeValidTree(root), "synthetic NTSC-U-like data tree is created");
 
     RunSourceResolverTests(root);
