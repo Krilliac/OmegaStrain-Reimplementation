@@ -1615,7 +1615,11 @@ if(BUILD_TESTING)
         add_executable(omega_startup_failure_dialog_tests
             native/tests/startup_failure_dialog_tests.cpp
         )
-        target_link_libraries(omega_startup_failure_dialog_tests PRIVATE omega_sdl_backend)
+        target_link_libraries(omega_startup_failure_dialog_tests
+            PRIVATE
+                omega_runtime
+                omega_sdl_backend
+        )
         if(MSVC)
             target_compile_options(omega_startup_failure_dialog_tests PRIVATE
                 /W4

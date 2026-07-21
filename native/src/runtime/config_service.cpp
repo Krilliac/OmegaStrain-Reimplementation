@@ -299,15 +299,15 @@ std::expected<ConfigStore, std::string> LoadConfigFile(
 
     std::ifstream stream(path, std::ios::binary);
     if (!stream)
-        return std::unexpected("unable to open config file: " + path.string());
+        return std::unexpected("unable to open config file");
     std::string bytes(limits.max_input_bytes + 1U, '\0');
     stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     if (stream.bad())
-        return std::unexpected("unable to read config file: " + path.string());
+        return std::unexpected("unable to read config file");
     const std::size_t read_bytes = static_cast<std::size_t>(stream.gcount());
     if (read_bytes > limits.max_input_bytes)
         return std::unexpected("config file exceeds the " +
-            std::to_string(limits.max_input_bytes) + "-byte budget: " + path.string());
+            std::to_string(limits.max_input_bytes) + "-byte budget");
     bytes.resize(read_bytes);
     return ParseConfigText(bytes, limits);
 }

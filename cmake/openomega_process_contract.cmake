@@ -25,6 +25,15 @@ function(run_openomega_case case_name expect_success expected_stdout expected_st
     normalize_process_output(actual_stdout "${actual_stdout}")
     normalize_process_output(actual_stderr "${actual_stderr}")
 
+    foreach(forbidden_fragment IN LISTS openomega_forbidden_diagnostic_fragments)
+        string(FIND "${actual_stdout}${actual_stderr}" "${forbidden_fragment}"
+            forbidden_position)
+        if(NOT forbidden_position EQUAL -1)
+            message(FATAL_ERROR
+                "${case_name}: process output disclosed a forbidden private-path fragment")
+        endif()
+    endforeach()
+
     if(expect_success)
         if(NOT actual_result STREQUAL "0")
             message(FATAL_ERROR
@@ -207,7 +216,15 @@ set(configured_root_config "${process_working_directory}/configured-root.cfg")
 file(WRITE "${configured_root_config}" "content.data_root = ${empty_data_root}\n")
 set(explicit_empty_config "${process_working_directory}/explicit-empty.cfg")
 file(WRITE "${explicit_empty_config}" "")
-set(missing_explicit_config "${process_working_directory}/missing-explicit.cfg")
+set(missing_explicit_config
+    "${process_working_directory}/PrivateUser-SecretVault-missing-explicit.cfg")
+set(openomega_forbidden_diagnostic_fragments
+    "PrivateUser"
+    "SecretVault"
+    "synthetic-runtime-profiles"
+    "${missing_explicit_config}"
+    "${default_profile}"
+)
 
 run_openomega_case(probe_failure_precedes_persistence FALSE ""
     "content startup [missing-required-file]: game-data root is missing SYSTEM.CNF\n"
@@ -224,6 +241,13 @@ run_openomega_case(zero_frames_reopen TRUE "${zero_frame_stdout}" "" --frames=0)
 directory_manifest("${native_save_directory}" native_save_after_reopen)
 require_same_manifest("second zero-frame native-save reopen"
     "${native_save_after_first_startup}" "${native_save_after_reopen}")
+
+file(MAKE_DIRECTORY "${default_profile}")
+run_openomega_case(nonregular_default_profile FALSE ""
+    "runtime configuration default profile: config path is not a regular file\n"
+    --frames=0
+)
+file(REMOVE_RECURSE "${default_profile}")
 
 file(MAKE_DIRECTORY "${default_profile_directory}")
 file(WRITE "${default_profile}" "content.data_root = ${empty_data_root}\n")
@@ -246,7 +270,7 @@ run_openomega_case(explicit_config_bypasses_malformed_default TRUE
     "--config=${explicit_empty_config}" --frames=0
 )
 run_openomega_case(explicit_missing_remains_fatal FALSE ""
-    "runtime configuration ${missing_explicit_config}: unable to open config file: ${missing_explicit_config}\n"
+    "runtime configuration explicit profile: unable to open config file\n"
     "--config=${missing_explicit_config}" --frames=0
 )
 

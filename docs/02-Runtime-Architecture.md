@@ -710,9 +710,10 @@ one-argument overload remains ambient-free. A missing default yields the empty s
 the loader inspects only the final entry with `symlink_status(error_code)`: regular files use the
 existing bounded loader; a reported symlink, dangling symlink, directory, or other non-regular
 entry fails without being followed; other inspection errors fail. This does not assert rejection
-of symlinked parents or every Windows reparse point. Default-only load and inspection diagnostics
-carry `runtime configuration default profile: `; existing explicit and `--set` diagnostics are
-unchanged. File values, source-order overrides, E-0074 tuple validation, and atomic direct CLI
+of symlinked parents or every Windows reparse point. Load and inspection diagnostics use only the
+fixed `runtime configuration explicit profile: ` or `runtime configuration default profile: `
+category and never include the source filesystem path. Existing `--set` diagnostics are unchanged.
+File values, source-order overrides, E-0074 tuple validation, and atomic direct CLI
 precedence retain their order. Success remains silent. There is no profile write, directory
 creation, migration, picker, startup dialog, default level, hot reload, private-data access, retail
 behavior, or emulator-equivalence claim.

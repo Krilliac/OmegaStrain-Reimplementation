@@ -1,10 +1,14 @@
 #include "startup_failure_dialog.h"
 
+#include "omega/runtime/runtime_settings.h"
+
 #include <SDL3/SDL_init.h>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -189,6 +193,64 @@ void TestOwnershipAndIndependence()
           "independent build returns its own exact text");
 }
 
+void CheckRuntimeConfigurationPrivacyProjection(
+    const std::expected<omega::runtime::ConfigStore, std::string>& result,
+    const std::string_view expected_detail, const std::filesystem::path& private_path,
+    const std::string_view context)
+{
+    Check(!result, context);
+    if (result)
+        return;
+
+    Check(result.error() == expected_detail, context);
+    const std::string dialog = Text(Build(
+        omega::app::StartupFailureStage::RuntimeConfiguration,
+        "runtime-configuration", result.error()));
+    Check(dialog == ExpectedText(
+                        "runtime configuration", "runtime-configuration", expected_detail),
+        "runtime configuration detail reaches the dialog projection unchanged");
+    Check(dialog.find(private_path.string()) == std::string::npos,
+        "runtime configuration dialogs omit the complete source path");
+    Check(dialog.find("PrivateUser") == std::string::npos,
+        "runtime configuration dialogs omit the synthetic user identity");
+    Check(dialog.find("SecretVault") == std::string::npos,
+        "runtime configuration dialogs omit the synthetic private directory");
+}
+
+void TestRuntimeConfigurationPrivacyProjection()
+{
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+                      ("openomega-dialog-PrivateUser-SecretVault-" +
+                          std::to_string(suffix));
+    std::error_code file_error;
+    std::filesystem::remove_all(root, file_error);
+    file_error.clear();
+    std::filesystem::create_directories(root, file_error);
+    Check(!file_error, "the dialog privacy fixture root is created");
+
+    const auto missing_explicit = root / "missing-explicit.cfg";
+    omega::runtime::LaunchOptions explicit_options;
+    explicit_options.config_path = missing_explicit;
+    CheckRuntimeConfigurationPrivacyProjection(
+        omega::runtime::LoadRuntimeConfig(explicit_options),
+        "runtime configuration explicit profile: unable to open config file",
+        missing_explicit,
+        "an explicit config error is available for dialog projection");
+
+    const auto nonregular_default = root / "default-profile.cfg";
+    std::filesystem::create_directory(nonregular_default, file_error);
+    Check(!file_error, "the non-regular dialog privacy fixture is created");
+    CheckRuntimeConfigurationPrivacyProjection(
+        omega::runtime::LoadRuntimeConfig({}, nonregular_default),
+        "runtime configuration default profile: config path is not a regular file",
+        nonregular_default,
+        "a default config error is available for dialog projection");
+
+    std::filesystem::remove_all(root, file_error);
+    Check(!file_error, "the dialog privacy fixture root is removed");
+}
+
 void TestPolicyAndSuppressedShow()
 {
     using omega::app::StartupFailureDialogOutcome;
@@ -273,6 +335,7 @@ int main()
     TestProjection();
     TestLimitsAndCapacity();
     TestOwnershipAndIndependence();
+    TestRuntimeConfigurationPrivacyProjection();
     TestPolicyAndSuppressedShow();
 
     if (failures != 0)

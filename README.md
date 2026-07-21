@@ -855,9 +855,11 @@ Studio's historical engine source or internal toolchain.
   hosts. An explicit `--config` bypasses discovery and inspection. A missing default is silent;
   a regular default is loaded before validated `--set` overrides; and a reported final-entry
   symlink, dangling symlink, directory, or other non-regular type is rejected without following
-  it. Discovery performs no normalization, canonicalization, token expansion, write, directory
-  creation, migration, or success-path printing. This slice does not claim rejection of symlinked
-  parents, add a picker or startup dialog, choose a default level, or inspect private content.
+  it. Config file failures use only fixed explicit/default profile labels and never disclose the
+  source filesystem path. Discovery performs no normalization, canonicalization, token expansion,
+  write, directory creation, migration, or success-path printing. This slice does not claim
+  rejection of symlinked parents, add a picker or startup dialog, choose a default level, or
+  inspect private content.
   Serialized local validation passed: focused and full MSVC builds completed cleanly; direct
   `omega_core_tests` and the exact process contract passed; default, opt-in GPU, and restored
   CTest passed 30/30, 34/34, and 30/30; runtime-off direct and focused checks passed with 27
@@ -1203,6 +1205,7 @@ looks for one host-family default: `%LOCALAPPDATA%/OpenOmega/openomega.cfg` on W
 `$HOME/.config/openomega/openomega.cfg` when `HOME` is absolute. Missing, empty, or relative
 required roots produce no candidate. A missing default profile is equivalent to the empty store;
 the final entry must be a reported regular file and is never followed when reported as a symlink.
+Config file failures use fixed explicit/default profile labels without printing the source path.
 No profile directory or file is created. `--set=KEY=VALUE` applies one validated command-line
 override per key. Current keys are
 `log.minimum_severity`, `log.ring_capacity`, `jobs.worker_count`, `jobs.max_pending_jobs`,
