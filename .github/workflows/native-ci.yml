@@ -26,6 +26,9 @@ jobs:
       - name: Validate tracked content
         run: python -B tools/check_public_tree.py
 
+      - name: Validate evidence ledger format
+        run: python -B tools/check_ledger_format.py
+
       - name: Enforce native dependency boundaries
         run: python -B tools/check_native_dependencies.py
 

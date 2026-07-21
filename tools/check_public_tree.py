@@ -40,18 +40,47 @@ SECRET_PATTERNS = {
 }
 
 # A concrete absolute user-home path names a specific developer machine and
-# username; it must never ship in the public tree. This matches Windows
-# drive-letter user-profile paths and Unix /home or /Users paths, but only when a
-# concrete name segment follows. Placeholder forms (an angle-bracketed name,
-# $HOME, %LOCALAPPDATA%) have no such segment and do not match, so documentation
-# may still describe paths generically.
-# Case-insensitive: Windows filesystems treat ``C:\\users`` and ``C:\\Users``
-# alike, and the placeholder exemptions ($HOME, <user>, %LOCALAPPDATA%) fail on
-# structure, not letter case, so IGNORECASE cannot make them match.
-OWNER_HOME_PATH = re.compile(
-    rb"(?:[A-Za-z]:[\\/]Users[\\/]|/home/|/Users/)[A-Za-z0-9._-]+",
+# username; it must never ship in the public tree. Scan decoded text so Unicode
+# names are handled correctly. One-or-more separators also catches paths as
+# represented in JSON/C/C++ source (for example, doubled backslashes).
+OWNER_HOME_WINDOWS_PATH = re.compile(
+    r"[A-Za-z]:[\\/]+Users[\\/]+(?P<user>[\w.@+-]+)",
     re.IGNORECASE,
 )
+OWNER_HOME_UNIX_PATH = re.compile(
+    r"/(?:home|Users)[\\/]+(?P<user>[\w.@+-]+)",
+    re.IGNORECASE,
+)
+URI_PREFIX = re.compile(
+    r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*):/+[^\s]*$",
+    re.IGNORECASE,
+)
+
+
+def contains_owner_home_path(text: str) -> bool:
+    """Return whether text contains a concrete absolute developer-home path.
+
+    Non-file URI path components are not filesystem roots; ``file:`` URIs are.
+    Dot-only segments are not concrete user names. Placeholder forms such as
+    ``<user>``, ``$HOME``, and ``%USERNAME%`` are excluded by the username
+    character class.
+    """
+    for match in OWNER_HOME_WINDOWS_PATH.finditer(text):
+        if match.group("user").strip("."):
+            return True
+    for match in OWNER_HOME_UNIX_PATH.finditer(text):
+        uri = URI_PREFIX.search(text[: match.start() + 1])
+        if uri is not None and uri.group("scheme").lower() != "file":
+            continue
+        if (
+            uri is None
+            and match.start() > 0
+            and re.fullmatch(r"[\w:/.-]", text[match.start() - 1])
+        ):
+            continue
+        if match.group("user").strip("."):
+            return True
+    return False
 
 MAX_TRACKED_BYTES = 5 * 1024 * 1024
 PS2_EXECUTABLE_NAME = re.compile(
@@ -129,9 +158,11 @@ def check_blob(blob: TrackedBlob) -> list[str]:
 
     if b"\0" in data:
         errors.append(f"binary/NUL content requires explicit policy review: {normalized}")
+    decoded: str | None
     try:
-        data.decode("utf-8")
+        decoded = data.decode("utf-8")
     except UnicodeDecodeError:
+        decoded = None
         errors.append(f"non-UTF-8 content requires explicit policy review: {normalized}")
     if data.startswith(b"version https://git-lfs.github.com/spec/v1"):
         errors.append(f"Git LFS pointer requires explicit policy review: {normalized}")
@@ -140,7 +171,7 @@ def check_blob(blob: TrackedBlob) -> list[str]:
     for label, pattern in SECRET_PATTERNS.items():
         if pattern.search(data):
             errors.append(f"{label}: {normalized}")
-    if OWNER_HOME_PATH.search(data):
+    if decoded is not None and contains_owner_home_path(decoded):
         errors.append(f"absolute owner-home path leaks a developer machine/username: {normalized}")
     return errors
 
