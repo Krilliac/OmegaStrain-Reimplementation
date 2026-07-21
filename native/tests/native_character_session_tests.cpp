@@ -438,6 +438,41 @@ void CheckDurableSessionLifecycleAndReopen() {
       "the reopened validated marker remains an idempotent session start");
 }
 
+void CheckGameSessionCapacityClassification() {
+  TempDirectory tree("session-capacity");
+  const auto database_root = tree.path() / "native-save";
+  const ProfileId profile_id = Profile("abababababababababababababababab");
+  const CharacterId character_id =
+      Character("cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd");
+  constexpr omega::persistence::SaveDatabaseLimits limits{
+      .max_records = 4U,
+      .max_key_bytes = SaveDatabase::kHardMaxKeyBytes,
+  };
+
+  auto persistence = NativePersistence::Bootstrap(database_root, limits);
+  Check(persistence.has_value(),
+        "the bounded character-session database bootstraps");
+  if (!persistence)
+    return;
+  if (!CreateProfile(*persistence, profile_id, "Capacity Profile") ||
+      !persistence->ConfirmActiveProfile(profile_id) ||
+      !CreateCharacter(*persistence, profile_id, character_id,
+                       "Capacity Character") ||
+      !persistence->ConfirmActiveCharacter(profile_id, character_id)) {
+    Check(false, "the bounded character-session fixture fills four records");
+    return;
+  }
+
+  Check(persistence->database().record_count() == 4U,
+        "the bounded character-session fixture reaches its exact record limit");
+  CheckGameSessionError(
+      persistence->PrepareGameSessionStart(profile_id, character_id),
+      GameSessionStartErrorCode::StorageLimitExceeded,
+      "a fifth character-session record reports the typed storage limit");
+  Check(persistence->database().record_count() == 4U,
+        "the rejected character-session checkpoint preserves all four records");
+}
+
 void CheckDeletedOwnedRecordsFailTyped() {
   TempDirectory tree("deleted-owned-records");
   const auto database_root = tree.path() / "native-save";
@@ -663,6 +698,7 @@ void CheckCorruptGameSessionCheckpointFailsBootstrap() {
 int main() {
   CheckEmptyBootstrapAndTypedFailures();
   CheckDurableSessionLifecycleAndReopen();
+  CheckGameSessionCapacityClassification();
   CheckDeletedOwnedRecordsFailTyped();
   CheckProfileSwitchInvalidatesActiveCharacter();
   CheckProfileSwitchRejectsInterferingCharacterPointer();

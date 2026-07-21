@@ -1991,7 +1991,7 @@ void CheckDiagnosticCampaignStart(
         Check(!invalid_slot && invalid_slot.error() ==
                   "diagnostic campaign start selected an invalid slot" &&
                   !direct_unconfirmed && direct_unconfirmed.error() ==
-                      "diagnostic campaign start failed: active-profile-required" &&
+                      "game session start failed: active-profile-required" &&
                   Access::FrontEnd(*app) == kMainStartDiagnostic &&
                   Access::GpuSnapshot(*app) == gpu_before,
             "typed diagnostic-start application rejects malformed and unconfirmed requests without publication");
@@ -2019,6 +2019,8 @@ void CheckDiagnosticCampaignStart(
         fixture_root / "native-diagnostic-campaign-capacity";
     constexpr omega::persistence::SaveDatabaseLimits kFourRecordLimit{
         .max_records = 4U,
+        .max_key_bytes =
+            omega::persistence::SaveDatabase::kHardMaxKeyBytes,
     };
     {
         auto persistence = omega::app::NativePersistence::Bootstrap(
@@ -2095,7 +2097,7 @@ void CheckDiagnosticCampaignStart(
                   rejected->completion() ==
                       omega::app::RunCaptureCompletion::OperationalFailure &&
                   failure && *failure ==
-                      "diagnostic campaign start failed: storage-limit-exceeded" &&
+                      "game session start failed: storage-limit-exceeded" &&
                   failure->find(constrained_root.string()) ==
                       std::string_view::npos &&
                   failure->find(profile_id->ToString()) ==
@@ -4368,7 +4370,7 @@ int main()
         probe_cyan, probe_background, probe_slate, probe_cyan,
         probe_amber, probe_background, probe_cyan, probe_background,
         probe_slate, probe_slate, probe_cyan, probe_background,
-        probe_slate, probe_cyan, probe_slate, probe_cyan,
+        probe_slate, probe_cyan, probe_slate, probe_slate,
     };
     std::array<omega::runtime::RenderTextureBlitCommand, 16U>
         no_level_probe_commands{};
@@ -4513,8 +4515,8 @@ int main()
     constexpr std::array expected_controls_probe_readback{
         probe_background, probe_cyan, probe_slate, probe_cyan,
         probe_amber, probe_amber, probe_cyan, probe_background,
-        probe_cyan, probe_slate, probe_cyan, probe_cyan,
-        probe_cyan, probe_cyan, probe_cyan, probe_cyan,
+        probe_slate, probe_slate, probe_cyan, probe_cyan,
+        probe_cyan, probe_slate, probe_slate, probe_cyan,
     };
     for (std::size_t index = 0U; index < menu_probe_commands.size(); ++index)
     {
@@ -4737,10 +4739,9 @@ int main()
               normal_result.executed_simulation_steps == 1U &&
               normal_debug_position &&
               normal_debug_position->x == 0 && normal_debug_position->y == 0 &&
-              normal_debug_position->z == static_cast<std::int64_t>(
-                  normal_result.executed_simulation_steps),
-        "one Return-plus-W frame enters diagnostic play and applies one deterministic "
-        "movement step nonmodally");
+              normal_debug_position->z == 0,
+        "one Return-plus-W frame enters diagnostic play and advances simulation "
+        "without leaking modal movement into the deployment step");
     const omega::app::GpuHostSnapshot normal_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
     const omega::runtime::RenderDrawList normal_actor_draw_list =
@@ -4751,13 +4752,6 @@ int main()
         ? std::optional<omega::runtime::RenderTargetRectQ16>{
               normal_actor_commands[1].destination}
         : std::nullopt;
-    constexpr omega::runtime::RenderTargetRectQ16
-        kActorPositiveZOneDestination{
-            .left = 31'744U,
-            .top = 30'720U,
-            .right = 33'792U,
-            .bottom = 32'768U,
-        };
     Check(OmegaAppTestAccess::FrontEnd(*app) ==
                   omega::app::FrontEndState{
                       .mode = omega::app::FrontEndMode::DiagnosticPlay,
@@ -4792,7 +4786,7 @@ int main()
                   diagnostic_actor_marker_texture &&
               normal_actor_commands[1].source == kFullMenuSource &&
               normal_actor_commands[1].destination ==
-                  kActorPositiveZOneDestination &&
+                  kActorOriginDestination &&
               normal_actor_commands[1].fit_mode ==
                   omega::runtime::RenderTextureFitMode::Stretch &&
               normal_actor_commands[1].filter_mode ==
@@ -4800,7 +4794,8 @@ int main()
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   normal_actor_draw_list) &&
               IsOneDiagnosticPlaySubmission(initial_gpu, normal_gpu),
-        "primary priority enters DiagnosticPlay with immutable base then post-step positive-Z-up actor marker and no reupload");
+        "primary priority enters DiagnosticPlay with immutable base and an origin "
+        "marker because same-frame menu movement is neutral");
 
     const omega::runtime::FrameSchedulerState normal_before =
         normal->scheduler_state_before();
@@ -4829,7 +4824,7 @@ int main()
             0U, omega::app::kFrontEndPrimaryAction);
         const auto action_schema = normal_pair->input_trace().actions();
         captured_action_count = action_schema.size();
-        constexpr std::array<std::uint32_t, 7U> kExpectedActions{
+        constexpr std::array<std::uint32_t, 9U> kExpectedActions{
             1U,
             omega::app::kDebugMoveForwardAction,
             omega::app::kDebugMoveBackwardAction,
@@ -4837,6 +4832,8 @@ int main()
             omega::app::kDebugMoveRightAction,
             omega::app::kFrontEndPrimaryAction,
             omega::app::kFrontEndCancelAction,
+            omega::app::kDebugFireAction,
+            omega::app::kDebugTargetAction,
         };
         captured_action_schema_exact =
             action_schema.size() == kExpectedActions.size();
@@ -4860,14 +4857,15 @@ int main()
         Check(normal_pair->input_trace().first_frame_index() == 2U &&
                   normal_pair->input_trace().frame_count() == 1U &&
                   normal_pair->scheduler_elapsed_trace().frame_count() == 1U &&
-                  captured_input && captured_elapsed && captured_action_count == 7U &&
+                  captured_input && captured_elapsed && captured_action_count == 9U &&
                   captured_action_schema_exact && captured_action_states_valid &&
                   captured_elapsed->elapsed == one_step_elapsed &&
                   captured_forward && captured_menu_toggle &&
                   captured_forward->held && captured_forward->pressed &&
                   !captured_forward->released && captured_menu_toggle->held &&
                   captured_menu_toggle->pressed && !captured_menu_toggle->released,
-            "normal capture records the exact seven-action schema and simultaneous Return/W edges");
+            "normal capture records the exact nine-action schema and simultaneous "
+            "Return/W edges");
         if (captured_elapsed)
         {
             auto replay = omega::runtime::FrameScheduler::Create(normal_before.config);
@@ -4980,7 +4978,7 @@ int main()
                   normal_actor_destination &&
               replay_session.diagnostic_actor_marker_destination() ==
                   std::optional<omega::runtime::RenderTargetRectQ16>{
-                      kActorPositiveZOneDestination} &&
+                      kActorOriginDestination} &&
               replay_session.front_end_state() ==
                   omega::app::FrontEndState{} &&
               normal_result.planned_simulation_steps ==
@@ -4990,7 +4988,8 @@ int main()
               replay_session.state() ==
                   omega::app::RunReplaySessionState::Complete &&
               replay_session.remaining_frames() == 0U,
-        "replay applies action 6 and reaches the captured fresh-world position and actor destination");
+        "replay applies action 6 while preserving the captured neutral deployment "
+        "position and actor destination");
 
     const auto replay_complete = replay_session.Next();
     Check(!replay_complete &&
