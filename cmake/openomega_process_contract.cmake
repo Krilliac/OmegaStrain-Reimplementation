@@ -170,10 +170,13 @@ string(CONCAT zero_frame_stdout
 set(empty_data_root "${CMAKE_CURRENT_BINARY_DIR}/openomega-process-contract-empty-data-root")
 set(process_working_directory
     "${CMAKE_CURRENT_BINARY_DIR}/openomega-process-contract-working-directory")
+set(private_missing_data_root
+    "${process_working_directory}/PrivateUser-SecretVault-missing-game-data")
 file(REMOVE_RECURSE "${empty_data_root}")
 file(MAKE_DIRECTORY "${empty_data_root}")
 file(REMOVE_RECURSE "${process_working_directory}")
 file(MAKE_DIRECTORY "${process_working_directory}")
+file(REMOVE_RECURSE "${private_missing_data_root}")
 
 if("$ENV{OPENOMEGA_TEST_PROFILE_ROOT}" STREQUAL "" OR
    NOT "$ENV{LOCALAPPDATA}" STREQUAL "$ENV{OPENOMEGA_TEST_PROFILE_ROOT}/local-app-data" OR
@@ -249,6 +252,7 @@ set(openomega_forbidden_diagnostic_fragments
     "secret-configured-root"
     "secret-invalid-level"
     "synthetic-runtime-profiles"
+    "${private_missing_data_root}"
     "${missing_explicit_config}"
     "${default_profile}"
 )
@@ -438,6 +442,10 @@ run_openomega_case(set_supplies_missing_root FALSE ""
 run_openomega_case(missing_system_config FALSE ""
     "content startup [missing-required-file]: game-data root is missing SYSTEM.CNF\n"
     "--data-root=${empty_data_root}"
+)
+run_openomega_case(missing_private_game_data_root_is_redacted FALSE ""
+    "content startup [mount-failed]: unable to mount game-data root\n"
+    "--data-root=${private_missing_data_root}" --frames=0
 )
 run_openomega_case(capture_without_frames FALSE ""
     "--capture-run requires --frames\n${openomega_usage}"
