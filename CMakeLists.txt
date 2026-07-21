@@ -1236,7 +1236,9 @@ if(BUILD_TESTING)
         )
     endif()
     add_test(NAME omega_profile_catalog_tests COMMAND omega_profile_catalog_tests)
-    set_tests_properties(omega_profile_catalog_tests PROPERTIES TIMEOUT 10)
+    # The 65-profile durability fixture performs synchronous write-through and
+    # directory flushes whose Windows Debug latency varies substantially on hosted runners.
+    set_tests_properties(omega_profile_catalog_tests PROPERTIES TIMEOUT 30)
 
     add_executable(omega_par_text_envelope_tests
         native/tests/par_text_envelope_decoder_tests.cpp
