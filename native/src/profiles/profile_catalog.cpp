@@ -16,14 +16,18 @@
 #include <vector>
 
 namespace omega::profiles {
-// The project-owned catalog ceiling must stay inside the storage layer's own
-// record ceiling, so a full profiles/ namespace can never be legal to the
-// database yet unrepresentable to a bounded enumeration.
-static_assert(kProfileCatalogMaxProfiles > 0U &&
-                  kProfileCatalogMaxProfiles <=
-                      persistence::SaveDatabase::kHardMaxRecords,
-              "the project-owned profile ceiling must be a nonzero bound at or "
-              "below SaveDatabase::kHardMaxRecords");
+// The project-owned catalog ceiling must cover the storage layer's own record
+// ceiling, so a profiles/ namespace can never be legal to the database yet
+// unrepresentable to the default enumeration. Every record a database holds is
+// checked against its configured max_records, which is itself validated at or
+// below kHardMaxRecords, so this relationship is what keeps List() — that is,
+// ListBounded(kProfileCatalogMaxProfiles) — from newly failing closed on a
+// catalog written before the bound existed.
+static_assert(kProfileCatalogMaxProfiles >=
+                  persistence::SaveDatabase::kHardMaxRecords,
+              "the project-owned profile ceiling must cover "
+              "SaveDatabase::kHardMaxRecords so the default enumeration admits "
+              "every database-legal profile catalog");
 
 namespace {
 using persistence::SaveDatabaseError;
@@ -303,8 +307,8 @@ DecodeMetadata(const SaveRecord &record) {
 
   const std::size_t middle_bytes =
       key.size() - kProfileKeyPrefix.size() - kProfileMetadataKeySuffix.size();
-  return key.substr(kProfileKeyPrefix.size(), middle_bytes)
-             .find('/') == std::string_view::npos;
+  return key.substr(kProfileKeyPrefix.size(), middle_bytes).find('/') ==
+         std::string_view::npos;
 }
 
 // Precondition: IsDirectMarkerKey(key). Fails closed on any identifier the

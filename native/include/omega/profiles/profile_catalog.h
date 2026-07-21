@@ -23,9 +23,14 @@ inline constexpr std::uint64_t kProfileTimestampMaxUnixMilliseconds =
 // Project-owned ceiling on how many profile markers one enumeration will
 // admit. This is an invented application limit chosen for this reimplementation
 // — it does not model a memory-card capacity, a save-slot count, or any retail
-// quantity. It is deliberately far below the storage layer's own record
-// ceiling; profile_catalog.cpp static_asserts that relationship.
-inline constexpr std::size_t kProfileCatalogMaxProfiles = 64U;
+// quantity. It deliberately covers the storage layer's own record ceiling: a
+// SaveDatabase can never hold more records than SaveDatabase::kHardMaxRecords,
+// so no database-legal profiles/ namespace can present more direct markers than
+// this admits, and the default enumeration can never reject a catalog the
+// database itself accepts. profile_catalog.cpp static_asserts that
+// relationship. Callers that want a tighter budget ask for one explicitly
+// through ListBounded.
+inline constexpr std::size_t kProfileCatalogMaxProfiles = 4'096U;
 
 // A native OpenOmega profile identifier. Text form is exactly 32 lowercase
 // hexadecimal bytes. The identifier is application-owned and does not model a
@@ -122,18 +127,25 @@ public:
 
   // [owning persistence/game thread] Returns summaries sorted by ProfileId.
   // Non-marker records beneath profiles/ are deliberately ignored. Exactly
-  // equivalent to ListBounded(kProfileCatalogMaxProfiles).
+  // equivalent to ListBounded(kProfileCatalogMaxProfiles). Because that ceiling
+  // covers SaveDatabase::kHardMaxRecords, this enumeration admits every catalog
+  // the database can legally hold and never fails closed on its own budget, so
+  // it remains the unbounded whole-namespace listing it has always been.
   [[nodiscard]] std::expected<std::vector<ProfileSummary>, ProfileCatalogError>
   List() const;
 
   // [owning persistence/game thread] Returns summaries sorted by ProfileId,
-  // admitting at most max_profiles profile markers. Every record beneath
-  // profiles/ whose key is shaped like a direct <id>/metadata marker spends one
-  // unit of the budget *before* its identifier is parsed or its payload read,
-  // so an over-populated namespace fails closed with ResourceExhausted rather
-  // than silently truncating. Non-marker records beneath profiles/ are
-  // deliberately ignored and cost no budget. A max_profiles above
-  // kProfileCatalogMaxProfiles is itself rejected with ResourceExhausted.
+  // admitting at most max_profiles profile markers. This is the opt-in tighter
+  // budget: a caller that can only afford a handful of profiles asks for that
+  // many and gets a typed refusal instead of a partial answer. Every record
+  // beneath profiles/ whose key is shaped like a direct <id>/metadata marker
+  // spends one unit of the budget *before* its identifier is parsed or its
+  // payload read, so a namespace holding more markers than the requested budget
+  // fails closed with ResourceExhausted rather than silently truncating.
+  // Non-marker records beneath profiles/ are deliberately ignored and cost no
+  // budget. A max_profiles above kProfileCatalogMaxProfiles is itself rejected
+  // with ResourceExhausted; since that ceiling covers the storage layer's
+  // record cap, only budgets no database could ever need are refused this way.
   //
   // This bounds what the catalog materializes, not the storage layer beneath
   // it. SaveDatabase::List still materializes prefix record metadata for the

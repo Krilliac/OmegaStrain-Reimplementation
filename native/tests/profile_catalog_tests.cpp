@@ -77,6 +77,15 @@ void CheckErrorCode(const std::expected<T, ProfileCatalogError> &result,
   return "profiles/" + id.ToString() + "/metadata";
 }
 
+// Distinct canonical identifiers for populations too large to spell out.
+[[nodiscard]] ProfileId SequentialId(const std::size_t index) {
+  constexpr std::string_view alphabet = "0123456789abcdef";
+  std::string text(32U, '0');
+  text[30] = alphabet[(index >> 4U) & 0x0fU];
+  text[31] = alphabet[index & 0x0fU];
+  return Id(text);
+}
+
 class TempDirectory final {
 public:
   explicit TempDirectory(const std::string_view label) {
@@ -339,6 +348,48 @@ void CheckBoundedListing() {
     const auto filtered = catalog.ListBounded(ids.size());
     Check(filtered && filtered->size() == ids.size(),
           "non-marker records beneath profiles/ spend no enumeration budget");
+  }
+
+  {
+    // A catalog the database accepts but a 64-marker ceiling would have
+    // refused. Enumerating it is the historical List contract, so the
+    // project-owned ceiling has to cover the storage layer's record cap rather
+    // than sit below it; profile_catalog.cpp static_asserts that relationship
+    // for every population up to SaveDatabase::kHardMaxRecords, and this
+    // fixture pins the first population the superseded ceiling got wrong.
+    constexpr std::size_t kSupersededCeiling = 64U;
+    TempDirectory tree("bounded-legacy-population");
+    auto opened = SaveDatabase::Open(Config(tree.path() / "database"));
+    Check(opened.has_value(), "the legacy-population database opens");
+    if (opened) {
+      SaveDatabase database = std::move(*opened);
+      ProfileCatalog catalog(database);
+
+      bool populated = true;
+      for (std::size_t index = 0U; index <= kSupersededCeiling; ++index) {
+        const ProfileMetadata metadata{
+            .display_name = "Legacy " + std::to_string(index),
+            .created_unix_milliseconds = 1'000U,
+            .modified_unix_milliseconds = 1'000U,
+        };
+        // Not folded into the accumulator: `&&` would short-circuit the
+        // remaining creates once one failed and leave the population short.
+        const bool created =
+            catalog.Create(SequentialId(index), metadata).has_value();
+        populated = populated && created;
+      }
+      Check(populated,
+            "every marker of the superseded-ceiling population commits");
+
+      const auto listed = catalog.List();
+      Check(listed && listed->size() == kSupersededCeiling + 1U,
+            "List admits a catalog larger than the superseded 64-marker "
+            "ceiling");
+      CheckErrorCode(catalog.ListBounded(kSupersededCeiling),
+                     ProfileCatalogErrorCode::ResourceExhausted,
+                     "the superseded ceiling still serves as a tighter opt-in "
+                     "budget and fails closed below the population");
+    }
   }
 
   {
