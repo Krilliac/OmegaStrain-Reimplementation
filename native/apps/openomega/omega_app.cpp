@@ -988,6 +988,22 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
     AudioServiceSnapshot audio_fault_baseline = audio_->Snapshot();
     while (running && (frame_limit < 0 || result.rendered_frames < frame_limit))
     {
+        const auto next_rendered_frame_count =
+            detail::CheckedNextRenderedFrameCount(result.rendered_frames);
+        if (!next_rendered_frame_count)
+        {
+            (void)ContainOpeningMovieAudio();
+            jobs_->WaitForIdle();
+            constexpr std::string_view error =
+                "run-local rendered frame counter exhausted";
+            log_->Error("render", error);
+            return RunLoopResult{
+                .result = result,
+                .operational_error = std::string(error),
+                .capture_error = std::nullopt,
+            };
+        }
+
         const InputPumpResult events = sdl_input_->PumpEvents(*input_, *log_);
         const runtime::InputSnapshot input_snapshot = input_->EndFrame();
         if (capture_session != nullptr)
@@ -1408,7 +1424,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 .capture_error = std::nullopt,
             };
         }
-        ++result.rendered_frames;
+        result.rendered_frames = *next_rendered_frame_count;
 
         const AudioServiceSnapshot audio_health = audio_->Snapshot();
         if (audio_health.callback_failures > audio_fault_baseline.callback_failures ||
