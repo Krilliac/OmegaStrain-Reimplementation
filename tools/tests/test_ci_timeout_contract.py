@@ -21,10 +21,14 @@ class WindowsCiTimeoutContractTests(unittest.TestCase):
 
     def test_windows_timeout_ceilings_remain_bounded_and_hierarchical(self) -> None:
         sdl_input_timeout = self._ctest_timeout("omega_sdl_input_tests")
+        native_persistence_timeout = self._ctest_timeout(
+            "omega_native_persistence_tests"
+        )
         package_contract_timeout = self._ctest_timeout(
             "openomega_windows_portable_package_contract"
         )
         self.assertEqual(sdl_input_timeout, 15)
+        self.assertEqual(native_persistence_timeout, 30)
 
         timeout_constants = self._package_timeout_constants()
         self.assertEqual(
