@@ -305,6 +305,18 @@ counts; generated fixtures cover digest answers and limits, cache reuse, nested 
 equivalence, unsafe entries, resource limits, and identity/content races. No owner-corpus result is
 recorded, and this does not promote a descriptor to semantic IR or establish UI/menu, retail-format,
 rendering, or PCSX2 behavior.
+E-0114 adds explicit archive-backed opening-movie selection with
+`--opening-movie-member=NAME`. It resolves only the supplied normalized member from fixed
+`ZMEDIA/ZMOVIES.HOG`, using a frozen indexed HOG mount so the multi-gigabyte container is never
+loaded as one value. The selected payload alone crosses the existing `GameDataService` and
+one-component `SourceLocator` boundary under the unchanged 512 MiB input cap, then moves through an
+identity-free `OpeningMovieSource` into the existing player. The path and member selectors are
+mutually exclusive and both remain incompatible with probe, capture, and replay. Synthetic fixtures
+cover exact and mixed-case lookup, missing member, absent and malformed optional archives, a sparse
+512 MiB plus one byte member rejected before payload allocation, path/owned-source parser parity,
+and malformed owned-source failure opening Profiles without profile mutation or movie resources.
+No automatic member, discovery, enumeration, or fallback is implemented; that decision remains
+blocked on private owner-side observation. Private inputs are not committed, logged, or named.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-

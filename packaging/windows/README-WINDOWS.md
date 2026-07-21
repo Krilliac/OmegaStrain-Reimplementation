@@ -12,8 +12,12 @@ contract instead requires first zero-frame startup to create an exact native-sav
 isolated profile and a second startup to reopen it without further mutation. This is not general
 clean-machine, interactive, owner-data, GPU, audio, or broader Windows-version compatibility
 validation. Optional opening-movie playback requires Windows Media Foundation and an available
-synchronous MPEG-2 decoder MFT. If that decoder capability is unavailable, OpenOmega skips the
-optional opening movie and continues to the native menu. The package has exactly this layout:
+synchronous MPEG-2 decoder MFT. `--opening-movie=PATH` selects one external file;
+`--opening-movie-member=NAME` selects only that exact case-insensitive member from fixed
+`ZMEDIA/ZMOVIES.HOG` under the effective game-data root. The selectors are mutually exclusive and
+the archive route performs no member discovery or fallback. If the archive, member, or decoder is
+unavailable or rejected, OpenOmega emits no source identity, skips the optional movie, and
+continues to Profiles. The package has exactly this layout:
 
 ```text
 OpenOmega-0.1.0-windows-x86_64/
@@ -49,7 +53,9 @@ persistence at `%LOCALAPPDATA%\OpenOmega\native-save`; a fresh launch creates tw
 database snapshots and an empty process-lock file, but no default game profile. `--probe-only`
 validates content and returns without touching native persistence. Owner-supplied data remains
 outside this archive and can be selected through `openomega_launcher.exe`, with the documented
-`--data-root` and optional `--level` arguments, or through configuration.
+`--data-root` and optional `--level` arguments, or through configuration. An archive member name
+must come from the owner; this preview does not
+guess or publish an automatic intro member.
 
 Interactive game startup opens the project-generated Profiles screen. Durable profile confirmation
 opens Characters, durable character confirmation opens BriefingRoom, and its mission row enters

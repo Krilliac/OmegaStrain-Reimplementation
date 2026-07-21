@@ -207,8 +207,10 @@ death, health, timer, debrief, checkpoint, spawn, campaign, inventory, reward, o
 observation, or PCSX2-parity claim.
 
 ## Remaining cutscene/menu blockers (honest)
-- Cutscene playback is Windows-only and selected through an external `--opening-movie` path; retail-
-  intro discovery from game data is absent. Transition reliability also requires a defined practical
+- Cutscene playback is Windows-only and selected either through an external `--opening-movie` path
+  or an explicit `--opening-movie-member=NAME` lookup in fixed `ZMEDIA/ZMOVIES.HOG`; automatic
+  retail-intro selection remains absent until private owner-side observation. Transition reliability
+  also requires a defined practical
   watchdog bound for greater-than-half-clock backward PTS discontinuities (N4) and an ADR-compliant
   fail-open transition with proven containment for post-render movie-audio faults (N5).
 - The menu is a synthetic card shell with project-owned glyph rendering. A retail-shaped menu still
