@@ -816,7 +816,7 @@ OmegaApp::~OmegaApp() noexcept
         try
         {
             log_->Warning("shutdown",
-                "opening movie audio containment failed; SDL audio shutdown will retry");
+                "opening movie audio containment failed; final SDL audio cleanup will continue");
         }
         catch (...)
         {
