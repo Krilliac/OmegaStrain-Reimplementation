@@ -109,6 +109,13 @@ Studio's historical engine source or internal toolchain.
   deterministic logical or raw card without patching an existing image. Owner saves and exported
   card images stay outside version control; Omega Strain payload interpretation remains a separate
   evidence-backed mapping slice.
+- E-0103 gives that project-owned front end a distinct cancel action without changing the global
+  quit path. Backspace and gamepad East publish action 7; Escape and gamepad Back remain action 1
+  quit controls. Cancel is inert on Main, otherwise returns Profiles, DiagnosticPlay, Controls, or
+  AssetTopology to its corresponding Main row without publishing a profile command, and wins over
+  simultaneous confirm/navigation edges. Live capture and replay consume the same bounded action
+  schema and terminal input still resolves before any reduction. These bindings and transitions are
+  synthetic native-shell policy, not evidence of a retail control map or menu graph.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public

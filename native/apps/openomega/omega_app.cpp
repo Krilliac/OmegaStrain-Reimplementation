@@ -139,6 +139,16 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
         },
         runtime::InputBinding{
             .device = runtime::InputDevice::Keyboard,
+            .code = static_cast<std::uint16_t>(SDL_SCANCODE_BACKSPACE),
+            .action = kFrontEndCancelAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::GamepadButton,
+            .code = static_cast<std::uint16_t>(SDL_GAMEPAD_BUTTON_EAST),
+            .action = kFrontEndCancelAction,
+        },
+        runtime::InputBinding{
+            .device = runtime::InputDevice::Keyboard,
             .code = static_cast<std::uint16_t>(SDL_SCANCODE_F1),
             .action = kFrontEndPrimaryAction,
         },
@@ -1322,6 +1332,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                         .primary_pressed = input_snapshot.WasPressed(kFrontEndPrimaryAction),
                         .previous_pressed = input_snapshot.WasPressed(kFrontEndPreviousAction),
                         .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
+                        .cancel_pressed = input_snapshot.WasPressed(kFrontEndCancelAction),
                     },
                     front_end_startup_model_.visible_profiles);
             front_end_state_ = front_end.state;

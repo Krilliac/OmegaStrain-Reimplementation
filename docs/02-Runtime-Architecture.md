@@ -1959,3 +1959,19 @@ derives and publishes the same typed command from the captured logical edges; te
 complete before reduction, so a captured simultaneous primary edge cannot select a profile. This
 is project-owned native host policy only, not a claim about retail profile
 order, menu layout, controls, active-save behavior, persistence policy, timing, or fidelity.
+
+### Project-owned front-end cancel action
+
+Logical action 7 is a distinct project-owned cancel edge. Keyboard Backspace and gamepad East map
+to it; Escape and gamepad Back remain global quit controls and still resolve before front-end
+reduction. After invalid-state normalization, cancel has priority over primary and navigation. It is
+inert on Main. From Profiles, DiagnosticPlay, Controls, or AssetTopology it returns to Main on the
+corresponding Profiles, StartDiagnostic, Controls, or AssetTopology row, resets the bounded profile
+cursor, and publishes no command. Primary retains its existing activation and return behavior.
+
+The live host and `RunReplaySession` route the same press edge through `FrontEndInputEdges`.
+Capture therefore carries sorted action 7 as an ordinary logical-action row without physical-input
+provenance. The host table grows from seventeen to nineteen bindings and from six to seven logical
+actions, remaining below the fixed 64-action trace limit. These bindings, precedence rules, and
+return rows are native host-shell policy only; they establish no retail control map, button-name,
+menu graph, timing, or behavioral-equivalence claim.
