@@ -87,11 +87,13 @@ def contains_owner_home_path(text: str) -> bool:
             return True
     return False
 
+
 MAX_TRACKED_BYTES = 5 * 1024 * 1024
 PS2_EXECUTABLE_NAME = re.compile(
-    r"(?:SCUS|SLUS|SLES|SCES|SLPS|SLPM|SCPS|SCPM|PBPX|PAPX)[_-]?\d{3}[._]?\d{2}",
+    r"(?:SCUS|SLUS|SLES|SCES|SLPS|SLPM|SCPS|SCPM|PBPX|PAPX)[_-]?\d{3}[._]?\d{2}(?!\d)",
     re.IGNORECASE,
 )
+ALLOWED_RETAIL_NAME_PATHS = frozenset({"analysis/elf/scus_97264.metadata.json"})
 SENSITIVE_NAMES = {
     ".env",
     "credentials.json",
@@ -160,7 +162,10 @@ def check_blob(blob: TrackedBlob) -> list[str]:
         errors.append(f"blocked root: {normalized}")
     if path.suffix.lower() in BLOCKED_EXTENSIONS:
         errors.append(f"blocked retail/payload extension: {normalized}")
-    if PS2_EXECUTABLE_NAME.search(path.name):
+    if (
+        PS2_EXECUTABLE_NAME.search(path.name)
+        and normalized_lower not in ALLOWED_RETAIL_NAME_PATHS
+    ):
         errors.append(f"retail executable name: {normalized}")
     name_lower = path.name.lower()
     if name_lower in SENSITIVE_NAMES or name_lower.startswith(".env."):

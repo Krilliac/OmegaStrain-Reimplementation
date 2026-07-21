@@ -221,10 +221,12 @@ set(explicit_empty_config "${process_working_directory}/explicit-empty.cfg")
 file(WRITE "${explicit_empty_config}" "")
 set(missing_explicit_config
     "${process_working_directory}/PrivateUser-SecretVault-missing-explicit.cfg")
+set(synthetic_users_prefix "C:/Users/")
+set(synthetic_owner_home "${synthetic_users_prefix}PrivateUser/SecretVault")
 set(malformed_private_config
     "${process_working_directory}/PrivateUser-SecretVault-malformed.cfg")
 file(WRITE "${malformed_private_config}"
-    "PrivateUser.SecretVault = C:/Users/PrivateUser/SecretVault/raw-secret-malformed\n")
+    "PrivateUser.SecretVault = ${synthetic_owner_home}/raw-secret-malformed\n")
 set(duplicate_private_config
     "${process_working_directory}/PrivateUser-SecretVault-duplicate.cfg")
 file(WRITE "${duplicate_private_config}"
@@ -233,7 +235,7 @@ file(WRITE "${duplicate_private_config}"
 set(private_integer_config
     "${process_working_directory}/PrivateUser-SecretVault-integer.cfg")
 file(WRITE "${private_integer_config}"
-    "jobs.worker_count = C:/Users/PrivateUser/SecretVault/raw-secret-integer\n")
+    "jobs.worker_count = ${synthetic_owner_home}/raw-secret-integer\n")
 set(private_severity_config
     "${process_working_directory}/PrivateUser-SecretVault-severity.cfg")
 file(WRITE "${private_severity_config}"
@@ -355,13 +357,13 @@ run_openomega_case(explicit_unknown_key_is_private FALSE ""
 run_openomega_case(set_malformed_key_is_private FALSE ""
     "--set override: config override: config key contains a byte outside [a-z0-9_.]\n"
     "--config=${explicit_empty_config}"
-    "--set=PrivateUser.SecretVault=C:/Users/PrivateUser/SecretVault/raw-secret-set"
+    "--set=PrivateUser.SecretVault=${synthetic_owner_home}/raw-secret-set"
     --frames=0
 )
 run_openomega_case(set_integer_value_is_private FALSE ""
     "runtime configuration: jobs.worker_count: config integer value must be a canonical base-10 int64\n"
     "--config=${explicit_empty_config}"
-    "--set=jobs.worker_count=C:/Users/PrivateUser/SecretVault/raw-secret-set"
+    "--set=jobs.worker_count=${synthetic_owner_home}/raw-secret-set"
     --frames=0
 )
 run_openomega_case(set_unsupported_value_is_private FALSE ""

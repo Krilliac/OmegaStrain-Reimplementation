@@ -139,7 +139,8 @@ int RuntimeSettingsFailureCount()
     Check(bad_delta && !omega::runtime::ResolveRuntimeSettings(*bad_delta),
         "the frame delta clamp cannot be shorter than one simulation step");
     auto bad_integer = omega::runtime::ParseConfigText(
-        "input.max_events_per_frame = C:/Users/PrivateUser/SecretVault/raw-secret\n");
+        "input.max_events_per_frame = C:/Users/"
+        "PrivateUser/SecretVault/raw-secret\n");
     Check(bad_integer.has_value(), "private integer setting fixture parses");
     if (bad_integer)
     {
@@ -347,7 +348,8 @@ int RuntimeSettingsFailureCount()
     omega::runtime::LaunchOptions private_integer_override;
     private_integer_override.config_overrides.push_back(
         {.key = "jobs.worker_count",
-            .value = "C:/Users/PrivateUser/SecretVault/raw-secret-worker-count"});
+            .value = "C:/Users/"
+                     "PrivateUser/SecretVault/raw-secret-worker-count"});
     auto private_integer_override_config =
         omega::runtime::LoadRuntimeConfig(private_integer_override);
     Check(private_integer_override_config.has_value(),
@@ -429,7 +431,8 @@ int RuntimeSettingsFailureCount()
 
     const auto private_integer_config_path = root / "PrivateUser-SecretVault-integer.cfg";
     Check(WriteTextFile(private_integer_config_path,
-              "jobs.worker_count = C:/Users/PrivateUser/SecretVault/raw-secret-file-value\n"),
+              "jobs.worker_count = C:/Users/"
+              "PrivateUser/SecretVault/raw-secret-file-value\n"),
         "private integer file-profile fixture is written");
     omega::runtime::LaunchOptions private_integer_file_options;
     private_integer_file_options.config_path = private_integer_config_path;

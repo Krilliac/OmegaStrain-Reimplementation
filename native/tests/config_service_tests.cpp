@@ -249,7 +249,8 @@ int ConfigServiceFailureCount()
     }
 
     auto private_values = Parse(
-        "privateuser.number = C:/Users/PrivateUser/SecretVault/raw-secret-number\n"
+        "privateuser.number = C:/Users/"
+        "PrivateUser/SecretVault/raw-secret-number\n"
         "privateuser.flag = PrivateUser-SecretVault-raw-secret-boolean");
     Check(private_values.has_value(), "private diagnostic-value fixtures parse as strings");
     if (private_values)

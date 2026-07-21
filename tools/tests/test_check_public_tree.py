@@ -165,6 +165,33 @@ class PublicTreeGateTests(unittest.TestCase):
                     )
                 )
 
+    def test_retail_executable_name_is_blocked_with_an_extra_suffix(self) -> None:
+        for name in (
+            "SLUS_200.73.txt",
+            "dump-SCES_502.24.json",
+            "SCUS-97264.reencoded.txt",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(
+                    any(
+                        "retail executable name" in error
+                        for error in self.errors(name)
+                    )
+                )
+
+    def test_only_the_tracked_sanitized_boot_metadata_name_is_exempt(self) -> None:
+        allowed = "analysis/elf/scus_97264.metadata.json"
+        self.assertEqual(gate.ALLOWED_RETAIL_NAME_PATHS, frozenset({allowed}))
+        self.assertFalse(
+            any("retail executable name" in error for error in self.errors(allowed))
+        )
+        self.assertTrue(
+            any(
+                "retail executable name" in error
+                for error in self.errors("analysis/elf/SLUS_20073.metadata.json")
+            )
+        )
+
     def test_every_payload_extension_is_pinned_and_enforced_case_insensitively(self) -> None:
         self.assertEqual(len(EXPECTED_BLOCKED_EXTENSIONS), 73)
         self.assertEqual(EXPECTED_BLOCKED_EXTENSIONS, gate.BLOCKED_EXTENSIONS)
@@ -371,6 +398,23 @@ class PublicTreeGateTests(unittest.TestCase):
                     any("owner-home path" in error for error in self.errors("record.jsonl", compact))
                 )
 
+    def test_absolute_owner_home_paths_are_blocked_case_insensitively(self) -> None:
+        drive = b"C:"
+        leaks = (
+            b"see " + drive + rb"\Users\alice\project\file.txt",
+            b"path is " + drive + b"/users" + b"/bob/checkout",
+            b"log at /home" + b"/carol/build.log",
+            b"macos /USERS" + b"/dave/dev",
+        )
+        for leak in leaks:
+            with self.subTest(leak=leak):
+                self.assertTrue(
+                    any(
+                        "owner-home path" in error
+                        for error in self.errors("notes.md", leak)
+                    )
+                )
+
     def test_generic_home_placeholders_are_not_blocked(self) -> None:
         for safe in (
             b"documented under <user>/OpenOmega",
@@ -379,6 +423,8 @@ class PublicTreeGateTests(unittest.TestCase):
             b"C:/Users/<user>/OpenOmega",
             b"C:/Users/%USERNAME%/OpenOmega",
             b"documented as `/home/<name>`",
+            b"web route https://example.test/home/alice is not a filesystem home",
+            b"web route https://example.test/Users/bob remains public documentation",
             b"the private/ and runtime/ roots stay ignored",
         ):
             with self.subTest(safe=safe):
