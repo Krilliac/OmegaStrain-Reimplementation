@@ -688,6 +688,36 @@ if(BUILD_TESTING)
         COMMAND omega_sdl_gpu_exception_boundary_tests)
     set_tests_properties(omega_sdl_gpu_exception_boundary_tests PROPERTIES TIMEOUT 5)
 
+    add_executable(omega_opening_movie_player_error_mapping_tests
+        native/tests/opening_movie_player_error_mapping_tests.cpp
+    )
+    target_include_directories(omega_opening_movie_player_error_mapping_tests PRIVATE
+        native/apps/openomega
+        native/include
+    )
+    if(MSVC)
+        target_compile_options(omega_opening_movie_player_error_mapping_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_opening_movie_player_error_mapping_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_opening_movie_player_error_mapping_tests
+        COMMAND omega_opening_movie_player_error_mapping_tests)
+    set_tests_properties(omega_opening_movie_player_error_mapping_tests PROPERTIES
+        TIMEOUT 5)
+
     if(TARGET omega_app_host)
         add_executable(omega_opening_movie_player_boundary_tests
             native/tests/opening_movie_player_boundary_tests.cpp
