@@ -1,10 +1,12 @@
-function Get-OmegaMaximumWindowsCommandLineLength {
+function Get-OmegaMaximumWindowsStartProcessContentLength {
     [CmdletBinding()]
     [OutputType([int])]
     param()
 
-    # CreateProcessW accepts at most 32,767 UTF-16 code units including the terminating NUL.
-    return 32766
+    # CreateProcessW documents 32,767 UTF-16 code units including the terminating NUL.
+    # Windows PowerShell 5.1's Start-Process adapter rejects a constructed content line of
+    # 32,766 code units, so retain one additional adapter code unit and admit at most 32,765.
+    return 32765
 }
 
 function Measure-OmegaWindowsStartProcessFilePath {
@@ -15,8 +17,8 @@ function Measure-OmegaWindowsStartProcessFilePath {
         [ValidateNotNullOrEmpty()]
         [string]$FilePath,
 
-        [ValidateRange(0, 32766)]
-        [int]$MaximumEncodedLength = 32766
+        [ValidateRange(0, 32765)]
+        [int]$MaximumEncodedLength = 32765
     )
 
     # Start-Process supplies FilePath separately, but its Windows process construction frames the
@@ -46,8 +48,8 @@ function ConvertTo-OmegaWindowsCommandLineArgument {
         [AllowEmptyString()]
         [string]$Argument,
 
-        [ValidateRange(0, 32766)]
-        [int]$MaximumEncodedLength = 32766
+        [ValidateRange(0, 32765)]
+        [int]$MaximumEncodedLength = 32765
     )
 
     if ($Argument.Length -gt $MaximumEncodedLength) {
@@ -140,8 +142,8 @@ function Join-OmegaWindowsCommandLineArguments {
         [AllowEmptyString()]
         [string[]]$ArgumentList,
 
-        [ValidateRange(0, 32766)]
-        [int]$MaximumLength = 32766
+        [ValidateRange(0, 32765)]
+        [int]$MaximumLength = 32765
     )
 
     $builder = [System.Text.StringBuilder]::new()

@@ -109,7 +109,7 @@ function Read-ArgumentCapture {
             $arguments = [Collections.Generic.List[string]]::new([int]$count)
             for ($index = 0; $index -lt $count; ++$index) {
                 $codeUnits = $reader.ReadUInt32()
-                if ($codeUnits -gt (Get-OmegaMaximumWindowsCommandLineLength)) {
+                if ($codeUnits -gt (Get-OmegaMaximumWindowsStartProcessContentLength)) {
                     throw 'invalid argument length'
                 }
                 $byteCount = [int]$codeUnits * 2
@@ -147,9 +147,8 @@ function Wait-ForCapturedProcess {
         if (-not $process.WaitForExit(10000)) {
             throw 'Synthetic argv capture process timed out.'
         }
-        if ($process.ExitCode -ne 0) {
-            throw 'Synthetic argv capture process failed.'
-        }
+        # A Process reopened by ID does not reliably expose ExitCode in Windows PowerShell 5.1.
+        # Read-ArgumentCapture below is the authoritative success and integrity check.
     }
     finally {
         $process.Dispose()
@@ -160,7 +159,7 @@ function Invoke-CapturedLauncher {
     param(
         [string]$Launcher,
         [string]$CapturePath,
-        [object[]]$LaunchArguments
+        [hashtable]$LaunchParameters
     )
 
     if (Test-Path -LiteralPath $CapturePath) {
@@ -171,7 +170,7 @@ function Invoke-CapturedLauncher {
     try {
         [Environment]::SetEnvironmentVariable('OPENOMEGA_ARGV_CAPTURE_PATH', $CapturePath,
             [EnvironmentVariableTarget]::Process)
-        $launchResult = & $Launcher @LaunchArguments
+        $launchResult = & $Launcher @LaunchParameters
         Wait-ForCapturedProcess -ProcessId $launchResult.ProcessId
     }
     finally {
@@ -193,6 +192,8 @@ if (-not [IO.Path]::IsPathRooted($ArgvCaptureExecutable) -or
 $quote = [string][char]34
 $backslash = [string][char]92
 
+Assert-Equal (Get-OmegaMaximumWindowsStartProcessContentLength) '32765' `
+    'the Windows PowerShell 5.1 Start-Process content ceiling remains pinned'
 Assert-Equal (Measure-OmegaWindowsStartProcessFilePath 'plain.exe') '11' `
     'Start-Process executable framing always reserves both quotes'
 Assert-Equal (Measure-OmegaWindowsStartProcessFilePath 'two words.exe') '15' `
@@ -202,9 +203,9 @@ Assert-Throws { Measure-OmegaWindowsStartProcessFilePath ('bad' + $quote + '.exe
 Assert-Throws { Measure-OmegaWindowsStartProcessFilePath ('bad' + [char]0 + '.exe') } `
     'NUL executable paths fail closed'
 $maximumExecutablePath = ''.PadLeft(
-    (Get-OmegaMaximumWindowsCommandLineLength) - 2, [char]97)
+    (Get-OmegaMaximumWindowsStartProcessContentLength) - 2, [char]97)
 Assert-Equal (Measure-OmegaWindowsStartProcessFilePath $maximumExecutablePath) `
-    (Get-OmegaMaximumWindowsCommandLineLength) `
+    (Get-OmegaMaximumWindowsStartProcessContentLength) `
     'an always-quoted executable at the content bound is accepted'
 Assert-Throws { Measure-OmegaWindowsStartProcessFilePath ($maximumExecutablePath + 'a') } `
     'an always-quoted executable over the content bound fails closed'
@@ -245,11 +246,11 @@ $joinedExpected = 'plain ' + ($quote + $quote) + ' ' + `
 Assert-Equal (Join-OmegaWindowsCommandLineArguments @('plain', '', 'two words', $hostileArgument)) `
     $joinedExpected 'joined argv preserves empty, spaced, and hostile-looking values'
 
-$maximumPlain = ''.PadLeft((Get-OmegaMaximumWindowsCommandLineLength), [char]97)
+$maximumPlain = ''.PadLeft((Get-OmegaMaximumWindowsStartProcessContentLength), [char]97)
 Assert-Equal (ConvertTo-OmegaWindowsCommandLineArgument $maximumPlain) $maximumPlain `
-    'the exact unquoted command-line bound is accepted'
+    'the exact unquoted Start-Process adapter bound is accepted'
 Assert-Throws { ConvertTo-OmegaWindowsCommandLineArgument ($maximumPlain + 'a') } `
-    'arguments beyond the command-line bound fail closed'
+    'arguments beyond the Start-Process adapter bound fail closed'
 Assert-Throws { ConvertTo-OmegaWindowsCommandLineArgument ('a' + [char]0 + 'b') } `
     'NUL arguments fail closed'
 Assert-Throws { Join-OmegaWindowsCommandLineArguments @('ab', 'cd') -MaximumLength 4 } `
@@ -299,7 +300,7 @@ try {
         '--', $syntheticIso
     )
     $encodedExecutableLength = Measure-OmegaWindowsStartProcessFilePath $syntheticPcsx2
-    $maximumArgumentLineLength = (Get-OmegaMaximumWindowsCommandLineLength) - `
+    $maximumArgumentLineLength = (Get-OmegaMaximumWindowsStartProcessContentLength) - `
         $encodedExecutableLength - 1
     $expectedDryRunArguments = Join-OmegaWindowsCommandLineArguments $dryRunArguments `
         -MaximumLength $maximumArgumentLineLength
@@ -341,8 +342,12 @@ try {
             $threeBackslashes + $quote + 'tail-' + $twoBackslashes
         $roundTrip = Invoke-CapturedLauncher -Launcher $syntheticLauncher `
             -CapturePath (Join-Path $syntheticCaptureDirectory 'round-trip.argv') `
-            -LaunchArguments @('-SlowBoot', '-Debugger', '-Resume', '-GameArgs', `
-                $roundTripGameArgs)
+            -LaunchParameters @{
+                SlowBoot = $true
+                Debugger = $true
+                Resume = $true
+                GameArgs = $roundTripGameArgs
+            }
     }
     finally {
         [Environment]::SetEnvironmentVariable('OPENOMEGA_QUOTING_SENTINEL', $priorSentinelPath,
@@ -366,7 +371,8 @@ try {
 
     # Grow a plain GameArgs value by the exact remaining encoded capacity. This keeps the
     # oracle independent of temporary-path length while exercising the launcher's full command
-    # construction, including the executable frame, separator, and terminating-NUL allowance.
+    # construction, including the executable frame, separator, terminating-NUL allowance, and
+    # the Windows PowerShell 5.1 adapter margin.
     $boundarySeed = & $syntheticLauncher -DryRun -GameArgs 'a'
     $remainingCapacity = $maximumArgumentLineLength - $boundarySeed.Arguments.Length
     Assert-True -Condition ($remainingCapacity -gt 0) `
@@ -376,8 +382,8 @@ try {
     Assert-Equal $exactDryRun.Arguments.Length $maximumArgumentLineLength `
         'the exact accepted argument line reaches its deterministic bound'
     Assert-Equal ($encodedExecutableLength + 1 + $exactDryRun.Arguments.Length) `
-        (Get-OmegaMaximumWindowsCommandLineLength) `
-        'the exact accepted launch consumes the full CreateProcess content budget'
+        (Get-OmegaMaximumWindowsStartProcessContentLength) `
+        'the exact accepted launch consumes the bounded Start-Process content budget'
     Assert-ThrowsExactly `
         { & $syntheticLauncher -DryRun -GameArgs ($exactGameArgs + 'a') } `
         'Windows command line exceeds the bounded launch limit.' `
@@ -385,7 +391,7 @@ try {
 
     $exactRoundTrip = Invoke-CapturedLauncher -Launcher $syntheticLauncher `
         -CapturePath (Join-Path $syntheticCaptureDirectory 'exact-boundary.argv') `
-        -LaunchArguments @('-GameArgs', $exactGameArgs)
+        -LaunchParameters @{ GameArgs = $exactGameArgs }
     $exactExpected = @(
         $syntheticPcsx2,
         '-fastboot',
@@ -396,7 +402,7 @@ try {
         '--', $syntheticIso
     )
     Assert-SequenceEqual -Actual $exactRoundTrip.Arguments -Expected $exactExpected `
-        -Message 'the exact accepted command-line boundary reaches the launched child intact'
+        -Message 'the exact accepted Start-Process adapter boundary reaches the child intact'
 
     Remove-Item -LiteralPath $syntheticIso -Force
     Assert-Throws { & $syntheticLauncher -DryRun | Out-Null } `
