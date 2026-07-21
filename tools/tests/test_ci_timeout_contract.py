@@ -127,8 +127,14 @@ class WindowsCiTimeoutContractTests(unittest.TestCase):
         self.assertEqual(step_body.count(opening_movie), 1)
         self.assertEqual(step_body.count(composed_menu), 1)
         self.assertLess(step_body.index(opening_movie), step_body.index(composed_menu))
-        self.assertIn("Test-Path -LiteralPath $smoke -PathType Leaf", step_body)
-        self.assertIn("if ($LASTEXITCODE -ne 0)", step_body)
+        presence_check = step_body.index(
+            "Test-Path -LiteralPath $smoke -PathType Leaf"
+        )
+        self.assertEqual(step_body.count("\n            & $smoke\n"), 1)
+        invocation = step_body.index("\n            & $smoke\n")
+        exit_check = step_body.index("if ($LASTEXITCODE -ne 0)")
+        self.assertLess(presence_check, invocation)
+        self.assertLess(invocation, exit_check)
         self.assertIn('throw "$smokeName failed: $LASTEXITCODE"', step_body)
 
     def _assert_timeout_precedes_gate_diagnostic(
