@@ -67,7 +67,8 @@ namespace
 {
     const auto reject = []() -> std::unexpected<std::string>
     {
-        return std::unexpected("config integer value must be a canonical base-10 int64");
+        return std::unexpected(
+            std::string("config integer value must be a canonical base-10 int64"));
     };
     std::string_view digits = value;
     const bool negative = !digits.empty() && digits.front() == '-';
