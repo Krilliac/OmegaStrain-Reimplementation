@@ -1,8 +1,9 @@
 # Asset-decoding handoff (for the Codex workstream)
 
-Originally prepared 2026-07-20 from the `claude/frontend-asset-decoding` workstream (PR #58), then
-refreshed after the bounded front-end descriptors and native opening-movie audio path landed in
-PR #70. This document hands forward adapter hardening, evidence collection, and RE-tool integration.
+Originally prepared 2026-07-20 from the `claude/frontend-asset-decoding` workstream (PR #58),
+refreshed after PR #70, and updated for the schema-version-3 front-end topology vocabulary in PR #82
+and ledger E-0110. This document hands forward adapter hardening, evidence collection, and RE-tool
+integration.
 It records only tracked, path-free facts and keeps implementation capability distinct from retail
 behavioral parity.
 
@@ -26,7 +27,9 @@ a regression. See `docs/01-Clean-Room-Method.md` and `analysis/evidence/ledger.j
   layout, lookup, render, menu, or consumer semantics.
 - Every observed format family is classified in `analysis/formats/DECODER-COVERAGE.md` with a
   tracked-source citation, plus a ranked next-evidence queue.
-- Ledger entry `E-0095` records this pass.
+- Ledger entry `E-0095` records the original decoder-coverage pass. `E-0110` supersedes only its
+  schema-version-2 front-end topology statements with the neutral schema-version-3 `.ie` category
+  and fixed `.gui+.ie` aggregate pair vocabulary.
 - Ledger entry `E-0097` records the later size-only collector contract, corrected 47-dossier
   catalog, and synthetic/privacy validation; it records no owner-corpus measurement.
 - Ledger entry `E-0098` promotes `.so` from aggregate-scanner-only to a native passive descriptor.
@@ -78,28 +81,28 @@ Frozen contract for the bounded, privacy-safe structural fingerprint collector:
 `.bnk` and `.gun` are optional explicit allowlist choices. Their spelling assigns no audio, weapon,
 or menu role.
 
-### 2. Adversarial / resource-boundary tests for existing passive adapters
+### 2. Maintain adversarial / resource-boundary coverage for existing structural adapters
 
-Add missing tests to the LPD, PAR, SKAS, and VPK adapters **without changing their semantics**.
-Sources and their current tests:
+LPD, PAR, SKAS, and VPK now have dedicated, registered generated-fixture suites covering the
+applicable truncation and malformed boundaries, physical and caller limits, unaligned backing
+storage, deterministic repeated decoding, and typed path-free failures without changing format
+semantics. LPD, PAR, and SKAS also inject failures at their owned-allocation boundaries.
 
-- LPD — `native/include/omega/retail/lpd_envelope_decoder.h` family; `native/src/retail/*`.
-- PAR — `native/include/omega/retail/par_text_envelope_decoder.h`.
-- SKAS — `native/include/omega/retail/skas_text_envelope_decoder.h`.
-- VPK — `native/include/omega/retail/vpk_wrapper_envelope_decoder.h` (see ledger `E-0094`).
+VPK returns a fixed descriptor and retains no source or payload bytes. Its suite exercises zero
+scratch, string, and nesting budgets, but does not inject allocation failure into string-owning
+`DecodeError` construction. That narrow error-path hardening question remains open and must not be
+conflated with missing adversarial coverage.
+
+These suites validate only the implemented structural envelopes. Owner-corpus acceptance, semantic
+interpretation, runtime consumer integration, and retail or PCSX2 behavioral parity remain
+unproven. Add cases only for separately demonstrated variants or newly introduced resource
+boundaries. See `analysis/formats/DECODER-COVERAGE.md`, the corresponding format dossiers, and
+ledger entries `E-0091` through `E-0094` for the exact current evidence and nonclaims.
 
 The newer FNT, GUI, and IE boundaries already have dedicated generated-fixture suites for accepted
 prefixes, truncation/malformed cases, hard and caller limits, determinism, unaligned input, and
 path-free typed failures. Extend those suites only when separately demonstrated structure widens a
 descriptor; do not use test construction to invent deeper payload semantics.
-
-Cases to cover for each, if not already present: truncated prefix at every signature byte; span one
-below the minimum and one above the fixed hard ceiling; an unaligned backing slice when the format
-does not require alignment (do not invent an alignment rule); a caller `DecodeLimits` more generous
-than the hard ceiling (assert the ceiling does **not** rise); repeated-call determinism; typed
-path-free error on every rejection; and allocation-failure behavior (there is no shared
-`decode_test_hooks.h` — each test rolls its own failure hook; see item 4). Serialize builds (`-j 1`)
-and run focused + full CTest per the evidence bar in the AI brief.
 
 ### 3. Mechanical verification for existing retail adapters
 
