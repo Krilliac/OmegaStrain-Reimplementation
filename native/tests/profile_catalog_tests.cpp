@@ -262,6 +262,133 @@ void CheckEmptyCreateListReadAndUpdate() {
         "listing ignores non-marker records in the profile namespace");
 }
 
+void CheckBoundedListing() {
+  {
+    TempDirectory tree("bounded-empty");
+    auto opened = SaveDatabase::Open(Config(tree.path() / "database"));
+    Check(opened.has_value(), "the bounded-listing empty database opens");
+    if (opened) {
+      SaveDatabase database = std::move(*opened);
+      ProfileCatalog catalog(database);
+      const auto empty = catalog.ListBounded(0U);
+      Check(empty && empty->empty(),
+            "a zero enumeration budget succeeds when no marker exists");
+    }
+  }
+
+  {
+    TempDirectory tree("bounded-population");
+    auto opened = SaveDatabase::Open(Config(tree.path() / "database"));
+    Check(opened.has_value(), "the bounded-listing population database opens");
+    if (!opened)
+      return;
+    SaveDatabase database = std::move(*opened);
+    ProfileCatalog catalog(database);
+
+    constexpr std::array ids{
+        "00000000000000000000000000000001"sv,
+        "00000000000000000000000000000002"sv,
+        "00000000000000000000000000000003"sv,
+    };
+    for (std::size_t index = 0U; index < ids.size(); ++index) {
+      const ProfileMetadata metadata{
+          .display_name = "Bounded " + std::to_string(index),
+          .created_unix_milliseconds = 1'000U,
+          .modified_unix_milliseconds = 1'000U,
+      };
+      Check(catalog.Create(Id(ids[index]), metadata).has_value(),
+            "each synthetic bounded-listing profile commits");
+    }
+
+    const auto exact = catalog.ListBounded(ids.size());
+    Check(exact && exact->size() == ids.size() &&
+              (*exact)[0].id == Id(ids[0]) && (*exact)[1].id == Id(ids[1]) &&
+              (*exact)[2].id == Id(ids[2]),
+          "an exact enumeration budget admits every marker in sorted order");
+    const auto surplus = catalog.ListBounded(ids.size() + 1U);
+    Check(surplus && surplus->size() == ids.size(),
+          "a surplus enumeration budget admits every marker");
+
+    CheckErrorCode(catalog.ListBounded(ids.size() - 1U),
+                   ProfileCatalogErrorCode::ResourceExhausted,
+                   "a budget below the marker population fails closed");
+    CheckErrorCode(catalog.ListBounded(0U),
+                   ProfileCatalogErrorCode::ResourceExhausted,
+                   "a zero budget fails closed once a marker exists");
+    CheckErrorCode(
+        catalog.ListBounded(omega::profiles::kProfileCatalogMaxProfiles + 1U),
+        ProfileCatalogErrorCode::ResourceExhausted,
+        "a budget above the project-owned ceiling is itself rejected");
+
+    const auto delegated = catalog.List();
+    const auto ceiling =
+        catalog.ListBounded(omega::profiles::kProfileCatalogMaxProfiles);
+    Check(delegated && ceiling && delegated->size() == ids.size() &&
+              ceiling->size() == ids.size() &&
+              (*delegated)[0].id == (*ceiling)[0].id &&
+              (*delegated)[2].id == (*ceiling)[2].id,
+          "List delegates to the project-owned ceiling budget");
+
+    std::array child_record{
+        SaveMutation::Put("profiles/00000000000000000000000000000002/"
+                          "campaign/metadata",
+                          1U, Bytes("opaque-child")),
+    };
+    Check(database.Commit(child_record).has_value(),
+          "the synthetic bounded-listing child record commits");
+    const auto filtered = catalog.ListBounded(ids.size());
+    Check(filtered && filtered->size() == ids.size(),
+          "non-marker records beneath profiles/ spend no enumeration budget");
+  }
+
+  {
+    TempDirectory tree("bounded-noncanonical-marker");
+    auto opened = SaveDatabase::Open(Config(tree.path() / "database"));
+    Check(opened.has_value(), "the bounded noncanonical-marker database opens");
+    if (opened) {
+      SaveDatabase database = std::move(*opened);
+      std::array mutation{
+          SaveMutation::Put("profiles/not-a-profile-id/metadata", 1U,
+                            Bytes("synthetic")),
+      };
+      Check(database.Commit(mutation).has_value(),
+            "the noncanonical marker commits through raw storage");
+      ProfileCatalog catalog(database);
+      CheckErrorCode(catalog.ListBounded(0U),
+                     ProfileCatalogErrorCode::ResourceExhausted,
+                     "a malformed direct marker spends budget before it is "
+                     "parsed, so a zero budget reports exhaustion");
+      CheckErrorCode(catalog.ListBounded(1U),
+                     ProfileCatalogErrorCode::CorruptMetadata,
+                     "a malformed direct marker admitted within budget still "
+                     "fails closed as corrupt");
+    }
+  }
+
+  {
+    TempDirectory tree("bounded-degenerate-marker");
+    auto opened = SaveDatabase::Open(Config(tree.path() / "database"));
+    Check(opened.has_value(), "the bounded degenerate-marker database opens");
+    if (opened) {
+      SaveDatabase database = std::move(*opened);
+      std::array mutation{
+          SaveMutation::Put("profiles/metadata", 1U, Bytes("synthetic")),
+      };
+      Check(database.Commit(mutation).has_value(),
+            "the identifier-free marker commits through raw storage");
+      ProfileCatalog catalog(database);
+      CheckErrorCode(catalog.ListBounded(0U),
+                     ProfileCatalogErrorCode::ResourceExhausted,
+                     "an identifier-free marker spends budget before its "
+                     "extent is inspected");
+      CheckErrorCode(catalog.ListBounded(1U),
+                     ProfileCatalogErrorCode::CorruptMetadata,
+                     "an identifier-free marker admitted within budget fails "
+                     "closed as corrupt");
+    }
+  }
+}
+
 void CheckMetadataValidation() {
   TempDirectory tree("validation");
   auto opened = SaveDatabase::Open(Config(tree.path() / "database"));
@@ -408,6 +535,7 @@ void CheckCorruptionAndVersionHandling() {
 int main() {
   CheckIdentifiersAndErrorNames();
   CheckEmptyCreateListReadAndUpdate();
+  CheckBoundedListing();
   CheckMetadataValidation();
   CheckTypedMetadataReopen();
   CheckCorruptionAndVersionHandling();
