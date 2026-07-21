@@ -810,7 +810,20 @@ OmegaApp::OmegaApp(
 
 OmegaApp::~OmegaApp() noexcept
 {
-    (void)ContainOpeningMovieAudio();
+    const bool opening_movie_audio_contained = ContainOpeningMovieAudio();
+    if (!opening_movie_audio_contained && log_ != nullptr)
+    {
+        try
+        {
+            log_->Warning("shutdown",
+                "opening movie audio containment failed; SDL audio shutdown will retry");
+        }
+        catch (...)
+        {
+            // Destruction remains noexcept even if bounded shutdown logging
+            // cannot allocate.
+        }
+    }
     opening_movie_draw_list_ = {};
     opening_movie_player_.reset();
     diagnostic_asset_topology_draw_list_ = {};
