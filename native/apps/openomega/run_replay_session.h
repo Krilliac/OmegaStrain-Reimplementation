@@ -22,6 +22,11 @@ inline constexpr std::uint32_t kDebugMoveBackwardAction = 3U;
 inline constexpr std::uint32_t kDebugMoveLeftAction = 4U;
 inline constexpr std::uint32_t kDebugMoveRightAction = 5U;
 
+// While the menu is modal, the shared up/down edges navigate instead of moving the diagnostic
+// entity. Keep that intentional alias coupled to the front-end contract at compile time.
+static_assert(kDebugMoveForwardAction == kFrontEndPreviousAction);
+static_assert(kDebugMoveBackwardAction == kFrontEndNextAction);
+
 struct RunReplaySessionConfig
 {
     runtime::FrameSchedulerConfig scheduler{};
