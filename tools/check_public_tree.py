@@ -13,6 +13,7 @@ BLOCKED_ROOTS = {
     "analysis/output",
     "build",
     "downloads",
+    "logs",
     "private",
     "runtime",
     "third_party",
@@ -88,7 +89,7 @@ def contains_owner_home_path(text: str) -> bool:
 
 MAX_TRACKED_BYTES = 5 * 1024 * 1024
 PS2_EXECUTABLE_NAME = re.compile(
-    r"(?:SCUS|SLUS|SLES|SCES|SLPS|SLPM|SCPS|SCPM|PBPX|PAPX)[_-]?\d{3}[._]\d{2}",
+    r"(?:SCUS|SLUS|SLES|SCES|SLPS|SLPM|SCPS|SCPM|PBPX|PAPX)[_-]?\d{3}[._]?\d{2}",
     re.IGNORECASE,
 )
 SENSITIVE_NAMES = {

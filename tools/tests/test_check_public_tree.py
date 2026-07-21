@@ -93,6 +93,7 @@ class PublicTreeGateTests(unittest.TestCase):
             "analysis/output",
             "build",
             "downloads",
+            "logs",
             "private",
             "runtime",
             "third_party",
@@ -121,9 +122,28 @@ class PublicTreeGateTests(unittest.TestCase):
                         for error in self.errors(f"fixture{extension}")
                     )
                 )
-        self.assertTrue(
-            any("retail executable name" in error for error in self.errors("SCUS_972.64"))
-        )
+        for executable_name in (
+            "SCUS_972.64",
+            "SCUS-97264",
+            "scus97264",
+            "SCUS_97264",
+            "SCUS972.64",
+        ):
+            with self.subTest(executable_name=executable_name):
+                self.assertTrue(
+                    any(
+                        "retail executable name" in error
+                        for error in self.errors(executable_name)
+                    )
+                )
+        for near_miss in ("SCUS-9726", "SCUS-972640", "SCUS-97A64"):
+            with self.subTest(near_miss=near_miss):
+                self.assertFalse(
+                    any(
+                        "retail executable name" in error
+                        for error in self.errors(near_miss)
+                    )
+                )
 
     def test_sensitive_names_and_git_modes_are_blocked(self) -> None:
         self.assertTrue(any("sensitive filename" in error for error in self.errors(".env.local")))
