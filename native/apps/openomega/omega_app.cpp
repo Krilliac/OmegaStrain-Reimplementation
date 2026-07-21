@@ -450,6 +450,30 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     };
     static_assert(menu_selection_targets.size() == kFrontEndMainRowCount);
     static_assert(kFrontEndVisibleProfiles <= kFrontEndMainRowCount);
+    // Project-owned active-row cue. It reuses each profile row's vertical band
+    // and sits just outside the card's row panel, opposite the selection cursor,
+    // so the two cues never overlap. It assigns no retail layout meaning.
+    constexpr std::array profile_active_targets{
+        runtime::RenderTargetRectQ16{
+            .left = 25'280U,
+            .top = 7'424U,
+            .right = 26'048U,
+            .bottom = 8'960U,
+        },
+        runtime::RenderTargetRectQ16{
+            .left = 25'280U,
+            .top = 9'344U,
+            .right = 26'048U,
+            .bottom = 10'880U,
+        },
+        runtime::RenderTargetRectQ16{
+            .left = 25'280U,
+            .top = 11'264U,
+            .right = 26'048U,
+            .bottom = 12'800U,
+        },
+    };
+    static_assert(profile_active_targets.size() == kFrontEndVisibleProfiles);
 
     runtime::RenderTextureHandle diagnostic_texture;
     runtime::RenderTextureHandle diagnostic_actor_marker_texture;
@@ -460,7 +484,7 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     runtime::RenderTextureHandle diagnostic_asset_topology_texture;
     runtime::RenderTextureHandle diagnostic_asset_transfer_texture;
     constexpr std::size_t kDiagnosticBaseCommandCapacity = 1U;
-    constexpr std::size_t kDiagnosticMaximumOverlayCommandCapacity = 2U;
+    constexpr std::size_t kDiagnosticMaximumOverlayCommandCapacity = 3U;
     constexpr std::size_t kDiagnosticCommandCapacity =
         kDiagnosticBaseCommandCapacity + kDiagnosticMaximumOverlayCommandCapacity;
     static_assert(kDiagnosticCommandCapacity <=
@@ -605,6 +629,31 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             }
             presentation.profile_selection_draw_lists[slot] =
                 std::move(*created_draw_list);
+
+            for (std::size_t active_slot = 0U;
+                 active_slot < presentation.profile_active_draw_lists[slot].size();
+                 ++active_slot)
+            {
+                diagnostic_commands[diagnostic_base_command_count + 2U] =
+                    runtime::RenderTextureBlitCommand{
+                        .texture = presentation.profiles_texture,
+                        .source = profile_selection_source,
+                        .destination = profile_active_targets[active_slot],
+                        .fit_mode = runtime::RenderTextureFitMode::Stretch,
+                        .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+                    };
+                auto created_active_draw_list = runtime::RenderDrawList::Create(
+                    std::span<const runtime::RenderTextureBlitCommand>{
+                        diagnostic_commands.data(),
+                        diagnostic_base_command_count + 3U});
+                if (!created_active_draw_list)
+                {
+                    return std::unexpected(std::string{
+                        "SDL/GPU front-end active profile draw-list creation failed"});
+                }
+                presentation.profile_active_draw_lists[slot][active_slot] =
+                    std::move(*created_active_draw_list);
+            }
         }
         return presentation;
     };
@@ -970,7 +1019,12 @@ OmegaApp::OmegaApp(
           FrontEndCapabilities{
               .can_create_first_profile = first_profile_presentation_.has_value(),
           })),
-      can_create_first_profile_(first_profile_presentation_.has_value())
+      can_create_first_profile_(first_profile_presentation_.has_value()),
+      // native_persistence_ is the first declared member, so it is already
+      // initialized here. ConfirmActiveProfile is the only way to publish
+      // active_profile_id_, so a composition without persistence has no
+      // authorization source and must not be gated against one.
+      requires_active_profile_for_diagnostic_play_(native_persistence_ != nullptr)
 {
 }
 
@@ -997,6 +1051,11 @@ OmegaApp::~OmegaApp() noexcept
     diagnostic_actor_draw_list_ = {};
     const auto clear_front_end_draw_lists = [](FrontEndPresentation& presentation) noexcept
     {
+        for (auto& active_draw_lists : presentation.profile_active_draw_lists)
+        {
+            for (runtime::RenderDrawList& draw_list : active_draw_lists)
+                draw_list = {};
+        }
         for (runtime::RenderDrawList& draw_list :
              presentation.profile_selection_draw_lists)
             draw_list = {};
@@ -1573,9 +1632,10 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                         .cancel_pressed = input_snapshot.WasPressed(kFrontEndCancelAction),
                     },
                     front_end_startup_model_.visible_profiles,
-                    FrontEndCapabilities{
-                        .can_create_first_profile = can_create_first_profile_,
-                    });
+                    CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed());
+            // The command is applied, and therefore persisted, before its state
+            // is published. A failed command leaves the prior front-end state and
+            // the prior activation in place.
             auto applied = ApplyFrontEndCommand(front_end.command);
             if (!applied)
             {
@@ -1590,7 +1650,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             front_end_state_ = front_end.state;
         }
         const bool simulation_allowed =
-            !movie_was_active && FrontEndAllowsSimulation(front_end_state_);
+            !movie_was_active && FrontEndAllowsSimulation(front_end_state_,
+                                     CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed());
         const std::chrono::nanoseconds effective_elapsed = simulation_allowed
             ? elapsed
             : std::chrono::nanoseconds::zero();
@@ -1674,7 +1735,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
 
         const simulation::SimulationState simulation_snapshot = simulation_->Snapshot();
         const bool movie_is_active = IsBootSequenceActive(boot_sequence_state_);
-        if (!movie_is_active && FrontEndAllowsSimulation(front_end_state_))
+        if (!movie_is_active && FrontEndAllowsSimulation(front_end_state_,
+                                    CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed()))
         {
             auto refreshed_actor_draw_list = RefreshDiagnosticActorDrawList();
             if (!refreshed_actor_draw_list)
@@ -1926,6 +1988,21 @@ std::expected<void, std::string> OmegaApp::CreateFirstProfile()
     }
 }
 
+FrontEndCapabilities OmegaApp::CurrentFrontEndCapabilities() const noexcept
+{
+    return FrontEndCapabilities{
+        .can_create_first_profile = can_create_first_profile_,
+        .requires_active_profile_for_diagnostic_play =
+            requires_active_profile_for_diagnostic_play_,
+    };
+}
+
+bool OmegaApp::ActiveProfileIsConfirmed() const noexcept
+{
+    return FrontEndHasConfirmedActiveProfile(
+        front_end_startup_model_, active_profile_id_);
+}
+
 std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
     const FrontEndCommand command)
 {
@@ -2027,7 +2104,8 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
 
 const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcept
 {
-    const FrontEndView view = BuildFrontEndView(front_end_state_, content_stage_, front_end_startup_model_);
+    const FrontEndView view = BuildFrontEndView(
+        front_end_state_, content_stage_, front_end_startup_model_, active_profile_id_);
     const std::size_t selected_main_row = static_cast<std::size_t>(view.selected_main_row);
     if (selected_main_row >= front_end_presentation_.main_draw_lists.size())
         return front_end_presentation_.main_draw_lists.front();
@@ -2042,6 +2120,20 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
         if (profile_slot < view.profiles.visible_profiles &&
             profile_slot < front_end_presentation_.profile_selection_draw_lists.size())
         {
+            // The cue position comes only from the identifier the view resolved
+            // against the model it publishes, so an unresolvable confirmation
+            // simply falls back to the unmarked selection list.
+            if (view.active_profile_slot)
+            {
+                const std::size_t active_slot =
+                    static_cast<std::size_t>(*view.active_profile_slot);
+                if (active_slot <
+                    front_end_presentation_.profile_active_draw_lists[profile_slot].size())
+                {
+                    return front_end_presentation_
+                        .profile_active_draw_lists[profile_slot][active_slot];
+                }
+            }
             return front_end_presentation_.profile_selection_draw_lists[profile_slot];
         }
         return front_end_presentation_.profiles_draw_list;
