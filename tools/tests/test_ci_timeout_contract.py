@@ -108,6 +108,29 @@ class WindowsCiTimeoutContractTests(unittest.TestCase):
             "CMake install subprocess timed out after",
         )
 
+    def test_windows_native_executes_generated_movie_and_menu_gpu_acceptances(
+        self,
+    ) -> None:
+        job_body = self._workflow_job_body("windows-native")
+        step_match = re.search(
+            r"(?ms)^      - name: Run generated movie and menu GPU acceptances\n"
+            r"(?P<body>.*?)(?=^      - name:|\Z)",
+            job_body,
+        )
+        self.assertIsNotNone(step_match)
+        step_body = step_match.group("body")
+        self.assertIn("        timeout-minutes: 5\n", step_body)
+        self.assertIn("          SDL_AUDIO_DRIVER: dummy\n", step_body)
+        self.assertIn("          SDL_GPU_DRIVER: direct3d12\n", step_body)
+        opening_movie = "omega_app_opening_movie_smoke.exe"
+        composed_menu = "omega_app_capture_smoke.exe"
+        self.assertEqual(step_body.count(opening_movie), 1)
+        self.assertEqual(step_body.count(composed_menu), 1)
+        self.assertLess(step_body.index(opening_movie), step_body.index(composed_menu))
+        self.assertIn("Test-Path -LiteralPath $smoke -PathType Leaf", step_body)
+        self.assertIn("if ($LASTEXITCODE -ne 0)", step_body)
+        self.assertIn('throw "$smokeName failed: $LASTEXITCODE"', step_body)
+
     def _assert_timeout_precedes_gate_diagnostic(
         self, body: str, timeout_constant: str, timeout_message: str
     ) -> None:
@@ -161,17 +184,21 @@ class WindowsCiTimeoutContractTests(unittest.TestCase):
         return int(timeout_match.group(1))
 
     def _workflow_job_timeout_minutes(self, job_name: str) -> int:
+        job_body = self._workflow_job_body(job_name)
+        timeout_match = re.search(
+            r"(?m)^    timeout-minutes:\s*(\d+)\s*$",
+            job_body,
+        )
+        self.assertIsNotNone(timeout_match, job_name)
+        return int(timeout_match.group(1))
+
+    def _workflow_job_body(self, job_name: str) -> str:
         job_match = re.search(
             rf"(?ms)^  {re.escape(job_name)}:\n(?P<body>.*?)(?=^  [a-z0-9-]+:\n|\Z)",
             self.native_ci,
         )
         self.assertIsNotNone(job_match, job_name)
-        timeout_match = re.search(
-            r"(?m)^    timeout-minutes:\s*(\d+)\s*$",
-            job_match.group("body"),
-        )
-        self.assertIsNotNone(timeout_match, job_name)
-        return int(timeout_match.group(1))
+        return job_match.group("body")
 
 
 if __name__ == "__main__":
