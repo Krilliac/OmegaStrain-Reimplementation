@@ -1,5 +1,6 @@
 #include "sdl_gpu_host.h"
 
+#include "sdl_gpu_exception_boundary.h"
 #include "sdl_platform_service.h"
 
 #include "omega/runtime/render_draw_list.h"
@@ -712,41 +713,52 @@ std::expected<void, std::string> SdlGpuHost::UpdateRgba8Texture(
 std::expected<void, std::string> SdlGpuHost::ReleaseTexture(
     const runtime::RenderTextureHandle& handle)
 {
-    auto metadata = impl_->texture_pool.Get(handle);
-    if (!metadata)
-    {
-        if (!IsDefaultHandle(handle))
-            SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
-        return std::unexpected(PoolError("render texture resolve for release", metadata.error()));
-    }
+    return detail::InvokeSdlGpuExceptionBoundary(
+        detail::kReleaseTextureExceptionMessages,
+        [this, &handle]() -> std::expected<void, std::string>
+        {
+            auto metadata = impl_->texture_pool.Get(handle);
+            if (!metadata)
+            {
+                if (!IsDefaultHandle(handle))
+                    SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
+                return std::unexpected(
+                    PoolError("render texture resolve for release", metadata.error()));
+            }
 
-    const std::uint32_t slot_index = metadata->handle.slot_index;
-    if (slot_index >= impl_->texture_slots.size() ||
-        impl_->texture_slots[slot_index] == nullptr)
-    {
-        SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
-        return std::unexpected("render texture backend slot invariant failed during release");
-    }
+            const std::uint32_t slot_index = metadata->handle.slot_index;
+            if (slot_index >= impl_->texture_slots.size() ||
+                impl_->texture_slots[slot_index] == nullptr)
+            {
+                SaturatingIncrement(impl_->rejected_nondefault_texture_handles);
+                return std::unexpected(
+                    "render texture backend slot invariant failed during release");
+            }
 
-    auto idle = WaitForIdle();
-    if (!idle)
-        return idle;
+            auto idle = WaitForIdle();
+            if (!idle)
+                return idle;
 
-    auto released = impl_->texture_pool.Release(handle);
-    if (!released)
-        return std::unexpected(PoolError("render texture release", released.error()));
+            auto released = impl_->texture_pool.Release(handle);
+            if (!released)
+                return std::unexpected(PoolError("render texture release", released.error()));
 
-    SDL_ReleaseGPUTexture(impl_->device, impl_->texture_slots[slot_index]);
-    impl_->texture_slots[slot_index] = nullptr;
-    SaturatingIncrement(impl_->successful_releases);
-    return {};
+            SDL_ReleaseGPUTexture(impl_->device, impl_->texture_slots[slot_index]);
+            impl_->texture_slots[slot_index] = nullptr;
+            SaturatingIncrement(impl_->successful_releases);
+            return {};
+        });
 }
 
 std::expected<void, std::string> SdlGpuHost::WaitForIdle()
 {
-    if (!SDL_WaitForGPUIdle(impl_->device))
-        return std::unexpected(SdlError("SDL_WaitForGPUIdle"));
-    return {};
+    return detail::InvokeSdlGpuExceptionBoundary(detail::kWaitForIdleExceptionMessages,
+        [this]() -> std::expected<void, std::string>
+        {
+            if (!SDL_WaitForGPUIdle(impl_->device))
+                return std::unexpected(SdlError("SDL_WaitForGPUIdle"));
+            return {};
+        });
 }
 
 std::expected<std::array<runtime::RenderClearColorRgba8, 4U>, std::string>
