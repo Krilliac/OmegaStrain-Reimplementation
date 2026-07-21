@@ -68,6 +68,7 @@ namespace
 {
 using std::chrono::milliseconds;
 using std::chrono::nanoseconds;
+using omega::app::FrontEndCapabilities;
 using omega::app::FrontEndMode;
 using omega::app::FrontEndMainRow;
 using omega::app::FrontEndCommand;
@@ -441,6 +442,8 @@ void CheckContractAndTaxonomy()
     static_assert(!default_config.enable_debug_locomotion);
     static_assert(!default_config.initial_front_end_state);
     static_assert(default_config.front_end_visible_profile_slots == 0U);
+    static_assert(default_config.front_end_total_profile_count == 0U);
+    static_assert(!default_config.front_end_capabilities.can_create_first_profile);
     static_assert(static_cast<int>(
                       RunReplayErrorCode::SimulationRepresentationExhausted) == 7);
     static_assert(static_cast<int>(
@@ -1433,6 +1436,219 @@ void CheckFrontEndModalGate()
         "terminal resolution precedes the reducer and cannot cancel, select the highlighted profile, or mutate any simulation owner");
 }
 
+void CheckFirstProfileCreationReplay()
+{
+    constexpr std::array<std::uint32_t, 1U> primary_action{
+        omega::app::kFrontEndPrimaryAction};
+    constexpr std::array primary_down{
+        InputTransition{.code = 0U, .pressed = true}};
+    constexpr std::array primary_up{
+        InputTransition{.code = 0U, .pressed = false}};
+    const std::array create_release_select_frames{
+        ScriptedElapsedFrame{
+            .elapsed = std::chrono::seconds{4}, .transitions = primary_down},
+        ScriptedElapsedFrame{
+            .elapsed = std::chrono::seconds{4}, .transitions = primary_up},
+        ScriptedElapsedFrame{
+            .elapsed = std::chrono::seconds{4}, .transitions = primary_down},
+    };
+    constexpr FrontEndState profiles_first{
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+    constexpr FrontEndState main_profiles{
+        .mode = FrontEndMode::Main,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+
+    RunCaptureTracePair create_pair =
+        BuildScriptedPair(primary_action, create_release_select_frames);
+    RunReplaySessionConfig create_config = ValidConfig();
+    create_config.initial_front_end_state = profiles_first;
+    create_config.front_end_visible_profile_slots = 0U;
+    create_config.front_end_total_profile_count = 0U;
+    create_config.front_end_capabilities = FrontEndCapabilities{
+        .can_create_first_profile = true,
+    };
+    auto create_result =
+        RunReplaySession::Create(std::move(create_pair), create_config);
+    RunReplaySession source = TakeSession(
+        create_result, "the first-profile creation replay is created");
+    const auto scheduler_origin = source.scheduler_state();
+    const auto simulation_origin = source.simulation_state();
+
+    auto create_frame = source.Next();
+    const auto create_plan = create_frame ? create_frame->frame_plan() : std::nullopt;
+    Check(create_frame && create_plan &&
+              create_frame->input().WasPressed(omega::app::kFrontEndPrimaryAction) &&
+              create_frame->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::CreateFirstProfile,
+                  .profile_slot = FrontEndProfileSlot::First,
+              } &&
+              source.front_end_state() == profiles_first &&
+              create_plan->simulation_steps == 0U &&
+              create_plan->interpolation_alpha == 0.0 &&
+              !create_plan->clamped_delta && !create_plan->dropped_time &&
+              source.scheduler_state() == scheduler_origin &&
+              SameSimulation(source.simulation_state(), simulation_origin),
+        "an explicitly enabled empty replay publishes one logical first-profile creation without advancing time or simulation");
+
+    RunReplaySession replay = std::move(source);
+    Check(source.state() == RunReplaySessionState::Inert &&
+              source.remaining_frames() == 0U && !source.scheduler_state() &&
+              !source.simulation_state() && !source.front_end_state(),
+        "moving a first-profile replay leaves the source observably inert");
+    const auto inert_next = source.Next();
+    CheckError(inert_next, RunReplayOperation::Next,
+        RunReplayErrorCode::InvalidSessionState,
+        "moved-from first-profile replay input cannot mutate logical creation state");
+
+    auto release_frame = replay.Next();
+    const auto release_plan = release_frame ? release_frame->frame_plan() : std::nullopt;
+    Check(release_frame && release_plan &&
+              release_frame->input().WasReleased(omega::app::kFrontEndPrimaryAction) &&
+              release_frame->front_end_command() == FrontEndCommand{} &&
+              replay.front_end_state() == profiles_first &&
+              release_plan->simulation_steps == 0U &&
+              replay.scheduler_state() == scheduler_origin &&
+              SameSimulation(replay.simulation_state(), simulation_origin),
+        "the release after logical creation is inert and preserves the new selectable first slot across session move");
+
+    auto select_frame = replay.Next();
+    const auto select_plan = select_frame ? select_frame->frame_plan() : std::nullopt;
+    Check(select_frame && select_plan &&
+              select_frame->input().WasPressed(omega::app::kFrontEndPrimaryAction) &&
+              select_frame->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::SetActiveProfile,
+                  .profile_slot = FrontEndProfileSlot::First,
+              } &&
+              replay.front_end_state() == main_profiles &&
+              select_plan->simulation_steps == 0U &&
+              replay.scheduler_state() == scheduler_origin &&
+              SameSimulation(replay.simulation_state(), simulation_origin) &&
+              replay.state() == RunReplaySessionState::Complete &&
+              replay.remaining_frames() == 0U,
+        "only a later primary press selects the logically created first profile and creation cannot repeat");
+
+    const std::array one_primary_frame{
+        ScriptedElapsedFrame{
+            .elapsed = std::chrono::seconds{4}, .transitions = primary_down},
+    };
+    RunCaptureTracePair legacy_pair =
+        BuildScriptedPair(primary_action, one_primary_frame);
+    RunReplaySessionConfig legacy_config = ValidConfig();
+    legacy_config.initial_front_end_state = profiles_first;
+    auto legacy_created =
+        RunReplaySession::Create(std::move(legacy_pair), legacy_config);
+    RunReplaySession legacy = TakeSession(
+        legacy_created, "the default-closed empty-profile replay is created");
+    const auto legacy_scheduler_origin = legacy.scheduler_state();
+    const auto legacy_simulation_origin = legacy.simulation_state();
+    auto legacy_frame = legacy.Next();
+    Check(legacy_frame && legacy_frame->frame_plan() &&
+              legacy_frame->front_end_command() == FrontEndCommand{} &&
+              legacy.front_end_state() == main_profiles &&
+              legacy_frame->frame_plan()->simulation_steps == 0U &&
+              legacy.scheduler_state() == legacy_scheduler_origin &&
+              SameSimulation(legacy.simulation_state(), legacy_simulation_origin),
+        "default-false replay capability preserves the legacy empty-profile return behavior");
+
+    RunCaptureTracePair nonempty_total_pair =
+        BuildScriptedPair(primary_action, one_primary_frame);
+    RunReplaySessionConfig nonempty_total_config = ValidConfig();
+    nonempty_total_config.initial_front_end_state = profiles_first;
+    nonempty_total_config.front_end_visible_profile_slots = 0U;
+    nonempty_total_config.front_end_total_profile_count = 1U;
+    nonempty_total_config.front_end_capabilities = FrontEndCapabilities{
+        .can_create_first_profile = true,
+    };
+    auto nonempty_total_created = RunReplaySession::Create(
+        std::move(nonempty_total_pair), nonempty_total_config);
+    RunReplaySession nonempty_total = TakeSession(nonempty_total_created,
+        "the nonempty-total creation-gate replay is created");
+    auto nonempty_total_frame = nonempty_total.Next();
+    Check(nonempty_total_frame &&
+              nonempty_total_frame->front_end_command() == FrontEndCommand{} &&
+              nonempty_total.front_end_state() == main_profiles,
+        "a nonzero startup total keeps an explicit creation request closed");
+
+    RunCaptureTracePair nonempty_visible_pair =
+        BuildScriptedPair(primary_action, one_primary_frame);
+    RunReplaySessionConfig nonempty_visible_config = ValidConfig();
+    nonempty_visible_config.initial_front_end_state = profiles_first;
+    nonempty_visible_config.front_end_visible_profile_slots = 1U;
+    nonempty_visible_config.front_end_total_profile_count = 0U;
+    nonempty_visible_config.front_end_capabilities = FrontEndCapabilities{
+        .can_create_first_profile = true,
+    };
+    auto nonempty_visible_created = RunReplaySession::Create(
+        std::move(nonempty_visible_pair), nonempty_visible_config);
+    RunReplaySession nonempty_visible = TakeSession(nonempty_visible_created,
+        "the nonempty-visible creation-gate replay is created");
+    auto nonempty_visible_frame = nonempty_visible.Next();
+    Check(nonempty_visible_frame &&
+              nonempty_visible_frame->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::SetActiveProfile,
+                  .profile_slot = FrontEndProfileSlot::First,
+              } &&
+              nonempty_visible.front_end_state() == main_profiles,
+        "a nonzero startup visible count keeps creation closed and preserves ordinary first-slot selection");
+
+    constexpr std::array<std::uint32_t, 2U> primary_cancel_actions{
+        omega::app::kFrontEndPrimaryAction,
+        omega::app::kFrontEndCancelAction,
+    };
+    constexpr std::array cancel_and_primary_down{
+        InputTransition{.code = 0U, .pressed = true},
+        InputTransition{.code = 1U, .pressed = true},
+    };
+    const std::array cancel_frames{
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = cancel_and_primary_down},
+    };
+    RunCaptureTracePair cancel_pair =
+        BuildScriptedPair(primary_cancel_actions, cancel_frames);
+    RunReplaySessionConfig cancel_config = create_config;
+    auto cancel_created =
+        RunReplaySession::Create(std::move(cancel_pair), cancel_config);
+    RunReplaySession cancel = TakeSession(
+        cancel_created, "the first-profile cancel-priority replay is created");
+    const auto cancel_scheduler_origin = cancel.scheduler_state();
+    const auto cancel_simulation_origin = cancel.simulation_state();
+    auto cancel_frame = cancel.Next();
+    Check(cancel_frame && cancel_frame->frame_plan() &&
+              cancel_frame->front_end_command() == FrontEndCommand{} &&
+              cancel.front_end_state() == main_profiles &&
+              cancel_frame->frame_plan()->simulation_steps == 0U &&
+              cancel.scheduler_state() == cancel_scheduler_origin &&
+              SameSimulation(cancel.simulation_state(), cancel_simulation_origin),
+        "cancel remains terminal for the modal edge and suppresses first-profile creation without advancing owners");
+
+    const std::span<const ScriptedElapsedFrame> no_elapsed_frames;
+    RunCaptureTracePair terminal_pair = BuildScriptedPair(
+        primary_cancel_actions, no_elapsed_frames,
+        TerminalReasons{.host_quit_requested = true}, cancel_and_primary_down);
+    RunReplaySessionConfig terminal_config = create_config;
+    auto terminal_created =
+        RunReplaySession::Create(std::move(terminal_pair), terminal_config);
+    RunReplaySession terminal = TakeSession(
+        terminal_created, "the first-profile terminal replay is created");
+    const auto terminal_menu_origin = terminal.front_end_state();
+    const auto terminal_scheduler_origin = terminal.scheduler_state();
+    const auto terminal_simulation_origin = terminal.simulation_state();
+    auto terminal_frame = terminal.Next();
+    Check(terminal_frame && terminal_frame->terminal_input() &&
+              terminal_frame->front_end_command() == FrontEndCommand{} &&
+              !terminal_frame->elapsed() && !terminal_frame->frame_plan() &&
+              terminal.front_end_state() == terminal_menu_origin &&
+              terminal.scheduler_state() == terminal_scheduler_origin &&
+              SameSimulation(terminal.simulation_state(), terminal_simulation_origin) &&
+              terminal.state() == RunReplaySessionState::Complete,
+        "terminal input resolves before first-profile creation and leaves every logical and simulation owner unchanged");
+}
+
 void CheckMoveLifecycle()
 {
     constexpr std::array<std::uint32_t, 1U> actions{17U};
@@ -1561,6 +1777,7 @@ int main()
     CheckTerminalBehavior();
     CheckDebugLocomotionOptIn();
     CheckFrontEndModalGate();
+    CheckFirstProfileCreationReplay();
     CheckMoveLifecycle();
     CheckReplayAllocationRetry();
 

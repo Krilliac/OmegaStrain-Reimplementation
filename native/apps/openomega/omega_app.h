@@ -75,7 +75,7 @@ public:
     [[nodiscard]] int audio_sample_rate() const noexcept;
     [[nodiscard]] int audio_channel_count() const noexcept;
     // [game/main thread; no concurrent use] Owned session value selected from
-    // the immutable startup model. Null means no explicit selection has occurred.
+    // the bounded front-end model. Null means no explicit selection has occurred.
     [[nodiscard]] std::optional<profiles::ProfileId> active_profile_id() const noexcept;
 
 private:
@@ -122,10 +122,23 @@ private:
     // [game/main thread] Releases CPU/GPU movie state after audio has already
     // been contained or the run has become fatal.
     void ReleaseOpeningMovieForFrontEnd();
-    // [game/main thread; no concurrent use] Resolves only bounded startup slots
-    // and copies their immutable ID. It performs no catalog or database access.
-    void ApplyFrontEndCommand(FrontEndCommand command) noexcept;
+    // [game/main thread; no concurrent use] Applies a bounded menu command. Profile
+    // creation is the only command that may touch persistence; its complete GPU
+    // presentation is reserved before the catalog transaction begins.
+    [[nodiscard]] std::expected<void, std::string> ApplyFrontEndCommand(
+        FrontEndCommand command);
+    [[nodiscard]] std::expected<void, std::string> CreateFirstProfile();
     [[nodiscard]] const runtime::RenderDrawList& CurrentFrontEndDrawList() const noexcept;
+
+    struct FrontEndPresentation
+    {
+        runtime::RenderTextureHandle main_texture;
+        runtime::RenderTextureHandle profiles_texture;
+        std::array<runtime::RenderDrawList, kFrontEndMainRowCount> main_draw_lists;
+        runtime::RenderDrawList profiles_draw_list;
+        std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>
+            profile_selection_draw_lists;
+    };
 
     OmegaApp(std::unique_ptr<NativePersistence> native_persistence,
         std::unique_ptr<runtime::ConfigStore> config,
@@ -148,17 +161,12 @@ private:
         runtime::RenderDrawList opening_movie_draw_list,
         BootSequenceState boot_sequence_state,
         runtime::RenderTextureHandle diagnostic_texture,
-        runtime::RenderTextureHandle front_end_texture,
-        runtime::RenderTextureHandle front_end_profiles_texture,
+        FrontEndPresentation front_end_presentation,
+        std::optional<FrontEndPresentation> first_profile_presentation,
         runtime::RenderTextureHandle diagnostic_controls_texture,
         runtime::RenderTextureHandle diagnostic_asset_topology_texture,
         runtime::RenderTextureHandle diagnostic_asset_transfer_texture,
         runtime::RenderDrawList diagnostic_hidden_draw_list,
-        std::array<runtime::RenderDrawList, kFrontEndMainRowCount>
-            front_end_main_draw_lists,
-        runtime::RenderDrawList front_end_profiles_draw_list,
-        std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>
-            front_end_profile_selection_draw_lists,
         runtime::RenderDrawList diagnostic_controls_draw_list,
         runtime::RenderDrawList diagnostic_asset_topology_draw_list,
         runtime::ContentStartupStage content_stage,
@@ -198,28 +206,34 @@ private:
     // Non-owning generation-scoped identity. The host remains the backend-resource owner and a
     // default-moved-from app cannot release this copied value because its host_ is null.
     runtime::RenderTextureHandle diagnostic_texture_;
-    runtime::RenderTextureHandle front_end_texture_;
-    runtime::RenderTextureHandle front_end_profiles_texture_;
+    FrontEndPresentation front_end_presentation_;
+    // When present, this retains the inactive half of the one-time empty -> first
+    // profile presentation swap so both texture pairs remain explicitly releasable.
+    std::optional<FrontEndPresentation> first_profile_presentation_;
     runtime::RenderTextureHandle diagnostic_controls_texture_;
     runtime::RenderTextureHandle diagnostic_asset_topology_texture_;
     runtime::RenderTextureHandle diagnostic_asset_transfer_texture_;
     // Immutable non-owning draw data, retained independently from the explicit release handles.
     runtime::RenderDrawList diagnostic_hidden_draw_list_;
-    std::array<runtime::RenderDrawList, kFrontEndMainRowCount>
-        front_end_main_draw_lists_;
-    runtime::RenderDrawList front_end_profiles_draw_list_;
-    std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>
-        front_end_profile_selection_draw_lists_;
     runtime::RenderDrawList diagnostic_controls_draw_list_;
     runtime::RenderDrawList diagnostic_asset_topology_draw_list_;
-    // Immutable bounded snapshot and content classification captured before SDL startup.
+    // Bounded front-end model and immutable content classification. The profile
+    // model begins as the startup snapshot and may perform the one supported
+    // zero-to-one transition after a durable first-profile create.
     runtime::ContentStartupStage content_stage_ = runtime::ContentStartupStage::NoContent;
     FrontEndStartupModel front_end_startup_model_{};
     // Project-owned app-layer state. It has no renderer, database, or retail-data lifetime.
     FrontEndState front_end_state_;
+    // Capability is consumed only after the durable create succeeds. Presence of
+    // the alternate presentation alone cannot express this because it then owns
+    // the old empty presentation until teardown.
+    bool can_create_first_profile_ = false;
     // Explicit session policy only. This owned value is never persisted and no
     // profile is selected implicitly at startup.
     std::optional<profiles::ProfileId> active_profile_id_;
+    // Friend-only wall-clock seam. Production samples system_clock at the command
+    // boundary; tests may provide one valid UTC millisecond value.
+    std::optional<std::uint64_t> first_profile_timestamp_override_for_testing_;
     // Friend-only, game-thread, one-shot wall-time input. Production factories leave it empty,
     // and no production API can populate it. Run and RunWithCapture consume it before validation
     // so every exit path is leak-free and at most the first elapsed-bearing host frame observes it.

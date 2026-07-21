@@ -349,8 +349,9 @@ protection, and integrity-checked future-version handling.
 The profile composition slice adds `omega_profiles` and the app-owned `NativePersistence` service.
 `ProfileCatalog` borrows one stable heap-owned database and stores only bounded versioned markers at
 `profiles/<32-lower-hex-id>/metadata`; it deterministically lists identifiers and never creates or
-selects a default. `OmegaApp` solely owns the composed service on the persistence/game thread and
-destroys it last. Non-probe startup resolves the host-native save directory, opens the database, and
+selects a profile implicitly. `OmegaApp` solely owns the composed service on the persistence/game
+thread and destroys it last. Non-probe startup resolves the host-native save directory, opens the
+database, and
 validates all profile markers before platform creation. `--probe-only` returns before persistence;
 `--frames=0` returns after bootstrap. This still assigns no active-profile, campaign, checkpoint,
 retail-payload, PS2 filesystem, memory-card-device, guest-memory, or emulator-savestate semantics.
@@ -1968,6 +1969,33 @@ derives and publishes the same typed command from the captured logical edges; te
 complete before reduction, so a captured simultaneous primary edge cannot select a profile. This
 is project-owned native host policy only, not a claim about retail profile
 order, menu layout, controls, active-save behavior, persistence policy, timing, or fidelity.
+
+### E-0106 explicit first-profile creation
+
+The bounded model now permits one app-owned zero-to-one transition without introducing an automatic
+default. Only an exact empty catalog with native persistence enables the reducer capability. Primary
+on that empty Profiles screen publishes `CreateFirstProfile` and remains modal; cancel still has
+priority, navigation remains inert, and a held Primary level cannot publish another press edge. The
+command carries no caller metadata. `OmegaApp` owns the fixed project identifier
+`00000000000000000000000000000001` and display name `PROFILE 1`.
+
+At startup, the host constructs complete empty and one-profile presentations, including both main
+and Profiles textures and all draw lists. A pool-capacity failure while constructing the alternate
+presentation rejects startup before persistence changes. At command time, `OmegaApp` rechecks the
+live catalog, samples bounded UTC milliseconds from `system_clock` (with a friend-only deterministic
+timestamp seam), prepares the projected model, and calls transactional `ProfileCatalog::Create`.
+After the durable `MustBeAbsent` write, only a no-throw whole-presentation swap and fixed-value model
+assignments remain. Both presentation bundles retain their own handles and draw lists until teardown,
+where lists are cleared before each texture is released while the GPU host is still alive.
+
+Creation does not select the new profile. The same Primary press remains consumed in Profiles; a
+later release and press publishes the ordinary First-slot selection and returns to Main. Fresh replay
+receives the original total and visible counts, advances only its private logical model from zero to
+one after the creation command, and performs no catalog, persistence, identifier, time, raster,
+renderer, or GPU work. Capture bytes remain unchanged. Reopening the native database observes the
+record, but this establishes no persistent active-profile policy, retail/PS2 save behavior, campaign
+or checkpoint schema, memory-card or savestate semantics, proprietary-data contract, or behavioral
+parity.
 
 ### Project-owned front-end cancel action
 

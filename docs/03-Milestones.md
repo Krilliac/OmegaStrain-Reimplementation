@@ -228,6 +228,14 @@ two, and five player advances, zero transition-frame simulation, playback/GPU/au
 and path-free categorical failure logging. Because the generated source bypasses owner-stream
 parsing and production decode, it establishes no Media Foundation teardown, finite-source PCM or
 hardware-backlog drain, perceptual synchronization, retail timing, or repeated owner-input result.
+E-0106 adds an explicit project-owned first-profile action without automatic creation. Primary in an
+exact empty Profiles screen creates fixed ID `00000000000000000000000000000001` named `PROFILE 1`
+through the transactional native catalog and remains modal with no active profile until a later
+Primary edge. Complete empty and one-profile GPU presentations are preloaded, so no fallible GPU
+operation follows the durable write. Fresh replay models only the successful logical zero-to-one
+transition and touches no persistence, identifier, time, or GPU state. Restart and constrained-pool
+fixtures cover durability and preflight rejection. This is synthetic native-shell behavior, not
+retail/PS2 profile, campaign, checkpoint, save, or parity evidence.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
@@ -1167,10 +1175,11 @@ emulator equivalence. It is not wired into level loading, effects, or the front 
 
 ## M6: Campaign coverage
 
-Status: native persistence foundation and profile-catalog startup composition implemented. The
+Status: native persistence foundation, profile-catalog startup composition, and one explicit
+first-profile creation path implemented. The
 versioned transactional `SaveDatabase` stores only project-owned native records. `ProfileCatalog`
 adds bounded metadata at `profiles/<32-lower-hex-id>/metadata`, lists it before platform startup, and
-never creates or selects a default profile. `OmegaApp` owns the database/catalog lifetime through
+never creates or selects a profile implicitly. `OmegaApp` owns the database/catalog lifetime through
 `NativePersistence`; `--probe-only` does not touch persistence and `--frames=0` returns after
 bootstrap. The bounded standard PS2 memory-card container/filesystem codec is also implemented.
 E-0089 adds a bounded project-generated Main/Profiles/Controls/AssetTopology shell that snapshots
@@ -1179,7 +1188,10 @@ with explicit, session-only active-profile selection: the startup snapshot copie
 fixed-size IDs, the pure reducer emits a typed first/second/third-slot command, and `OmegaApp`
 resolves and owns the selected ID on its game thread. Selection never mutates the profile catalog,
 writes the database, or creates/selects an implicit default. Only DiagnosticPlay advances
-simulation. Persistent active-profile policy, profile mutation UI, campaign schemas, and the
+simulation. E-0106 adds the explicit empty-catalog `CreateFirstProfile` transition with one fixed
+project ID/name, transactional persistence, preloaded empty/one-profile presentations, and no
+automatic active selection; a later Primary selects it session-locally. Persistent active-profile
+policy, general profile mutation UI, campaign schemas, and the
 independently evidenced Omega Strain payload mapping remain in progress. No PS2 memory-card device
 or emulator savestate is part of the shipping-runtime design, and the synthetic shell is not a
 retail-fidelity claim.
