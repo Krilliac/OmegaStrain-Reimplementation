@@ -49,6 +49,13 @@ struct RunReplaySessionConfig
     // Default closed preserves legacy replay. Create gates this capability against
     // both startup counts before any frame can reach the pure reducer.
     FrontEndCapabilities front_end_capabilities{};
+    // Replay-local authorization mirror for the explicit diagnostic-play gate.
+    // It is deliberately identity-free: replay holds no ProfileId, catalog view,
+    // database, or persistence owner, and models only whether a confirmation has
+    // already been replayed. Default false matches the app, whose startup never
+    // copies a durable confirmation into session state; with the default closed
+    // capability it cannot change any result, so legacy replay stays byte-for-byte.
+    bool front_end_active_profile_is_confirmed = false;
 
     friend constexpr bool operator==(
         const RunReplaySessionConfig&, const RunReplaySessionConfig&) noexcept = default;
@@ -258,6 +265,11 @@ public:
     // [game thread; no concurrent use] Null means this session uses legacy nonmodal replay.
     [[nodiscard]] std::optional<FrontEndState>
     front_end_state() const noexcept;
+    // [game thread; no concurrent use] Replay-local authorization mirror. It is
+    // opened only by a successfully replayed SetActiveProfile command and holds
+    // no identifier of its own, so it can never name, invent, or resolve a
+    // profile. A moved-from or inert session reports the closed default.
+    [[nodiscard]] bool front_end_active_profile_is_confirmed() const noexcept;
 
 private:
     RunReplaySession(runtime::FrameScheduler&& scheduler,
@@ -267,7 +279,8 @@ private:
         std::optional<FrontEndState> front_end_state,
         std::uint8_t front_end_visible_profile_slots,
         std::size_t front_end_total_profile_count,
-        FrontEndCapabilities front_end_capabilities) noexcept;
+        FrontEndCapabilities front_end_capabilities,
+        bool front_end_active_profile_is_confirmed) noexcept;
     void NormalizeInert() noexcept;
 
     std::optional<runtime::FrameScheduler> scheduler_;
@@ -278,6 +291,7 @@ private:
     std::uint8_t front_end_visible_profile_slots_ = 0U;
     std::size_t front_end_total_profile_count_ = 0U;
     FrontEndCapabilities front_end_capabilities_{};
+    bool front_end_active_profile_is_confirmed_ = false;
     RunReplaySessionState state_ = RunReplaySessionState::Inert;
 };
 } // namespace omega::app
