@@ -1,5 +1,7 @@
 #include "startup_failure_dialog.h"
 
+#include "omega/runtime/content_startup.h"
+#include "omega/runtime/content_startup_diagnostic.h"
 #include "omega/runtime/runtime_settings.h"
 
 #include <SDL3/SDL_init.h>
@@ -459,6 +461,70 @@ void TestRuntimeConfigurationPrivacyProjection()
     Check(!file_error, "the dialog privacy fixture root is removed");
 }
 
+void TestMissingGameDataRootPrivacyProjection()
+{
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto private_missing_root = std::filesystem::temp_directory_path() /
+        ("openomega-dialog-PrivateUser-SecretVault-missing-game-data-" +
+            std::to_string(suffix));
+    std::error_code file_error;
+    std::filesystem::remove_all(private_missing_root, file_error);
+    Check(!file_error, "the private-looking game-data root is absent");
+    if (file_error)
+        return;
+
+    omega::runtime::LaunchOptions options;
+    options.data_root = private_missing_root;
+    const auto startup = omega::runtime::StartContent(options);
+    Check(!startup, "a missing private-looking game-data root rejects startup");
+    if (startup)
+        return;
+
+    Check(startup.error().code == omega::runtime::ContentStartupErrorCode::GameData,
+        "the missing root remains a categorical game-data startup failure");
+    Check(startup.error().game_data_error.has_value() &&
+              startup.error().game_data_error->code ==
+                  omega::content::GameDataErrorCode::MountFailed,
+        "the missing root retains the mount-failed category");
+
+    const auto diagnostic = omega::runtime::DescribeContentStartupError(startup.error());
+    Check(diagnostic.has_value(), "the missing-root diagnostic is projectable");
+    if (!diagnostic)
+        return;
+
+    constexpr std::string_view expected_category = "mount-failed";
+    constexpr std::string_view expected_detail = "unable to mount game-data root";
+    Check(diagnostic->category == expected_category,
+        "the missing-root diagnostic publishes the categorical code");
+    Check(diagnostic->message == expected_detail,
+        "the missing-root diagnostic publishes the fixed detail");
+
+    const std::string stderr_projection = "content startup [" +
+        std::string(diagnostic->category) + "]: " + std::string(diagnostic->message) + '\n';
+    const std::string dialog_projection = Text(Build(
+        omega::app::StartupFailureStage::ContentStartup,
+        diagnostic->category, diagnostic->message));
+    Check(stderr_projection ==
+              "content startup [mount-failed]: unable to mount game-data root\n",
+        "the missing-root stderr projection retains the categorical diagnostic");
+    Check(dialog_projection == ExpectedText(
+              "content startup", expected_category, expected_detail),
+        "the missing-root dialog projection retains the categorical diagnostic");
+
+    const std::array forbidden{
+        private_missing_root.string(),
+        std::string("PrivateUser"),
+        std::string("SecretVault"),
+    };
+    for (const std::string& fragment : forbidden)
+    {
+        Check(stderr_projection.find(fragment) == std::string::npos,
+            "the missing-root stderr projection omits private path material");
+        Check(dialog_projection.find(fragment) == std::string::npos,
+            "the missing-root dialog projection omits private path material");
+    }
+}
+
 void TestPolicyAndSuppressedShow()
 {
     using omega::app::StartupFailureDialogOutcome;
@@ -545,6 +611,7 @@ int main()
     TestLimitsAndCapacity();
     TestOwnershipAndIndependence();
     TestRuntimeConfigurationPrivacyProjection();
+    TestMissingGameDataRootPrivacyProjection();
     TestPolicyAndSuppressedShow();
 
     if (failures != 0)
