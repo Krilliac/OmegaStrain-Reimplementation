@@ -146,6 +146,10 @@ private:
     RefreshDiagnosticActorDrawList();
     [[nodiscard]] const runtime::RenderDrawList& CurrentFrontEndDrawList() const noexcept;
 
+    using ProfileActiveDrawListMatrix =
+        std::array<std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>,
+            kFrontEndVisibleProfiles>;
+
     struct FrontEndPresentation
     {
         runtime::RenderTextureHandle main_texture;
@@ -158,9 +162,10 @@ private:
         // selection list for its row plus the project-owned active-row cue, so
         // the cue is chosen by the position the confirmed identifier resolves to
         // and never by a separately stored second identity.
-        std::array<std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>,
-            kFrontEndVisibleProfiles>
-            profile_active_draw_lists;
+        // Startup-owned immutable presentation data. Indirection keeps the
+        // complete selected-by-active matrix out of OmegaApp value/expected
+        // stack storage; construction and all allocation finish before Run.
+        std::unique_ptr<ProfileActiveDrawListMatrix> profile_active_draw_lists;
     };
 
     OmegaApp(std::unique_ptr<NativePersistence> native_persistence,
