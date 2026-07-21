@@ -19,7 +19,10 @@ inline constexpr std::uint64_t kFntObservedPayloadOffset = 16;
 inline constexpr std::uint64_t kFntMaximumInputBytes = 1ULL * 1024ULL * 1024ULL;
 inline constexpr std::uint64_t kFntMaximumDecodedItems = 1;
 
-// Passive description of the small, aggregate-observed FNT wrapper prefix. The
+// Passive description of the small, project-defined FNT wrapper-prefix
+// hypothesis. The exact prefix constants are a falsifiable project boundary; no
+// tracked source records their retail provenance (see
+// analysis/formats/FRONTEND-EVIDENCE-AUDIT.md, tier C6). The
 // numeric prefix values and regions intentionally remain observational: no
 // version, resource-binding, glyph, metric, or texture semantics are assigned.
 // The borrowed source and its bytes are never retained.
@@ -36,8 +39,8 @@ struct FntEnvelopeDescriptor {
 inline constexpr std::uint64_t kFntMaximumLogicalOutputBytes =
     sizeof(FntEnvelopeDescriptor);
 
-// [any worker thread; stateless/reentrant] Validates only the fixed prefix
-// shared by the currently observed FNT cohort and reports byte ranges without
+// [any worker thread; stateless/reentrant] Validates only the fixed,
+// project-defined prefix hypothesis and reports byte ranges without
 // retaining their contents. Caller limits may tighten but cannot raise the
 // fixed input, item, or output ceilings. The flat inspection uses zero dynamic
 // scratch and nesting depth zero.
