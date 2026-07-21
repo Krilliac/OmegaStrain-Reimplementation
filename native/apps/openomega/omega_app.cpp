@@ -964,7 +964,12 @@ OmegaApp::OmegaApp(
       diagnostic_controls_draw_list_(std::move(diagnostic_controls_draw_list)),
       diagnostic_asset_topology_draw_list_(std::move(diagnostic_asset_topology_draw_list)),
       content_stage_(content_stage), front_end_startup_model_(front_end_startup_model),
-      front_end_state_(InitialFrontEndState()),
+      front_end_state_(PlanProjectFrontEndStartupState(
+          front_end_startup_model_.total_profiles,
+          front_end_startup_model_.visible_profiles,
+          FrontEndCapabilities{
+              .can_create_first_profile = first_profile_presentation_.has_value(),
+          })),
       can_create_first_profile_(first_profile_presentation_.has_value())
 {
 }

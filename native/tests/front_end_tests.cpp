@@ -386,6 +386,111 @@ void CheckModelContract()
           "the first over-limit catalog fails before any projection");
 }
 
+[[nodiscard]] constexpr FrontEndState ReferenceProjectFrontEndStartupState(
+    const std::uint16_t total_profiles, const std::uint8_t visible_profiles,
+    const FrontEndCapabilities capabilities) noexcept
+{
+    constexpr FrontEndState kProfilesState{
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+    const bool valid_counts = total_profiles <= omega::app::kFrontEndMaximumProfiles &&
+                              visible_profiles <= omega::app::kFrontEndVisibleProfiles &&
+                              visible_profiles <= total_profiles &&
+                              ((total_profiles == 0U && visible_profiles == 0U) ||
+                               (total_profiles != 0U && visible_profiles != 0U));
+    if (!valid_counts || (total_profiles == 0U && !capabilities.can_create_first_profile))
+        return omega::app::InitialFrontEndState();
+    return kProfilesState;
+}
+
+[[nodiscard]] constexpr bool StartupPlannerMatchesVisibleBoundaries(
+    const std::uint16_t total_profiles) noexcept
+{
+    constexpr std::array capabilities{false, true};
+    for (std::uint16_t visible_value = 0U; visible_value <= 0xffU; ++visible_value)
+    {
+        const auto visible_profiles = static_cast<std::uint8_t>(visible_value);
+        for (const bool can_create : capabilities)
+        {
+            const FrontEndCapabilities capability{.can_create_first_profile = can_create};
+            if (omega::app::PlanProjectFrontEndStartupState(
+                    total_profiles, visible_profiles, capability) !=
+                ReferenceProjectFrontEndStartupState(total_profiles, visible_profiles, capability))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void CheckStartupStatePlannerContract()
+{
+    constexpr FrontEndState kInitialState{
+        .mode = FrontEndMode::Main,
+        .selected_main_row = FrontEndMainRow::StartDiagnostic,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+    constexpr FrontEndState kProfilesState{
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+    constexpr FrontEndCapabilities kCreationEnabled{.can_create_first_profile = true};
+
+    static_assert(noexcept(omega::app::PlanProjectFrontEndStartupState(0U, 0U, {})));
+    static_assert(omega::app::PlanProjectFrontEndStartupState(0U, 0U, {}) == kInitialState);
+    static_assert(omega::app::PlanProjectFrontEndStartupState(0U, 0U, kCreationEnabled) == kProfilesState);
+    static_assert(omega::app::PlanProjectFrontEndStartupState(1U, 1U, {}) == kProfilesState);
+    static_assert(omega::app::PlanProjectFrontEndStartupState(1'024U, 3U, kCreationEnabled) == kProfilesState);
+    static_assert(omega::app::PlanProjectFrontEndStartupState(1U, 0U, kCreationEnabled) == kInitialState);
+    static_assert(omega::app::PlanProjectFrontEndStartupState(0U, 1U, kCreationEnabled) == kInitialState);
+    static_assert(omega::app::PlanProjectFrontEndStartupState(1'025U, 3U, kCreationEnabled) == kInitialState);
+    static_assert(StartupPlannerMatchesVisibleBoundaries(0U));
+    static_assert(StartupPlannerMatchesVisibleBoundaries(1U));
+    static_assert(StartupPlannerMatchesVisibleBoundaries(3U));
+    static_assert(StartupPlannerMatchesVisibleBoundaries(4U));
+    static_assert(StartupPlannerMatchesVisibleBoundaries(1'024U));
+    static_assert(StartupPlannerMatchesVisibleBoundaries(1'025U));
+    static_assert(StartupPlannerMatchesVisibleBoundaries(65'535U));
+
+    bool all_boundary_results_match = true;
+    constexpr std::array<std::uint16_t, 7U> totals{0U, 1U, 3U, 4U, 1'024U, 1'025U, 65'535U};
+    constexpr std::array capabilities_under_test{false, true};
+    for (const std::uint16_t total_profiles : totals)
+    {
+        for (std::uint16_t visible_value = 0U; visible_value <= 0xffU; ++visible_value)
+        {
+            const auto visible_profiles = static_cast<std::uint8_t>(visible_value);
+            for (const bool can_create : capabilities_under_test)
+            {
+                const FrontEndCapabilities capabilities{.can_create_first_profile = can_create};
+                all_boundary_results_match =
+                    all_boundary_results_match &&
+                    omega::app::PlanProjectFrontEndStartupState(
+                        total_profiles, visible_profiles, capabilities) ==
+                        ReferenceProjectFrontEndStartupState(total_profiles, visible_profiles, capabilities);
+            }
+        }
+    }
+    Check(all_boundary_results_match,
+          "all 3584 total/visible/capability boundary combinations return the exact fail-closed or Profiles state");
+
+    std::uint16_t total_profiles = 4U;
+    std::uint8_t visible_profiles = 3U;
+    FrontEndCapabilities capabilities{.can_create_first_profile = true};
+    const std::uint16_t original_total = total_profiles;
+    const std::uint8_t original_visible = visible_profiles;
+    const FrontEndCapabilities original_capabilities = capabilities;
+    const FrontEndState planned = omega::app::PlanProjectFrontEndStartupState(
+        total_profiles, visible_profiles, capabilities);
+    Check(planned == kProfilesState && total_profiles == original_total &&
+              visible_profiles == original_visible && capabilities == original_capabilities,
+          "startup planning returns the exact Profiles state without mutating caller-owned inputs");
+}
+
 void CheckReducerAndViewContract()
 {
     static_assert(omega::app::kFrontEndPrimaryAction == 6U);
@@ -865,6 +970,7 @@ void CheckRasterContract()
 int main()
 {
     CheckModelContract();
+    CheckStartupStatePlannerContract();
     CheckReducerAndViewContract();
     CheckRasterContract();
 

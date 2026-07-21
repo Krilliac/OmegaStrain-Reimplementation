@@ -205,6 +205,36 @@ struct FrontEndView
     };
 }
 
+// [any thread; reentrant] Selects the project-owned startup surface from an
+// already-captured profile-count snapshot and an explicit persistence
+// capability. Valid nonempty snapshots and explicitly creatable empty
+// snapshots open Profiles at its first slot. Every malformed, out-of-bounds,
+// or non-creatable empty snapshot fails closed to InitialFrontEndState. This
+// pure planner performs no command publication, allocation, I/O, persistence,
+// or identity work.
+[[nodiscard]] constexpr FrontEndState PlanProjectFrontEndStartupState(
+    const std::uint16_t total_profiles, const std::uint8_t visible_profiles,
+    const FrontEndCapabilities capabilities = {}) noexcept
+{
+    const bool counts_are_bounded = total_profiles <= kFrontEndMaximumProfiles &&
+                                    visible_profiles <= kFrontEndVisibleProfiles;
+    const bool visible_count_fits_total = visible_profiles <= total_profiles;
+    const bool both_counts_are_zero = total_profiles == 0U && visible_profiles == 0U;
+    const bool both_counts_are_nonzero = total_profiles != 0U && visible_profiles != 0U;
+    if (!counts_are_bounded || !visible_count_fits_total ||
+        (!both_counts_are_zero && !both_counts_are_nonzero) ||
+        (both_counts_are_zero && !capabilities.can_create_first_profile))
+    {
+        return InitialFrontEndState();
+    }
+
+    return FrontEndState{
+        .mode = FrontEndMode::Profiles,
+        .selected_main_row = FrontEndMainRow::Profiles,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+}
+
 [[nodiscard]] constexpr bool IsValidFrontEndState(const FrontEndState state) noexcept
 {
     const bool valid_mode = state.mode == FrontEndMode::Main || state.mode == FrontEndMode::Profiles ||

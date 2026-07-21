@@ -1463,6 +1463,31 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     public-tree gate, the 107-record ledger gate, diff checks, and independent static reviews passed.
     Local serialized C++ build/test was not attempted because the RAM preflight reported critical
     kernel-pool pressure; publication CI and exact-main results remain unclaimed.
+85. E-0108 introduces one pure project-owned profile-gated startup policy without adding an
+    automatic create or select path. `PlanProjectFrontEndStartupState` is
+    `constexpr`/`noexcept`: a bounded internally consistent nonempty snapshot, or exact empty
+    snapshot with `can_create_first_profile`, returns `Profiles / Profiles / First`. A malformed or
+    out-of-bounds pair, including zero profiles without that capability, returns the established
+    `Main / StartDiagnostic / First` state. Planning performs no command publication, allocation,
+    persistence, identity, GPU, or platform work. `OmegaApp` and production fresh replay supply
+    their already-owned counts and explicit capability to the same planner. Creation remains the
+    E-0106 explicit action and selection remains the separate E-0096 explicit action.
+    Generated acceptance fixtures compose natural movie completion and Primary skip with
+    `movie -> Profiles -> explicit create -> release -> explicit select -> Main`. The skip press is
+    swallowed and must be released before a distinct create press; every front-end frame remains
+    modal. A generated bounded playback failure also fails open to Profiles without profile or
+    durable-catalog mutation. No GPU resource is added. Tested `NoContent` no-opening-movie totals
+    remain 8 slots / 233,476 logical bytes for an empty catalog and 6 / 159,748 for a nonempty
+    catalog. The generated `NoContent` 2x2 movie fixture coexists at 9 / 233,492 and transition
+    releases exactly one slot / 16 bytes. Tooling passed 340/340, Python compile-all passed, the
+    native-dependency gate checked 261 files, the staged public-tree gate checked 438 indexed text
+    blobs, the ledger gates checked 108 unique records, diff checks passed, and independent static
+    audits found no blocker. Local C++ compilation and execution were not attempted because the host
+    remains under critical kernel-pool pressure; publication CI and exact-main validation remain
+    pending and unclaimed. This is native shell composition only, not retail
+    startup, menu, profile, save, active-profile persistence, campaign, checkpoint, PS2,
+    memory-card, savestate, emulator, proprietary-input, or behavioral-parity evidence. No private
+    or proprietary input was accessed for this slice.
 
 ## Disc observations
 
@@ -1484,17 +1509,13 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
 
 ## Next focused pass
 
-1. Add a pure project-owned startup-entry planner and one composed generated acceptance for the
-   existing movie/profile flows. Route a valid visible profile set, or an exact-empty catalog with
-   first-profile capability, into Profiles; fail closed to Main for inconsistent counts or missing
-   persistence capability. Apply the same planner to live startup and fresh replay without automatic
-   creation or selection. Extend the generated opening-movie smoke through
-   `movie -> Profiles -> create -> release -> select -> Main`, proving skip-edge containment, durable
-   `PROFILE 1`, zero simulation while modal, the existing draw-list transitions, and no command-time
-   GPU allocation. This is native shell policy, not retail startup/menu behavior, and adds no GPU
-   resource. Define persistent active-profile and campaign/checkpoint policy separately. Preserve
-   process/package isolation in persistence tests and never make a PS2 memory-card device, guest RAM,
-   or emulator savestate part of the shipping runtime.
+1. Define the next bounded project-owned active-profile confirmation and persistence slice only.
+   Keep confirmation explicit, preserve the existing no-automatic-create/no-automatic-select
+   startup policy, and specify the native persistence boundary for an already selected owned
+   `ProfileId` without introducing campaign or checkpoint records. Cover reopen, stale or absent
+   identities, write failure, and process/package isolation with generated fixtures before any
+   broader profile mutation UI. This is native policy, not retail or PS2 save behavior; never make a
+   PS2 memory-card device, guest RAM, or emulator savestate part of the shipping runtime.
 2. Treat E-0099 as runnable-tool and configuration-initialization readiness only. Before any new
    observation, prepare a fresh neutral-menu savestate under the enforced modes and run the private
    producer's synthetic contract and security checks outside every OpenOmega worktree. Then collect

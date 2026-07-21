@@ -253,6 +253,57 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     std::cerr << "]: " << error.message << '\n';
 }
 
+[[nodiscard]] constexpr std::string_view ReplayFrontEndModeName(
+    const omega::app::FrontEndMode mode) noexcept
+{
+    switch (mode)
+    {
+    case omega::app::FrontEndMode::Main:
+        return "Main";
+    case omega::app::FrontEndMode::Profiles:
+        return "Profiles";
+    case omega::app::FrontEndMode::DiagnosticPlay:
+        return "DiagnosticPlay";
+    case omega::app::FrontEndMode::Controls:
+        return "Controls";
+    case omega::app::FrontEndMode::AssetTopology:
+        return "AssetTopology";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] constexpr std::string_view ReplayFrontEndMainRowName(
+    const omega::app::FrontEndMainRow row) noexcept
+{
+    switch (row)
+    {
+    case omega::app::FrontEndMainRow::StartDiagnostic:
+        return "StartDiagnostic";
+    case omega::app::FrontEndMainRow::Profiles:
+        return "Profiles";
+    case omega::app::FrontEndMainRow::Controls:
+        return "Controls";
+    case omega::app::FrontEndMainRow::AssetTopology:
+        return "AssetTopology";
+    }
+    return "Unknown";
+}
+
+[[nodiscard]] constexpr std::string_view ReplayFrontEndProfileSlotName(
+    const omega::app::FrontEndProfileSlot slot) noexcept
+{
+    switch (slot)
+    {
+    case omega::app::FrontEndProfileSlot::First:
+        return "First";
+    case omega::app::FrontEndProfileSlot::Second:
+        return "Second";
+    case omega::app::FrontEndProfileSlot::Third:
+        return "Third";
+    }
+    return "Unknown";
+}
+
 [[nodiscard]] bool IsZeroOriginScheduler(
     const omega::runtime::FrameSchedulerState& state) noexcept
 {
@@ -284,12 +335,19 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     };
     config.enable_debug_locomotion = std::ranges::includes(
         traces->input_trace().actions(), debug_locomotion_actions);
-    config.initial_front_end_state = omega::app::InitialFrontEndState();
+    if (front_end_total_profile_count > omega::app::kFrontEndMaximumProfiles)
+    {
+        std::cerr << "runtime capture replay: profile snapshot exceeds the project limit\n";
+        return false;
+    }
     config.front_end_visible_profile_slots = front_end_visible_profile_slots;
     config.front_end_total_profile_count = front_end_total_profile_count;
     config.front_end_capabilities.can_create_first_profile =
         front_end_visible_profile_slots == 0U &&
         front_end_total_profile_count == 0U;
+    config.initial_front_end_state = omega::app::PlanProjectFrontEndStartupState(
+        static_cast<std::uint16_t>(front_end_total_profile_count),
+        front_end_visible_profile_slots, config.front_end_capabilities);
     auto created = omega::app::RunReplaySession::Create(std::move(*traces), config);
     if (!created)
     {
@@ -337,7 +395,8 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     const auto scheduler = replay.scheduler_state();
     const auto simulation = replay.simulation_state();
     const auto replay_debug_position = replay.debug_locomotion_position();
-    if (!scheduler || !simulation)
+    const auto replay_front_end = replay.front_end_state();
+    if (!scheduler || !simulation || !replay_front_end)
     {
         std::cerr << "runtime capture replay: final owner snapshots are unavailable\n";
         return false;
@@ -385,6 +444,11 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
               << " completed_simulation_steps=" << simulation->completed_steps
               << " clamped_frames=" << clamped_frames
               << " dropped_frames=" << dropped_frames
+              << " front_end=" << ReplayFrontEndModeName(replay_front_end->mode)
+              << '/' << ReplayFrontEndMainRowName(
+                            replay_front_end->selected_main_row)
+              << '/' << ReplayFrontEndProfileSlotName(
+                            replay_front_end->selected_profile_slot)
               << " completion=complete\n";
     return true;
 }
