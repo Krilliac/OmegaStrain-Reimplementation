@@ -491,7 +491,7 @@ jobs:
           $sentinelStderr = @(
             'unknown option: --openomega-package-contract-sentinel',
             'usage: openomega [-h|--help]',
-            '       openomega [--config=PATH] [--set=KEY=VALUE ...] [--frames=N [--capture-run [--replay-capture]]] [--data-root=PATH [--level=CODE] [--probe-only]] [--opening-movie=PATH]'
+            '       openomega [--config=PATH] [--set=KEY=VALUE ...] [--frames=N [--capture-run [--replay-capture]]] [--data-root=PATH [--level=CODE]] [--probe-only] [--opening-movie=PATH]'
           ) -join "`n"
           $sentinelStderr += "`n"
           Invoke-LauncherCase `
