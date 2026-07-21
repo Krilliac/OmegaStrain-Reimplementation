@@ -153,6 +153,8 @@ add_library(omega_runtime STATIC
     native/src/runtime/log_service.cpp
     native/src/runtime/packed24_transfer_debug_image.cpp
     native/src/runtime/render_draw_list.cpp
+    native/src/runtime/render_mesh_draw_list.cpp
+    native/src/runtime/render_mesh_pool.cpp
     native/src/runtime/render_texture_pool.cpp
     native/src/runtime/runtime_config_discovery.cpp
     native/src/runtime/run_capture_replay.cpp
@@ -1797,6 +1799,56 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_render_texture_pool_tests COMMAND omega_render_texture_pool_tests)
     set_tests_properties(omega_render_texture_pool_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_render_mesh_pool_tests
+        native/tests/render_mesh_pool_tests.cpp
+    )
+    target_link_libraries(omega_render_mesh_pool_tests PRIVATE omega_runtime)
+    if(MSVC)
+        target_compile_options(omega_render_mesh_pool_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_render_mesh_pool_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_render_mesh_pool_tests COMMAND omega_render_mesh_pool_tests)
+    set_tests_properties(omega_render_mesh_pool_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_render_mesh_draw_list_tests
+        native/tests/render_mesh_draw_list_tests.cpp
+    )
+    target_link_libraries(omega_render_mesh_draw_list_tests PRIVATE omega_runtime)
+    if(MSVC)
+        target_compile_options(omega_render_mesh_draw_list_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_render_mesh_draw_list_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_render_mesh_draw_list_tests COMMAND omega_render_mesh_draw_list_tests)
+    set_tests_properties(omega_render_mesh_draw_list_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_render_draw_list_tests
         native/tests/render_draw_list_tests.cpp
