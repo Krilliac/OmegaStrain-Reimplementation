@@ -100,11 +100,55 @@ class PublicTreeGateTests(unittest.TestCase):
                     any("owner-home path" in error for error in self.errors("notes.md", leak))
                 )
 
+    def test_escaped_and_unicode_owner_home_paths_are_blocked(self) -> None:
+        drive = b"C:"
+        escaped = b'{"path":"' + drive + rb"\\Users\\alice\\repo" + b'"}'
+        unicode_unix = ("at /home" + "/élise/repo").encode("utf-8")
+        unicode_windows = drive + (r"\Users\élise\repo").encode("utf-8")
+        embedded_windows = b"prefix" + drive + rb"\Users\alice\repo"
+        unix_home = b"/home" + b"/alice/repo"
+        macos_home = b"/Users" + b"/alice/repo"
+        file_uri_unix = b"file://" + unix_home
+        file_uri_macos = b"file://" + macos_home
+        short_file_uri = b"file:" + unix_home
+        for leak in (
+            escaped,
+            unicode_unix,
+            unicode_windows,
+            embedded_windows,
+            file_uri_unix,
+            file_uri_macos,
+            short_file_uri,
+        ):
+            with self.subTest(leak=leak):
+                self.assertTrue(
+                    any("owner-home path" in error for error in self.errors("notes.md", leak))
+                )
+
+    def test_urls_and_dot_segments_are_not_owner_home_paths(self) -> None:
+        drive = b"C:"
+        safe = (
+            b"https://example.test/home/docs",
+            b"https://example.test/Users/docs",
+            drive + rb"\Users\..\Windows",
+            drive + rb"\Users\.\Windows",
+            b"relative/home/alice",
+        )
+        for value in safe:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    [e for e in self.errors("docs/note.md", value) if "owner-home path" in e],
+                    [],
+                )
+
     def test_generic_home_placeholders_are_not_blocked(self) -> None:
         for safe in (
             b"documented under <user>/OpenOmega",
             b"resolved from $HOME/.config",
             b"%LOCALAPPDATA%/OpenOmega/native-save",
+            b"C:/Users/<user>/OpenOmega",
+            b"C:/Users/%USERNAME%/OpenOmega",
+            b"documented as `/home/<name>`",
             b"the private/ and runtime/ roots stay ignored",
         ):
             with self.subTest(safe=safe):
