@@ -1488,6 +1488,34 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     startup, menu, profile, save, active-profile persistence, campaign, checkpoint, PS2,
     memory-card, savestate, emulator, proprietary-input, or behavioral-parity evidence. No private
     or proprietary input was accessed for this slice.
+86. E-0109 adds one project-owned durable active-profile confirmation boundary without making it an
+    automatic startup selection. `NativePersistence` owns canonical key `profiles/active`, record
+    schema 1, and an exact 32-byte value: ASCII `OOACTPRF`, little-endian payload version 1, zero
+    flags, a zero reserved word, and the raw 16-byte `ProfileId`. Production app storage uses a
+    1,025-record ceiling, sufficient for the bounded 1,024-profile startup model plus this pointer
+    when no other record consumes capacity; it is not an enforced namespace reservation. Bootstrap
+    rejects malformed length/magic/scalars, unsupported record or payload versions, and a stale ID
+    absent from the validated catalog through the typed `persisted-active-profile` category. The
+    existing Profiles Primary command is the explicit confirmation edge. It revalidates the profile
+    and atomically commits the pointer before the projected front-end state or app-session active ID
+    is published. A same-ID reconfirm checks the current pointer/revision and performs no write.
+    Missing-profile, conflict, capacity, storage, and allocation failures retain the prior Profiles
+    state, exact database totals, session value, and GPU snapshot. Reopen validates and exposes the
+    durable pointer, but the next app still begins `Profiles / Profiles / First` with session active
+    unset until a new explicit Primary edge. Generated acceptance fixes one 41-byte profile value at
+    generation 1 and two records / 73 logical value bytes after the 32-byte pointer commit at
+    generation 2; same-ID reconfirm preserves those totals. Capture/replay schema is unchanged,
+    replay remains persistence-free, and no GPU resource is added. A non-installed test-only writer
+    prepares that deterministic state for the direct process and Windows portable-package
+    contracts. Each launches the real shell twice at zero frames, requires one profile and empty
+    stderr, and proves that native-save bytes plus adjacent test/package trees are unchanged. The
+    package's exact install/archive allowlists exclude the helper and save state. Static validation
+    passed all 340 tooling tests, Python compile-all, the 262-file native dependency gate, both
+    109-record ledger gates, the 439-blob staged public-tree gate, diff checks, and independent
+    core/package reviews. Local C++ compilation/execution and publication CI remain pending.
+    This establishes only project-owned native confirmation policy. It assigns no retail or PS2
+    save, menu, profile, campaign, checkpoint, memory-card, guest-RAM, savestate, emulator,
+    proprietary-input, owner-corpus, or behavioral-parity semantics, and no owner input was used.
 
 ## Disc observations
 
@@ -1509,13 +1537,11 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
 
 ## Next focused pass
 
-1. Define the next bounded project-owned active-profile confirmation and persistence slice only.
-   Keep confirmation explicit, preserve the existing no-automatic-create/no-automatic-select
-   startup policy, and specify the native persistence boundary for an already selected owned
-   `ProfileId` without introducing campaign or checkpoint records. Cover reopen, stale or absent
-   identities, write failure, and process/package isolation with generated fixtures before any
-   broader profile mutation UI. This is native policy, not retail or PS2 save behavior; never make a
-   PS2 memory-card device, guest RAM, or emulator savestate part of the shipping runtime.
+1. After E-0109's generated direct-process and portable-package reopen contract is compiled and
+   executed by publication CI, define the first bounded project-owned campaign/checkpoint policy as
+   a separate native schema and transaction slice. It must remain explicit, transactional, and
+   independent of PS2 save representation. Do not infer retail or PS2 save/menu/profile behavior or
+   introduce a PS2 memory-card device, guest RAM, or emulator savestate into the shipping runtime.
 2. Treat E-0099 as runnable-tool and configuration-initialization readiness only. Before any new
    observation, prepare a fresh neutral-menu savestate under the enforced modes and run the private
    producer's synthetic contract and security checks outside every OpenOmega worktree. Then collect

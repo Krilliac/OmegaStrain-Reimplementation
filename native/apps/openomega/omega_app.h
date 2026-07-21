@@ -122,9 +122,11 @@ private:
     // [game/main thread] Releases CPU/GPU movie state after audio has already
     // been contained or the run has become fatal.
     void ReleaseOpeningMovieForFrontEnd();
-    // [game/main thread; no concurrent use] Applies a bounded menu command. Profile
-    // creation is the only command that may touch persistence; its complete GPU
-    // presentation is reserved before the catalog transaction begins.
+    // [game/main thread; no concurrent use] Applies a bounded menu command before
+    // its projected reducer state is published. Profile creation and explicit
+    // active-profile confirmation may touch persistence; neither mutates GPU state.
+    // A failed command leaves both the prior front-end state and session activation
+    // unpublished.
     [[nodiscard]] std::expected<void, std::string> ApplyFrontEndCommand(
         FrontEndCommand command);
     [[nodiscard]] std::expected<void, std::string> CreateFirstProfile();
@@ -239,8 +241,9 @@ private:
     // the alternate presentation alone cannot express this because it then owns
     // the old empty presentation until teardown.
     bool can_create_first_profile_ = false;
-    // Explicit session policy only. This owned value is never persisted and no
-    // profile is selected implicitly at startup.
+    // Explicit per-launch activation only. The corresponding confirmation is
+    // persisted before this value is published, but startup never copies a durable
+    // confirmation into session state or selects a profile implicitly.
     std::optional<profiles::ProfileId> active_profile_id_;
     // Friend-only wall-clock seam. Production samples system_clock at the command
     // boundary; tests may provide one valid UTC millisecond value.

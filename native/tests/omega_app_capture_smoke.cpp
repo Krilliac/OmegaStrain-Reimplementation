@@ -339,6 +339,48 @@ struct OmegaAppTestAccess final
         return app.active_profile_id_;
     }
 
+    [[nodiscard]] static std::optional<profiles::ProfileId>
+    PersistedConfirmedProfile(const OmegaApp& app) noexcept
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        return app.native_persistence_->persisted_confirmed_profile_id();
+    }
+
+    [[nodiscard]] static std::optional<std::uint64_t> PersistenceGeneration(
+        const OmegaApp& app) noexcept
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        return app.native_persistence_->database().generation();
+    }
+
+    [[nodiscard]] static std::optional<std::size_t> PersistenceRecordCount(
+        const OmegaApp& app) noexcept
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        return app.native_persistence_->database().record_count();
+    }
+
+    [[nodiscard]] static std::optional<std::size_t> PersistenceLogicalValueBytes(
+        const OmegaApp& app) noexcept
+    {
+        if (!app.native_persistence_)
+            return std::nullopt;
+        return app.native_persistence_->database().logical_value_bytes();
+    }
+
+    [[nodiscard]] static bool EraseStartupProfileId(
+        OmegaApp& app, const FrontEndProfileSlot slot) noexcept
+    {
+        const std::size_t index = static_cast<std::size_t>(slot);
+        if (index >= app.front_end_startup_model_.profiles.size())
+            return false;
+        app.front_end_startup_model_.profiles[index].id.reset();
+        return true;
+    }
+
     [[nodiscard]] static bool CanCreateFirstProfile(
         const OmegaApp& app) noexcept
     {
@@ -1260,6 +1302,260 @@ void CheckPackedTransferUploadBudgetFallback(omega::app::OmegaApp& app,
     return SDL_PushEvent(&event);
 }
 
+void CheckActiveProfileConfirmation(
+    const std::filesystem::path& fixture_root,
+    const omega::runtime::RuntimeSettings& settings)
+{
+    using Access = omega::app::detail::OmegaAppTestAccess;
+    const auto profile_id = omega::profiles::ProfileId::Parse(
+        "00000000000000000000000000000001");
+    Check(profile_id.has_value(),
+        "the generated active-profile confirmation ID parses");
+    if (!profile_id)
+        return;
+
+    constexpr omega::app::FrontEndState kProfilesFirst{
+        .mode = omega::app::FrontEndMode::Profiles,
+        .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+        .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+    };
+    constexpr omega::app::FrontEndState kReturnedProfilesRow{
+        .mode = omega::app::FrontEndMode::Main,
+        .selected_main_row = omega::app::FrontEndMainRow::Profiles,
+        .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
+    };
+    constexpr std::string_view kMissingFailure =
+        "active profile confirmation failed: profile-not-found";
+    constexpr std::string_view kCapacityFailure =
+        "active profile confirmation failed: storage-limit-exceeded";
+    const omega::profiles::ProfileMetadata metadata{
+        .display_name = "selection",
+        .created_unix_milliseconds = 1U,
+        .modified_unix_milliseconds = 1U,
+    };
+    const std::filesystem::path database_root =
+        fixture_root / "native-active-profile-confirmation";
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(database_root);
+        Check(persistence.has_value(),
+            "the generated active-profile database bootstraps");
+        if (!persistence)
+            return;
+        const auto created = persistence->profiles().Create(*profile_id, metadata);
+        Check(created && persistence->database().generation() == 1U &&
+                  persistence->database().record_count() == 1U &&
+                  persistence->database().logical_value_bytes() == 41U &&
+                  !persistence->persisted_confirmed_profile_id(),
+            "profile creation publishes generation one with one 41-byte metadata record and no confirmation");
+        if (!created)
+            return;
+    }
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(database_root);
+        auto config = omega::runtime::ParseConfigText("");
+        Check(persistence && config &&
+                  persistence->startup_profiles().size() == 1U &&
+                  !persistence->persisted_confirmed_profile_id(),
+            "the generated unconfirmed profile reopens for app startup");
+        if (!persistence || !config)
+            return;
+
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            omega::runtime::ContentStartupState{}, std::move(*persistence), false);
+        Check(app && Access::FrontEnd(*app) == kProfilesFirst &&
+                  !Access::ActiveProfile(*app) &&
+                  !Access::PersistedConfirmedProfile(*app),
+            "startup enters Profiles/First with both session activation and durable confirmation unset");
+        if (!app)
+            return;
+
+        const omega::app::GpuHostSnapshot gpu_before = Access::GpuSnapshot(*app);
+        const bool pushed = PushKey(SDL_SCANCODE_F1, true);
+        auto selected = app->RunWithCapture(1);
+        Check(pushed && selected &&
+                  selected->completion() ==
+                      omega::app::RunCaptureCompletion::FrameLimitReached &&
+                  !selected->failure() &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{2U} &&
+                  Access::PersistenceRecordCount(*app) ==
+                      std::optional<std::size_t>{2U} &&
+                  Access::PersistenceLogicalValueBytes(*app) ==
+                      std::optional<std::size_t>{73U} &&
+                  Access::PersistedConfirmedProfile(*app) == profile_id &&
+                  Access::ActiveProfile(*app) == profile_id &&
+                  Access::FrontEnd(*app) == kReturnedProfilesRow &&
+                  IsOneVisibleMenuSubmission(
+                      gpu_before, Access::GpuSnapshot(*app)),
+            "confirmation commits generation two and the 32-byte pointer before publishing session state and leaving Profiles without GPU mutation");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the generated successful confirmation edge releases");
+    }
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(database_root);
+        auto config = omega::runtime::ParseConfigText("");
+        Check(persistence && config &&
+                  persistence->persisted_confirmed_profile_id() == profile_id &&
+                  persistence->database().generation() == 2U &&
+                  persistence->database().record_count() == 2U &&
+                  persistence->database().logical_value_bytes() == 73U,
+            "reopen validates the generated durable confirmation and exact database totals");
+        if (!persistence || !config)
+            return;
+
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            omega::runtime::ContentStartupState{}, std::move(*persistence), false);
+        Check(app && Access::FrontEnd(*app) == kProfilesFirst &&
+                  !Access::ActiveProfile(*app) &&
+                  Access::PersistedConfirmedProfile(*app) == profile_id,
+            "a durable confirmation never implicitly activates the reopened session");
+        if (!app)
+            return;
+
+        const omega::app::GpuHostSnapshot gpu_before = Access::GpuSnapshot(*app);
+        const bool pushed = PushKey(SDL_SCANCODE_F1, true);
+        auto reconfirmed = app->RunWithCapture(1);
+        Check(pushed && reconfirmed &&
+                  reconfirmed->completion() ==
+                      omega::app::RunCaptureCompletion::FrameLimitReached &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{2U} &&
+                  Access::PersistenceRecordCount(*app) ==
+                      std::optional<std::size_t>{2U} &&
+                  Access::PersistenceLogicalValueBytes(*app) ==
+                      std::optional<std::size_t>{73U} &&
+                  Access::PersistedConfirmedProfile(*app) == profile_id &&
+                  Access::ActiveProfile(*app) == profile_id &&
+                  Access::FrontEnd(*app) == kReturnedProfilesRow &&
+                  IsOneVisibleMenuSubmission(
+                      gpu_before, Access::GpuSnapshot(*app)),
+            "same-ID reconfirmation remains an explicit session activation without publishing another durable generation or touching GPU state");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the generated idempotent confirmation edge releases");
+    }
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(database_root);
+        auto config = omega::runtime::ParseConfigText("");
+        if (!persistence || !config)
+        {
+            Check(false,
+                "the missing-model confirmation fixture reopens");
+            return;
+        }
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            omega::runtime::ContentStartupState{}, std::move(*persistence), false);
+        Check(app.has_value(),
+            "the missing-model confirmation app starts");
+        if (!app)
+            return;
+
+        const omega::app::GpuHostSnapshot gpu_before = Access::GpuSnapshot(*app);
+        const bool erased = Access::EraseStartupProfileId(
+            *app, omega::app::FrontEndProfileSlot::First);
+        const bool pushed = PushKey(SDL_SCANCODE_F1, true);
+        auto rejected = app->RunWithCapture(1);
+        std::optional<std::string_view> failure;
+        if (rejected)
+            failure = rejected->failure();
+        const std::string root_text = database_root.string();
+        const std::string id_text = profile_id->ToString();
+        Check(erased && pushed && rejected &&
+                  rejected->completion() ==
+                      omega::app::RunCaptureCompletion::OperationalFailure &&
+                  failure && *failure == kMissingFailure &&
+                  failure->size() < 96U &&
+                  failure->find(root_text) == std::string_view::npos &&
+                  failure->find(id_text) == std::string_view::npos &&
+                  Access::FrontEnd(*app) == kProfilesFirst &&
+                  !Access::ActiveProfile(*app) &&
+                  Access::PersistedConfirmedProfile(*app) == profile_id &&
+                  Access::PersistenceGeneration(*app) ==
+                      std::optional<std::uint64_t>{2U} &&
+                  Access::PersistenceRecordCount(*app) ==
+                      std::optional<std::size_t>{2U} &&
+                  Access::PersistenceLogicalValueBytes(*app) ==
+                      std::optional<std::size_t>{73U} &&
+                  Access::GpuSnapshot(*app) == gpu_before,
+            "a missing startup-model ID fails with one bounded private error while preserving Profiles, the durable pointer, session state, database totals, and exact GPU state");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the generated missing-model confirmation edge releases");
+    }
+
+    const std::filesystem::path constrained_root =
+        fixture_root / "native-active-profile-capacity";
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(constrained_root,
+            omega::persistence::SaveDatabaseLimits{.max_records = 1U});
+        Check(persistence.has_value(),
+            "the one-record active-profile database bootstraps");
+        if (!persistence)
+            return;
+        const auto created = persistence->profiles().Create(*profile_id, metadata);
+        Check(created && persistence->database().generation() == 1U &&
+                  persistence->database().record_count() == 1U &&
+                  persistence->database().logical_value_bytes() == 41U,
+            "the capacity fixture fills its sole record with the generated profile");
+        if (!created)
+            return;
+    }
+
+    auto constrained_persistence = omega::app::NativePersistence::Bootstrap(
+        constrained_root,
+        omega::persistence::SaveDatabaseLimits{.max_records = 1U});
+    auto constrained_config = omega::runtime::ParseConfigText("");
+    Check(constrained_persistence && constrained_config &&
+              constrained_persistence->startup_profiles().size() == 1U,
+        "the full one-record capacity fixture reopens with its startup model");
+    if (!constrained_persistence || !constrained_config)
+        return;
+
+    auto constrained_app = Access::CreateWithPersistence(
+        std::move(*constrained_config), settings,
+        omega::runtime::ContentStartupState{},
+        std::move(*constrained_persistence), false);
+    Check(constrained_app && Access::FrontEnd(*constrained_app) == kProfilesFirst &&
+              !Access::ActiveProfile(*constrained_app) &&
+              !Access::PersistedConfirmedProfile(*constrained_app),
+        "the full one-record database still starts unconfirmed in Profiles");
+    if (!constrained_app)
+        return;
+
+    const omega::app::GpuHostSnapshot gpu_before =
+        Access::GpuSnapshot(*constrained_app);
+    const bool pushed = PushKey(SDL_SCANCODE_F1, true);
+    auto rejected = constrained_app->RunWithCapture(1);
+    std::optional<std::string_view> failure;
+    if (rejected)
+        failure = rejected->failure();
+    const std::string root_text = constrained_root.string();
+    const std::string id_text = profile_id->ToString();
+    Check(pushed && rejected &&
+              rejected->completion() ==
+                  omega::app::RunCaptureCompletion::OperationalFailure &&
+              failure && *failure == kCapacityFailure &&
+              failure->size() < 96U &&
+              failure->find(root_text) == std::string_view::npos &&
+              failure->find(id_text) == std::string_view::npos &&
+              Access::FrontEnd(*constrained_app) == kProfilesFirst &&
+              !Access::ActiveProfile(*constrained_app) &&
+              !Access::PersistedConfirmedProfile(*constrained_app) &&
+              Access::PersistenceGeneration(*constrained_app) ==
+                  std::optional<std::uint64_t>{1U} &&
+              Access::PersistenceRecordCount(*constrained_app) ==
+                  std::optional<std::size_t>{1U} &&
+              Access::PersistenceLogicalValueBytes(*constrained_app) ==
+                  std::optional<std::size_t>{41U} &&
+              Access::GpuSnapshot(*constrained_app) == gpu_before,
+        "capacity rejection preserves the prior Profiles state, unset session and durable values, generation-one database, exact GPU snapshot, and private fixed error");
+    Check(PushKey(SDL_SCANCODE_F1, false) &&
+              constrained_app->Run(1).has_value(),
+        "the generated capacity-rejected confirmation edge releases");
+}
+
 void CheckExplicitFirstProfileCreation(
     const std::filesystem::path& fixture_root,
     const omega::runtime::RuntimeSettings& settings)
@@ -1430,11 +1726,18 @@ void CheckExplicitFirstProfileCreation(
                 .selected_profile_slot = omega::app::FrontEndProfileSlot::First,
             };
             Check(selection_frame &&
-                      Access::ActiveProfile(*app) == *first_profile_id &&
-                      Access::FrontEnd(*app) == kReturnedProfilesRow &&
-                      Access::ProfileCatalogCount(*app) ==
-                          std::optional<std::size_t>{1U},
-                "a second Primary after one release frame selects the durable first profile without another mutation");
+                       Access::ActiveProfile(*app) == *first_profile_id &&
+                       Access::PersistedConfirmedProfile(*app) == *first_profile_id &&
+                       Access::PersistenceGeneration(*app) ==
+                           std::optional<std::uint64_t>{2U} &&
+                       Access::PersistenceRecordCount(*app) ==
+                           std::optional<std::size_t>{2U} &&
+                       Access::PersistenceLogicalValueBytes(*app) ==
+                           std::optional<std::size_t>{73U} &&
+                       Access::FrontEnd(*app) == kReturnedProfilesRow &&
+                       Access::ProfileCatalogCount(*app) ==
+                           std::optional<std::size_t>{1U},
+                "a second Primary after one release frame confirms and activates the durable first profile without catalog mutation");
             Check(PushKey(SDL_SCANCODE_F1, false) && run_plain_frame(),
                 "the explicit first-profile selection key releases before teardown");
         }
@@ -1442,7 +1745,11 @@ void CheckExplicitFirstProfileCreation(
 
     auto reopened = omega::app::NativePersistence::Bootstrap(creation_root);
     Check(reopened && reopened->startup_profiles().size() == 1U &&
-              reopened->startup_profiles()[0].id == *first_profile_id &&
+               reopened->persisted_confirmed_profile_id() == first_profile_id &&
+               reopened->database().generation() == 2U &&
+               reopened->database().record_count() == 2U &&
+               reopened->database().logical_value_bytes() == 73U &&
+               reopened->startup_profiles()[0].id == *first_profile_id &&
               reopened->startup_profiles()[0].metadata.display_name ==
                   omega::app::kFrontEndFirstProfileDisplayName &&
               reopened->startup_profiles()[0].metadata.created_unix_milliseconds ==
@@ -1450,7 +1757,7 @@ void CheckExplicitFirstProfileCreation(
               reopened->startup_profiles()[0].metadata.modified_unix_milliseconds ==
                   kCreationTimestamp &&
               reopened->startup_profiles()[0].metadata_revision == 1U,
-        "reopening native persistence observes exactly one fixed-ID PROFILE 1 record with the deterministic timestamps");
+        "reopening native persistence observes the fixed-ID PROFILE 1 metadata and its separate durable confirmation");
 
     const std::filesystem::path constrained_root =
         fixture_root / "native-first-profile-preflight";
@@ -1607,6 +1914,7 @@ int main()
         }
 
         CheckExplicitFirstProfileCreation(generated_content.root(), settings);
+        CheckActiveProfileConfirmation(generated_content.root(), settings);
 
         const std::filesystem::path profile_database_root =
             generated_content.root() / "native-profile-front-end";
@@ -1749,6 +2057,15 @@ int main()
                         *profile_app);
                 const auto gpu_before_terminal =
                     omega::app::detail::OmegaAppTestAccess::GpuSnapshot(*profile_app);
+                const auto persistence_generation_before_terminal =
+                    omega::app::detail::OmegaAppTestAccess::PersistenceGeneration(
+                        *profile_app);
+                const auto persistence_records_before_terminal =
+                    omega::app::detail::OmegaAppTestAccess::PersistenceRecordCount(
+                        *profile_app);
+                const auto persistence_bytes_before_terminal =
+                    omega::app::detail::OmegaAppTestAccess::PersistenceLogicalValueBytes(
+                        *profile_app);
                 Check(PushKey(SDL_SCANCODE_F1, true) && PushQuit(),
                     "profile selection and host-terminal events enter together");
                 auto terminal_selection = profile_app->RunWithCapture(1);
@@ -1762,6 +2079,14 @@ int main()
                               *profile_app) == highlighted_second &&
                           !omega::app::detail::OmegaAppTestAccess::ActiveProfile(
                               *profile_app) &&
+                          !omega::app::detail::OmegaAppTestAccess::PersistedConfirmedProfile(
+                              *profile_app) &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceGeneration(
+                              *profile_app) == persistence_generation_before_terminal &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceRecordCount(
+                              *profile_app) == persistence_records_before_terminal &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceLogicalValueBytes(
+                              *profile_app) == persistence_bytes_before_terminal &&
                           omega::app::detail::OmegaAppTestAccess::SchedulerSnapshot(
                               *profile_app) == scheduler_before_terminal &&
                           SameSimulationState(
@@ -1770,12 +2095,15 @@ int main()
                               simulation_before_terminal) &&
                           omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
                               *profile_app) == gpu_before_terminal,
-                    "terminal resolution captures but never applies a simultaneous profile-selection action");
+                    "terminal resolution captures but never applies or persists a simultaneous profile-selection action");
 
                 Check(PushKey(SDL_SCANCODE_F1, false) &&
-                          run_plain_profile_frame() &&
-                          PushKey(SDL_SCANCODE_F1, true),
+                          run_plain_profile_frame(),
                     "the terminal profile action releases before a fresh explicit selection");
+                const auto gpu_before_selection =
+                    omega::app::detail::OmegaAppTestAccess::GpuSnapshot(*profile_app);
+                Check(PushKey(SDL_SCANCODE_F1, true),
+                    "a fresh explicit profile-selection edge enters alone");
                 auto selected = profile_app->RunWithCapture(1);
                 const omega::app::FrontEndState returned_profiles_row{
                     .mode = omega::app::FrontEndMode::Main,
@@ -1787,11 +2115,22 @@ int main()
                               omega::app::RunCaptureCompletion::FrameLimitReached &&
                           omega::app::detail::OmegaAppTestAccess::ActiveProfile(
                               *profile_app) == selected_id &&
+                          omega::app::detail::OmegaAppTestAccess::PersistedConfirmedProfile(
+                              *profile_app) == selected_id &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceGeneration(
+                              *profile_app) == std::optional<std::uint64_t>{5U} &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceRecordCount(
+                              *profile_app) == std::optional<std::size_t>{5U} &&
+                          omega::app::detail::OmegaAppTestAccess::PersistenceLogicalValueBytes(
+                              *profile_app) == std::optional<std::size_t>{207U} &&
                           omega::app::detail::OmegaAppTestAccess::FrontEnd(
                               *profile_app) == returned_profiles_row &&
                           omega::app::detail::OmegaAppTestAccess::ProfileCatalogCount(
-                              *profile_app) == std::optional<std::size_t>{4U},
-                    "a fresh primary edge copies the highlighted existing ID into session state without catalog mutation");
+                              *profile_app) == std::optional<std::size_t>{4U} &&
+                          IsOneVisibleMenuSubmission(gpu_before_selection,
+                              omega::app::detail::OmegaAppTestAccess::GpuSnapshot(
+                                  *profile_app)),
+                    "a fresh primary edge commits the highlighted existing ID before session publication without catalog or GPU mutation");
 
                 auto replay_traces = selected
                                          ? std::move(*selected).TakeTracePair()
