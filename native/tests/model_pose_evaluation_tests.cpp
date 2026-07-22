@@ -46,6 +46,15 @@ void CheckError(
     return matrix;
 }
 
+[[nodiscard]] Matrix4x4IR Scale(const float x, const float y, const float z)
+{
+    Matrix4x4IR matrix = kIdentityMatrix4x4IR;
+    matrix.row_major[0] = x;
+    matrix.row_major[5] = y;
+    matrix.row_major[10] = z;
+    return matrix;
+}
+
 [[nodiscard]] bool IsTranslation(
     const Matrix4x4IR& matrix, const float x, const float y, const float z)
 {
@@ -79,7 +88,7 @@ int ModelPoseEvaluationFailureCount()
     // Empty skeleton composes to an empty world pose.
     {
         const auto empty = EvaluateBindPose(SkeletonIR{});
-        Check(empty.has_value() && empty->joint_world_transforms.empty(),
+        Check(empty.has_value() && empty->joint_global_transforms.empty(),
             "bind pose of an empty skeleton is an empty world pose");
     }
 
@@ -88,8 +97,8 @@ int ModelPoseEvaluationFailureCount()
         SkeletonIR single;
         single.joints.push_back(JointIR{.local_bind_transform = Translation(5.0F, 0.0F, 0.0F)});
         const auto pose = EvaluateBindPose(single);
-        Check(pose.has_value() && pose->joint_world_transforms.size() == 1 &&
-                  IsTranslation(pose->joint_world_transforms[0], 5.0F, 0.0F, 0.0F),
+        Check(pose.has_value() && pose->joint_global_transforms.size() == 1 &&
+                  IsTranslation(pose->joint_global_transforms[0], 5.0F, 0.0F, 0.0F),
             "a root joint's bind-pose world transform equals its own local transform");
     }
 
@@ -97,14 +106,14 @@ int ModelPoseEvaluationFailureCount()
     {
         const auto chain = MakeTranslationChain();
         const auto pose = EvaluateBindPose(chain);
-        Check(pose.has_value() && pose->joint_world_transforms.size() == 3, "chain bind pose has 3 joints");
+        Check(pose.has_value() && pose->joint_global_transforms.size() == 3, "chain bind pose has 3 joints");
         if (pose)
         {
-            Check(IsTranslation(pose->joint_world_transforms[0], 1.0F, 0.0F, 0.0F),
+            Check(IsTranslation(pose->joint_global_transforms[0], 1.0F, 0.0F, 0.0F),
                 "chain root world transform is its own local translation");
-            Check(IsTranslation(pose->joint_world_transforms[1], 1.0F, 2.0F, 0.0F),
+            Check(IsTranslation(pose->joint_global_transforms[1], 1.0F, 2.0F, 0.0F),
                 "chain child world transform accumulates parent and local translation");
-            Check(IsTranslation(pose->joint_world_transforms[2], 1.0F, 2.0F, 3.0F),
+            Check(IsTranslation(pose->joint_global_transforms[2], 1.0F, 2.0F, 3.0F),
                 "chain grandchild world transform accumulates the full parent chain");
         }
 
@@ -125,9 +134,25 @@ int ModelPoseEvaluationFailureCount()
             Translation(0.0F, 0.0F, 0.0F),
         };
         const auto world = EvaluatePose(chain, generic_pose);
-        Check(world.has_value() && world->joint_world_transforms.size() == 3 &&
-                  IsTranslation(world->joint_world_transforms[1], 10.0F, 0.0F, 0.0F),
+        Check(world.has_value() && world->joint_global_transforms.size() == 3 &&
+                  IsTranslation(world->joint_global_transforms[1], 10.0F, 0.0F, 0.0F),
             "the generic evaluator composes the supplied local pose, not the skeleton's bind pose");
+    }
+
+    // Non-commutative coverage freezes parent-global * local order. A parent scale must scale the
+    // child's local translation; local * parent would incorrectly leave it at (5,7,0).
+    {
+        SkeletonIR skeleton;
+        skeleton.joints.push_back(JointIR{.local_bind_transform = Scale(2.0F, 3.0F, 1.0F)});
+        skeleton.joints.push_back(
+            JointIR{.parent_index = 0, .local_bind_transform = Translation(5.0F, 7.0F, 0.0F)});
+        const auto pose = EvaluateBindPose(skeleton);
+        Check(pose.has_value() && pose->joint_global_transforms.size() == 2 &&
+                  pose->joint_global_transforms[1].row_major[0] == 2.0F &&
+                  pose->joint_global_transforms[1].row_major[5] == 3.0F &&
+                  pose->joint_global_transforms[1].row_major[3] == 10.0F &&
+                  pose->joint_global_transforms[1].row_major[7] == 21.0F,
+            "pose composition applies parent-global before non-commutative local transform");
     }
 
     // Joint-count mismatch is rejected.
@@ -186,10 +211,11 @@ int ModelPoseEvaluationFailureCount()
     {
         const auto chain = MakeTranslationChain();
         DecodeLimits limits;
-        limits.maximum_output_bytes = chain.joints.size() * sizeof(Matrix4x4IR);
+        limits.maximum_output_bytes =
+            sizeof(omega::asset::GlobalPoseIR) + chain.joints.size() * sizeof(Matrix4x4IR);
         Check(EvaluateBindPose(chain, limits).has_value(),
             "bind pose succeeds at the exact output-byte budget");
-        limits.maximum_output_bytes = (chain.joints.size() * sizeof(Matrix4x4IR)) - 1;
+        --limits.maximum_output_bytes;
         CheckError(EvaluateBindPose(chain, limits), DecodeErrorCode::LimitExceeded,
             "bind pose rejects one byte below the output-byte budget");
     }

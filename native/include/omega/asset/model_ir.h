@@ -4,6 +4,7 @@
 #include "omega/asset/render_mesh_ir.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -49,7 +50,10 @@ struct SkeletonIR
 };
 
 // One vertex's bounded skin-influence set. Slots at or beyond used_influences are unexamined
-// padding. No retail weight encoding, normalization rule, or influence count is asserted.
+// padding. No retail weight encoding, normalization rule, zero-influence fallback, inverse-bind
+// policy, or influence count is asserted. A renderer must not consume this table until a separate
+// project-owned skinning contract defines those policies; a future retail bridge will translate
+// into that contract.
 struct SkinInfluenceIR
 {
     std::array<std::uint32_t, kMaximumSkinInfluencesPerVertex> joint_indices{};
@@ -81,15 +85,16 @@ struct PoseIR
     bool operator==(const PoseIR&) const = default;
 };
 
-// One evaluated world-space pose: one accumulated joint-to-world transform per skeleton joint, in
-// the same source order as SkeletonIR::joints. Produced only by composing a PoseIR (or a
-// skeleton's own bind transforms) against a validated parent chain; see
-// omega/runtime/model_pose_evaluation.h. It carries no retail placement meaning.
-struct WorldPoseIR
+// One evaluated skeleton-global pose: one accumulated joint-to-model transform per skeleton joint,
+// in the same source order as SkeletonIR::joints. Scene placement remains a separate
+// SceneMeshInstanceIR::local_to_world transform; this value therefore does not claim world-space
+// placement. It also is not a complete skinning palette because inverse-bind policy is deliberately
+// outside this slice. See omega/runtime/model_pose_evaluation.h.
+struct GlobalPoseIR
 {
-    std::vector<Matrix4x4IR> joint_world_transforms;
+    std::vector<Matrix4x4IR> joint_global_transforms;
 
-    bool operator==(const WorldPoseIR&) const = default;
+    bool operator==(const GlobalPoseIR&) const = default;
 };
 
 // One project-owned pose keyframe at an opaque, caller-defined sample coordinate. No retail time
@@ -102,9 +107,10 @@ struct ClipKeyframeIR
     bool operator==(const ClipKeyframeIR&) const = default;
 };
 
-// Fully owned, source-ordered sequence of pose keyframes. ClipIR is a bounded owned target shape
-// only: this slice decodes no independently established retail clip grammar into it (see
-// docs/adr/0007-project-owned-model-pose-ir.md) and implements no time-based sampling or blending.
+// Fully owned, source-ordered sequence of pose keyframes. ValidateClipAgainstSkeleton enforces the
+// fixed keyframe ceiling, finite sample coordinates, pose cardinality, and aggregate caller
+// budgets. ClipIR remains a target shape only: this slice decodes no independently established
+// retail clip grammar into it and implements no time-based sampling or blending.
 struct ClipIR
 {
     std::string name;
