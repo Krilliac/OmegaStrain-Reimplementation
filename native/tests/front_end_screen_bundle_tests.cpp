@@ -222,7 +222,8 @@ void AppendGuiNode(std::vector<std::byte>& bytes, const GuiNode& node)
     const std::string_view root_identifier,
     const std::string_view localized_reference = "$CreateAgent",
     const bool unsafe_scope = false, const bool wrong_resource_case = false,
-    const std::size_t extra_scope_count = 0U)
+    const std::size_t extra_scope_count = 0U,
+    const bool omit_explicit_default_font = false)
 {
     const GuiNode localized{
         .factory = "GuiTextWidget",
@@ -235,7 +236,7 @@ void AppendGuiNode(std::vector<std::byte>& bytes, const GuiNode& node)
         .factory = "GuiTextWidget",
         .identifier = "escaped",
         .text_reference = "$$LiteralDollar",
-        .font_reference = "default",
+        .font_reference = omit_explicit_default_font ? "" : "default",
     };
     std::string external_resource(root_identifier);
     external_resource.append("_external");
@@ -519,6 +520,7 @@ struct FrontEndFixtureOptions final
     bool scoped_name_collision = false;
     bool omit_scope_archive = false;
     bool omit_scoped_visual = false;
+    bool omit_explicit_default_font = false;
 };
 
 [[nodiscard]] std::vector<std::byte> MakeScreenHog(const ScreenSpec& screen,
@@ -532,7 +534,8 @@ struct FrontEndFixtureOptions final
                       changed ? options.localized_reference : "$CreateAgent",
                       changed && options.unsafe_scope,
                       changed && options.wrong_resource_case,
-                      changed ? options.extra_scope_count : 0U)},
+                      changed ? options.extra_scope_count : 0U,
+                      changed && options.omit_explicit_default_font)},
         HogMember{.name = std::string(screen.stem) + ".IE",
             .payload = MakeIe(screen.stem, screen.texture_basename,
                 changed && options.unsafe_texture_reference)},
@@ -713,6 +716,37 @@ Load(const std::filesystem::path& root, const omega::content::FrontEndScreenKey 
         return std::unexpected(service.error());
     return service->LoadFrontEndScreen(key);
 }
+
+struct FontResolutionSummary final
+{
+    std::size_t authored_references = 0U;
+    bool all_resolved = true;
+    bool saw_nonempty_text_with_empty_font = false;
+    bool empty_fonts_resolve_to_default = true;
+};
+
+void InspectFontResolution(const omega::asset::FrontendWidgetIR& node,
+    const omega::content::FrontEndScreenBundle& bundle,
+    const omega::retail::FntV3IR* default_font,
+    FontResolutionSummary& summary)
+{
+    if (node.font_reference)
+    {
+        ++summary.authored_references;
+        const auto* resolved = bundle.ResolveFontReference(node.font_reference);
+        summary.all_resolved = summary.all_resolved && resolved != nullptr;
+        if (node.font_reference->empty())
+        {
+            summary.empty_fonts_resolve_to_default =
+                summary.empty_fonts_resolve_to_default && resolved == default_font;
+            summary.saw_nonempty_text_with_empty_font =
+                summary.saw_nonempty_text_with_empty_font ||
+                (node.text_reference && !node.text_reference->empty());
+        }
+    }
+    for (const auto& child : node.children)
+        InspectFontResolution(child, bundle, default_font, summary);
+}
 } // namespace
 
 int main()
@@ -734,6 +768,13 @@ int main()
         const FrontEndScreenBundle::TextureMap&>);
     static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>().fonts()),
         const FrontEndScreenBundle::FontMap&>);
+    static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>()
+                                            .ResolveFont(std::string_view{})),
+        const omega::retail::FntV3IR*>);
+    static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>()
+                                            .ResolveFontReference(
+                                                std::declval<const std::optional<std::string>&>())),
+        const omega::retail::FntV3IR*>);
     static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>()
                                             .visual_scopes()),
         const FrontEndScreenBundle::VisualScopeMap&>);
@@ -818,10 +859,48 @@ int main()
                   loaded->font_atlases().size() == 1U &&
                   loaded->font_atlases().contains(kAtlasMember),
             "font basenames and decoded atlas references select exact canonical dependencies");
+        const auto* default_font = &loaded->fonts().at("DEFAULT.FNT");
+        const std::optional<std::string> absent_font;
+        Check(loaded->ResolveFontReference(widget_root.children.at(0U).font_reference) ==
+                      default_font &&
+                  loaded->ResolveFontReference(widget_root.children.at(1U).font_reference) ==
+                      default_font &&
+                  loaded->ResolveFontReference(absent_font) == default_font &&
+                  loaded->ResolveFont("dEfAuLt.FnT") == default_font &&
+                  loaded->ResolveFont("missing") == nullptr,
+            "font resolution applies null, empty, basename, full-name, and fail-closed rules");
         const auto* localized = loaded->strings().Find("CREATEAGENT");
         Check(localized && localized->value == "Generated Create Agent",
             "the bundle owns the decoded NTSC-U localization table");
     }
+
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog({.changed_screen = 2U,
+                  .omit_explicit_default_font = true})),
+        "Load Agent fixture without an explicit DEFAULT font reference is written");
+    auto inherited_font = Load(root, FrontEndScreenKey::LoadAgent);
+    Check(inherited_font.has_value(),
+        "Load Agent retains its registry default when every authored font is empty");
+    if (inherited_font)
+    {
+        const auto& children = inherited_font->widget_document().root.children;
+        Check(children.at(0U).font_reference &&
+                  children.at(0U).font_reference->empty() &&
+                  children.at(1U).font_reference &&
+                  children.at(1U).font_reference->empty(),
+            "Load Agent preserves its authored empty font strings in canonical GUI IR");
+        const auto* default_font = inherited_font->ResolveFontReference(
+            children.at(0U).font_reference);
+        Check(inherited_font->fonts().size() == 1U &&
+                  inherited_font->fonts().contains("DEFAULT.FNT") &&
+                  default_font == &inherited_font->fonts().at("DEFAULT.FNT") &&
+                  inherited_font->ResolveFontReference(children.at(1U).font_reference) ==
+                      default_font &&
+                  inherited_font->font_atlases().contains(kAtlasMember),
+            "empty-only Load Agent text loads and resolves DEFAULT.FNT with its atlas");
+    }
+    Check(WriteBytes(paths->front_end_hog, MakeFrontEndHog()),
+        "valid front-end archive is restored after default-font inheritance coverage");
 
     auto move_source = Load(root, FrontEndScreenKey::Title);
     Check(move_source.has_value(), "move-ownership fixture loads");
@@ -1007,6 +1086,23 @@ int main()
                           !loaded->screen_textures().empty() && !loaded->fonts().empty() &&
                           !loaded->font_atlases().empty() && !loaded->strings().entries.empty(),
                     "an owner-supplied route yields a complete owned retail presentation bundle");
+                const auto default_font_entry = loaded->fonts().find("DEFAULT.FNT");
+                const auto* default_font = default_font_entry == loaded->fonts().end()
+                    ? nullptr
+                    : &default_font_entry->second;
+                FontResolutionSummary font_summary;
+                InspectFontResolution(loaded->widget_document().root, *loaded,
+                    default_font, font_summary);
+                Check(font_summary.authored_references != 0U &&
+                          font_summary.all_resolved,
+                    "every owner-supplied GUI font reference resolves within its bundle");
+                if (screen.key == FrontEndScreenKey::LoadAgent)
+                {
+                    Check(default_font != nullptr &&
+                              font_summary.saw_nonempty_text_with_empty_font &&
+                              font_summary.empty_fonts_resolve_to_default,
+                        "owner-supplied Load Agent retains DEFAULT.FNT for authored empty text fonts");
+                }
             }
         }
     }
