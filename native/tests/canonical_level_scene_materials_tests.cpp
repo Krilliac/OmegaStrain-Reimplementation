@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -59,6 +60,16 @@ int main()
         .spatial = {.terrain_cells = {MakeTriangleMesh(), MakeTriangleMesh(2.0F)}},
         .material_catalogs = {.terrain_cells = {MakeCatalog("A"), MakeCatalog("BC")}},
     };
+    constexpr std::uint64_t exact_scene_output_bytes =
+        sizeof(omega::runtime::CanonicalLevelScene) +
+        2U * sizeof(omega::runtime::CanonicalLevelSceneCell) +
+        6U * sizeof(omega::asset::Float3IR) + 6U * sizeof(std::uint32_t);
+    constexpr std::uint64_t exact_output_bytes =
+        sizeof(omega::runtime::CanonicalLevelSceneWithMaterials) +
+        2U * sizeof(omega::runtime::CanonicalLevelSceneCell) +
+        2U * sizeof(omega::runtime::CanonicalLevelCellMaterialCatalog) +
+        6U * sizeof(omega::asset::Float3IR) + 6U * sizeof(std::uint32_t) +
+        2U * sizeof(std::string) + 2U * sizeof(omega::asset::MaterialCatalogEntryIR) + 3U;
     auto paired = omega::runtime::BuildCanonicalLevelSceneWithMaterials(content);
     Check(paired.has_value(), "matching cell counts build a paired canonical scene");
     if (paired)
@@ -99,6 +110,105 @@ int main()
         Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
                                                                               association_limits),
               "association validation is bounded by tighten-only cell limits");
+
+        association_limits = {};
+        association_limits.scene.maximum_cells = 1U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
+                                                                              association_limits),
+              "direct association validation enforces the canonical scene cell limit");
+
+        association_limits = {};
+        association_limits.scene.maximum_positions = 5U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
+                                                                              association_limits),
+              "direct association validation enforces the aggregate position limit");
+
+        association_limits = {};
+        association_limits.scene.maximum_triangle_indices = 5U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
+                                                                              association_limits),
+              "direct association validation enforces the aggregate triangle-index limit");
+
+        association_limits = {};
+        association_limits.scene.maximum_output_bytes = exact_scene_output_bytes;
+        association_limits.maximum_output_bytes = exact_output_bytes;
+        Check(omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(
+                  *paired, association_limits)
+                  .has_value(),
+              "direct association validation accepts exact ABI-local logical output budgets");
+        --association_limits.scene.maximum_output_bytes;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
+                                                                              association_limits),
+              "direct association validation enforces the scene output-byte limit");
+
+        association_limits = {};
+        association_limits.maximum_names = 1U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
+                                                                              association_limits),
+              "direct association validation enforces the nested name count limit");
+
+        association_limits = {};
+        association_limits.maximum_materials = 1U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
+                                                                              association_limits),
+              "direct association validation enforces the nested material count limit");
+
+        association_limits = {};
+        association_limits.maximum_name_bytes = 2U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
+                                                                              association_limits),
+              "direct association validation enforces the aggregate name-byte limit");
+
+        association_limits = {};
+        association_limits.maximum_name_length = 1U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
+                                                                              association_limits),
+              "direct association validation enforces the per-name length limit");
+
+        association_limits = {};
+        association_limits.maximum_output_bytes = exact_output_bytes - 1U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
+                                                                              association_limits),
+              "direct association validation enforces the combined output-byte limit");
+
+        auto invalid_direct_material = *paired;
+        invalid_direct_material.material_catalogs[1].catalog.materials[0].name_indices[0] = 2U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(
+                  invalid_direct_material),
+              "direct association validation rejects a mutated material name reference");
+
+        auto nonfinite_direct_position = *paired;
+        nonfinite_direct_position.scene.cells[0].render_mesh.positions[0].x =
+            std::numeric_limits<float>::infinity();
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(
+                  nonfinite_direct_position),
+              "direct association validation rejects a mutated non-finite position");
+
+        auto invalid_direct_index = *paired;
+        invalid_direct_index.scene.cells[1].render_mesh.triangle_indices[0] = 99U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(
+                  invalid_direct_index),
+              "direct association validation rejects a mutated triangle index");
+
+        auto incomplete_direct_triangle = *paired;
+        incomplete_direct_triangle.scene.cells[0].render_mesh.triangle_indices.pop_back();
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(
+                  incomplete_direct_triangle),
+              "direct association validation rejects an incomplete triangle");
+
+        auto nonfinite_direct_transform = *paired;
+        nonfinite_direct_transform.scene.cells[0].local_to_world.row_major[0] =
+            std::numeric_limits<float>::quiet_NaN();
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(
+                  nonfinite_direct_transform),
+              "direct association validation rejects a non-finite cell transform");
+
+        auto nonfinite_direct_camera = *paired;
+        nonfinite_direct_camera.scene.camera.world_to_view.row_major[0] =
+            std::numeric_limits<float>::quiet_NaN();
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(
+                  nonfinite_direct_camera),
+              "direct association validation rejects a non-finite camera transform");
     }
 
     // Mismatched cardinality is rejected before any composition.
@@ -151,12 +261,6 @@ int main()
     Check(!omega::runtime::BuildCanonicalLevelSceneWithMaterials(content, limits),
           "the per-name length limit is enforced inside each catalog");
 
-    constexpr std::uint64_t exact_output_bytes =
-        sizeof(omega::runtime::CanonicalLevelSceneWithMaterials) +
-        2U * sizeof(omega::runtime::CanonicalLevelSceneCell) +
-        2U * sizeof(omega::runtime::CanonicalLevelCellMaterialCatalog) +
-        6U * sizeof(omega::asset::Float3IR) + 6U * sizeof(std::uint32_t) +
-        2U * sizeof(std::string) + 2U * sizeof(omega::asset::MaterialCatalogEntryIR) + 3U;
     limits = {};
     limits.maximum_output_bytes = exact_output_bytes;
     Check(omega::runtime::BuildCanonicalLevelSceneWithMaterials(content, limits).has_value(),
