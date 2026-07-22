@@ -22,6 +22,7 @@
 #include "omega/runtime/render_mesh_draw_list.h"
 #include "omega/runtime/render_texture.h"
 #include "omega/runtime/runtime_settings.h"
+#include "omega/runtime/scene_transform.h"
 #include "omega/simulation/simulation_world.h"
 
 #include <array>
@@ -34,11 +35,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-
-namespace omega::asset
-{
-struct SceneIR;
-}
 
 namespace omega::app
 {
@@ -148,9 +144,10 @@ private:
     // allocation, I/O, or persistence work occurs.
     [[nodiscard]] bool ActiveProfileIsConfirmed() const noexcept;
     [[nodiscard]] bool ActiveCharacterIsConfirmed() const noexcept;
-    // [game/main/render thread; no concurrent use] Rebuilds only the fixed CPU
-    // command value for the post-step diagnostic actor position. The marker
-    // texture remains immutable and resident for the complete app lifetime.
+    // [game/main/render thread; no concurrent use] Atomically rebuilds fixed CPU
+    // texture fallback/overlay commands and, when a scene is resident, the
+    // environment-plus-actor mesh commands for the final post-step position.
+    // All texture and mesh resources remain immutable and resident.
     [[nodiscard]] std::expected<void, std::string>
     RefreshDiagnosticActorDrawList();
     [[nodiscard]] const runtime::RenderDrawList& CurrentFrontEndDrawList() const noexcept;
@@ -191,6 +188,10 @@ private:
         std::array<runtime::RenderMeshHandle,
             runtime::kMaximumRenderMeshDrawsPerFrame> mesh_handles{};
         std::size_t mesh_count = 0U;
+        std::size_t environment_command_count = 0U;
+        runtime::RenderMeshHandle actor_mesh_handle;
+        asset::SceneCameraIR camera;
+        runtime::RenderMeshDrawList environment_draw_list;
         runtime::RenderMeshDrawList draw_list;
         runtime::RenderDrawList overlay_draw_list;
     };

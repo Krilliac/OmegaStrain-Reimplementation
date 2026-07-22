@@ -15,6 +15,8 @@
 namespace
 {
 using omega::app::PlanProjectDiagnosticActorMarkerDestination;
+using omega::app::PlanProjectDiagnosticActorMeshTransform;
+using omega::asset::Matrix4x4IR;
 using omega::runtime::RenderDrawList;
 using omega::runtime::RenderSourceRectQ16;
 using omega::runtime::RenderTargetRectQ16;
@@ -61,6 +63,17 @@ void Check(const bool condition, const std::string_view message)
     };
 }
 
+[[nodiscard]] constexpr Matrix4x4IR ExpectedMeshTransform(
+    const Position3 position) noexcept
+{
+    Matrix4x4IR transform = omega::asset::kIdentityMatrix4x4IR;
+    transform.row_major[3U] =
+        static_cast<float>(ClampCoordinate(position.x)) / 32.0F;
+    transform.row_major[7U] =
+        static_cast<float>(ClampCoordinate(position.z)) / 32.0F;
+    return transform;
+}
+
 [[nodiscard]] constexpr bool IsValidDestination(
     const RenderTargetRectQ16 destination) noexcept
 {
@@ -103,7 +116,14 @@ void CheckPosition(const Position3 position, const std::string_view message)
     const RenderTargetRectQ16 repeat =
         PlanProjectDiagnosticActorMarkerDestination(position);
     const RenderTargetRectQ16 expected = ExpectedDestination(position);
+    const Matrix4x4IR first_transform =
+        PlanProjectDiagnosticActorMeshTransform(position);
+    const Matrix4x4IR repeat_transform =
+        PlanProjectDiagnosticActorMeshTransform(position);
+    const Matrix4x4IR expected_transform = ExpectedMeshTransform(position);
     Check(first == expected && repeat == expected, message);
+    Check(first_transform == expected_transform && repeat_transform == expected_transform,
+        "every generated position produces the exact deterministic actor mesh transform");
     Check(first.right - first.left == 2'048U &&
               first.bottom - first.top == 2'048U,
         "every generated position retains the fixed marker extent");
@@ -121,6 +141,10 @@ void CheckContract()
         Result>);
     static_assert(noexcept(
         PlanProjectDiagnosticActorMarkerDestination(Position3{})));
+    static_assert(std::is_same_v<decltype(
+                      PlanProjectDiagnosticActorMeshTransform(Position3{})),
+        Matrix4x4IR>);
+    static_assert(noexcept(PlanProjectDiagnosticActorMeshTransform(Position3{})));
 
     constexpr RenderTargetRectQ16 origin =
         PlanProjectDiagnosticActorMarkerDestination(Position3{});
@@ -149,6 +173,22 @@ void CheckContract()
                   RenderTargetRectQ16{63'488U, 0U, 65'536U, 2'048U});
     static_assert(negative_corner ==
                   RenderTargetRectQ16{0U, 63'488U, 2'048U, 65'536U});
+
+    constexpr Matrix4x4IR origin_transform =
+        PlanProjectDiagnosticActorMeshTransform(Position3{});
+    constexpr Matrix4x4IR positive_transform =
+        PlanProjectDiagnosticActorMeshTransform(Position3{.x = 1, .z = 1});
+    constexpr Matrix4x4IR saturated_transform =
+        PlanProjectDiagnosticActorMeshTransform(Position3{
+            .x = std::numeric_limits<std::int64_t>::max(),
+            .y = std::numeric_limits<std::int64_t>::min(),
+            .z = std::numeric_limits<std::int64_t>::min(),
+        });
+    static_assert(origin_transform == omega::asset::kIdentityMatrix4x4IR);
+    static_assert(positive_transform.row_major[3U] == 1.0F / 32.0F &&
+                  positive_transform.row_major[7U] == 1.0F / 32.0F);
+    static_assert(saturated_transform.row_major[3U] == 31.0F / 32.0F &&
+                  saturated_transform.row_major[7U] == -31.0F / 32.0F);
 }
 
 void CheckCompleteVisibleGrid()

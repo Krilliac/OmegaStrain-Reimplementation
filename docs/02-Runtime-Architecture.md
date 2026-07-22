@@ -2003,6 +2003,10 @@ parity.
 
 ### E-0107 project-owned diagnostic actor overlay
 
+E-0116 later supersedes this section only when a nonempty indexed diagnostic scene is resident: in
+that path the actor is a synthetic mesh and this marker texture supplies target/fire cues only. The
+complete texture actor path below remains the empty-scene and no-scene fallback contract.
+
 `PlanProjectDiagnosticActorMarkerDestination` is a renderer-neutral, total,
 `constexpr`/`noexcept` presentation map. It accepts an owned synthetic `Position3` value and returns
 one half-open `RenderTargetRectQ16`. The normalized extent is 65,536, the center is 32,768, one
@@ -2196,6 +2200,39 @@ capture retains only logical rows, never physical device provenance. The targeti
 BriefingRoom card, and transitions are synthetic
 host policy and establish no retail mission selector, input map, combat, camera, UI, timing, or
 behavioral-equivalence claim.
+
+### E-0116 simulation-driven indexed diagnostic actor
+
+`BuildProjectDiagnosticActorMesh` is a reentrant `noexcept` project factory. It returns one
+independently owned triangle containing three finite positions, indices `{0,1,2}`, and exactly 48
+logical bytes. Its allocation-failure value is a fixed non-allocating `string_view`, so the error
+translation cannot throw from the `noexcept` boundary. The geometry is synthetic clip-like
+diagnostic data and does not enter or mutate `SceneIR`.
+
+For a nonempty scene, `OmegaApp` reserves the final entry of both 64-element boundaries for that
+actor. It therefore rejects more than 63 environment mesh resources or 63 environment commands
+before upload. It composes all environment and actor transforms before mutation, uploads environment
+meshes in order followed by actor, retains the camera and immutable environment draw list, and
+publishes the actor last with project magenta `{255,64,224,255}`. A rollback guard attempts to
+release every successfully uploaded prefix in reverse order; the host retains final-cleanup
+authority if a release itself fails. Empty scenes upload no actor and retain E-0107's texture
+fallback.
+
+After all scheduled fixed simulation steps, `PlanProjectDiagnosticActorMeshTransform` clamps the
+final synthetic X/Z coordinates to `[-31,31]`, divides each by 32, maps X right and positive Z up,
+and ignores Y. `ComposeObjectToClip` applies the retained camera. Refresh copies every retained
+environment command byte-for-byte, appends the actor, builds the target/fire-only scene overlay, and
+publishes all replacement CPU lists only after every validation succeeds. It performs no GPU
+upload, release, asset mutation, collision, material, or gamepad work. Teardown clears all command
+lists and releases actor first, then environment handles in reverse order.
+
+Generated fixtures prove exact 63-environment-plus-actor capacity, all actor-stage pool-budget
+rollbacks, nonidentity retained-camera composition, a stable multi-command environment prefix,
+atomic invalid handle/count/camera rejection, post-step keyboard movement, zero-step stability,
+mouse target/fire overlay separation, actor-first production teardown, and zero residual residency.
+The keyboard/mouse-first and opt-in-only gamepad contract remains unchanged. This slice establishes
+no retail actor, geometry, placement, coordinate, camera, material, animation, collision,
+owner-corpus result, emulator equivalence, or visual parity.
 
 ### Project-owned front-end cancel action
 

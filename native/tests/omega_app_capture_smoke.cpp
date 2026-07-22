@@ -14,6 +14,7 @@
 #include "omega/runtime/input_tracker.h"
 #include "omega/runtime/runtime_settings.h"
 #include "omega/runtime/scheduler_elapsed_trace.h"
+#include "omega/runtime/scene_transform.h"
 
 #include <SDL3/SDL.h>
 
@@ -55,6 +56,9 @@ struct DiagnosticScenePresentationProbe final
     std::array<runtime::RenderMeshHandle,
         runtime::kMaximumRenderMeshDrawsPerFrame> mesh_handles{};
     std::size_t mesh_count = 0U;
+    std::size_t environment_command_count = 0U;
+    runtime::RenderMeshHandle actor_mesh_handle;
+    asset::SceneCameraIR camera;
     runtime::RenderMeshDrawList draw_list;
 };
 
@@ -111,6 +115,10 @@ struct OmegaAppTestAccess final
         return DiagnosticScenePresentationProbe{
             .mesh_handles = presentation.mesh_handles,
             .mesh_count = presentation.mesh_count,
+            .environment_command_count =
+                presentation.environment_command_count,
+            .actor_mesh_handle = presentation.actor_mesh_handle,
+            .camera = presentation.camera,
             .draw_list = presentation.draw_list,
         };
     }
@@ -345,6 +353,94 @@ struct OmegaAppTestAccess final
             : kEmptyDrawList;
     }
 
+    [[nodiscard]] static std::optional<runtime::RenderMeshHandle>
+    DiagnosticSceneActorMeshHandle(const OmegaApp& app) noexcept
+    {
+        if (!app.diagnostic_scene_presentation_)
+            return std::nullopt;
+        return app.diagnostic_scene_presentation_->actor_mesh_handle;
+    }
+
+    [[nodiscard]] static bool SetDiagnosticSceneActorMeshHandle(
+        OmegaApp& app, const runtime::RenderMeshHandle handle) noexcept
+    {
+        if (!app.diagnostic_scene_presentation_)
+            return false;
+        app.diagnostic_scene_presentation_->actor_mesh_handle = handle;
+        return true;
+    }
+
+    [[nodiscard]] static std::optional<std::size_t>
+    DiagnosticSceneEnvironmentCommandCount(const OmegaApp& app) noexcept
+    {
+        if (!app.diagnostic_scene_presentation_)
+            return std::nullopt;
+        return app.diagnostic_scene_presentation_->environment_command_count;
+    }
+
+    [[nodiscard]] static bool SetDiagnosticSceneEnvironmentCommandCount(
+        OmegaApp& app, const std::size_t command_count) noexcept
+    {
+        if (!app.diagnostic_scene_presentation_)
+            return false;
+        app.diagnostic_scene_presentation_->environment_command_count = command_count;
+        return true;
+    }
+
+    [[nodiscard]] static std::optional<asset::SceneCameraIR>
+    DiagnosticSceneCamera(const OmegaApp& app) noexcept
+    {
+        if (!app.diagnostic_scene_presentation_)
+            return std::nullopt;
+        return app.diagnostic_scene_presentation_->camera;
+    }
+
+    [[nodiscard]] static bool SetDiagnosticSceneCamera(
+        OmegaApp& app, const asset::SceneCameraIR& camera) noexcept
+    {
+        if (!app.diagnostic_scene_presentation_)
+            return false;
+        app.diagnostic_scene_presentation_->camera = camera;
+        return true;
+    }
+
+    [[nodiscard]] static bool DuplicateDiagnosticSceneEnvironmentCommand(
+        OmegaApp& app)
+    {
+        if (!app.diagnostic_scene_presentation_)
+            return false;
+        auto& presentation = *app.diagnostic_scene_presentation_;
+        const auto environment_commands =
+            presentation.environment_draw_list.commands();
+        const auto combined_commands = presentation.draw_list.commands();
+        if (environment_commands.size() != 1U || combined_commands.size() != 2U)
+            return false;
+
+        runtime::RenderMeshDrawCommand distinct_second_command =
+            environment_commands.front();
+        distinct_second_command.object_to_clip.row_major[3U] = 0.25F;
+        distinct_second_command.color.red = 111U;
+        const std::array duplicated_environment{
+            environment_commands.front(),
+            distinct_second_command,
+        };
+        const std::array duplicated_combined{
+            environment_commands.front(),
+            distinct_second_command,
+            combined_commands.back(),
+        };
+        auto environment_draw_list =
+            runtime::RenderMeshDrawList::Create(duplicated_environment);
+        auto combined_draw_list =
+            runtime::RenderMeshDrawList::Create(duplicated_combined);
+        if (!environment_draw_list || !combined_draw_list)
+            return false;
+        presentation.environment_command_count = duplicated_environment.size();
+        presentation.environment_draw_list = std::move(*environment_draw_list);
+        presentation.draw_list = std::move(*combined_draw_list);
+        return true;
+    }
+
     [[nodiscard]] static runtime::RenderMeshDrawList CurrentFrontEndMeshDrawList(
         const OmegaApp& app) noexcept
     {
@@ -354,6 +450,18 @@ struct OmegaAppTestAccess final
     static void ReleaseDiagnosticScenePresentation(OmegaApp& app) noexcept
     {
         app.ReleaseDiagnosticScenePresentation();
+    }
+
+    [[nodiscard]] static std::expected<runtime::RenderMeshHandle, std::string>
+    UploadRenderMesh(OmegaApp& app, const asset::RenderMeshIR& mesh)
+    {
+        return app.host_->UploadRenderMesh(mesh);
+    }
+
+    [[nodiscard]] static std::expected<void, std::string> ReleaseRenderMesh(
+        OmegaApp& app, const runtime::RenderMeshHandle handle)
+    {
+        return app.host_->ReleaseRenderMesh(handle);
     }
 
     [[nodiscard]] static const std::array<runtime::RenderDrawList,
@@ -643,6 +751,22 @@ void Check(const bool condition, const std::string_view message)
 
 [[nodiscard]] bool DrawListsEqual(const omega::runtime::RenderDrawList& left,
     const omega::runtime::RenderDrawList& right) noexcept
+{
+    const auto left_commands = left.commands();
+    const auto right_commands = right.commands();
+    if (left_commands.size() != right_commands.size())
+        return false;
+    for (std::size_t index = 0U; index < left_commands.size(); ++index)
+    {
+        if (left_commands[index] != right_commands[index])
+            return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool MeshDrawListsEqual(
+    const omega::runtime::RenderMeshDrawList& left,
+    const omega::runtime::RenderMeshDrawList& right) noexcept
 {
     const auto left_commands = left.commands();
     const auto right_commands = right.commands();
@@ -1169,6 +1293,7 @@ void CheckDiagnosticScenePresentationTransactions()
     };
     scene.camera.world_to_view = world_to_view;
     scene.camera.view_to_clip = view_to_clip;
+    const omega::asset::SceneIR original_scene = scene;
 
     auto created_platform = omega::app::SdlPlatformService::Create();
     Check(created_platform.has_value(),
@@ -1185,12 +1310,279 @@ void CheckDiagnosticScenePresentationTransactions()
             },
             omega::runtime::RenderMeshPoolConfig{
                 .slot_capacity = 2U,
-                .maximum_resident_positions = 6U,
-                .maximum_resident_triangle_indices = 6U,
-                .maximum_resident_logical_bytes = 96U,
+                .maximum_resident_positions = 9U,
+                .maximum_resident_triangle_indices = 9U,
+                .maximum_resident_logical_bytes = 144U,
             });
         Check(created_host.has_value(),
-            "the two-slot scene-presentation host initializes");
+            "the actor-upload rollback host initializes");
+        if (created_host)
+        {
+            auto host = std::move(*created_host);
+            auto rejected = Access::BuildDiagnosticScenePresentation(host, scene);
+            const omega::app::GpuHostSnapshot rolled_back = host.Snapshot();
+            Check(!rejected && rejected.error() ==
+                      "diagnostic actor mesh upload failed: render mesh reserve: slot-capacity-exceeded" &&
+                      rolled_back.successful_mesh_uploads == 2U &&
+                      rolled_back.successful_mesh_upload_logical_bytes == 96U &&
+                      rolled_back.successful_mesh_releases == 2U &&
+                      rolled_back.meshes.slot_capacity == 2U &&
+                      rolled_back.meshes.free_slots == 2U &&
+                      rolled_back.meshes.reserved_slots == 0U &&
+                      rolled_back.meshes.resident_slots == 0U &&
+                      rolled_back.meshes.resident_positions == 0U &&
+                      rolled_back.meshes.resident_triangle_indices == 0U &&
+                      rolled_back.meshes.resident_logical_bytes == 0U,
+                "an actor upload failure releases the complete environment prefix with zero residual residency");
+        }
+    }
+
+    {
+        struct ActorBudgetFailureCase final
+        {
+            omega::runtime::RenderMeshPoolConfig config;
+            std::string_view expected_error;
+        };
+        constexpr std::array cases{
+            ActorBudgetFailureCase{
+                .config = {
+                    .slot_capacity = 3U,
+                    .maximum_resident_positions = 8U,
+                    .maximum_resident_triangle_indices = 9U,
+                    .maximum_resident_logical_bytes = 144U,
+                },
+                .expected_error =
+                    "diagnostic actor mesh upload failed: render mesh reserve: position-budget-exceeded",
+            },
+            ActorBudgetFailureCase{
+                .config = {
+                    .slot_capacity = 3U,
+                    .maximum_resident_positions = 9U,
+                    .maximum_resident_triangle_indices = 8U,
+                    .maximum_resident_logical_bytes = 144U,
+                },
+                .expected_error =
+                    "diagnostic actor mesh upload failed: render mesh reserve: triangle-index-budget-exceeded",
+            },
+            ActorBudgetFailureCase{
+                .config = {
+                    .slot_capacity = 3U,
+                    .maximum_resident_positions = 9U,
+                    .maximum_resident_triangle_indices = 9U,
+                    .maximum_resident_logical_bytes = 143U,
+                },
+                .expected_error =
+                    "diagnostic actor mesh upload failed: render mesh reserve: logical-byte-budget-exceeded",
+            },
+        };
+        bool all_budget_failures_rolled_back = true;
+        for (const ActorBudgetFailureCase& failure_case : cases)
+        {
+            auto created_host = omega::app::SdlGpuHost::Create(platform, false,
+                omega::runtime::RenderTexturePoolConfig{
+                    .slot_capacity = 1U,
+                    .maximum_resident_logical_bytes = 4U,
+                },
+                failure_case.config);
+            if (!created_host)
+            {
+                all_budget_failures_rolled_back = false;
+                continue;
+            }
+            auto host = std::move(*created_host);
+            auto rejected = Access::BuildDiagnosticScenePresentation(host, scene);
+            const omega::app::GpuHostSnapshot rolled_back = host.Snapshot();
+            all_budget_failures_rolled_back =
+                all_budget_failures_rolled_back && !rejected &&
+                rejected.error() == failure_case.expected_error &&
+                rolled_back.successful_mesh_uploads == 2U &&
+                rolled_back.successful_mesh_upload_logical_bytes == 96U &&
+                rolled_back.successful_mesh_releases == 2U &&
+                rolled_back.meshes.free_slots == 3U &&
+                rolled_back.meshes.reserved_slots == 0U &&
+                rolled_back.meshes.resident_slots == 0U &&
+                rolled_back.meshes.resident_positions == 0U &&
+                rolled_back.meshes.resident_triangle_indices == 0U &&
+                rolled_back.meshes.resident_logical_bytes == 0U;
+        }
+        Check(all_budget_failures_rolled_back,
+            "actor position, index, and byte budget failures release the complete environment prefix");
+    }
+
+    {
+        auto created_host = omega::app::SdlGpuHost::Create(platform, false,
+            omega::runtime::RenderTexturePoolConfig{
+                .slot_capacity = 1U,
+                .maximum_resident_logical_bytes = 4U,
+            },
+            omega::runtime::RenderMeshPoolConfig{
+                .slot_capacity = 1U,
+                .maximum_resident_positions = 3U,
+                .maximum_resident_triangle_indices = 3U,
+                .maximum_resident_logical_bytes = 48U,
+            });
+        Check(created_host.has_value(),
+            "the empty-and-capacity scene host initializes");
+        if (created_host)
+        {
+            auto host = std::move(*created_host);
+            const omega::asset::SceneIR empty_scene;
+            auto empty = Access::BuildDiagnosticScenePresentation(host, empty_scene);
+            const omega::app::GpuHostSnapshot after_empty = host.Snapshot();
+
+            omega::asset::SceneIR mesh_saturated_scene;
+            mesh_saturated_scene.render_meshes.assign(
+                omega::runtime::kMaximumRenderMeshDrawsPerFrame,
+                MakePresentationTriangle(0.0F));
+            mesh_saturated_scene.mesh_instances.emplace_back();
+            auto mesh_saturated = Access::BuildDiagnosticScenePresentation(
+                host, mesh_saturated_scene);
+            const omega::app::GpuHostSnapshot after_mesh_saturated =
+                host.Snapshot();
+
+            omega::asset::SceneIR instance_saturated_scene;
+            instance_saturated_scene.render_meshes = {
+                MakePresentationTriangle(0.0F)};
+            instance_saturated_scene.mesh_instances.resize(
+                omega::runtime::kMaximumRenderMeshDrawsPerFrame);
+            auto instance_saturated = Access::BuildDiagnosticScenePresentation(
+                host, instance_saturated_scene);
+            const omega::app::GpuHostSnapshot after_instance_saturated =
+                host.Snapshot();
+            Check(empty && empty->mesh_count == 0U &&
+                      empty->environment_command_count == 0U &&
+                      !empty->actor_mesh_handle.valid() &&
+                      empty->draw_list.empty() &&
+                      after_empty.successful_mesh_uploads == 0U &&
+                      !mesh_saturated && mesh_saturated.error() ==
+                          "diagnostic scene exceeds renderer command capacity" &&
+                      !instance_saturated && instance_saturated.error() ==
+                          "diagnostic scene exceeds renderer command capacity" &&
+                      after_mesh_saturated.successful_mesh_uploads == 0U &&
+                      after_mesh_saturated.successful_mesh_releases == 0U &&
+                      after_mesh_saturated.meshes.free_slots == 1U &&
+                      after_instance_saturated == after_mesh_saturated,
+                "an empty scene keeps the texture fallback while 64 meshes and 64 instances reject independently before upload");
+        }
+    }
+
+    {
+        constexpr std::size_t environment_capacity =
+            omega::runtime::kMaximumRenderMeshDrawsPerFrame - 1U;
+        constexpr std::uint64_t total_mesh_count =
+            omega::runtime::kMaximumRenderMeshDrawsPerFrame;
+        constexpr std::uint64_t total_position_count = total_mesh_count * 3U;
+        constexpr std::uint64_t total_index_count = total_mesh_count * 3U;
+        constexpr std::uint64_t total_logical_bytes = total_mesh_count * 48U;
+        auto created_host = omega::app::SdlGpuHost::Create(platform, false,
+            omega::runtime::RenderTexturePoolConfig{
+                .slot_capacity = 1U,
+                .maximum_resident_logical_bytes = 4U,
+            },
+            omega::runtime::RenderMeshPoolConfig{
+                .slot_capacity =
+                    omega::runtime::kMaximumRenderMeshDrawsPerFrame,
+                .maximum_resident_positions = total_position_count,
+                .maximum_resident_triangle_indices = total_index_count,
+                .maximum_resident_logical_bytes = total_logical_bytes,
+            });
+        Check(created_host.has_value(),
+            "the exact actor-reserved scene-capacity host initializes");
+        if (created_host)
+        {
+            auto host = std::move(*created_host);
+            omega::asset::SceneIR boundary_scene;
+            boundary_scene.render_meshes.reserve(environment_capacity);
+            boundary_scene.mesh_instances.reserve(environment_capacity);
+            for (std::size_t index = 0U; index < environment_capacity; ++index)
+            {
+                boundary_scene.render_meshes.push_back(
+                    MakePresentationTriangle(static_cast<float>(index) * 2.0F));
+                boundary_scene.mesh_instances.push_back(
+                    omega::asset::SceneMeshInstanceIR{
+                        .render_mesh_index = static_cast<std::uint32_t>(index),
+                    });
+            }
+
+            auto built =
+                Access::BuildDiagnosticScenePresentation(host, boundary_scene);
+            const auto commands = built
+                ? built->draw_list.commands()
+                : std::span<const omega::runtime::RenderMeshDrawCommand>{};
+            const omega::app::GpuHostSnapshot resident = host.Snapshot();
+            bool exact_environment_prefix = built &&
+                built->mesh_count == total_mesh_count &&
+                built->environment_command_count == environment_capacity &&
+                commands.size() == total_mesh_count;
+            if (built && commands.size() == total_mesh_count)
+            {
+                for (std::size_t index = 0U; index < environment_capacity; ++index)
+                {
+                    exact_environment_prefix = exact_environment_prefix &&
+                        commands[index].mesh == built->mesh_handles[index];
+                }
+                exact_environment_prefix = exact_environment_prefix &&
+                    commands.back().mesh == built->actor_mesh_handle &&
+                    built->actor_mesh_handle ==
+                        built->mesh_handles[environment_capacity] &&
+                    commands.back().color ==
+                        omega::runtime::RenderMeshColorRgba8{
+                            .red = 255U,
+                            .green = 64U,
+                            .blue = 224U,
+                            .alpha = 255U,
+                        };
+            }
+            Check(exact_environment_prefix &&
+                      resident.successful_mesh_uploads == total_mesh_count &&
+                      resident.successful_mesh_upload_logical_bytes ==
+                          total_logical_bytes &&
+                      resident.meshes.free_slots == 0U &&
+                      resident.meshes.reserved_slots == 0U &&
+                      resident.meshes.resident_slots == total_mesh_count &&
+                      resident.meshes.resident_positions == total_position_count &&
+                      resident.meshes.resident_triangle_indices == total_index_count &&
+                      resident.meshes.resident_logical_bytes == total_logical_bytes,
+                "63 environment meshes fill the exact 64-command and 64-resource boundary with the actor last");
+
+            bool released_reverse = built.has_value();
+            if (built)
+            {
+                built->draw_list = {};
+                for (std::size_t index = built->mesh_count; index != 0U; --index)
+                {
+                    released_reverse = released_reverse &&
+                        host.ReleaseRenderMesh(built->mesh_handles[index - 1U])
+                            .has_value();
+                }
+            }
+            const omega::app::GpuHostSnapshot released = host.Snapshot();
+            Check(released_reverse &&
+                      released.successful_mesh_releases == total_mesh_count &&
+                      released.meshes.free_slots == total_mesh_count &&
+                      released.meshes.reserved_slots == 0U &&
+                      released.meshes.resident_slots == 0U &&
+                      released.meshes.resident_positions == 0U &&
+                      released.meshes.resident_triangle_indices == 0U &&
+                      released.meshes.resident_logical_bytes == 0U,
+                "the exact-capacity actor presentation can release every generation without residual residency");
+        }
+    }
+
+    {
+        auto created_host = omega::app::SdlGpuHost::Create(platform, false,
+            omega::runtime::RenderTexturePoolConfig{
+                .slot_capacity = 1U,
+                .maximum_resident_logical_bytes = 4U,
+            },
+            omega::runtime::RenderMeshPoolConfig{
+                .slot_capacity = 3U,
+                .maximum_resident_positions = 9U,
+                .maximum_resident_triangle_indices = 9U,
+                .maximum_resident_logical_bytes = 144U,
+            });
+        Check(created_host.has_value(),
+            "the three-slot environment-plus-actor presentation host initializes");
         if (created_host)
         {
             auto host = std::move(*created_host);
@@ -1199,41 +1591,60 @@ void CheckDiagnosticScenePresentationTransactions()
             const auto commands = built
                 ? built->draw_list.commands()
                 : std::span<const omega::runtime::RenderMeshDrawCommand>{};
-            Check(built && built->mesh_count == 2U && commands.size() == 2U &&
+            Check(built && built->mesh_count == 3U &&
+                      scene == original_scene &&
+                      built->environment_command_count == 2U &&
+                      commands.size() == 3U &&
                       built->mesh_handles[0].valid() &&
                       built->mesh_handles[1].valid() &&
+                      built->mesh_handles[2].valid() &&
                       built->mesh_handles[0] != built->mesh_handles[1] &&
+                      built->mesh_handles[1] != built->mesh_handles[2] &&
+                      built->actor_mesh_handle == built->mesh_handles[2] &&
+                      built->camera == scene.camera &&
                       commands[0].mesh == built->mesh_handles[1] &&
                       commands[0].object_to_clip == object_to_clip_with_local &&
                       commands[1].mesh == built->mesh_handles[0] &&
                       commands[1].object_to_clip == object_to_clip_without_local &&
-                      resident.successful_mesh_uploads == 2U &&
-                      resident.successful_mesh_upload_logical_bytes == 96U &&
+                      commands[2].mesh == built->actor_mesh_handle &&
+                      commands[2].object_to_clip == object_to_clip_without_local &&
+                      commands[2].color == omega::runtime::RenderMeshColorRgba8{
+                          .red = 255U,
+                          .green = 64U,
+                          .blue = 224U,
+                          .alpha = 255U,
+                      } &&
+                      commands[2].raster_mode ==
+                          omega::runtime::RenderMeshRasterMode::Fill &&
+                      resident.successful_mesh_uploads == 3U &&
+                      resident.successful_mesh_upload_logical_bytes == 144U &&
                       resident.successful_mesh_releases == 0U &&
-                      resident.meshes.slot_capacity == 2U &&
+                      resident.meshes.slot_capacity == 3U &&
                       resident.meshes.free_slots == 0U &&
                       resident.meshes.reserved_slots == 0U &&
-                      resident.meshes.resident_slots == 2U &&
+                      resident.meshes.resident_slots == 3U &&
                       resident.meshes.retired_slots == 0U &&
                       resident.meshes.reserved_positions == 0U &&
-                      resident.meshes.resident_positions == 6U &&
+                      resident.meshes.resident_positions == 9U &&
                       resident.meshes.reserved_triangle_indices == 0U &&
-                      resident.meshes.resident_triangle_indices == 6U &&
+                      resident.meshes.resident_triangle_indices == 9U &&
                       resident.meshes.reserved_logical_bytes == 0U &&
-                      resident.meshes.resident_logical_bytes == 96U,
-                "two meshes retain exact generations and compose view-to-clip, world-to-view, and local-to-world in instance order");
+                      resident.meshes.resident_logical_bytes == 144U,
+                "two environment meshes remain byte-identical before one camera-composed magenta actor command");
             if (built)
             {
                 built->draw_list = {};
+                auto released_actor =
+                    host.ReleaseRenderMesh(built->mesh_handles[2]);
                 auto released_second =
                     host.ReleaseRenderMesh(built->mesh_handles[1]);
                 auto released_first =
                     host.ReleaseRenderMesh(built->mesh_handles[0]);
                 const omega::app::GpuHostSnapshot released = host.Snapshot();
-                Check(released_second && released_first &&
-                          released.successful_mesh_releases == 2U &&
-                          released.meshes.slot_capacity == 2U &&
-                          released.meshes.free_slots == 2U &&
+                Check(released_actor && released_second && released_first &&
+                           released.successful_mesh_releases == 3U &&
+                           released.meshes.slot_capacity == 3U &&
+                           released.meshes.free_slots == 3U &&
                           released.meshes.reserved_slots == 0U &&
                           released.meshes.resident_slots == 0U &&
                           released.meshes.retired_slots == 0U &&
@@ -1243,7 +1654,7 @@ void CheckDiagnosticScenePresentationTransactions()
                           released.meshes.resident_triangle_indices == 0U &&
                           released.meshes.reserved_logical_bytes == 0U &&
                           released.meshes.resident_logical_bytes == 0U,
-                    "the successful multi-mesh presentation releases both exact generations");
+                    "the successful presentation releases actor first and both environment generations in reverse order");
             }
         }
     }
@@ -2489,20 +2900,23 @@ void CheckDiagnosticSceneMissionActivation(
         const omega::app::GpuHostSnapshot initial_gpu = Access::GpuSnapshot(*app);
         const auto scene_commands = Access::DiagnosticSceneMeshDrawList(*app).commands();
         const auto scene_overlay = Access::DiagnosticSceneOverlayDrawList(*app).commands();
-        Check(initial_gpu.successful_mesh_uploads == 1U &&
-                  initial_gpu.successful_mesh_upload_logical_bytes == 48U &&
+        const omega::runtime::RenderMeshHandle initial_environment_mesh_handle =
+            scene_commands.empty() ? omega::runtime::RenderMeshHandle{}
+                                   : scene_commands.front().mesh;
+        Check(initial_gpu.successful_mesh_uploads == 2U &&
+                  initial_gpu.successful_mesh_upload_logical_bytes == 96U &&
                   initial_gpu.successful_mesh_releases == 0U &&
                   initial_gpu.meshes.slot_capacity == 64U &&
-                  initial_gpu.meshes.free_slots == 63U &&
+                  initial_gpu.meshes.free_slots == 62U &&
                   initial_gpu.meshes.reserved_slots == 0U &&
-                  initial_gpu.meshes.resident_slots == 1U &&
-                  initial_gpu.meshes.resident_positions == 3U &&
-                  initial_gpu.meshes.resident_triangle_indices == 3U &&
-                  initial_gpu.meshes.resident_logical_bytes == 48U,
-            "startup owns one exact 48-byte indexed spatial mesh with no partial reservation");
-        Check(scene_commands.size() == 1U && scene_commands[0].mesh.valid() &&
-                  scene_commands[0].object_to_clip ==
-                      omega::asset::kIdentityMatrix4x4IR &&
+                  initial_gpu.meshes.resident_slots == 2U &&
+                  initial_gpu.meshes.resident_positions == 6U &&
+                  initial_gpu.meshes.resident_triangle_indices == 6U &&
+                  initial_gpu.meshes.resident_logical_bytes == 96U,
+            "startup owns one environment mesh followed by one exact 48-byte actor mesh with no partial reservation");
+        Check(scene_commands.size() == 2U && scene_commands[0].mesh.valid() &&
+                   scene_commands[0].object_to_clip ==
+                       omega::asset::kIdentityMatrix4x4IR &&
                   scene_commands[0].color ==
                       omega::runtime::RenderMeshColorRgba8{
                           .red = 112U,
@@ -2510,13 +2924,24 @@ void CheckDiagnosticSceneMissionActivation(
                           .blue = 255U,
                           .alpha = 255U,
                       } &&
-                  scene_commands[0].raster_mode ==
+                   scene_commands[0].raster_mode ==
+                       omega::runtime::RenderMeshRasterMode::Fill &&
+                  scene_commands[1].mesh.valid() &&
+                  scene_commands[1].mesh != scene_commands[0].mesh &&
+                  scene_commands[1].object_to_clip ==
+                      omega::asset::kIdentityMatrix4x4IR &&
+                  scene_commands[1].color ==
+                      omega::runtime::RenderMeshColorRgba8{
+                          .red = 255U,
+                          .green = 64U,
+                          .blue = 224U,
+                          .alpha = 255U,
+                      } &&
+                  scene_commands[1].raster_mode ==
                       omega::runtime::RenderMeshRasterMode::Fill &&
-                  scene_overlay.size() == 1U &&
-                  scene_overlay[0].texture ==
-                      Access::DiagnosticActorMarkerTexture(*app) &&
+                  scene_overlay.empty() &&
                   Access::CurrentFrontEndMeshDrawList(*app).empty(),
-            "the validated scene packet composes both camera stages and the instance transform and remains hidden in Profiles");
+            "the validated environment-plus-actor scene remains resident but hidden in Profiles");
 
         const bool reached_briefing =
             PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
@@ -2547,19 +2972,265 @@ void CheckDiagnosticSceneMissionActivation(
                   play_gpu.successful_mesh_releases ==
                       briefing_gpu.successful_mesh_releases &&
                   play_gpu.frame_submissions == briefing_gpu.frame_submissions + 1U &&
-                  play_gpu.blit_submissions == briefing_gpu.blit_submissions + 1U &&
+                  play_gpu.blit_submissions == briefing_gpu.blit_submissions &&
                   play_gpu.successful_blit_draws ==
-                      briefing_gpu.successful_blit_draws + 1U &&
+                      briefing_gpu.successful_blit_draws &&
                   play_gpu.mesh_submissions == briefing_gpu.mesh_submissions + 1U &&
                   play_gpu.successful_mesh_draws ==
-                      briefing_gpu.successful_mesh_draws + 1U &&
-                  Access::CurrentFrontEndMeshDrawList(*app).size() == 1U &&
+                      briefing_gpu.successful_mesh_draws + 2U &&
+                  Access::CurrentFrontEndMeshDrawList(*app).size() == 2U &&
+                  Access::CurrentFrontEndDrawList(*app).empty() &&
                   DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
                       Access::DiagnosticSceneOverlayDrawList(*app)),
-            "BriefingRoom mission activation publishes one indexed draw with the existing actor overlay and no deploy-click fire cue");
+            "BriefingRoom mission activation publishes environment then magenta actor with no duplicate texture marker or deploy-click fire cue");
 
         Check(PushMouseButton(SDL_BUTTON_LEFT, false) && app->Run(1).has_value(),
             "the diagnostic-scene mission click releases in DiagnosticPlay");
+
+        const omega::runtime::RenderMeshDrawList before_movement =
+            Access::CurrentFrontEndMeshDrawList(*app);
+        const omega::app::GpuHostSnapshot movement_gpu_before =
+            Access::GpuSnapshot(*app);
+        const bool movement_queued =
+            Access::ArmNextRunElapsed(*app, settings.frame.simulation_step) &&
+            PushKey(SDL_SCANCODE_W, true);
+        auto movement = app->RunWithCapture(1);
+        const omega::runtime::RenderMeshDrawList after_movement =
+            Access::CurrentFrontEndMeshDrawList(*app);
+        const auto moved_position = Access::DebugLocomotionPosition(*app);
+        const omega::app::GpuHostSnapshot movement_gpu_after =
+            Access::GpuSnapshot(*app);
+        const auto before_movement_commands = before_movement.commands();
+        const auto after_movement_commands = after_movement.commands();
+        Check(movement_queued && movement && !movement->failure() &&
+                  moved_position &&
+                  *moved_position == omega::simulation::Position3{.z = 1} &&
+                  before_movement_commands.size() == 2U &&
+                  after_movement_commands.size() == 2U &&
+                  after_movement_commands[0] == before_movement_commands[0] &&
+                  after_movement_commands[1].mesh ==
+                      before_movement_commands[1].mesh &&
+                  after_movement_commands[1].color ==
+                      before_movement_commands[1].color &&
+                  after_movement_commands[1].raster_mode ==
+                      before_movement_commands[1].raster_mode &&
+                  after_movement_commands[1].object_to_clip ==
+                      omega::app::PlanProjectDiagnosticActorMeshTransform(
+                          *moved_position) &&
+                  after_movement_commands[1].object_to_clip !=
+                      before_movement_commands[1].object_to_clip &&
+                  movement_gpu_after.successful_mesh_uploads ==
+                      movement_gpu_before.successful_mesh_uploads &&
+                   movement_gpu_after.successful_mesh_releases ==
+                       movement_gpu_before.successful_mesh_releases &&
+                   movement_gpu_after.meshes == movement_gpu_before.meshes &&
+                   SameTextureResidency(
+                       movement_gpu_before, movement_gpu_after) &&
+                   movement_gpu_after.successful_mesh_draws ==
+                      movement_gpu_before.successful_mesh_draws + 2U &&
+                  Access::CurrentFrontEndDrawList(*app).empty(),
+            "one keyboard simulation step keeps the environment prefix immutable and updates only the actor mesh transform without GPU resource churn");
+
+        Check(PushKey(SDL_SCANCODE_W, false) &&
+                  Access::ArmNextRunElapsed(
+                      *app, std::chrono::nanoseconds::zero()) &&
+                  app->Run(1).has_value() &&
+                  MeshDrawListsEqual(after_movement,
+                      Access::CurrentFrontEndMeshDrawList(*app)),
+            "a zero-step movement release reproduces the same combined mesh draw list");
+
+        const bool target_pressed = PushMouseButton(SDL_BUTTON_RIGHT, true) &&
+            Access::ArmNextRunElapsed(*app, std::chrono::nanoseconds::zero());
+        auto target_frame = app->RunWithCapture(1);
+        const auto target_overlay =
+            Access::DiagnosticSceneOverlayDrawList(*app).commands();
+        Check(target_pressed && target_frame && !target_frame->failure() &&
+                  target_overlay.size() == 2U && moved_position &&
+                  target_overlay[0].texture ==
+                      Access::DiagnosticActorMarkerTexture(*app) &&
+                  target_overlay[1].texture ==
+                      Access::DiagnosticActorMarkerTexture(*app) &&
+                  target_overlay[0].destination !=
+                      omega::app::PlanProjectDiagnosticActorMarkerDestination(
+                          *moved_position) &&
+                  target_overlay[1].destination !=
+                      omega::app::PlanProjectDiagnosticActorMarkerDestination(
+                          *moved_position) &&
+                  DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                      Access::DiagnosticSceneOverlayDrawList(*app)),
+            "held right mouse publishes only the two target cues above the actor mesh, never a duplicate marker");
+        Check(PushMouseButton(SDL_BUTTON_RIGHT, false) && app->Run(1).has_value(),
+            "the scene target cue releases without changing mesh ownership");
+
+        const bool fire_pressed = PushMouseButton(SDL_BUTTON_LEFT, true) &&
+            Access::ArmNextRunElapsed(*app, std::chrono::nanoseconds::zero());
+        auto fire_frame = app->RunWithCapture(1);
+        const auto fire_overlay =
+            Access::DiagnosticSceneOverlayDrawList(*app).commands();
+        Check(fire_pressed && fire_frame && !fire_frame->failure() &&
+                  fire_overlay.size() == 1U && moved_position &&
+                  fire_overlay[0].texture ==
+                      Access::DiagnosticActorMarkerTexture(*app) &&
+                  fire_overlay[0].destination !=
+                      omega::app::PlanProjectDiagnosticActorMarkerDestination(
+                          *moved_position),
+            "left mouse fire publishes only its project cue above the actor mesh");
+        Check(PushMouseButton(SDL_BUTTON_LEFT, false) && app->Run(1).has_value(),
+            "the scene fire cue releases without changing mesh ownership");
+
+        const auto retained_camera = Access::DiagnosticSceneCamera(*app);
+        omega::asset::SceneCameraIR dynamic_camera;
+        dynamic_camera.world_to_view.row_major = {
+            2.0F, 0.0F, 0.0F, 0.25F,
+            0.0F, 3.0F, 0.0F, -0.5F,
+            0.0F, 0.0F, 1.0F, 0.0F,
+            0.0F, 0.0F, 0.0F, 1.0F,
+        };
+        dynamic_camera.view_to_clip.row_major = {
+            1.0F, 0.5F, 0.0F, 0.0F,
+            0.0F, 1.0F, 0.0F, 0.0F,
+            0.0F, 0.0F, 1.0F, 0.0F,
+            0.0F, 0.0F, 0.0F, 1.0F,
+        };
+        const bool dynamic_refresh_ready = retained_camera && moved_position &&
+            Access::DuplicateDiagnosticSceneEnvironmentCommand(*app) &&
+            Access::SetDiagnosticSceneCamera(*app, dynamic_camera) &&
+            Access::ArmNextRunElapsed(*app, std::chrono::nanoseconds::zero());
+        const omega::runtime::RenderMeshDrawList before_dynamic_refresh =
+            Access::CurrentFrontEndMeshDrawList(*app);
+        const omega::app::GpuHostSnapshot dynamic_gpu_before =
+            Access::GpuSnapshot(*app);
+        auto dynamic_refresh = app->RunWithCapture(1);
+        const omega::runtime::RenderMeshDrawList after_dynamic_refresh =
+            Access::CurrentFrontEndMeshDrawList(*app);
+        const omega::app::GpuHostSnapshot dynamic_gpu_after =
+            Access::GpuSnapshot(*app);
+        const auto dynamic_commands = after_dynamic_refresh.commands();
+        const auto before_dynamic_commands = before_dynamic_refresh.commands();
+        std::optional<omega::asset::Matrix4x4IR> expected_dynamic_actor;
+        if (moved_position)
+        {
+            const auto composed = omega::runtime::ComposeObjectToClip(
+                dynamic_camera,
+                omega::app::PlanProjectDiagnosticActorMeshTransform(
+                    *moved_position));
+            if (composed)
+                expected_dynamic_actor = *composed;
+        }
+        Check(dynamic_refresh_ready && dynamic_refresh &&
+                  !dynamic_refresh->failure() && expected_dynamic_actor &&
+                  before_dynamic_commands.size() == 3U &&
+                  dynamic_commands.size() == 3U &&
+                  dynamic_commands[0] == before_dynamic_commands[0] &&
+                  dynamic_commands[1] == before_dynamic_commands[1] &&
+                  dynamic_commands[2].mesh == before_dynamic_commands[2].mesh &&
+                  dynamic_commands[2].color == before_dynamic_commands[2].color &&
+                  dynamic_commands[2].raster_mode ==
+                      before_dynamic_commands[2].raster_mode &&
+                  dynamic_commands[2].object_to_clip == *expected_dynamic_actor &&
+                  dynamic_gpu_after.successful_mesh_uploads ==
+                      dynamic_gpu_before.successful_mesh_uploads &&
+                  dynamic_gpu_after.successful_mesh_releases ==
+                      dynamic_gpu_before.successful_mesh_releases &&
+                  dynamic_gpu_after.successful_mesh_draws ==
+                      dynamic_gpu_before.successful_mesh_draws + 3U,
+            "refresh preserves a two-command environment prefix and composes the post-step actor through the retained camera");
+
+        const bool restored_after_dynamic = retained_camera &&
+            Access::SetDiagnosticSceneCamera(*app, *retained_camera) &&
+            Access::ArmNextRunElapsed(*app, std::chrono::nanoseconds::zero()) &&
+            app->Run(1).has_value();
+        Check(restored_after_dynamic,
+            "the dynamic camera refresh fixture restores the retained camera");
+
+        const auto retained_actor_handle =
+            Access::DiagnosticSceneActorMeshHandle(*app);
+        const auto retained_environment_count =
+            Access::DiagnosticSceneEnvironmentCommandCount(*app);
+        const omega::runtime::RenderDrawList actor_draw_list_before_invalid =
+            Access::DiagnosticActorDrawList(*app);
+        const omega::runtime::RenderDrawList scene_overlay_before_invalid =
+            Access::DiagnosticSceneOverlayDrawList(*app);
+        const omega::runtime::RenderMeshDrawList scene_meshes_before_invalid =
+            Access::DiagnosticSceneMeshDrawList(*app);
+        const omega::app::GpuHostSnapshot invalid_state_gpu_before =
+            Access::GpuSnapshot(*app);
+
+        const bool invalid_actor_ready = retained_actor_handle &&
+            Access::SetDiagnosticSceneActorMeshHandle(*app, {}) &&
+            Access::ArmNextRunElapsed(*app, std::chrono::nanoseconds::zero());
+        auto invalid_actor = app->RunWithCapture(1);
+        const bool actor_handle_restored = retained_actor_handle &&
+            Access::SetDiagnosticSceneActorMeshHandle(
+                *app, *retained_actor_handle);
+        Check(invalid_actor_ready && invalid_actor && actor_handle_restored &&
+                  invalid_actor->completion() ==
+                      omega::app::RunCaptureCompletion::OperationalFailure &&
+                  invalid_actor->failure() == std::optional<std::string_view>{
+                      "diagnostic scene draw-list creation failed: invalid-state"} &&
+                  invalid_actor->result().rendered_frames == 0 &&
+                  Access::GpuSnapshot(*app) == invalid_state_gpu_before &&
+                  DrawListsEqual(Access::DiagnosticActorDrawList(*app),
+                      actor_draw_list_before_invalid) &&
+                  DrawListsEqual(Access::DiagnosticSceneOverlayDrawList(*app),
+                      scene_overlay_before_invalid) &&
+                  MeshDrawListsEqual(Access::DiagnosticSceneMeshDrawList(*app),
+                      scene_meshes_before_invalid),
+            "an invalid retained actor handle fails before rendering and preserves every published list");
+
+        const bool invalid_count_ready = retained_environment_count &&
+            Access::SetDiagnosticSceneEnvironmentCommandCount(
+                *app, *retained_environment_count + 1U) &&
+            Access::ArmNextRunElapsed(*app, std::chrono::nanoseconds::zero());
+        auto invalid_count = app->RunWithCapture(1);
+        const bool environment_count_restored = retained_environment_count &&
+            Access::SetDiagnosticSceneEnvironmentCommandCount(
+                *app, *retained_environment_count);
+        Check(invalid_count_ready && invalid_count && environment_count_restored &&
+                  invalid_count->completion() ==
+                      omega::app::RunCaptureCompletion::OperationalFailure &&
+                  invalid_count->failure() == std::optional<std::string_view>{
+                      "diagnostic scene draw-list creation failed: invalid-state"} &&
+                  invalid_count->result().rendered_frames == 0 &&
+                  Access::GpuSnapshot(*app) == invalid_state_gpu_before &&
+                  DrawListsEqual(Access::DiagnosticActorDrawList(*app),
+                      actor_draw_list_before_invalid) &&
+                  DrawListsEqual(Access::DiagnosticSceneOverlayDrawList(*app),
+                      scene_overlay_before_invalid) &&
+                  MeshDrawListsEqual(Access::DiagnosticSceneMeshDrawList(*app),
+                      scene_meshes_before_invalid),
+            "a mismatched retained environment count fails atomically before rendering");
+
+        omega::asset::SceneCameraIR invalid_camera = retained_camera
+            ? *retained_camera
+            : omega::asset::SceneCameraIR{};
+        invalid_camera.view_to_clip.row_major[0U] =
+            std::numeric_limits<float>::infinity();
+        const bool invalid_camera_ready = retained_camera &&
+            Access::SetDiagnosticSceneCamera(*app, invalid_camera) &&
+            Access::ArmNextRunElapsed(*app, std::chrono::nanoseconds::zero());
+        auto invalid_camera_refresh = app->RunWithCapture(1);
+        const bool camera_restored = retained_camera &&
+            Access::SetDiagnosticSceneCamera(*app, *retained_camera);
+        Check(invalid_camera_ready && invalid_camera_refresh && camera_restored &&
+                  invalid_camera_refresh->completion() ==
+                      omega::app::RunCaptureCompletion::OperationalFailure &&
+                  invalid_camera_refresh->failure() ==
+                      std::optional<std::string_view>{
+                          "diagnostic scene transform is non-finite"} &&
+                  invalid_camera_refresh->result().rendered_frames == 0 &&
+                  Access::GpuSnapshot(*app) == invalid_state_gpu_before &&
+                  DrawListsEqual(Access::DiagnosticActorDrawList(*app),
+                      actor_draw_list_before_invalid) &&
+                  DrawListsEqual(Access::DiagnosticSceneOverlayDrawList(*app),
+                      scene_overlay_before_invalid) &&
+                  MeshDrawListsEqual(Access::DiagnosticSceneMeshDrawList(*app),
+                      scene_meshes_before_invalid),
+            "a non-finite retained camera fails before rendering and preserves every published list");
+
+        Check(Access::ArmNextRunElapsed(*app, std::chrono::nanoseconds::zero()) &&
+                  app->Run(1).has_value(),
+            "the restored retained-scene state resumes rendering after atomic failures");
         const omega::app::GpuHostSnapshot before_return = Access::GpuSnapshot(*app);
         const bool returned = PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value();
         const omega::app::GpuHostSnapshot after_return = Access::GpuSnapshot(*app);
@@ -2577,7 +3248,7 @@ void CheckDiagnosticSceneMissionActivation(
         Access::ReleaseDiagnosticScenePresentation(*app);
         const omega::app::GpuHostSnapshot after_release = Access::GpuSnapshot(*app);
         Check(after_release.successful_mesh_releases ==
-                  before_release.successful_mesh_releases + 1U &&
+                  before_release.successful_mesh_releases + 2U &&
                   after_release.meshes.free_slots ==
                       after_release.meshes.slot_capacity &&
                   after_release.meshes.reserved_slots == 0U &&
@@ -2587,7 +3258,32 @@ void CheckDiagnosticSceneMissionActivation(
                   after_release.meshes.resident_logical_bytes == 0U &&
                   Access::DiagnosticSceneMeshDrawList(*app).empty() &&
                   Access::CurrentFrontEndMeshDrawList(*app).empty(),
-            "explicit scene teardown clears commands before releasing the exact resident generation");
+            "explicit scene teardown clears commands before releasing actor then environment generations");
+
+        auto reused_environment_slot = Access::UploadRenderMesh(
+            *app, MakePresentationTriangle(0.0F));
+        const bool reused_expected_slot = reused_environment_slot &&
+            initial_environment_mesh_handle.valid() &&
+            reused_environment_slot->pool_identity ==
+                initial_environment_mesh_handle.pool_identity &&
+            reused_environment_slot->slot_index ==
+                initial_environment_mesh_handle.slot_index &&
+            reused_environment_slot->generation ==
+                initial_environment_mesh_handle.generation + 1U;
+        auto released_probe = reused_environment_slot
+            ? Access::ReleaseRenderMesh(*app, *reused_environment_slot)
+            : std::expected<void, std::string>{
+                  std::unexpected("the release-order probe did not upload")};
+        const omega::app::GpuHostSnapshot after_probe = Access::GpuSnapshot(*app);
+        Check(reused_expected_slot && released_probe &&
+                  after_probe.meshes.free_slots ==
+                      after_probe.meshes.slot_capacity &&
+                  after_probe.meshes.reserved_slots == 0U &&
+                  after_probe.meshes.resident_slots == 0U &&
+                  after_probe.meshes.resident_positions == 0U &&
+                  after_probe.meshes.resident_triangle_indices == 0U &&
+                  after_probe.meshes.resident_logical_bytes == 0U,
+            "production teardown releases actor first then environment so the environment slot is recycled next");
     }
 
     auto invalid_config = omega::runtime::ParseConfigText("");
