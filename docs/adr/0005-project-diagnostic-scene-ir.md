@@ -15,14 +15,16 @@ would turn a diagnostic into an unsupported retail claim.
 
 `Float3IR` is the shared project geometry scalar and `Matrix4x4IR` stores 16 values in row-major
 order. OpenOmega matrix math indexes element `(row, column)` as `row * 4 + column` and multiplies
-column vectors: `clip = world_to_clip * local_to_world * [x y z 1]^T`. The project clip volume is
-`-w <= x <= w`, `-w <= y <= w`, and `0 <= z <= w`, with positive Y upward after division by W.
-These are OpenOmega conventions, not statements about the retail game or its original engine.
+column vectors:
+`clip = view_to_clip * world_to_view * local_to_world * [x y z 1]^T`. `SceneCameraIR`
+owns the separate identity-default `world_to_view` and `view_to_clip` stages. The project clip
+volume is `-w <= x <= w`, `-w <= y <= w`, and `0 <= z <= w`, with positive Y upward after division
+by W. These are OpenOmega conventions, not statements about the retail game or its original engine.
 
 `RenderMeshIR` owns positions and flat groups of three unsigned 32-bit triangle indices. `SceneIR`
 owns render meshes, indexed mesh instances, and one camera. It contains no material assignment,
 platform resource, retail field, borrowed view, source path, or executable behavior. Identity is the
-default instance and camera transform.
+default instance transform and the default for both camera stages.
 
 `BuildSpatialDiagnosticScene` is a bounded, reentrant diagnostic adapter, not a retail scene
 decoder. It:
