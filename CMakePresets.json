@@ -12,8 +12,10 @@
       "generator": "Ninja Multi-Config",
       "binaryDir": "${sourceDir}/build/msvc",
       "environment": {
+        "AR": "lib.exe",
         "CC": "cl.exe",
-        "CXX": "cl.exe"
+        "CXX": "cl.exe",
+        "LD": "link.exe"
       },
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "cl.exe",
