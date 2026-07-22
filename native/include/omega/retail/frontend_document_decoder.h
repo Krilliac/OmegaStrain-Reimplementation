@@ -20,6 +20,7 @@ struct DecodedGuiFrontend {
   asset::FrontendWidgetDocumentIR document;
   std::uint64_t decoded_items = 0;
   std::uint64_t logical_output_bytes = 0;
+  std::uint64_t peak_scratch_bytes = 0;
   std::uint8_t trailing_zero_bytes = 0;
 };
 
@@ -27,6 +28,7 @@ struct DecodedIeFrontend {
   asset::FrontendVisualDocumentIR document;
   std::uint64_t decoded_items = 0;
   std::uint64_t logical_output_bytes = 0;
+  std::uint64_t peak_scratch_bytes = 0;
   std::uint8_t trailing_zero_bytes = 0;
 };
 
@@ -44,9 +46,8 @@ DecodeGuiFrontendMeasured(std::span<const std::byte> bytes,
 
 // [any worker thread; reentrant] Converts the paired retail IE hierarchy into
 // canonical owned visual-resource data. Proven affine transforms, positions,
-// UVs, quantized colors, indexed triangles, and topology are retained. Observed
-// animation-track families are structurally validated and discarded rather
-// than assigned unproven canonical meanings.
+// UVs, quantized colors, indexed triangles, topology, and the proven ordered
+// VERTEX/OPACITY/UVOFF_U/UVOFF_V animation-track families are retained.
 [[nodiscard]] asset::DecodeResult<asset::FrontendVisualDocumentIR>
 DecodeIeFrontend(std::span<const std::byte> bytes,
                  asset::DecodeLimits limits = {});

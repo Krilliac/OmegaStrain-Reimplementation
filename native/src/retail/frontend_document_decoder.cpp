@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace omega::retail {
 namespace {
@@ -71,6 +72,9 @@ public:
   [[nodiscard]] std::uint64_t items() const noexcept { return items_; }
   [[nodiscard]] std::uint64_t output_bytes() const noexcept {
     return output_bytes_;
+  }
+  [[nodiscard]] std::uint64_t peak_scratch_bytes() const noexcept {
+    return peak_scratch_bytes_;
   }
   [[nodiscard]] const asset::DecodeLimits &limits() const noexcept {
     return limits_;
@@ -216,14 +220,6 @@ public:
     return std::bit_cast<float>(*word);
   }
 
-  [[nodiscard]] asset::DecodeResult<void> Skip(const std::uint64_t amount) {
-    auto available = CheckAvailable(amount, offset_);
-    if (!available)
-      return available;
-    offset_ += static_cast<std::size_t>(amount);
-    return {};
-  }
-
   [[nodiscard]] asset::DecodeResult<void>
   CheckAvailable(const std::uint64_t amount,
                  const std::uint64_t byte_offset) const {
@@ -232,20 +228,6 @@ public:
           Error(asset::DecodeErrorCode::Truncated,
                 "frontend counted field reaches past the input", byte_offset));
     return {};
-  }
-
-  [[nodiscard]] asset::DecodeResult<void>
-  SkipItems(const std::uint64_t count, const std::uint64_t stride,
-            const std::uint64_t count_offset) {
-    auto item_result = ConsumeItems(count, count_offset);
-    if (!item_result)
-      return item_result;
-    std::uint64_t bytes = 0;
-    if (!Multiply(count, stride, bytes))
-      return std::unexpected(Error(asset::DecodeErrorCode::Overflow,
-                                   "frontend counted-field size overflows",
-                                   count_offset));
-    return Skip(bytes);
   }
 
   [[nodiscard]] asset::DecodeResult<std::uint8_t>
@@ -278,6 +260,7 @@ private:
   std::size_t offset_ = 0;
   std::uint64_t items_ = 0;
   std::uint64_t output_bytes_ = 0;
+  std::uint64_t peak_scratch_bytes_ = 0;
 };
 
 template <typename Value>
@@ -540,25 +523,58 @@ ParseGuiNode(Reader &reader, const std::uint64_t depth,
     if (!item_result)
       return std::unexpected(item_result.error());
     std::uint64_t action_storage = 0;
-    if (!Multiply(*action_count, sizeof(std::string), action_storage))
+    if (!Multiply(*action_count, sizeof(asset::FrontendWidgetActionIR),
+                  action_storage))
       return std::unexpected(Error(
           asset::DecodeErrorCode::Overflow,
-          "GUI action-reference storage size overflows", action_count_offset));
+          "GUI action storage size overflows", action_count_offset));
     auto output = reader.ConsumeOutput(action_storage, action_count_offset);
     if (!output)
       return std::unexpected(output.error());
-    node.binding->action_references.reserve(*action_count);
+
+    node.binding->actions.reserve(*action_count);
     for (std::uint16_t index = 0; index < *action_count; ++index) {
       auto action = reader.ReadOwnedString();
       if (!action)
         return std::unexpected(action.error());
-      node.binding->action_references.push_back(std::move(*action));
+
       aligned = reader.Align4();
       if (!aligned)
         return std::unexpected(aligned.error());
-      auto ignored_words = reader.Skip(6);
-      if (!ignored_words)
-        return std::unexpected(ignored_words.error());
+      const std::uint64_t type_offset = reader.offset();
+      auto type = reader.ReadU16();
+      if (!type)
+        return std::unexpected(type.error());
+      auto start_tick = reader.ReadU16();
+      if (!start_tick)
+        return std::unexpected(start_tick.error());
+      auto end_tick = reader.ReadU16();
+      if (!end_tick)
+        return std::unexpected(end_tick.error());
+
+      asset::FrontendTimelineActionMode mode;
+      switch (*type) {
+      case 1U:
+        mode = asset::FrontendTimelineActionMode::Immediate;
+        break;
+      case 2U:
+        mode = asset::FrontendTimelineActionMode::TransitionFlag1;
+        break;
+      case 3U:
+        mode = asset::FrontendTimelineActionMode::TransitionFlag0;
+        break;
+      default:
+        return std::unexpected(Error(
+            asset::DecodeErrorCode::UnsupportedVariant,
+            "GUI decorator action uses an unsupported timeline dispatch form",
+            type_offset));
+      }
+      node.binding->actions.push_back(asset::FrontendWidgetActionIR{
+          .identifier = std::move(*action),
+          .mode = mode,
+          .start_tick = *start_tick,
+          .end_tick = *end_tick,
+      });
     }
   }
 
@@ -766,6 +782,16 @@ ParseIeNode(Reader &reader, const std::uint64_t depth,
   item_result = reader.ConsumeItems(*track_count, track_count_offset);
   if (!item_result)
     return std::unexpected(item_result.error());
+  std::uint64_t track_storage = 0;
+  if (!Multiply(*track_count, sizeof(asset::FrontendAnimationTrackIR),
+                track_storage))
+    return std::unexpected(Error(
+        asset::DecodeErrorCode::Overflow,
+        "IE animation-track storage size overflows", track_count_offset));
+  auto track_output = reader.ConsumeOutput(track_storage, track_count_offset);
+  if (!track_output)
+    return std::unexpected(track_output.error());
+  node.animation_tracks.reserve(*track_count);
   for (std::uint32_t track_index = 0; track_index < *track_count;
        ++track_index) {
     const std::uint64_t kind_offset = reader.offset();
@@ -785,24 +811,100 @@ ParseIeNode(Reader &reader, const std::uint64_t depth,
             Error(asset::DecodeErrorCode::Malformed,
                   "IE vertex-track target count contradicts its fixed stream",
                   entry_count_offset));
-      item_result = reader.ConsumeItems(*entry_count, entry_count_offset);
-      if (!item_result)
-        return std::unexpected(item_result.error());
+      auto subtracks =
+          PrepareOwnedVector<asset::FrontendVertexAnimationSubtrackIR>(
+              reader, *entry_count, sizeof(std::uint32_t),
+              entry_count_offset);
+      if (!subtracks)
+        return std::unexpected(subtracks.error());
+      asset::FrontendVertexAnimationTrackIR track;
+      track.position_subtracks.reserve(*entry_count);
       for (std::uint32_t entry_index = 0; entry_index < *entry_count;
            ++entry_index) {
         const std::uint64_t key_count_offset = reader.offset();
         auto key_count = reader.ReadU32();
         if (!key_count)
           return std::unexpected(key_count.error());
-        auto skipped = reader.SkipItems(*key_count, 16, key_count_offset);
-        if (!skipped)
-          return std::unexpected(skipped.error());
+        if (*key_count == 0U)
+          return std::unexpected(Error(
+              asset::DecodeErrorCode::Malformed,
+              "IE vertex animation subtrack has no keys", key_count_offset));
+        auto keys = PrepareOwnedVector<asset::FrontendVertexAnimationKeyIR>(
+            reader, *key_count, 16, key_count_offset);
+        if (!keys)
+          return std::unexpected(keys.error());
+        asset::FrontendVertexAnimationSubtrackIR subtrack;
+        subtrack.keys.reserve(*key_count);
+        float previous_time = 0.0F;
+        for (std::uint32_t key_index = 0; key_index < *key_count;
+             ++key_index) {
+          const std::uint64_t time_offset = reader.offset();
+          auto time = ReadFiniteF32(reader, "IE vertex-animation key time");
+          if (!time)
+            return std::unexpected(time.error());
+          if (key_index != 0U && *time <= previous_time)
+            return std::unexpected(Error(
+                asset::DecodeErrorCode::Malformed,
+                "IE vertex-animation key times are not strictly increasing",
+                time_offset));
+          auto x = ReadFiniteF32(reader, "IE vertex-animation X component");
+          if (!x)
+            return std::unexpected(x.error());
+          auto y = ReadFiniteF32(reader, "IE vertex-animation Y component");
+          if (!y)
+            return std::unexpected(y.error());
+          auto z = ReadFiniteF32(reader, "IE vertex-animation Z component");
+          if (!z)
+            return std::unexpected(z.error());
+          subtrack.keys.push_back(asset::FrontendVertexAnimationKeyIR{
+              .timeline_tick = *time,
+              .position = {.x = *x, .y = *y, .z = *z},
+          });
+          previous_time = *time;
+        }
+        track.position_subtracks.push_back(std::move(subtrack));
       }
+      node.animation_tracks.emplace_back(std::move(track));
     } else if (*kind == kOpacityTrack || *kind == kUvOffsetUTrack ||
                *kind == kUvOffsetVTrack) {
-      auto skipped = reader.SkipItems(*entry_count, 8, entry_count_offset);
-      if (!skipped)
-        return std::unexpected(skipped.error());
+      if (*entry_count == 0U)
+        return std::unexpected(Error(
+            asset::DecodeErrorCode::Malformed,
+            "IE scalar animation track has no keys", entry_count_offset));
+      auto keys = PrepareOwnedVector<asset::FrontendScalarAnimationKeyIR>(
+          reader, *entry_count, 8, entry_count_offset);
+      if (!keys)
+        return std::unexpected(keys.error());
+      asset::FrontendScalarAnimationTrackIR track;
+      if (*kind == kOpacityTrack)
+        track.target = asset::FrontendScalarAnimationTarget::Opacity;
+      else if (*kind == kUvOffsetUTrack)
+        track.target = asset::FrontendScalarAnimationTarget::UvOffsetU;
+      else
+        track.target = asset::FrontendScalarAnimationTarget::UvOffsetV;
+      track.keys.reserve(*entry_count);
+      float previous_time = 0.0F;
+      for (std::uint32_t key_index = 0; key_index < *entry_count;
+           ++key_index) {
+        const std::uint64_t time_offset = reader.offset();
+        auto time = ReadFiniteF32(reader, "IE scalar-animation key time");
+        if (!time)
+          return std::unexpected(time.error());
+        if (key_index != 0U && *time <= previous_time)
+          return std::unexpected(Error(
+              asset::DecodeErrorCode::Malformed,
+              "IE scalar-animation key times are not strictly increasing",
+              time_offset));
+        auto value = ReadFiniteF32(reader, "IE scalar-animation key value");
+        if (!value)
+          return std::unexpected(value.error());
+        track.keys.push_back(asset::FrontendScalarAnimationKeyIR{
+            .timeline_tick = *time,
+            .value = *value,
+        });
+        previous_time = *time;
+      }
+      node.animation_tracks.emplace_back(std::move(track));
     } else
       return std::unexpected(Error(
           asset::DecodeErrorCode::UnsupportedVariant,
@@ -890,6 +992,7 @@ DecodeGuiFrontendMeasured(const std::span<const std::byte> bytes,
       .document = {.root = std::move(*root)},
       .decoded_items = reader.items(),
       .logical_output_bytes = reader.output_bytes(),
+      .peak_scratch_bytes = reader.peak_scratch_bytes(),
       .trailing_zero_bytes = *padding,
   };
 }
@@ -932,6 +1035,7 @@ DecodeIeFrontendMeasured(const std::span<const std::byte> bytes,
       .document = {.root = std::move(*root)},
       .decoded_items = reader.items(),
       .logical_output_bytes = reader.output_bytes(),
+      .peak_scratch_bytes = reader.peak_scratch_bytes(),
       .trailing_zero_bytes = *padding,
   };
 }

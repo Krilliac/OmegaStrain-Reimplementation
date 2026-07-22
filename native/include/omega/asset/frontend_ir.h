@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace omega::asset {
@@ -44,6 +45,26 @@ enum class FrontendTextAlignment : std::uint8_t {
   Center = 2,
 };
 
+// Proven retail timeline dispatch forms. Immediate sets the primary value from
+// start_tick and then the secondary value from end_tick without calling the
+// transition path. The other forms set the primary value, then call the same
+// transition path with the retained boolean flag. Values are authored timeline
+// ticks; higher-level motion labels belong to the runtime evaluator.
+enum class FrontendTimelineActionMode : std::uint8_t {
+  Immediate,
+  TransitionFlag1,
+  TransitionFlag0,
+};
+
+struct FrontendWidgetActionIR {
+  std::string identifier;
+  FrontendTimelineActionMode mode = FrontendTimelineActionMode::Immediate;
+  std::uint16_t start_tick = 0;
+  std::uint16_t end_tick = 0;
+
+  bool operator==(const FrontendWidgetActionIR &) const = default;
+};
+
 // Canonical, fully owned references used by a widget's interface binding. The
 // ordered values are intentionally neutral until their individual coordinate
 // and matrix roles are independently established.
@@ -51,7 +72,9 @@ struct FrontendWidgetBindingIR {
   std::string scope_reference;
   std::string resource_reference;
   std::array<float, 12> transform_values{};
-  std::vector<std::string> action_references;
+  // Source-order, exact-case event/action bindings. Duplicates are retained so
+  // runtime lookup can reproduce the proven first-match precedence rule.
+  std::vector<FrontendWidgetActionIR> actions;
 
   bool operator==(const FrontendWidgetBindingIR &) const = default;
 };
@@ -110,12 +133,58 @@ struct FrontendTriangleIR {
   bool operator==(const FrontendTriangleIR &) const = default;
 };
 
+struct FrontendScalarAnimationKeyIR {
+  float timeline_tick = 0.0F;
+  float value = 0.0F;
+
+  bool operator==(const FrontendScalarAnimationKeyIR &) const = default;
+};
+
+struct FrontendVertexAnimationKeyIR {
+  float timeline_tick = 0.0F;
+  Float3IR position;
+
+  bool operator==(const FrontendVertexAnimationKeyIR &) const = default;
+};
+
+// One position-bound subtrack from a VERTEX animation. The enclosing vector's
+// ordinal is the target position index; every visual position has one entry.
+struct FrontendVertexAnimationSubtrackIR {
+  std::vector<FrontendVertexAnimationKeyIR> keys;
+
+  bool operator==(const FrontendVertexAnimationSubtrackIR &) const = default;
+};
+
+struct FrontendVertexAnimationTrackIR {
+  std::vector<FrontendVertexAnimationSubtrackIR> position_subtracks;
+
+  bool operator==(const FrontendVertexAnimationTrackIR &) const = default;
+};
+
+enum class FrontendScalarAnimationTarget : std::uint8_t {
+  Opacity,
+  UvOffsetU,
+  UvOffsetV,
+};
+
+struct FrontendScalarAnimationTrackIR {
+  FrontendScalarAnimationTarget target =
+      FrontendScalarAnimationTarget::Opacity;
+  std::vector<FrontendScalarAnimationKeyIR> keys;
+
+  bool operator==(const FrontendScalarAnimationTrackIR &) const = default;
+};
+
+using FrontendAnimationTrackIR =
+    std::variant<FrontendVertexAnimationTrackIR,
+                 FrontendScalarAnimationTrackIR>;
+
 // Canonical visual-resource hierarchy paired with a widget document. Nonempty
 // texture members include the proven .TDX suffix. transform_values preserves
 // the twelve source coefficients of a proven affine transform; whether the
 // retail bridge treats those coefficients as rows or columns remains unknown.
-// Animation records remain outside canonical IR until their semantics are
-// independently established.
+// Animation tracks retain source order. Key times are finite and strictly
+// increasing, so runtime interpolation has deterministic neighboring keys.
 struct FrontendVisualNodeIR {
   std::string identifier;
   std::optional<std::string> texture_member;
@@ -124,6 +193,7 @@ struct FrontendVisualNodeIR {
   std::vector<FrontendUvIR> uvs;
   std::vector<FrontendColorRgba8IR> colors;
   std::vector<FrontendTriangleIR> triangles;
+  std::vector<FrontendAnimationTrackIR> animation_tracks;
   std::vector<FrontendVisualNodeIR> children;
 
   bool operator==(const FrontendVisualNodeIR &) const = default;
@@ -138,6 +208,8 @@ struct FrontendVisualDocumentIR {
 static_assert(sizeof(FrontendUvIR) == 8U);
 static_assert(sizeof(FrontendColorRgba8IR) == 4U);
 static_assert(sizeof(FrontendTriangleIR) == 18U);
+static_assert(sizeof(FrontendScalarAnimationKeyIR) == 8U);
+static_assert(sizeof(FrontendVertexAnimationKeyIR) == 16U);
 static_assert(sizeof(FrontendWidgetRectangleIR) == 16U);
 static_assert(sizeof(FrontendTextColorIR) == 16U);
 } // namespace omega::asset

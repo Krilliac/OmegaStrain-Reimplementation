@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -78,6 +79,13 @@ struct GuiNodeOffsets {
   std::size_t decorator_transform = 0;
 };
 
+struct GuiActionSpec {
+  std::string_view identifier;
+  std::uint16_t type = 1;
+  std::uint16_t start_tick = 0;
+  std::uint16_t end_tick = 0;
+};
+
 struct GuiNodeSpec {
   std::string_view factory;
   std::string_view identifier;
@@ -98,7 +106,7 @@ struct GuiNodeSpec {
   std::string_view scope_reference;
   std::string_view resource_reference;
   std::array<float, 12> transform_values{};
-  std::vector<std::string_view> actions;
+  std::vector<GuiActionSpec> actions;
   std::vector<GuiNodeSpec> children;
   GuiNodeOffsets *offsets = nullptr;
 };
@@ -142,12 +150,12 @@ void AppendGuiNode(std::vector<std::byte> &bytes, const GuiNodeSpec &node) {
     for (const float value : node.transform_values)
       AppendF32(bytes, value);
     AppendU16(bytes, static_cast<std::uint16_t>(node.actions.size()));
-    for (const std::string_view action : node.actions) {
-      AppendString(bytes, action);
+    for (const GuiActionSpec &action : node.actions) {
+      AppendString(bytes, action.identifier);
       Align4(bytes);
-      AppendU16(bytes, 3);
-      AppendU16(bytes, 0);
-      AppendU16(bytes, 42);
+      AppendU16(bytes, action.type);
+      AppendU16(bytes, action.start_tick);
+      AppendU16(bytes, action.end_tick);
     }
   }
   AppendU16(bytes, static_cast<std::uint16_t>(node.children.size()));
@@ -198,7 +206,14 @@ struct GuiFixture {
       .resource_reference = "button_visual",
       .transform_values = {20.0F, 21.0F, 22.0F, 23.0F, 24.0F, 25.0F, 26.0F,
                            27.0F, 28.0F, 29.0F, 30.0F, 31.0F},
-      .actions = {"gain_focus", "activate"},
+      .actions = {{.identifier = "gain_focus",
+                   .type = 2,
+                   .start_tick = 10,
+                   .end_tick = 20},
+                  {.identifier = "activate",
+                   .type = 3,
+                   .start_tick = 0,
+                   .end_tick = 42}},
       .offsets = &button_offsets,
   };
   GuiNodeSpec text{
@@ -218,7 +233,10 @@ struct GuiFixture {
       .resource_reference = "status_visual",
       .transform_values = {30.0F, 31.0F, 32.0F, 33.0F, 34.0F, 35.0F, 36.0F,
                            37.0F, 38.0F, 39.0F, 40.0F, 41.0F},
-      .actions = {"refresh"},
+      .actions = {{.identifier = "refresh",
+                   .type = 1,
+                   .start_tick = 7,
+                   .end_tick = 11}},
       .offsets = &text_offsets,
   };
   GuiNodeSpec root{
@@ -230,7 +248,10 @@ struct GuiFixture {
       .resource_reference = "root_visual",
       .transform_values = {10.0F, 11.0F, 12.0F, 13.0F, 14.0F, 15.0F, 16.0F,
                            17.0F, 18.0F, 19.0F, 20.0F, 21.0F},
-      .actions = {"wake"},
+      .actions = {{.identifier = "wake",
+                   .type = 1,
+                   .start_tick = 2,
+                   .end_tick = 9}},
       .children = {button, text, character},
       .offsets = &root_offsets,
   };
@@ -250,9 +271,16 @@ struct IeFixture {
   std::size_t uv_data_offset = 0;
   std::size_t color_data_offset = 0;
   std::size_t triangle_data_offset = 0;
+  std::size_t track_count_offset = 0;
   std::size_t vertex_kind_offset = 0;
   std::size_t vertex_count_offset = 0;
-  std::size_t animation_payload_offset = 0;
+  std::size_t vertex_first_key_offset = 0;
+  std::size_t vertex_second_key_offset = 0;
+  std::size_t opacity_count_offset = 0;
+  std::size_t opacity_first_key_offset = 0;
+  std::size_t opacity_second_key_offset = 0;
+  std::size_t uv_u_first_key_offset = 0;
+  std::size_t uv_v_first_key_offset = 0;
   std::size_t secondary_count_offset = 0;
   std::size_t root_child_count_offset = 0;
   std::uint8_t padding = 0;
@@ -319,6 +347,7 @@ void AppendIeEmptyNode(std::vector<std::byte> &bytes,
        std::array<std::uint32_t, 9>{0, 1, 0, 0, 0, 0, 0, 0, 0})
     AppendU32(fixture.bytes, index);
 
+  fixture.track_count_offset = fixture.bytes.size();
   AppendU32(fixture.bytes, 4);
   fixture.vertex_kind_offset = fixture.bytes.size();
   AppendString(fixture.bytes, "VERTEX");
@@ -328,21 +357,40 @@ void AppendIeEmptyNode(std::vector<std::byte> &bytes,
   for (unsigned entry = 0; entry < 2; ++entry) {
     AppendU32(fixture.bytes, 2);
     if (entry == 0)
-      fixture.animation_payload_offset = fixture.bytes.size();
-    AppendZeros(fixture.bytes, 2U * 16U);
+      fixture.vertex_first_key_offset = fixture.bytes.size();
+    AppendF32(fixture.bytes, 0.0F);
+    AppendF32(fixture.bytes, entry == 0 ? 1.0F : 4.0F);
+    AppendF32(fixture.bytes, entry == 0 ? 2.0F : 5.0F);
+    AppendF32(fixture.bytes, entry == 0 ? 3.0F : 6.0F);
+    if (entry == 0)
+      fixture.vertex_second_key_offset = fixture.bytes.size();
+    AppendF32(fixture.bytes, 30.0F);
+    AppendF32(fixture.bytes, entry == 0 ? 7.0F : 10.0F);
+    AppendF32(fixture.bytes, entry == 0 ? 8.0F : 11.0F);
+    AppendF32(fixture.bytes, entry == 0 ? 9.0F : 12.0F);
   }
   AppendString(fixture.bytes, "OPACITY");
   Align4(fixture.bytes);
+  fixture.opacity_count_offset = fixture.bytes.size();
   AppendU32(fixture.bytes, 2);
-  AppendZeros(fixture.bytes, 2U * 8U);
+  fixture.opacity_first_key_offset = fixture.bytes.size();
+  AppendF32(fixture.bytes, 0.0F);
+  AppendF32(fixture.bytes, 1.0F);
+  fixture.opacity_second_key_offset = fixture.bytes.size();
+  AppendF32(fixture.bytes, 15.0F);
+  AppendF32(fixture.bytes, 0.5F);
   AppendString(fixture.bytes, "UVOFF_U");
   Align4(fixture.bytes);
   AppendU32(fixture.bytes, 1);
-  AppendZeros(fixture.bytes, 8);
+  fixture.uv_u_first_key_offset = fixture.bytes.size();
+  AppendF32(fixture.bytes, 0.0F);
+  AppendF32(fixture.bytes, 0.125F);
   AppendString(fixture.bytes, "UVOFF_V");
   Align4(fixture.bytes);
   AppendU32(fixture.bytes, 1);
-  AppendZeros(fixture.bytes, 8);
+  fixture.uv_v_first_key_offset = fixture.bytes.size();
+  AppendF32(fixture.bytes, 0.0F);
+  AppendF32(fixture.bytes, 0.875F);
 
   fixture.secondary_count_offset = fixture.bytes.size();
   AppendU32(fixture.bytes, 0);
@@ -416,7 +464,14 @@ int main() {
             root.binding->resource_reference == "root_visual" &&
             root.binding->transform_values[0] == 10.0F &&
             root.binding->transform_values[11] == 21.0F &&
-            root.binding->action_references == std::vector<std::string>{"wake"},
+            root.binding->actions ==
+                std::vector<omega::asset::FrontendWidgetActionIR>{{
+                    .identifier = "wake",
+                    .mode =
+                        omega::asset::FrontendTimelineActionMode::Immediate,
+                    .start_tick = 2,
+                    .end_tick = 9,
+                }},
         "GUI retains named rectangle, state, binding, finite transform, and "
         "source-order action fields");
     Check(
@@ -443,8 +498,19 @@ int main() {
             root.children[0].text_alignment ==
                 omega::asset::FrontendTextAlignment::Center &&
             root.children[0].binding &&
-            root.children[0].binding->action_references ==
-                std::vector<std::string>{"gain_focus", "activate"} &&
+            root.children[0].binding->actions ==
+                std::vector<omega::asset::FrontendWidgetActionIR>{
+                    {.identifier = "gain_focus",
+                     .mode =
+                         omega::asset::FrontendTimelineActionMode::
+                             TransitionFlag1,
+                     .start_tick = 10,
+                     .end_tick = 20},
+                    {.identifier = "activate",
+                     .mode = omega::asset::FrontendTimelineActionMode::
+                         TransitionFlag0,
+                     .start_tick = 0,
+                     .end_tick = 42}} &&
             root.children[1].kind == omega::asset::FrontendWidgetKind::Text &&
             root.children[1].identifier == "agent_status" &&
             !root.children[1].visible && root.children[1].enabled &&
@@ -461,8 +527,14 @@ int main() {
                 omega::asset::FrontendTextAlignment::Right &&
             root.children[1].binding &&
             root.children[1].binding->resource_reference == "status_visual" &&
-            root.children[1].binding->action_references ==
-                std::vector<std::string>{"refresh"} &&
+            root.children[1].binding->actions ==
+                std::vector<omega::asset::FrontendWidgetActionIR>{{
+                    .identifier = "refresh",
+                    .mode =
+                        omega::asset::FrontendTimelineActionMode::Immediate,
+                    .start_tick = 7,
+                    .end_tick = 11,
+                }} &&
             root.children[2].kind ==
                 omega::asset::FrontendWidgetKind::CharacterDisplay &&
             root.children[2].visible && !root.children[2].enabled &&
@@ -474,9 +546,10 @@ int main() {
     Check(gui_measured->decoded_items > 0 &&
               gui_measured->logical_output_bytes >=
                   sizeof(omega::asset::FrontendWidgetDocumentIR) &&
+              gui_measured->peak_scratch_bytes == 0 &&
               gui_measured->trailing_zero_bytes == gui_fixture.padding,
-          "GUI measured decode reports exact budgets and terminal zero "
-          "alignment");
+          "GUI measured decode reports exact zero-scratch budgets and "
+          "terminal-alignment usage");
   }
 
   const auto gui = omega::retail::DecodeGuiFrontend(gui_fixture.bytes);
@@ -497,8 +570,14 @@ int main() {
                 } &&
             owned_gui->root.children[0].text_alignment ==
                 omega::asset::FrontendTextAlignment::Center &&
-            owned_gui->root.children[0].binding->action_references ==
-                std::vector<std::string>{"gain_focus", "activate"},
+            owned_gui->root.children[0].binding->actions.size() == 2 &&
+            owned_gui->root.children[0].binding->actions[0].identifier ==
+                "gain_focus" &&
+            owned_gui->root.children[0].binding->actions[0].mode ==
+                omega::asset::FrontendTimelineActionMode::TransitionFlag1 &&
+            owned_gui->root.children[0].binding->actions[1].identifier ==
+                "activate" &&
+            owned_gui->root.children[0].binding->actions[1].end_tick == 42,
         "GUI semantic output remains valid after source storage replacement");
 
   const GuiFixture left_aligned_fixture = EncodeGuiFixture(GuiNodeSpec{
@@ -629,6 +708,45 @@ int main() {
              omega::asset::DecodeErrorCode::Malformed,
              "GUI rejects a NaN decorator transform component");
 
+  const GuiFixture duplicate_action_fixture = EncodeGuiFixture(GuiNodeSpec{
+      .factory = "GuiWidget",
+      .identifier = "duplicate_action",
+      .actions = {{.identifier = "onActivate", .type = 1},
+                  {.identifier = "onActivate", .type = 3}},
+  });
+  const auto duplicate_actions =
+      omega::retail::DecodeGuiFrontend(duplicate_action_fixture.bytes);
+  Check(duplicate_actions && duplicate_actions->root.binding &&
+            duplicate_actions->root.binding->actions.size() == 2 &&
+            duplicate_actions->root.binding->actions[0].identifier ==
+                "onActivate" &&
+            duplicate_actions->root.binding->actions[0].mode ==
+                omega::asset::FrontendTimelineActionMode::Immediate &&
+            duplicate_actions->root.binding->actions[1].identifier ==
+                "onActivate" &&
+            duplicate_actions->root.binding->actions[1].mode ==
+                omega::asset::FrontendTimelineActionMode::TransitionFlag0,
+        "GUI retains duplicate exact-case actions in source order for proven "
+        "first-match lookup");
+  const GuiFixture case_distinct_action_fixture = EncodeGuiFixture(GuiNodeSpec{
+      .factory = "GuiWidget",
+      .identifier = "case_distinct_actions",
+      .actions = {{.identifier = "onActivate", .type = 1},
+                  {.identifier = "ONACTIVATE", .type = 3}},
+  });
+  Check(omega::retail::DecodeGuiFrontend(case_distinct_action_fixture.bytes)
+            .has_value(),
+        "GUI action identity remains exact-byte and case-sensitive");
+  const GuiFixture unsupported_action_fixture = EncodeGuiFixture(GuiNodeSpec{
+      .factory = "GuiWidget",
+      .identifier = "unsupported_action",
+      .actions = {{.identifier = "onActivate", .type = 4}},
+  });
+  CheckError(
+      omega::retail::DecodeGuiFrontend(unsupported_action_fixture.bytes),
+      omega::asset::DecodeErrorCode::UnsupportedVariant,
+      "GUI rejects an action mode outside the three proven dispatch forms");
+
   bad_gui = gui_fixture.bytes;
   bad_gui.back() = std::byte{1};
   CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
@@ -653,7 +771,7 @@ int main() {
     limits.maximum_scratch_bytes = 0;
     Check(
         omega::retail::DecodeGuiFrontend(gui_fixture.bytes, limits).has_value(),
-        "GUI accepts exact input, item, output, and zero-scratch budgets");
+        "GUI accepts exact input, item, output, and scratch budgets");
     --limits.maximum_items;
     CheckError(omega::retail::DecodeGuiFrontend(gui_fixture.bytes, limits),
                omega::asset::DecodeErrorCode::LimitExceeded,
@@ -758,12 +876,67 @@ int main() {
                                  }},
           "IE retains owned positions, UVs, toward-zero RGBA8 colors, and "
           "separate index triples");
+    Check(panel.animation_tracks.size() == 4,
+          "IE retains animation tracks in source order");
+    if (panel.animation_tracks.size() == 4) {
+      const auto *vertex =
+          std::get_if<omega::asset::FrontendVertexAnimationTrackIR>(
+              &panel.animation_tracks[0]);
+      const auto *opacity =
+          std::get_if<omega::asset::FrontendScalarAnimationTrackIR>(
+              &panel.animation_tracks[1]);
+      const auto *uv_u =
+          std::get_if<omega::asset::FrontendScalarAnimationTrackIR>(
+              &panel.animation_tracks[2]);
+      const auto *uv_v =
+          std::get_if<omega::asset::FrontendScalarAnimationTrackIR>(
+              &panel.animation_tracks[3]);
+      Check(vertex && vertex->position_subtracks.size() == 2 &&
+                vertex->position_subtracks[0].keys.size() == 2 &&
+                vertex->position_subtracks[1].keys.size() == 2 &&
+                vertex->position_subtracks[0].keys ==
+                    std::vector<omega::asset::FrontendVertexAnimationKeyIR>{
+                        {.timeline_tick = 0.0F,
+                         .position = {.x = 1.0F, .y = 2.0F, .z = 3.0F}},
+                        {.timeline_tick = 30.0F,
+                         .position = {.x = 7.0F, .y = 8.0F, .z = 9.0F}}} &&
+                vertex->position_subtracks[1].keys[1].position ==
+                    omega::asset::Float3IR{.x = 10.0F,
+                                           .y = 11.0F,
+                                           .z = 12.0F},
+            "IE binds each VERTEX subtrack to its source-order position");
+      Check(opacity &&
+                opacity->target ==
+                    omega::asset::FrontendScalarAnimationTarget::Opacity &&
+                opacity->keys.size() == 2 &&
+                opacity->keys ==
+                    std::vector<omega::asset::FrontendScalarAnimationKeyIR>{
+                        {.timeline_tick = 0.0F, .value = 1.0F},
+                        {.timeline_tick = 15.0F, .value = 0.5F}} &&
+                uv_u &&
+                uv_u->target ==
+                    omega::asset::FrontendScalarAnimationTarget::UvOffsetU &&
+                uv_u->keys.size() == 1 &&
+                uv_u->keys[0] ==
+                    omega::asset::FrontendScalarAnimationKeyIR{
+                        .timeline_tick = 0.0F, .value = 0.125F} &&
+                uv_v &&
+                uv_v->target ==
+                    omega::asset::FrontendScalarAnimationTarget::UvOffsetV &&
+                uv_v->keys.size() == 1 &&
+                uv_v->keys[0] ==
+                    omega::asset::FrontendScalarAnimationKeyIR{
+                        .timeline_tick = 0.0F, .value = 0.875F},
+            "IE retains OPACITY, UVOFF_U, and UVOFF_V scalar keys and targets");
+    }
     Check(
         ie_measured->decoded_items > 0 &&
             ie_measured->logical_output_bytes >=
                 sizeof(omega::asset::FrontendVisualDocumentIR) &&
+            ie_measured->peak_scratch_bytes == 0 &&
             ie_measured->trailing_zero_bytes == ie_fixture.padding,
-        "IE measured decode reports exact budgets and terminal zero alignment");
+        "IE measured decode reports exact zero-scratch budgets and terminal "
+        "alignment");
   }
 
   const auto ie = omega::retail::DecodeIeFrontend(ie_fixture.bytes);
@@ -779,13 +952,43 @@ int main() {
         "IE keeps the skipped prefix and observed word outside canonical "
         "semantics");
   auto changed_animation = ie_fixture.bytes;
-  changed_animation[ie_fixture.animation_payload_offset] = std::byte{0x7F};
-  const auto opaque_ie = omega::retail::DecodeIeFrontend(changed_animation);
-  Check(ie && opaque_ie && *ie == *opaque_ie,
-        "IE validates but does not expose unproven animation payload values");
+  WriteF32(changed_animation, ie_fixture.vertex_first_key_offset + 4U, 13.0F);
+  const auto changed_animation_ie =
+      omega::retail::DecodeIeFrontend(changed_animation);
+  bool changed_key_retained = false;
+  if (changed_animation_ie &&
+      changed_animation_ie->root.children.size() == 1 &&
+      !changed_animation_ie->root.children[0].animation_tracks.empty()) {
+    const auto *vertex =
+        std::get_if<omega::asset::FrontendVertexAnimationTrackIR>(
+            &changed_animation_ie->root.children[0].animation_tracks[0]);
+    changed_key_retained =
+        vertex && !vertex->position_subtracks.empty() &&
+        !vertex->position_subtracks[0].keys.empty() &&
+        vertex->position_subtracks[0].keys[0].position.x == 13.0F;
+  }
+  Check(ie && changed_animation_ie && *ie != *changed_animation_ie &&
+            changed_key_retained,
+        "IE exposes proven animation payload values in canonical owned IR");
   auto ie_owned_bytes = ie_fixture.bytes;
   auto owned_ie = omega::retail::DecodeIeFrontend(ie_owned_bytes);
   std::fill(ie_owned_bytes.begin(), ie_owned_bytes.end(), std::byte{0xFF});
+  bool owned_animation = false;
+  if (owned_ie && owned_ie->root.children.size() == 1 &&
+      owned_ie->root.children[0].animation_tracks.size() >= 2) {
+    const auto *vertex =
+        std::get_if<omega::asset::FrontendVertexAnimationTrackIR>(
+            &owned_ie->root.children[0].animation_tracks[0]);
+    const auto *opacity =
+        std::get_if<omega::asset::FrontendScalarAnimationTrackIR>(
+            &owned_ie->root.children[0].animation_tracks[1]);
+    owned_animation = vertex && !vertex->position_subtracks.empty() &&
+                      vertex->position_subtracks[0].keys.size() == 2 &&
+                      vertex->position_subtracks[0].keys[1].position.z ==
+                          9.0F &&
+                      opacity && opacity->keys.size() == 2 &&
+                      opacity->keys[1].value == 0.5F;
+  }
   Check(owned_ie && owned_ie->root.children.size() == 1 &&
             owned_ie->root.children[0].texture_member == "panel_skin.TDX" &&
             owned_ie->root.children[0].positions.size() == 2 &&
@@ -793,8 +996,10 @@ int main() {
             owned_ie->root.children[0].triangles.size() == 1 &&
             owned_ie->root.children[0].positions[1].z == 6.0F &&
             owned_ie->root.children[0].colors[0].green == 127 &&
-            owned_ie->root.children[0].triangles[0].position_indices[1] == 1,
-        "IE render streams remain owned after source storage replacement");
+            owned_ie->root.children[0].triangles[0].position_indices[1] == 1 &&
+            owned_animation,
+        "IE render and animation streams remain owned after source storage "
+        "replacement");
 
   auto raised_limits = omega::asset::DecodeLimits{};
   raised_limits.maximum_items = std::numeric_limits<std::uint64_t>::max();
@@ -876,6 +1081,64 @@ int main() {
       omega::retail::DecodeIeFrontend(bad_ie),
       omega::asset::DecodeErrorCode::Malformed,
       "IE rejects a vertex-track count that contradicts its fixed stream");
+  bad_ie = ie_fixture.bytes;
+  WriteU32(bad_ie,
+           ie_fixture.vertex_first_key_offset - sizeof(std::uint32_t), 0U);
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects an empty VERTEX position subtrack");
+  bad_ie = ie_fixture.bytes;
+  WriteU32(bad_ie,
+           ie_fixture.vertex_first_key_offset - sizeof(std::uint32_t),
+           std::numeric_limits<std::uint32_t>::max());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie, raised_limits),
+             omega::asset::DecodeErrorCode::LimitExceeded,
+             "IE bounds a hostile VERTEX key count before allocation");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.vertex_first_key_offset,
+           std::numeric_limits<float>::infinity());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects a nonfinite VERTEX key time");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.vertex_first_key_offset + 4U,
+           std::numeric_limits<float>::quiet_NaN());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects a nonfinite VERTEX key component");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.vertex_second_key_offset, 0.0F);
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects duplicate or non-increasing VERTEX key times");
+  bad_ie = ie_fixture.bytes;
+  WriteU32(bad_ie, ie_fixture.opacity_count_offset, 0U);
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects an empty scalar animation track");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.opacity_first_key_offset,
+           std::numeric_limits<float>::quiet_NaN());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects a nonfinite scalar-animation key time");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.opacity_first_key_offset + 4U,
+           std::numeric_limits<float>::infinity());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects a nonfinite scalar-animation key value");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.opacity_second_key_offset, 0.0F);
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects duplicate or non-increasing scalar key times");
+  bad_ie = ie_fixture.bytes;
+  WriteU32(bad_ie, ie_fixture.track_count_offset,
+           std::numeric_limits<std::uint32_t>::max());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie, raised_limits),
+             omega::asset::DecodeErrorCode::LimitExceeded,
+             "IE bounds a hostile animation-track count before allocation");
   bad_ie = ie_fixture.bytes;
   WriteU32(bad_ie, ie_fixture.secondary_count_offset, 1);
   CheckError(omega::retail::DecodeIeFrontend(bad_ie),
