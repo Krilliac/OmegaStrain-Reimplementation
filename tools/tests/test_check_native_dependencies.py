@@ -45,6 +45,10 @@ class NativeDependencyGateTests(unittest.TestCase):
         cases = (
             ("native/src/archive/example.cpp", "omega/asset/decode.h"),
             ("native/src/frontend/example.cpp", "omega/asset/frontend_ir.h"),
+            (
+                "native/src/frontend_text/example.cpp",
+                "omega/retail/fnt_v3_decoder.h",
+            ),
             ("native/src/profiles/example.cpp", "omega/persistence/save_database.h"),
             ("native/src/simulation/example.cpp", "omega/asset/decode.h"),
             ("native/src/media/example.cpp", "omega/asset/decode.h"),
@@ -163,6 +167,10 @@ class NativeDependencyGateTests(unittest.TestCase):
         cases = (
             ("native/src/archive/example.cpp", "omega/runtime/frame_scheduler.h"),
             ("native/src/frontend/example.cpp", "omega/runtime/frame_scheduler.h"),
+            (
+                "native/src/frontend_text/example.cpp",
+                "omega/runtime/frame_scheduler.h",
+            ),
             ("native/src/persistence/example.cpp", "omega/profiles/profile_catalog.h"),
             ("native/src/profiles/example.cpp", "omega/runtime/frame_scheduler.h"),
             ("native/src/simulation/example.cpp", "omega/runtime/frame_scheduler.h"),
@@ -568,6 +576,59 @@ class NativeDependencyGateTests(unittest.TestCase):
                 )
         self.assert_rejected(
             "native/src/frontend/example.cpp",
+            "#include <windows.h>\n",
+            "unapproved external header",
+        )
+
+    def test_frontend_text_is_pure_and_accepts_only_retail_font_ir(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/include/omega/frontend_text/layout.h": (
+                    "#pragma once\n"
+                    "#include <expected>\n"
+                    '#include "omega/retail/fnt_v3_decoder.h"\n'
+                ),
+                "native/src/frontend_text/layout.cpp": (
+                    '#include "omega/frontend_text/layout.h"\n'
+                    "#include <algorithm>\n"
+                ),
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(errors, [])
+
+        header_rule = gate.module_rule(
+            Path("native/include/omega/frontend_text/layout.h")
+        )
+        source_rule = gate.module_rule(Path("native/src/frontend_text/layout.cpp"))
+        self.assertIsNotNone(header_rule)
+        self.assertIsNotNone(source_rule)
+        self.assertEqual(header_rule.name, "omega_frontend_text")
+        self.assertEqual(source_rule.name, "omega_frontend_text")
+        self.assertEqual(
+            header_rule.allowed_omega_modules,
+            frozenset({"omega_frontend_text", "omega_retail_formats"}),
+        )
+        self.assertEqual(
+            source_rule.allowed_omega_modules,
+            frozenset({"omega_frontend_text", "omega_retail_formats"}),
+        )
+        self.assertTrue(header_rule.platform_neutral)
+        self.assertTrue(source_rule.platform_neutral)
+
+        for include, message in (
+            ("omega/runtime/render_frame_packet.h", "forbidden dependency"),
+            ("omega/content/game_data_service.h", "forbidden dependency"),
+            ("pcsx2/GS/GS.h", "forbidden PCSX2 header"),
+        ):
+            with self.subTest(include=include):
+                self.assert_rejected(
+                    "native/src/frontend_text/example.cpp",
+                    f'#include "{include}"\n',
+                    message,
+                )
+        self.assert_rejected(
+            "native/src/frontend_text/example.cpp",
             "#include <windows.h>\n",
             "unapproved external header",
         )

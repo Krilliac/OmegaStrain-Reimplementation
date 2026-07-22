@@ -146,6 +146,13 @@ target_include_directories(omega_retail_formats PUBLIC native/include)
 target_link_libraries(omega_retail_formats PUBLIC omega_assets omega_core)
 target_compile_features(omega_retail_formats PUBLIC cxx_std_23)
 
+add_library(omega_frontend_text STATIC
+    native/src/frontend_text/text_layout.cpp
+)
+target_include_directories(omega_frontend_text PUBLIC native/include)
+target_link_libraries(omega_frontend_text PUBLIC omega_retail_formats)
+target_compile_features(omega_frontend_text PUBLIC cxx_std_23)
+
 add_library(omega_content STATIC
     native/src/content/game_data_service.cpp
     native/src/content/level_texture_store.cpp
@@ -1196,6 +1203,32 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_fnt_v3_decoder_tests COMMAND omega_fnt_v3_decoder_tests)
     set_tests_properties(omega_fnt_v3_decoder_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_frontend_text_layout_tests
+        native/tests/frontend_text_layout_tests.cpp
+    )
+    target_link_libraries(omega_frontend_text_layout_tests PRIVATE omega_frontend_text)
+    if(MSVC)
+        target_compile_options(omega_frontend_text_layout_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_frontend_text_layout_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_frontend_text_layout_tests
+        COMMAND omega_frontend_text_layout_tests)
+    set_tests_properties(omega_frontend_text_layout_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_retail_string_table_decoder_tests
         native/tests/retail_string_table_decoder_tests.cpp

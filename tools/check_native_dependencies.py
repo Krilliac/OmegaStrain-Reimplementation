@@ -263,6 +263,9 @@ _PERSISTENCE_EDGES = frozenset({"omega_persistence"})
 _PROFILES_EDGES = frozenset({"omega_profiles", "omega_persistence"})
 _PS2_COMPAT_EDGES = frozenset({"omega_ps2_compat"})
 _RETAIL_EDGES = frozenset({"omega_retail_formats", "omega_assets", "omega_core"})
+_FRONTEND_TEXT_EDGES = frozenset(
+    {"omega_frontend_text", "omega_retail_formats"}
+)
 _CONTENT_EDGES = frozenset(
     {"omega_content", "omega_retail_formats", "omega_assets", "omega_core"}
 )
@@ -415,6 +418,18 @@ MODULE_RULES = (
         platform_neutral=True,
     ),
     ModuleRule(
+        "native/include/omega/frontend_text/",
+        "omega_frontend_text",
+        _FRONTEND_TEXT_EDGES,
+        platform_neutral=True,
+    ),
+    ModuleRule(
+        "native/src/frontend_text/",
+        "omega_frontend_text",
+        _FRONTEND_TEXT_EDGES,
+        platform_neutral=True,
+    ),
+    ModuleRule(
         "native/include/omega/asset/",
         "omega_assets",
         _ASSET_EDGES,
@@ -494,6 +509,7 @@ PROJECT_HEADER_MODULES = (
     ("omega/content/", "omega_content"),
     ("omega/media/", "omega_media"),
     ("omega/retail/", "omega_retail_formats"),
+    ("omega/frontend_text/", "omega_frontend_text"),
     ("omega/asset/", "omega_assets"),
     ("omega/archive/", "omega_core"),
     ("omega/vfs/", "omega_core"),
