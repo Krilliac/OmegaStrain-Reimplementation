@@ -119,6 +119,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             "native/include/omega/debug/subsystem_entry_break.h",
             (
                 "#pragma once\n"
+                "#include <windows.h>\n"
                 "#include <debugapi.h>\n"
                 "#include <intrin.h>\n"
                 "#include <processenv.h>\n"
@@ -140,7 +141,7 @@ class NativeDependencyGateTests(unittest.TestCase):
         )
         self.assert_rejected(
             "native/include/omega/debug/subsystem_entry_break.h",
-            "#include <Windows.h>\n",
+            "#include <shellapi.h>\n",
             "omega_debug includes unapproved external header",
         )
 

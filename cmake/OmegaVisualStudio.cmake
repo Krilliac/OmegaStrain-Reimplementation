@@ -267,10 +267,14 @@ function(omega_configure_visual_studio)
         omega_app_opening_movie_smoke)
     _omega_vs_assign_folder("Tests/Aggregate"
         omega_core_tests)
+    _omega_vs_assign_folder("Tests/Developer/Debugging"
+        omega_subsystem_entry_break_contract_tests)
 
     _omega_vs_assign_folder("Developer Utilities/Test Support"
         omega_windows_argv_capture
         omega_native_persistence_fixture_writer)
+    _omega_vs_assign_folder("Developer Utilities/Debug Hosts"
+        omega_simulation_entry_break_host)
     _omega_vs_assign_folder("Developer Utilities/CTest Dashboard"
         Experimental
         Nightly
@@ -314,7 +318,7 @@ function(omega_configure_visual_studio)
     _omega_vs_map_library_to_host(
         omega_media omega_mpeg_program_stream_descriptor_tests omega_media)
     _omega_vs_map_library_to_host(
-        omega_simulation omega_core_tests omega_simulation)
+        omega_simulation omega_simulation_entry_break_host omega_simulation)
     _omega_vs_map_library_to_host(
         omega_gameplay omega_gameplay_tests omega_gameplay)
     _omega_vs_map_library_to_host(
