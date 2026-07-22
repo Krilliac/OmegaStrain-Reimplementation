@@ -16,6 +16,34 @@ enum class FrontendWidgetKind {
   CharacterDisplay,
 };
 
+// Retail GUI rectangles are stored as a left/top origin with X increasing to
+// the right and Y increasing upward. The lower edge is therefore top-height.
+struct FrontendWidgetRectangleIR {
+  float left = 0.0F;
+  float top = 0.0F;
+  float width = 0.0F;
+  float height = 0.0F;
+
+  bool operator==(const FrontendWidgetRectangleIR &) const = default;
+};
+
+// Selected retail records store normalized RGB and supply an implicit opaque
+// alpha. No color-space, premultiplication, or blend meaning is inferred.
+struct FrontendTextColorIR {
+  float red = 0.0F;
+  float green = 0.0F;
+  float blue = 0.0F;
+  float alpha = 1.0F;
+
+  bool operator==(const FrontendTextColorIR &) const = default;
+};
+
+enum class FrontendTextAlignment : std::uint8_t {
+  Left = 0,
+  Right = 1,
+  Center = 2,
+};
+
 // Canonical, fully owned references used by a widget's interface binding. The
 // ordered values are intentionally neutral until their individual coordinate
 // and matrix roles are independently established.
@@ -28,14 +56,22 @@ struct FrontendWidgetBindingIR {
   bool operator==(const FrontendWidgetBindingIR &) const = default;
 };
 
-// Canonical widget hierarchy. Retail factory names, flags, unproven style
-// values, byte offsets, and source storage are intentionally absent.
+// Canonical widget hierarchy. Retail factory names, raw flags/style values,
+// byte offsets, and source storage are intentionally absent. Text-specific
+// optionals are populated together by the decoder only for Text and Button
+// widgets.
 struct FrontendWidgetIR {
   FrontendWidgetKind kind = FrontendWidgetKind::Container;
   std::string identifier;
-  std::array<float, 4> layout_values{};
+  FrontendWidgetRectangleIR rectangle;
+  // Asset-authored render gate.
+  bool visible = false;
+  // Asset-authored focus/activation and disabled-text gate.
+  bool enabled = false;
   std::optional<std::string> text_reference;
   std::optional<std::string> font_reference;
+  std::optional<FrontendTextColorIR> text_color;
+  std::optional<FrontendTextAlignment> text_alignment;
   std::optional<FrontendWidgetBindingIR> binding;
   std::vector<FrontendWidgetIR> children;
 
@@ -102,4 +138,6 @@ struct FrontendVisualDocumentIR {
 static_assert(sizeof(FrontendUvIR) == 8U);
 static_assert(sizeof(FrontendColorRgba8IR) == 4U);
 static_assert(sizeof(FrontendTriangleIR) == 18U);
+static_assert(sizeof(FrontendWidgetRectangleIR) == 16U);
+static_assert(sizeof(FrontendTextColorIR) == 16U);
 } // namespace omega::asset

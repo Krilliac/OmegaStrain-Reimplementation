@@ -20,6 +20,12 @@ void AppendU16(std::vector<std::byte> &bytes, const std::uint16_t value) {
   bytes.push_back(static_cast<std::byte>((value >> 8U) & 0xFFU));
 }
 
+void WriteU16(std::vector<std::byte> &bytes, const std::size_t offset,
+              const std::uint16_t value) {
+  bytes[offset] = static_cast<std::byte>(value & 0xFFU);
+  bytes[offset + 1U] = static_cast<std::byte>((value >> 8U) & 0xFFU);
+}
+
 void AppendU32(std::vector<std::byte> &bytes, const std::uint32_t value) {
   for (unsigned shift = 0; shift < 32; shift += 8)
     bytes.push_back(static_cast<std::byte>((value >> shift) & 0xFFU));
@@ -63,19 +69,38 @@ void Align4(std::vector<std::byte> &bytes) {
   return static_cast<std::uint8_t>(bytes.size() - logical_size);
 }
 
+struct GuiNodeOffsets {
+  std::size_t rectangle = 0;
+  std::size_t visible = 0;
+  std::size_t enabled = 0;
+  std::size_t text_color = 0;
+  std::size_t text_style = 0;
+  std::size_t decorator_transform = 0;
+};
+
 struct GuiNodeSpec {
   std::string_view factory;
   std::string_view identifier;
-  std::array<float, 4> layout_values{};
+  omega::asset::FrontendWidgetRectangleIR rectangle{};
+  bool visible = true;
+  bool enabled = true;
   bool has_text_record = false;
   std::string_view text_reference;
   std::string_view font_reference;
+  omega::asset::FrontendTextColorIR text_color{
+      .red = 0.25F,
+      .green = 0.5F,
+      .blue = 0.75F,
+  };
+  omega::asset::FrontendTextAlignment text_alignment =
+      omega::asset::FrontendTextAlignment::Left;
   bool decorated = true;
   std::string_view scope_reference;
   std::string_view resource_reference;
   std::array<float, 12> transform_values{};
   std::vector<std::string_view> actions;
   std::vector<GuiNodeSpec> children;
+  GuiNodeOffsets *offsets = nullptr;
 };
 
 void AppendGuiNode(std::vector<std::byte> &bytes, const GuiNodeSpec &node) {
@@ -83,23 +108,37 @@ void AppendGuiNode(std::vector<std::byte> &bytes, const GuiNodeSpec &node) {
   AppendString(bytes, node.decorated ? "GuiInterfaceDecorator" : "");
   AppendString(bytes, node.identifier);
   Align4(bytes);
-  for (const float value : node.layout_values)
-    AppendF32(bytes, value);
-  AppendU16(bytes, 1);
-  AppendU16(bytes, 0);
+  if (node.offsets)
+    node.offsets->rectangle = bytes.size();
+  AppendF32(bytes, node.rectangle.left);
+  AppendF32(bytes, node.rectangle.top);
+  AppendF32(bytes, node.rectangle.width);
+  AppendF32(bytes, node.rectangle.height);
+  if (node.offsets)
+    node.offsets->visible = bytes.size();
+  AppendU16(bytes, node.visible ? 1U : 0U);
+  if (node.offsets)
+    node.offsets->enabled = bytes.size();
+  AppendU16(bytes, node.enabled ? 1U : 0U);
   if (node.has_text_record) {
     AppendString(bytes, node.text_reference);
     AppendString(bytes, node.font_reference);
     Align4(bytes);
-    AppendF32(bytes, 0.25F);
-    AppendF32(bytes, 0.5F);
-    AppendF32(bytes, 0.75F);
-    AppendU32(bytes, 0x12345678U);
+    if (node.offsets)
+      node.offsets->text_color = bytes.size();
+    AppendF32(bytes, node.text_color.red);
+    AppendF32(bytes, node.text_color.green);
+    AppendF32(bytes, node.text_color.blue);
+    if (node.offsets)
+      node.offsets->text_style = bytes.size();
+    AppendU32(bytes, static_cast<std::uint32_t>(node.text_alignment));
   }
   if (node.decorated) {
     AppendString(bytes, node.scope_reference);
     AppendString(bytes, node.resource_reference);
     Align4(bytes);
+    if (node.offsets)
+      node.offsets->decorator_transform = bytes.size();
     for (const float value : node.transform_values)
       AppendF32(bytes, value);
     AppendU16(bytes, static_cast<std::uint16_t>(node.actions.size()));
@@ -118,6 +157,9 @@ void AppendGuiNode(std::vector<std::byte> &bytes, const GuiNodeSpec &node) {
 
 struct GuiFixture {
   std::vector<std::byte> bytes;
+  GuiNodeOffsets root_offsets;
+  GuiNodeOffsets button_offsets;
+  GuiNodeOffsets text_offsets;
   std::uint8_t padding = 0;
 };
 
@@ -131,51 +173,73 @@ struct GuiFixture {
 }
 
 [[nodiscard]] GuiFixture MakeGuiFixture() {
+  GuiNodeOffsets root_offsets;
+  GuiNodeOffsets button_offsets;
+  GuiNodeOffsets text_offsets;
   GuiNodeSpec character{
       .factory = "GuiCharacterDisplay",
       .identifier = "agent_preview",
-      .layout_values = {9.0F, 10.0F, 11.0F, 12.0F},
+      .rectangle = {.left = 9.0F,
+                    .top = 10.0F,
+                    .width = 11.0F,
+                    .height = 12.0F},
+      .enabled = false,
       .decorated = false,
   };
   GuiNodeSpec button{
       .factory = "GuiButtonWidget",
       .identifier = "create_agent",
-      .layout_values = {5.0F, 6.0F, 7.0F, 8.0F},
+      .rectangle = {.left = 5.0F, .top = 6.0F, .width = 7.0F, .height = 8.0F},
       .has_text_record = true,
       .text_reference = "$CreateAgent",
       .font_reference = "Default",
+      .text_alignment = omega::asset::FrontendTextAlignment::Center,
       .scope_reference = "shell",
       .resource_reference = "button_visual",
       .transform_values = {20.0F, 21.0F, 22.0F, 23.0F, 24.0F, 25.0F, 26.0F,
                            27.0F, 28.0F, 29.0F, 30.0F, 31.0F},
       .actions = {"gain_focus", "activate"},
+      .offsets = &button_offsets,
   };
   GuiNodeSpec text{
       .factory = "GuiTextWidget",
       .identifier = "agent_status",
-      .layout_values = {13.0F, 14.0F, 15.0F, 16.0F},
+      .rectangle = {.left = 13.0F,
+                    .top = 14.0F,
+                    .width = 15.0F,
+                    .height = 16.0F},
+      .visible = false,
       .has_text_record = true,
       .text_reference = "$AgentStatus",
       .font_reference = "Small",
+      .text_color = {.red = 0.125F, .green = 0.375F, .blue = 0.625F},
+      .text_alignment = omega::asset::FrontendTextAlignment::Right,
       .scope_reference = "shell",
       .resource_reference = "status_visual",
       .transform_values = {30.0F, 31.0F, 32.0F, 33.0F, 34.0F, 35.0F, 36.0F,
                            37.0F, 38.0F, 39.0F, 40.0F, 41.0F},
       .actions = {"refresh"},
+      .offsets = &text_offsets,
   };
   GuiNodeSpec root{
       .factory = "GuiWidget",
       .identifier = "title_root",
-      .layout_values = {1.0F, 2.0F, 3.0F, 4.0F},
+      .rectangle = {.left = 1.0F, .top = 2.0F, .width = 3.0F, .height = 4.0F},
+      .enabled = false,
       .scope_reference = "",
       .resource_reference = "root_visual",
       .transform_values = {10.0F, 11.0F, 12.0F, 13.0F, 14.0F, 15.0F, 16.0F,
                            17.0F, 18.0F, 19.0F, 20.0F, 21.0F},
       .actions = {"wake"},
       .children = {button, text, character},
+      .offsets = &root_offsets,
   };
 
-  return EncodeGuiFixture(root);
+  GuiFixture fixture = EncodeGuiFixture(root);
+  fixture.root_offsets = root_offsets;
+  fixture.button_offsets = button_offsets;
+  fixture.text_offsets = text_offsets;
+  return fixture;
 }
 
 struct IeFixture {
@@ -336,40 +400,77 @@ int main() {
         "GUI decodes a generated recursive frontend document");
   if (gui_measured) {
     const auto &root = gui_measured->document.root;
-    Check(root.kind == omega::asset::FrontendWidgetKind::Container &&
-              root.identifier == "title_root" &&
-              root.layout_values ==
-                  std::array<float, 4>{1.0F, 2.0F, 3.0F, 4.0F} &&
-              root.binding && root.binding->scope_reference.empty() &&
-              root.binding->resource_reference == "root_visual" &&
-              root.binding->transform_values[0] == 10.0F &&
-              root.binding->transform_values[11] == 21.0F &&
-              root.binding->action_references ==
-                  std::vector<std::string>{"wake"},
-          "GUI retains only proven ordered layout, binding, transform, and "
-          "action fields");
-    Check(root.children.size() == 3 &&
-              root.children[0].kind ==
-                  omega::asset::FrontendWidgetKind::Button &&
-              root.children[0].identifier == "create_agent" &&
-              root.children[0].text_reference == "$CreateAgent" &&
-              root.children[0].font_reference == "Default" &&
-              root.children[0].binding &&
-              root.children[0].binding->action_references ==
-                  std::vector<std::string>{"gain_focus", "activate"} &&
-              root.children[1].kind == omega::asset::FrontendWidgetKind::Text &&
-              root.children[1].identifier == "agent_status" &&
-              root.children[1].text_reference == "$AgentStatus" &&
-              root.children[1].font_reference == "Small" &&
-              root.children[1].binding &&
-              root.children[1].binding->resource_reference == "status_visual" &&
-              root.children[1].binding->action_references ==
-                  std::vector<std::string>{"refresh"} &&
-              root.children[2].kind ==
-                  omega::asset::FrontendWidgetKind::CharacterDisplay &&
-              !root.children[2].binding,
-          "GUI preserves source-order child topology and all four supported "
-          "widget kinds");
+    Check(
+        root.kind == omega::asset::FrontendWidgetKind::Container &&
+            root.identifier == "title_root" &&
+            root.rectangle ==
+                omega::asset::FrontendWidgetRectangleIR{
+                    .left = 1.0F,
+                    .top = 2.0F,
+                    .width = 3.0F,
+                    .height = 4.0F,
+                } &&
+            root.visible && !root.enabled && !root.text_reference &&
+            !root.font_reference && !root.text_color && !root.text_alignment &&
+            root.binding && root.binding->scope_reference.empty() &&
+            root.binding->resource_reference == "root_visual" &&
+            root.binding->transform_values[0] == 10.0F &&
+            root.binding->transform_values[11] == 21.0F &&
+            root.binding->action_references == std::vector<std::string>{"wake"},
+        "GUI retains named rectangle, state, binding, finite transform, and "
+        "source-order action fields");
+    Check(
+        root.children.size() == 3 &&
+            root.children[0].kind == omega::asset::FrontendWidgetKind::Button &&
+            root.children[0].identifier == "create_agent" &&
+            root.children[0].rectangle ==
+                omega::asset::FrontendWidgetRectangleIR{
+                    .left = 5.0F,
+                    .top = 6.0F,
+                    .width = 7.0F,
+                    .height = 8.0F,
+                } &&
+            root.children[0].visible && root.children[0].enabled &&
+            root.children[0].text_reference == "$CreateAgent" &&
+            root.children[0].font_reference == "Default" &&
+            root.children[0].text_color ==
+                omega::asset::FrontendTextColorIR{
+                    .red = 0.25F,
+                    .green = 0.5F,
+                    .blue = 0.75F,
+                    .alpha = 1.0F,
+                } &&
+            root.children[0].text_alignment ==
+                omega::asset::FrontendTextAlignment::Center &&
+            root.children[0].binding &&
+            root.children[0].binding->action_references ==
+                std::vector<std::string>{"gain_focus", "activate"} &&
+            root.children[1].kind == omega::asset::FrontendWidgetKind::Text &&
+            root.children[1].identifier == "agent_status" &&
+            !root.children[1].visible && root.children[1].enabled &&
+            root.children[1].text_reference == "$AgentStatus" &&
+            root.children[1].font_reference == "Small" &&
+            root.children[1].text_color ==
+                omega::asset::FrontendTextColorIR{
+                    .red = 0.125F,
+                    .green = 0.375F,
+                    .blue = 0.625F,
+                    .alpha = 1.0F,
+                } &&
+            root.children[1].text_alignment ==
+                omega::asset::FrontendTextAlignment::Right &&
+            root.children[1].binding &&
+            root.children[1].binding->resource_reference == "status_visual" &&
+            root.children[1].binding->action_references ==
+                std::vector<std::string>{"refresh"} &&
+            root.children[2].kind ==
+                omega::asset::FrontendWidgetKind::CharacterDisplay &&
+            root.children[2].visible && !root.children[2].enabled &&
+            !root.children[2].text_reference &&
+            !root.children[2].font_reference && !root.children[2].text_color &&
+            !root.children[2].text_alignment && !root.children[2].binding,
+        "GUI preserves source-order child topology and all four supported "
+        "widget kinds with owned state/text semantics");
     Check(gui_measured->decoded_items > 0 &&
               gui_measured->logical_output_bytes >=
                   sizeof(omega::asset::FrontendWidgetDocumentIR) &&
@@ -384,8 +485,53 @@ int main() {
   auto gui_owned_bytes = gui_fixture.bytes;
   auto owned_gui = omega::retail::DecodeGuiFrontend(gui_owned_bytes);
   std::fill(gui_owned_bytes.begin(), gui_owned_bytes.end(), std::byte{0xFF});
-  Check(owned_gui && owned_gui->root.children[0].font_reference == "Default",
-        "GUI output remains valid after source storage replacement");
+  Check(owned_gui && owned_gui->root.rectangle.left == 1.0F &&
+            owned_gui->root.visible && !owned_gui->root.enabled &&
+            owned_gui->root.children[0].font_reference == "Default" &&
+            owned_gui->root.children[0].text_color ==
+                omega::asset::FrontendTextColorIR{
+                    .red = 0.25F,
+                    .green = 0.5F,
+                    .blue = 0.75F,
+                    .alpha = 1.0F,
+                } &&
+            owned_gui->root.children[0].text_alignment ==
+                omega::asset::FrontendTextAlignment::Center &&
+            owned_gui->root.children[0].binding->action_references ==
+                std::vector<std::string>{"gain_focus", "activate"},
+        "GUI semantic output remains valid after source storage replacement");
+
+  const GuiFixture left_aligned_fixture = EncodeGuiFixture(GuiNodeSpec{
+      .factory = "GuiTextWidget",
+      .identifier = "generated_left_text",
+      .has_text_record = true,
+      .text_reference = "$GeneratedLeftText",
+      .font_reference = "GeneratedFont",
+      .text_alignment = omega::asset::FrontendTextAlignment::Left,
+      .decorated = false,
+  });
+  const auto left_aligned =
+      omega::retail::DecodeGuiFrontend(left_aligned_fixture.bytes);
+  Check(left_aligned && left_aligned->root.text_alignment ==
+                            omega::asset::FrontendTextAlignment::Left,
+        "GUI maps the generated style family to Left, Right, and Center");
+
+  const GuiFixture finite_rectangle_fixture = EncodeGuiFixture(GuiNodeSpec{
+      .factory = "GuiWidget",
+      .identifier = "generated_finite_rectangle",
+      .rectangle = {.left = -4.0F, .top = 3.0F, .width = -2.0F, .height = 0.0F},
+      .decorated = false,
+  });
+  const auto finite_rectangle =
+      omega::retail::DecodeGuiFrontend(finite_rectangle_fixture.bytes);
+  Check(finite_rectangle && finite_rectangle->root.rectangle ==
+                                omega::asset::FrontendWidgetRectangleIR{
+                                    .left = -4.0F,
+                                    .top = 3.0F,
+                                    .width = -2.0F,
+                                    .height = 0.0F,
+                                },
+        "GUI retains finite rectangle values without guessing extent bounds");
 
   auto changed_gui_prefix = gui_fixture.bytes;
   changed_gui_prefix[3] = std::byte{0x01};
@@ -418,6 +564,71 @@ int main() {
   CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
              omega::asset::DecodeErrorCode::UnsupportedVariant,
              "GUI rejects an unsupported decorator family");
+
+  for (std::size_t index = 0; index < 4U; ++index) {
+    bad_gui = gui_fixture.bytes;
+    WriteF32(bad_gui, gui_fixture.root_offsets.rectangle + index * 4U,
+             std::numeric_limits<float>::quiet_NaN());
+    CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
+               omega::asset::DecodeErrorCode::Malformed,
+               "GUI rejects a nonfinite named rectangle component");
+  }
+  bad_gui = gui_fixture.bytes;
+  WriteF32(bad_gui, gui_fixture.root_offsets.rectangle,
+           std::numeric_limits<float>::infinity());
+  CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
+             omega::asset::DecodeErrorCode::Malformed,
+             "GUI rejects an infinite named rectangle component");
+  bad_gui = gui_fixture.bytes;
+  WriteU16(bad_gui, gui_fixture.root_offsets.visible, 2U);
+  const auto invalid_visible = omega::retail::DecodeGuiFrontend(bad_gui);
+  CheckError(invalid_visible, omega::asset::DecodeErrorCode::Malformed,
+             "GUI rejects a visible field outside serialized boolean values");
+  Check(!invalid_visible && invalid_visible.error().byte_offset ==
+                                gui_fixture.root_offsets.visible,
+        "GUI reports the exact invalid visible-field offset");
+  bad_gui = gui_fixture.bytes;
+  WriteU16(bad_gui, gui_fixture.root_offsets.enabled, 0xFFFFU);
+  const auto invalid_enabled = omega::retail::DecodeGuiFrontend(bad_gui);
+  CheckError(invalid_enabled, omega::asset::DecodeErrorCode::Malformed,
+             "GUI rejects an enabled field outside serialized boolean values");
+  Check(!invalid_enabled && invalid_enabled.error().byte_offset ==
+                                gui_fixture.root_offsets.enabled,
+        "GUI reports the exact invalid enabled-field offset");
+  bad_gui = gui_fixture.bytes;
+  WriteF32(bad_gui, gui_fixture.button_offsets.text_color,
+           std::numeric_limits<float>::infinity());
+  CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
+             omega::asset::DecodeErrorCode::Malformed,
+             "GUI rejects a nonfinite text color channel");
+  bad_gui = gui_fixture.bytes;
+  WriteF32(bad_gui, gui_fixture.button_offsets.text_color + 4U, -0.01F);
+  CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
+             omega::asset::DecodeErrorCode::Malformed,
+             "GUI rejects a text color channel outside the proven range");
+  bad_gui = gui_fixture.bytes;
+  WriteU32(bad_gui, gui_fixture.button_offsets.text_style, 0x00000100U);
+  CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
+             omega::asset::DecodeErrorCode::UnsupportedVariant,
+             "GUI rejects unproven text-style high bits");
+  bad_gui = gui_fixture.bytes;
+  WriteU32(bad_gui, gui_fixture.button_offsets.text_style, 3U);
+  CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
+             omega::asset::DecodeErrorCode::UnsupportedVariant,
+             "GUI rejects an alignment outside Left, Right, and Center");
+  bad_gui = gui_fixture.bytes;
+  WriteF32(bad_gui, gui_fixture.root_offsets.decorator_transform + 44U,
+           -std::numeric_limits<float>::infinity());
+  CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
+             omega::asset::DecodeErrorCode::Malformed,
+             "GUI rejects a nonfinite decorator transform component");
+  bad_gui = gui_fixture.bytes;
+  WriteF32(bad_gui, gui_fixture.root_offsets.decorator_transform,
+           std::numeric_limits<float>::quiet_NaN());
+  CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
+             omega::asset::DecodeErrorCode::Malformed,
+             "GUI rejects a NaN decorator transform component");
+
   bad_gui = gui_fixture.bytes;
   bad_gui.back() = std::byte{1};
   CheckError(omega::retail::DecodeGuiFrontend(bad_gui),
