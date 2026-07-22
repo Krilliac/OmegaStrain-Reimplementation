@@ -7,6 +7,7 @@
 #include "omega/asset/level_spatial_ir.h"
 #include "omega/asset/opening_movie_source.h"
 #include "omega/asset/source_locator.h"
+#include "omega/content/front_end_screen_bundle.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -73,6 +74,18 @@ struct GameDataServiceConfig
     // Whole-level spatial/material composition is corpus-confirmed at 72 MiB of cumulative input;
     // standalone asset decoders retain their narrower 64 MiB default.
     asset::DecodeLimits decode_limits{.maximum_input_bytes = 72ULL * 1024ULL * 1024ULL};
+    // One front-end screen composes many independently bounded indexed images. Its aggregate
+    // operation count is therefore larger than a standalone texture decoder's default even though
+    // retained output remains smaller. Callers may tighten every field; the service also applies
+    // equal or narrower fixed ceilings before any read or decode.
+    asset::DecodeLimits front_end_decode_limits{
+        .maximum_input_bytes = 64ULL * 1024ULL * 1024ULL,
+        .maximum_output_bytes = 128ULL * 1024ULL * 1024ULL,
+        .maximum_scratch_bytes = 128ULL * 1024ULL * 1024ULL,
+        .maximum_items = 64ULL * 1024ULL * 1024ULL,
+        .maximum_string_bytes = 4096U,
+        .maximum_nesting_depth = 16U,
+    };
 };
 
 // Non-hot-reloadable game-data service. OmegaApp is the sole owner; future AssetService instances
@@ -101,6 +114,14 @@ public:
     // bounded bytes; neither it nor any failure diagnostic retains a path or member name.
     [[nodiscard]] std::expected<asset::OpeningMovieSource, GameDataError>
     LoadOpeningMovieSource(std::string_view member_name) const;
+
+    // [any worker thread after Open(); thread-safe] Resolves one fixed canonical
+    // retail front-end route and returns only fully owned decoded presentation
+    // data. Every texture, font, atlas, and localized string table is derived
+    // from references in that route; a missing or unsupported dependency fails
+    // the entire operation without a fabricated fallback.
+    [[nodiscard]] std::expected<FrontEndScreenBundle, GameDataError>
+    LoadFrontEndScreen(FrontEndScreenKey key) const;
 
     // [any worker thread after Open(); thread-safe] Returns canonical owned data only. The caller
     // never receives archive views or retail-format storage.

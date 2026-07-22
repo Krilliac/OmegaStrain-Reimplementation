@@ -2942,6 +2942,33 @@ if(BUILD_TESTING)
     add_test(NAME omega_frontend_tdx_decoder_tests COMMAND omega_frontend_tdx_decoder_tests)
     set_tests_properties(omega_frontend_tdx_decoder_tests PROPERTIES TIMEOUT 10)
 
+    add_executable(omega_front_end_screen_bundle_tests
+        native/tests/front_end_screen_bundle_tests.cpp
+    )
+    target_link_libraries(omega_front_end_screen_bundle_tests PRIVATE omega_content)
+    target_compile_features(omega_front_end_screen_bundle_tests PRIVATE cxx_std_23)
+    if(MSVC)
+        target_compile_options(omega_front_end_screen_bundle_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_front_end_screen_bundle_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_front_end_screen_bundle_tests
+        COMMAND omega_front_end_screen_bundle_tests)
+    set_tests_properties(omega_front_end_screen_bundle_tests PROPERTIES TIMEOUT 20)
+
     add_executable(omega_lpd_envelope_decoder_tests
         native/tests/lpd_envelope_decoder_tests.cpp
     )

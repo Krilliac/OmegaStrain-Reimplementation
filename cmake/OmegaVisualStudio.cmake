@@ -234,7 +234,8 @@ function(omega_configure_visual_studio)
         omega_pss_pcm_audio_stream_tests)
     _omega_vs_assign_folder("Tests/Engine/Content"
         omega_level_texture_store_tests
-        omega_asset_service_tests)
+        omega_asset_service_tests
+        omega_front_end_screen_bundle_tests)
     _omega_vs_assign_folder("Tests/Engine/Runtime"
         omega_input_trace_tests
         omega_scheduler_elapsed_trace_tests
@@ -342,7 +343,7 @@ function(omega_configure_visual_studio)
     _omega_vs_map_library_to_host(
         omega_retail_formats omega_vag_adpcm_decoder_tests omega_retail_formats)
     _omega_vs_map_library_to_host(
-        omega_content omega_level_texture_store_tests omega_content)
+        omega_content omega_front_end_screen_bundle_tests omega_content)
     _omega_vs_map_library_to_host(
         omega_runtime omega_input_trace_tests omega_runtime)
     _omega_vs_map_library_to_host(
