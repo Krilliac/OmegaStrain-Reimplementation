@@ -1711,6 +1711,7 @@ OpeningMovieAudioFaultCounters OmegaApp::OpeningMovieAudioFaultCountersOf(
 
 void OmegaApp::ReleaseOpeningMovieForFrontEnd()
 {
+    opening_movie_skip_armed_ = false;
     if (IsBootSequenceActive(boot_sequence_state_))
     {
         boot_sequence_state_ = BootSequenceState{
@@ -1876,6 +1877,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
 
         const InputPumpResult events = sdl_input_->PumpEvents(*input_, *log_);
         const runtime::InputSnapshot input_snapshot = input_->EndFrame();
+        const bool movie_was_active = IsBootSequenceActive(boot_sequence_state_);
         if (capture_session != nullptr)
         {
             const auto captured = capture_session->AppendInput(input_snapshot);
@@ -1900,7 +1902,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         if (capture_session != nullptr)
         {
             const bool host_quit_requested = events.quit_requested;
-            const bool logical_quit_pressed = input_snapshot.WasPressed(kQuitAction);
+            const bool logical_quit_pressed =
+                !movie_was_active && input_snapshot.WasPressed(kQuitAction);
             if (host_quit_requested || logical_quit_pressed)
             {
                 const auto marked = capture_session->MarkTerminal(
@@ -1920,7 +1923,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 break;
             }
         }
-        else if (events.quit_requested || input_snapshot.WasPressed(kQuitAction))
+        else if (events.quit_requested ||
+                 (!movie_was_active && input_snapshot.WasPressed(kQuitAction)))
         {
             running = false;
             result.quit_requested = true;
@@ -1951,15 +1955,15 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             }
         }
 
-        const bool movie_was_active = IsBootSequenceActive(boot_sequence_state_);
         const bool diagnostic_play_input_context =
             !movie_was_active &&
             front_end_state_.mode == FrontEndMode::DiagnosticPlay;
         if (movie_was_active)
         {
-            const bool primary_pressed =
-                input_snapshot.WasPressed(kFrontEndPrimaryAction) ||
-                input_snapshot.WasPressed(kDebugFireAction);
+            const bool primary_pressed = opening_movie_skip_armed_ &&
+                (events.keyboard_or_mouse_pressed ||
+                    input_snapshot.WasPressed(kFrontEndPrimaryAction) ||
+                    input_snapshot.WasPressed(kDebugFireAction));
             bool source_failed = false;
             bool source_completed = false;
             if (!primary_pressed)
@@ -2483,6 +2487,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             };
         }
         result.rendered_frames = *next_rendered_frame_count;
+        if (movie_is_active)
+            opening_movie_skip_armed_ = true;
 
         const AudioServiceSnapshot audio_health = audio_->Snapshot();
         const OpeningMovieAudioFault audio_fault =

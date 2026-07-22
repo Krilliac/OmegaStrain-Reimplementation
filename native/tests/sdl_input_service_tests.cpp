@@ -55,12 +55,13 @@ constexpr std::uint16_t kGamepadCode =
     return SDL_PushEvent(&event);
 }
 
-[[nodiscard]] bool PushKey(const bool down)
+[[nodiscard]] bool PushKey(const bool down, const bool repeat = false)
 {
     SDL_Event event{};
     event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
     event.key.scancode = SDL_SCANCODE_A;
     event.key.down = down;
+    event.key.repeat = repeat;
     return PushEvent(event);
 }
 
@@ -259,7 +260,11 @@ int main()
             "default input construction does not open an attached gamepad");
         Check(PushKey(true) && PushMouseButton(true),
             "keyboard and mouse presses enter the default input queue");
-        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto keyboard_mouse_press_pump =
+            keyboard_mouse_only->PumpEvents(tracker, log);
+        Check(keyboard_mouse_press_pump.keyboard_or_mouse_pressed &&
+                  !keyboard_mouse_press_pump.quit_requested,
+            "fresh keyboard and mouse downs publish the app-layer modal-input signal");
         const auto keyboard_mouse_pressed = tracker.EndFrame();
         Check(keyboard_mouse_pressed.IsHeld(kKeyboardAction) &&
                   keyboard_mouse_pressed.IsHeld(kMouseAction) &&
@@ -267,15 +272,31 @@ int main()
             "default input accepts keyboard and mouse while gamepad stays disabled");
         Check(PushKey(false) && PushMouseButton(false),
             "keyboard and mouse releases enter the default input queue");
-        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto keyboard_mouse_release_pump =
+            keyboard_mouse_only->PumpEvents(tracker, log);
+        Check(!keyboard_mouse_release_pump.keyboard_or_mouse_pressed,
+            "keyboard and mouse releases do not publish the modal-input signal");
         const auto keyboard_mouse_released = tracker.EndFrame();
         Check(!keyboard_mouse_released.IsHeld(kKeyboardAction) &&
                   !keyboard_mouse_released.IsHeld(kMouseAction),
             "default keyboard and mouse releases reconcile normally");
 
+        Check(PushKey(true, true),
+            "a repeated key-down enters the default input queue");
+        const auto repeated_key_pump =
+            keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto repeated_key = tracker.EndFrame();
+        Check(!repeated_key_pump.keyboard_or_mouse_pressed &&
+                  !repeated_key.IsHeld(kKeyboardAction) &&
+                  repeated_key.accepted_event_count() == 0U,
+            "key repeat is neither a digital edge nor an app-layer modal-input press");
+
         Check(PushMouseMotion(pointer_window_id, 200.0F, 150.0F),
             "absolute mouse motion enters the default input queue");
-        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto mouse_motion_pump =
+            keyboard_mouse_only->PumpEvents(tracker, log);
+        Check(!mouse_motion_pump.keyboard_or_mouse_pressed,
+            "mouse motion does not publish the modal-input signal");
         const auto mouse_motion = tracker.EndFrame();
         Check(mouse_motion.pointer_position() ==
                   PointerPositionQ16{.x = 16'384U, .y = 16'384U} &&
@@ -316,7 +337,10 @@ int main()
 
         Check(PushMouseButton(true, pointer_window_id, 300.0F, 50.0F),
             "a positioned mouse press enters the SDL queue");
-        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto positioned_button_pump =
+            keyboard_mouse_only->PumpEvents(tracker, log);
+        Check(positioned_button_pump.keyboard_or_mouse_pressed,
+            "a positioned mouse down publishes the modal-input signal");
         const auto positioned_button = tracker.EndFrame();
         Check(positioned_button.pointer_position() ==
                   PointerPositionQ16{.x = 49'152U, .y = 16'384U} &&
@@ -325,7 +349,10 @@ int main()
             "a button event updates aim even without preceding motion and still reports its digital edge");
         Check(PushMouseButton(false, pointer_window_id, 300.0F, 50.0F),
             "the positioned mouse release enters the SDL queue");
-        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto positioned_release_pump =
+            keyboard_mouse_only->PumpEvents(tracker, log);
+        Check(!positioned_release_pump.keyboard_or_mouse_pressed,
+            "a positioned mouse release does not publish the modal-input signal");
         (void)tracker.EndFrame();
 
         Check(PushMouseMotion(pointer_window_id,
@@ -360,7 +387,9 @@ int main()
 
         Check(SetVirtualButton(primary_id, true), "the primary virtual button presses");
         SDL_UpdateJoysticks();
-        (void)input.PumpEvents(tracker, log);
+        const auto primary_press_pump = input.PumpEvents(tracker, log);
+        Check(!primary_press_pump.keyboard_or_mouse_pressed,
+            "gamepad button-down does not publish the keyboard/mouse modal-input signal");
         const auto primary_press = tracker.EndFrame();
         Check(primary_press.IsHeld(kGamepadAction) &&
                   primary_press.WasPressed(kGamepadAction) &&
@@ -450,8 +479,20 @@ int main()
         SDL_Event quit{};
         quit.type = SDL_EVENT_QUIT;
         Check(PushEvent(quit), "quit enters SDL's queue");
-        Check(input.PumpEvents(tracker, log).quit_requested,
-            "PumpEvents reports a queued quit request");
+        const auto quit_pump = input.PumpEvents(tracker, log);
+        Check(quit_pump.quit_requested &&
+                  !quit_pump.keyboard_or_mouse_pressed,
+            "PumpEvents reports quit without manufacturing a modal-input press");
+        (void)tracker.EndFrame();
+
+        SDL_Event close_requested{};
+        close_requested.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+        Check(PushEvent(close_requested),
+            "window close request enters SDL's queue");
+        const auto close_pump = input.PumpEvents(tracker, log);
+        Check(close_pump.quit_requested &&
+                  !close_pump.keyboard_or_mouse_pressed,
+            "window close request remains a host quit with no modal-input press");
         (void)tracker.EndFrame();
 
         Check(HasLogMessage(**ring, "closed removed primary SDL gamepad"),

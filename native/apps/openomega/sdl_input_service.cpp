@@ -193,7 +193,14 @@ InputPumpResult SdlInputService::PumpEvents(
     SDL_Event event{};
     while (SDL_PollEvent(&event))
     {
-        if (event.type == SDL_EVENT_QUIT)
+        if ((event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) ||
+            event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+        {
+            result.keyboard_or_mouse_pressed = true;
+        }
+
+        if (event.type == SDL_EVENT_QUIT ||
+            event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
         {
             result.quit_requested = true;
         }

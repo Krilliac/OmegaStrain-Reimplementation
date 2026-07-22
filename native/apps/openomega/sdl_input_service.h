@@ -17,6 +17,10 @@ class SdlPlatformService;
 struct InputPumpResult
 {
     bool quit_requested = false;
+    // True only when this pump consumed a fresh physical keyboard or mouse
+    // button press. Releases, key-repeat events, pointer motion, and gamepad
+    // events never set this app-layer modal-input signal.
+    bool keyboard_or_mouse_pressed = false;
 };
 
 // Non-hot-reloadable main-thread SDL event owner with opt-in primary-gamepad
