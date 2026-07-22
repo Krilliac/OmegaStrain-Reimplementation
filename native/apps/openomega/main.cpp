@@ -264,6 +264,8 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
         return "Profiles";
     case omega::app::FrontEndMode::Characters:
         return "Characters";
+    case omega::app::FrontEndMode::AgentCreation:
+        return "AgentCreation";
     case omega::app::FrontEndMode::BriefingRoom:
         return "BriefingRoom";
     case omega::app::FrontEndMode::DiagnosticPlay:
@@ -275,6 +277,9 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     }
     return "Unknown";
 }
+
+static_assert(ReplayFrontEndModeName(omega::app::FrontEndMode::AgentCreation) ==
+              "AgentCreation");
 
 [[nodiscard]] constexpr std::string_view ReplayFrontEndMainRowName(
     const omega::app::FrontEndMainRow row) noexcept
