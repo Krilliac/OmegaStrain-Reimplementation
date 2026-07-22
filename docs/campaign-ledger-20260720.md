@@ -178,6 +178,18 @@ diagnostic marker. It closes only the synthetic movement-to-trigger seam identif
 it supplies no retail trigger coordinates, objective graph, mission behavior, checkpoint semantics,
 collision, combat, AI, owner-corpus result, PCSX2 equivalence, or visual-parity claim.
 
+## Follow-on implementation: E-0119 diagnostic pointer target and fire
+
+The existing project pointer, target, and fire actions were later connected to one platform-free
+normalized 2D engagement reducer. A successful E-0118 crossing publishes the fixed target marker in
+that rendered frame, while eligibility observes completion on the following input frame. Held RMB/T
+plus an available in-bounds normalized pointer sample acquires it, and one LMB/Space edge latches the
+hit. Missing-pointer, untargeted, and outside-target attempts miss. Live and fresh replay evaluate
+the reducer once per normal frame; closed gates disable it and clear acquisition, while allowed play
+frames accept the edge and preserve the same owned state. This closes only a synthetic objective-to-
+target-to-hit seam. It supplies no retail target, camera, aim, weapon, projectile, raycast, damage,
+health, combat, AI, owner-corpus result, PCSX2 equivalence, or visual-parity claim.
+
 ## Remaining cutscene/menu blockers (honest)
 - Cutscene playback is Windows-only and selected through an external `--opening-movie` path; retail-
   intro discovery from game data is absent. Transition reliability also requires a defined practical

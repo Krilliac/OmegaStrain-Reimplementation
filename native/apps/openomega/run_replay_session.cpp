@@ -136,6 +136,10 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
             ? std::optional<gameplay::DiagnosticProximityTriggerState>{
                   gameplay::DiagnosticProximityTriggerState{}}
             : std::nullopt,
+        config.enable_debug_target_fire
+            ? std::optional<gameplay::DiagnosticTargetFireState>{
+                  gameplay::DiagnosticTargetFireState{}}
+            : std::nullopt,
         config.initial_front_end_state,
         config.front_end_visible_profile_slots,
         config.front_end_total_profile_count,
@@ -151,6 +155,8 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
     const std::optional<simulation::EntityId> debug_locomotion_entity,
     const std::optional<gameplay::DiagnosticProximityTriggerState>
         diagnostic_proximity_trigger_state,
+    const std::optional<gameplay::DiagnosticTargetFireState>
+        diagnostic_target_fire_state,
     const std::optional<FrontEndState> front_end_state,
     const std::uint8_t front_end_visible_profile_slots,
     const std::size_t front_end_total_profile_count,
@@ -164,6 +170,7 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
       replay_(std::in_place, std::move(replay)),
       debug_locomotion_entity_(debug_locomotion_entity),
       diagnostic_proximity_trigger_state_(diagnostic_proximity_trigger_state),
+      diagnostic_target_fire_state_(diagnostic_target_fire_state),
       front_end_state_(front_end_state),
       front_end_visible_profile_slots_(front_end_visible_profile_slots),
       front_end_total_profile_count_(front_end_total_profile_count),
@@ -191,6 +198,8 @@ RunReplaySession::RunReplaySession(RunReplaySession&& other) noexcept
           other.debug_locomotion_entity_, std::nullopt)),
       diagnostic_proximity_trigger_state_(std::exchange(
           other.diagnostic_proximity_trigger_state_, std::nullopt)),
+      diagnostic_target_fire_state_(std::exchange(
+          other.diagnostic_target_fire_state_, std::nullopt)),
       front_end_state_(std::exchange(
           other.front_end_state_, std::nullopt)),
       front_end_visible_profile_slots_(std::exchange(
@@ -225,6 +234,7 @@ void RunReplaySession::NormalizeInert() noexcept
     replay_.reset();
     debug_locomotion_entity_.reset();
     diagnostic_proximity_trigger_state_.reset();
+    diagnostic_target_fire_state_.reset();
     front_end_state_.reset();
     front_end_visible_profile_slots_ = 0U;
     front_end_total_profile_count_ = 0U;
@@ -394,6 +404,42 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
                                          *front_end_state_, front_end_capabilities,
                                          front_end_active_profile_is_confirmed_,
                                          front_end_active_character_is_confirmed_);
+    std::optional<gameplay::DiagnosticTargetFireState>
+        next_diagnostic_target_fire_state = diagnostic_target_fire_state_;
+    if (next_diagnostic_target_fire_state)
+    {
+        std::optional<gameplay::DiagnosticAimPointQ16> pointer;
+        if (const std::optional<runtime::PointerPositionQ16> captured_pointer =
+                replay_frame->input().pointer_position())
+        {
+            pointer = gameplay::DiagnosticAimPointQ16{
+                .x = captured_pointer->x,
+                .y = captured_pointer->y,
+            };
+        }
+        const bool proximity_complete_at_frame_start =
+            diagnostic_proximity_trigger_state_ &&
+            diagnostic_proximity_trigger_state_->objective_complete;
+        const auto advanced = gameplay::AdvanceDiagnosticTargetFire(
+            gameplay::kProjectDiagnosticAimTarget,
+            *next_diagnostic_target_fire_state,
+            gameplay::DiagnosticTargetFireInput{
+                .pointer = pointer,
+                .enabled = gameplay_input_context && simulation_allowed &&
+                           proximity_complete_at_frame_start,
+                .target_held =
+                    replay_frame->input().IsHeld(kDebugTargetAction),
+                .fire_pressed =
+                    replay_frame->input().WasPressed(kDebugFireAction),
+            });
+        if (!advanced)
+        {
+            state_ = RunReplaySessionState::Failed;
+            return std::unexpected(Error(RunReplayOperation::Next,
+                RunReplayErrorCode::DiagnosticTargetFireFailed));
+        }
+        *next_diagnostic_target_fire_state = advanced->state;
+    }
     const std::optional<std::chrono::nanoseconds> elapsed = replay_frame->elapsed();
     const std::chrono::nanoseconds effective_elapsed = simulation_allowed
         ? *elapsed
@@ -472,6 +518,7 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
         diagnostic_proximity_trigger_state_ =
             next_diagnostic_proximity_trigger_state;
     }
+    diagnostic_target_fire_state_ = next_diagnostic_target_fire_state;
 
     state_ = replay_->complete()
                  ? RunReplaySessionState::Complete
@@ -523,6 +570,12 @@ std::optional<gameplay::DiagnosticProximityTriggerState>
 RunReplaySession::diagnostic_proximity_trigger_state() const noexcept
 {
     return diagnostic_proximity_trigger_state_;
+}
+
+std::optional<gameplay::DiagnosticTargetFireState>
+RunReplaySession::diagnostic_target_fire_state() const noexcept
+{
+    return diagnostic_target_fire_state_;
 }
 
 std::optional<runtime::RenderTargetRectQ16>

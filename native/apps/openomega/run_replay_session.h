@@ -4,6 +4,7 @@
 #include "front_end.h"
 
 #include "omega/gameplay/diagnostic_proximity_trigger.h"
+#include "omega/gameplay/diagnostic_target_fire.h"
 #include "omega/runtime/frame_scheduler.h"
 #include "omega/runtime/run_capture_replay.h"
 #include "omega/simulation/simulation_world.h"
@@ -41,6 +42,9 @@ struct RunReplaySessionConfig
     // Project-owned diagnostic input policy. Disabled preserves the E0059 replay behavior even
     // when a trace happens to contain the synthetic movement action identifiers.
     bool enable_debug_locomotion = false;
+    // Project-owned pointer/fire objective policy. Disabled preserves prior replay behavior.
+    // When enabled, replay owns one target-fire state without adding identity or persistence.
+    bool enable_debug_target_fire = false;
     // Null preserves legacy nonmodal replay. A supplied value enables replay-owned menu reduction
     // and gates simulation from each resulting state without changing the captured elapsed value.
     std::optional<FrontEndState> initial_front_end_state;
@@ -104,6 +108,7 @@ enum class RunReplayErrorCode
     DebugLocomotionEntityCreateFailed,
     DebugLocomotionPlanFailed,
     DiagnosticProximityTriggerFailed,
+    DiagnosticTargetFireFailed,
 };
 
 [[nodiscard]] constexpr std::string_view RunReplayErrorCodeName(
@@ -133,6 +138,8 @@ enum class RunReplayErrorCode
         return "debug-locomotion-plan-failed";
     case RunReplayErrorCode::DiagnosticProximityTriggerFailed:
         return "diagnostic-proximity-trigger-failed";
+    case RunReplayErrorCode::DiagnosticTargetFireFailed:
+        return "diagnostic-target-fire-failed";
     }
     return "unknown";
 }
@@ -164,6 +171,8 @@ enum class RunReplayErrorCode
         return "run replay debug locomotion planning failed";
     case RunReplayErrorCode::DiagnosticProximityTriggerFailed:
         return "run replay diagnostic proximity trigger failed";
+    case RunReplayErrorCode::DiagnosticTargetFireFailed:
+        return "run replay diagnostic target fire failed";
     }
     return "run replay error is unknown";
 }
@@ -258,8 +267,9 @@ public:
     ~RunReplaySession() = default;
 
     // [game thread; no concurrent use] Consumes one replay frame. Lower replay failures are
-    // retryable and transactional. After a normal replay frame and scheduler plan are consumed,
-    // diagnostic locomotion-planning or simulation-step failure permanently fails this session.
+    // retryable and transactional. After a normal replay frame is consumed, diagnostic target/fire
+    // failure permanently fails this session; locomotion-planning or simulation-step failure does
+    // the same after scheduler planning begins.
     [[nodiscard]] std::expected<RunReplayFrame, RunReplayError> Next() noexcept;
 
     // [game thread; no concurrent use] Returned snapshots are owned copies.
@@ -278,6 +288,10 @@ public:
     // not retail mission, objective, checkpoint, or trigger behavior.
     [[nodiscard]] std::optional<gameplay::DiagnosticProximityTriggerState>
     diagnostic_proximity_trigger_state() const noexcept;
+    // [game thread; no concurrent use] Owned project-diagnostic target/fire state. This optional is
+    // present exactly when the explicit replay option enabled the synthetic objective.
+    [[nodiscard]] std::optional<gameplay::DiagnosticTargetFireState>
+    diagnostic_target_fire_state() const noexcept;
     // [game thread; no concurrent use] Derived from the current owned position through the fixed
     // project diagnostic presentation policy. No marker state or renderer resource is retained;
     // null means the positioned diagnostic entity is absent or this session is inert.
@@ -304,6 +318,8 @@ private:
         std::optional<simulation::EntityId> debug_locomotion_entity,
         std::optional<gameplay::DiagnosticProximityTriggerState>
             diagnostic_proximity_trigger_state,
+        std::optional<gameplay::DiagnosticTargetFireState>
+            diagnostic_target_fire_state,
         std::optional<FrontEndState> front_end_state,
         std::uint8_t front_end_visible_profile_slots,
         std::size_t front_end_total_profile_count,
@@ -320,6 +336,8 @@ private:
     std::optional<simulation::EntityId> debug_locomotion_entity_;
     std::optional<gameplay::DiagnosticProximityTriggerState>
         diagnostic_proximity_trigger_state_;
+    std::optional<gameplay::DiagnosticTargetFireState>
+        diagnostic_target_fire_state_;
     std::optional<FrontEndState> front_end_state_;
     std::uint8_t front_end_visible_profile_slots_ = 0U;
     std::size_t front_end_total_profile_count_ = 0U;

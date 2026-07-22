@@ -84,6 +84,7 @@ using omega::app::RunReplaySession;
 using omega::app::RunReplaySessionConfig;
 using omega::app::RunReplaySessionState;
 using omega::gameplay::DiagnosticProximityTriggerState;
+using omega::gameplay::DiagnosticTargetFireState;
 using omega::runtime::FramePlan;
 using omega::runtime::FrameScheduler;
 using omega::runtime::FrameSchedulerState;
@@ -92,6 +93,7 @@ using omega::runtime::InputBindingTable;
 using omega::runtime::InputDevice;
 using omega::runtime::InputEvent;
 using omega::runtime::InputTracker;
+using omega::runtime::PointerPositionQ16;
 using omega::runtime::RenderTargetRectQ16;
 using omega::runtime::RunCaptureReplayErrorCode;
 using omega::runtime::RunCaptureReplayOperation;
@@ -238,6 +240,7 @@ struct ScriptedElapsedFrame
 {
     nanoseconds elapsed{};
     std::span<const InputTransition> transitions;
+    std::optional<PointerPositionQ16> pointer_position;
 };
 
 [[nodiscard]] RunCaptureTracePair BuildPair(
@@ -309,6 +312,11 @@ struct ScriptedElapsedFrame
 
     for (const ScriptedElapsedFrame& frame : elapsed_frames)
     {
+        if (frame.pointer_position &&
+            !tracker.SetPointerPosition(*frame.pointer_position))
+        {
+            FailFixture("scripted pointer position");
+        }
         for (const InputTransition transition : frame.transitions)
         {
             if (!Push(tracker, transition.code, transition.pressed))
@@ -423,6 +431,16 @@ struct PairObservation
            state->objective_complete == objective_complete;
 }
 
+[[nodiscard]] bool SameDiagnosticTargetFire(
+    const std::optional<DiagnosticTargetFireState>& state,
+    const bool acquired, const bool target_complete) noexcept
+{
+    return state && *state == DiagnosticTargetFireState{
+                                 .acquired = acquired,
+                                 .target_complete = target_complete,
+                             };
+}
+
 [[nodiscard]] bool SameDiagnosticProximityTrigger(
     const std::optional<DiagnosticProximityTriggerState>& left,
     const std::optional<DiagnosticProximityTriggerState>& right) noexcept
@@ -455,6 +473,8 @@ void CheckContractAndTaxonomy()
         std::declval<const RunReplaySession&>().debug_locomotion_position()));
     static_assert(noexcept(std::declval<const RunReplaySession&>()
                                .diagnostic_proximity_trigger_state()));
+    static_assert(noexcept(std::declval<const RunReplaySession&>()
+                               .diagnostic_target_fire_state()));
     static_assert(noexcept(std::declval<const RunReplaySession&>()
                                .diagnostic_actor_marker_destination()));
     static_assert(noexcept(
@@ -499,6 +519,10 @@ void CheckContractAndTaxonomy()
         std::optional<DiagnosticProximityTriggerState>>);
     static_assert(std::is_same_v<
         decltype(std::declval<const RunReplaySession&>()
+                     .diagnostic_target_fire_state()),
+        std::optional<DiagnosticTargetFireState>>);
+    static_assert(std::is_same_v<
+        decltype(std::declval<const RunReplaySession&>()
                      .diagnostic_actor_marker_destination()),
         std::optional<RenderTargetRectQ16>>);
     static_assert(std::is_same_v<
@@ -519,6 +543,7 @@ void CheckContractAndTaxonomy()
     static_assert(default_config.scheduler == omega::runtime::FrameSchedulerConfig{});
     static_assert(default_config.maximum_entities == 65'536U);
     static_assert(!default_config.enable_debug_locomotion);
+    static_assert(!default_config.enable_debug_target_fire);
     static_assert(!default_config.initial_front_end_state);
     static_assert(default_config.front_end_visible_profile_slots == 0U);
     static_assert(default_config.front_end_total_profile_count == 0U);
@@ -551,6 +576,8 @@ void CheckContractAndTaxonomy()
                       RunReplayErrorCode::DebugLocomotionPlanFailed) == 9);
     static_assert(static_cast<int>(
                       RunReplayErrorCode::DiagnosticProximityTriggerFailed) == 10);
+    static_assert(static_cast<int>(
+                      RunReplayErrorCode::DiagnosticTargetFireFailed) == 11);
 
     struct ErrorContract
     {
@@ -587,6 +614,9 @@ void CheckContractAndTaxonomy()
         ErrorContract{RunReplayErrorCode::DiagnosticProximityTriggerFailed,
             "diagnostic-proximity-trigger-failed",
             "run replay diagnostic proximity trigger failed"},
+        ErrorContract{RunReplayErrorCode::DiagnosticTargetFireFailed,
+            "diagnostic-target-fire-failed",
+            "run replay diagnostic target fire failed"},
     };
     for (const auto& contract : contracts)
     {
@@ -1272,6 +1302,287 @@ void CheckDiagnosticProximityTriggerReplay()
               !legacy.debug_locomotion_position() &&
               !legacy.diagnostic_proximity_trigger_state(),
         "legacy locomotion-off replay never enables project trigger state");
+}
+
+void CheckDiagnosticTargetFireReplay()
+{
+    constexpr std::array<std::uint32_t, 4U> actions{
+        omega::app::kDebugMoveRightAction,
+        omega::app::kFrontEndPrimaryAction,
+        omega::app::kDebugFireAction,
+        omega::app::kDebugTargetAction,
+    };
+    constexpr PointerPositionQ16 target_center{
+        .x = 49'152U,
+        .y = 32'768U,
+    };
+    constexpr PointerPositionQ16 target_inclusive_corner{
+        .x = 51'200U,
+        .y = 34'816U,
+    };
+    constexpr std::array crossing_fire_down{
+        InputTransition{.code = 0U, .pressed = true},
+        InputTransition{.code = 2U, .pressed = true},
+        InputTransition{.code = 3U, .pressed = true},
+    };
+    constexpr std::array fire_up{
+        InputTransition{.code = 2U, .pressed = false},
+    };
+    constexpr std::array fire_down{
+        InputTransition{.code = 2U, .pressed = true},
+    };
+    const std::array target_frames{
+        ScriptedElapsedFrame{
+            .elapsed = milliseconds{60},
+            .transitions = crossing_fire_down,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = fire_up,
+            .pointer_position = target_inclusive_corner,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = fire_down,
+            .pointer_position = target_inclusive_corner,
+        },
+    };
+    RunReplaySessionConfig target_config = ValidConfig();
+    target_config.enable_debug_locomotion = true;
+    target_config.enable_debug_target_fire = true;
+    target_config.scheduler.max_steps_per_frame = 6U;
+    target_config.scheduler.max_frame_delta = milliseconds{60};
+
+    auto target_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, target_frames), target_config);
+    RunReplaySession target = TakeSession(
+        target_created, "the diagnostic target/fire replay is created");
+    Check(SameDiagnosticTargetFire(
+              target.diagnostic_target_fire_state(), false, false),
+        "the explicit target/fire option creates one incomplete unacquired target");
+
+    auto crossing = target.Next();
+    Check(crossing && crossing->frame_plan() &&
+              crossing->frame_plan()->simulation_steps == 6U &&
+              crossing->input().pointer_position() == target_center &&
+              crossing->input().WasPressed(omega::app::kDebugFireAction) &&
+              crossing->input().IsHeld(omega::app::kDebugTargetAction) &&
+              target.debug_locomotion_position() == Position3{.x = 6} &&
+              SameDiagnosticProximityTrigger(
+                  target.diagnostic_proximity_trigger_state(), false, true) &&
+              SameDiagnosticTargetFire(
+                  target.diagnostic_target_fire_state(), false, false),
+        "one multi-step crossing evaluates fire only once against the incomplete frame-start proximity state");
+
+    auto acquired = target.Next();
+    const auto simulation_before_hit = target.simulation_state();
+    Check(acquired && acquired->frame_plan() &&
+              acquired->frame_plan()->simulation_steps == 0U &&
+              acquired->input().pointer_position() == target_inclusive_corner &&
+              SameDiagnosticTargetFire(
+                  target.diagnostic_target_fire_state(), true, false),
+        "a later zero-step frame acquires the exact inclusive target corner after proximity completed earlier");
+
+    auto hit = target.Next();
+    Check(hit && hit->frame_plan() &&
+              hit->frame_plan()->simulation_steps == 0U &&
+              hit->input().pointer_position() == target_inclusive_corner &&
+              hit->input().WasPressed(omega::app::kDebugFireAction) &&
+              SameSimulation(target.simulation_state(), simulation_before_hit) &&
+              SameDiagnosticTargetFire(
+                  target.diagnostic_target_fire_state(), false, true),
+        "an exact pointer fire edge commits a hit on a successful zero-step frame without mutating simulation");
+
+    RunReplaySessionConfig disabled_config = target_config;
+    disabled_config.enable_debug_target_fire = false;
+    auto disabled_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, target_frames), disabled_config);
+    RunReplaySession disabled = TakeSession(
+        disabled_created, "the target/fire-disabled compatibility replay is created");
+    const auto disabled_first = disabled.Next();
+    const auto disabled_second = disabled.Next();
+    const auto disabled_third = disabled.Next();
+    Check(disabled_first && disabled_second && disabled_third &&
+              !disabled.diagnostic_target_fire_state() &&
+              disabled.debug_locomotion_position() == Position3{.x = 6} &&
+              SameDiagnosticProximityTrigger(
+                  disabled.diagnostic_proximity_trigger_state(), false, true),
+        "the default-disabled target/fire option preserves existing locomotion and proximity replay behavior");
+
+    constexpr std::array right_target_down{
+        InputTransition{.code = 0U, .pressed = true},
+        InputTransition{.code = 3U, .pressed = true},
+    };
+    constexpr std::array right_up{
+        InputTransition{.code = 0U, .pressed = false},
+    };
+    const std::array post_completion_multi_step_frames{
+        ScriptedElapsedFrame{
+            .elapsed = milliseconds{60},
+            .transitions = right_target_down,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = milliseconds{60},
+            .transitions = fire_down,
+            .pointer_position = target_center,
+        },
+    };
+    auto post_completion_multi_step_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, post_completion_multi_step_frames),
+        target_config);
+    RunReplaySession post_completion_multi_step = TakeSession(
+        post_completion_multi_step_created,
+        "the post-completion multi-step target/fire replay is created");
+    const auto completed_proximity = post_completion_multi_step.Next();
+    const auto one_fire_edge = post_completion_multi_step.Next();
+    Check(completed_proximity && completed_proximity->frame_plan() &&
+              completed_proximity->frame_plan()->simulation_steps == 6U &&
+              one_fire_edge && one_fire_edge->frame_plan() &&
+              one_fire_edge->frame_plan()->simulation_steps == 6U &&
+              post_completion_multi_step.debug_locomotion_position() ==
+                  Position3{.x = 12} &&
+              SameDiagnosticProximityTrigger(
+                  post_completion_multi_step
+                      .diagnostic_proximity_trigger_state(),
+                  false, true) &&
+              SameDiagnosticTargetFire(
+                  post_completion_multi_step.diagnostic_target_fire_state(),
+                  false, true),
+        "one fire edge is evaluated deterministically once before a post-proximity multi-step frame");
+
+    constexpr std::array exit_fire_down{
+        InputTransition{.code = 2U, .pressed = true},
+        InputTransition{.code = 1U, .pressed = true},
+    };
+    constexpr std::array exit_controls_up{
+        InputTransition{.code = 2U, .pressed = false},
+        InputTransition{.code = 1U, .pressed = false},
+    };
+    const std::array menu_frames{
+        ScriptedElapsedFrame{
+            .elapsed = milliseconds{60},
+            .transitions = right_target_down,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = right_up,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = exit_fire_down,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = exit_controls_up,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = fire_down,
+            .pointer_position = target_center,
+        },
+    };
+    RunReplaySessionConfig menu_config = target_config;
+    menu_config.initial_front_end_state = FrontEndState{};
+    menu_config.front_end_capabilities.can_start_diagnostic_campaign = true;
+    auto menu_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, menu_frames), menu_config);
+    RunReplaySession menu = TakeSession(
+        menu_created, "the target/fire menu click-through replay is created");
+    const auto menu_crossing = menu.Next();
+    const auto menu_acquired = menu.Next();
+    const auto acquired_before_exit = menu.diagnostic_target_fire_state();
+    const auto left_play = menu.Next();
+    const auto target_after_exit = menu.diagnostic_target_fire_state();
+    const auto controls_released = menu.Next();
+    const auto redeployed = menu.Next();
+    Check(menu_crossing && menu_acquired && left_play && controls_released &&
+              redeployed &&
+              menu_crossing->frame_plan() &&
+              menu_crossing->frame_plan()->simulation_steps == 6U &&
+              menu_acquired->frame_plan() &&
+              menu_acquired->frame_plan()->simulation_steps == 0U &&
+              SameDiagnosticTargetFire(acquired_before_exit, true, false) &&
+              left_play->frame_plan() &&
+              left_play->frame_plan()->simulation_steps == 0U &&
+              left_play->input().WasPressed(omega::app::kDebugFireAction) &&
+              SameDiagnosticTargetFire(target_after_exit, false, false) &&
+              controls_released->frame_plan() &&
+              controls_released->frame_plan()->simulation_steps == 0U &&
+              redeployed->front_end_command().type ==
+                  FrontEndCommandType::StartDiagnosticCampaign &&
+              menu.front_end_state() == FrontEndState{} &&
+              SameDiagnosticProximityTrigger(
+                  menu.diagnostic_proximity_trigger_state(), false, true) &&
+              SameDiagnosticTargetFire(
+                  menu.diagnostic_target_fire_state(), false, false),
+        "post-reduction exit clears an acquired target without hitting, and a later menu fire edge redeploys without click-through");
+
+    const std::array terminal_frames{
+        ScriptedElapsedFrame{
+            .elapsed = milliseconds{60},
+            .transitions = right_target_down,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = right_up,
+            .pointer_position = target_center,
+        },
+    };
+    auto terminal_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, terminal_frames,
+            TerminalReasons{.host_quit_requested = true}, fire_down),
+        target_config);
+    RunReplaySession terminal_source = TakeSession(
+        terminal_created, "the target/fire terminal replay is created");
+    const auto terminal_crossing = terminal_source.Next();
+    const auto terminal_acquired = terminal_source.Next();
+    const auto target_before_move =
+        terminal_source.diagnostic_target_fire_state();
+    RunReplaySession terminal = std::move(terminal_source);
+    Check(terminal_crossing && terminal_acquired &&
+              terminal_source.state() == RunReplaySessionState::Inert &&
+              !terminal_source.diagnostic_target_fire_state() &&
+              SameDiagnosticTargetFire(target_before_move, true, false) &&
+              terminal.diagnostic_target_fire_state() == target_before_move,
+        "move construction transfers acquired target/fire state and leaves the source inert");
+
+    const auto terminal_position = terminal.debug_locomotion_position();
+    const auto terminal_trigger = terminal.diagnostic_proximity_trigger_state();
+    const std::size_t terminal_remaining = terminal.remaining_frames();
+    replay_session_test_allocation::Arm(0U);
+    const auto failed_terminal = terminal.Next();
+    replay_session_test_allocation::Disarm();
+    CheckError(failed_terminal, RunReplayOperation::Next,
+        RunReplayErrorCode::ReplayNextFailed,
+        "a lower terminal-frame replay failure precedes target/fire mutation",
+        RunCaptureReplayErrorCode::AllocationFailed);
+    Check(terminal.state() == RunReplaySessionState::Ready &&
+              terminal.remaining_frames() == terminal_remaining &&
+              terminal.debug_locomotion_position() == terminal_position &&
+              SameDiagnosticProximityTrigger(
+                  terminal.diagnostic_proximity_trigger_state(), terminal_trigger) &&
+              terminal.diagnostic_target_fire_state() == target_before_move,
+        "a retryable lower terminal failure leaves acquired target/fire state unchanged");
+
+    auto terminal_frame = terminal.Next();
+    Check(terminal_frame && terminal_frame->terminal_input() &&
+              !terminal_frame->frame_plan() &&
+              terminal_frame->input().pointer_position() == target_center &&
+              terminal_frame->input().WasPressed(
+                  omega::app::kDebugFireAction) &&
+              terminal.state() == RunReplaySessionState::Complete &&
+              terminal.debug_locomotion_position() == terminal_position &&
+              SameDiagnosticProximityTrigger(
+                  terminal.diagnostic_proximity_trigger_state(), terminal_trigger) &&
+              terminal.diagnostic_target_fire_state() == target_before_move,
+        "a terminal fire frame preserves exact pointer publication without mutating target, trigger, or position state");
 }
 
 void CheckFrontEndModalGate()
@@ -3053,6 +3364,7 @@ int main()
     CheckTerminalBehavior();
     CheckDebugLocomotionOptIn();
     CheckDiagnosticProximityTriggerReplay();
+    CheckDiagnosticTargetFireReplay();
     CheckFrontEndModalGate();
     CheckFirstProfileCreationReplay();
     CheckDiagnosticPlayGateReplay();

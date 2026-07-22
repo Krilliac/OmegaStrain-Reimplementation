@@ -671,6 +671,25 @@ struct OmegaAppTestAccess final
         return app.diagnostic_proximity_trigger_state_;
     }
 
+    static void SetDiagnosticProximityTriggerState(OmegaApp& app,
+        const gameplay::DiagnosticProximityTriggerState state) noexcept
+    {
+        app.diagnostic_proximity_trigger_state_ = state;
+    }
+
+    [[nodiscard]] static gameplay::DiagnosticTargetFireState
+    DiagnosticTargetFireState(const OmegaApp& app) noexcept
+    {
+        static_assert(noexcept(app.diagnostic_target_fire_state()));
+        return app.diagnostic_target_fire_state();
+    }
+
+    static void SetDiagnosticTargetFireState(OmegaApp& app,
+        const gameplay::DiagnosticTargetFireState state) noexcept
+    {
+        app.diagnostic_target_fire_state_ = state;
+    }
+
     [[nodiscard]] static runtime::FrameSchedulerState SchedulerSnapshot(
         const OmegaApp& app) noexcept
     {
@@ -2981,6 +3000,12 @@ void CheckDiagnosticSceneMissionActivation(
             omega::app::PlanProjectDiagnosticObjectiveMarkerDestination(
                 omega::gameplay::DiagnosticProximityTriggerState{});
         static_assert(kObjectiveDestination.has_value());
+        constexpr auto kTargetDestination =
+            omega::app::PlanProjectDiagnosticTargetMarkerDestination(
+                omega::gameplay::DiagnosticProximityTriggerState{
+                    .objective_complete = true},
+                omega::gameplay::DiagnosticTargetFireState{});
+        static_assert(kTargetDestination.has_value());
         const omega::runtime::RenderMeshHandle initial_environment_mesh_handle =
             scene_commands.empty() ? omega::runtime::RenderMeshHandle{}
                                    : scene_commands.front().mesh;
@@ -3026,6 +3051,8 @@ void CheckDiagnosticSceneMissionActivation(
                    scene_overlay[0].destination == *kObjectiveDestination &&
                    SameProximityTriggerState(
                        Access::DiagnosticProximityTriggerState(*app), {}) &&
+                   Access::DiagnosticTargetFireState(*app) ==
+                       omega::gameplay::DiagnosticTargetFireState{} &&
                    Access::CurrentFrontEndMeshDrawList(*app).empty(),
             "the validated environment-plus-actor scene and armed objective remain resident but hidden in Profiles");
 
@@ -3088,6 +3115,8 @@ void CheckDiagnosticSceneMissionActivation(
                        *kObjectiveDestination &&
                    SameProximityTriggerState(
                        Access::DiagnosticProximityTriggerState(*app), {}) &&
+                   Access::DiagnosticTargetFireState(*app) ==
+                       omega::gameplay::DiagnosticTargetFireState{} &&
                    DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
                        Access::DiagnosticSceneOverlayDrawList(*app)),
             "the positioned BriefingRoom mission click records the exact project pointer, publishes environment, actor, and armed objective, and emits no deploy-click activation or fire cue");
@@ -3380,38 +3409,142 @@ void CheckDiagnosticSceneMissionActivation(
             Access::PersistenceRecordCount(*app);
         const auto trigger_persistence_bytes_before =
             Access::PersistenceLogicalValueBytes(*app);
+        constexpr omega::runtime::PointerPositionQ16 kExactTargetPointer{
+            .x = 49'152U,
+            .y = 32'768U,
+        };
+        constexpr auto kExactTargetCues =
+            omega::app::PlanProjectDiagnosticTargetCueRectangles(
+                std::optional<omega::runtime::PointerPositionQ16>{
+                    kExactTargetPointer});
+        constexpr auto kExactFireCue =
+            omega::app::PlanProjectDiagnosticFireCueRectangle(
+                std::optional<omega::runtime::PointerPositionQ16>{
+                    kExactTargetPointer});
+        const float exact_target_x =
+            static_cast<float>(app_window->logical_width) * 3.0F / 4.0F;
+        const float exact_target_y =
+            static_cast<float>(app_window->logical_height) / 2.0F;
+
+        constexpr std::size_t kTargetFlowFrameCount = 6U;
+        std::optional<omega::runtime::RunCaptureSession>
+            combined_target_flow_capture;
+        std::size_t combined_target_flow_frame_count = 0U;
+        const auto append_target_flow_capture =
+            [&combined_target_flow_capture,
+                &combined_target_flow_frame_count](
+                std::expected<omega::app::RunCaptureOutcome,
+                    std::string>& capture) -> bool {
+            if (!capture || capture->failure())
+                return false;
+            const auto* const pair = capture->trace_pair();
+            if (pair == nullptr || pair->input_trace().frame_count() != 1U ||
+                pair->scheduler_elapsed_trace().frame_count() != 1U ||
+                pair->terminal_input())
+            {
+                return false;
+            }
+            if (!combined_target_flow_capture)
+            {
+                auto created = omega::runtime::RunCaptureSession::Create(
+                    omega::runtime::RunCaptureSessionConfig{
+                        .maximum_frames = kTargetFlowFrameCount,
+                        .first_frame_index =
+                            pair->input_trace().first_frame_index(),
+                    },
+                    pair->input_trace().actions());
+                if (!created)
+                    return false;
+                combined_target_flow_capture.emplace(std::move(*created));
+            }
+
+            auto traces = std::move(*capture).TakeTracePair();
+            if (!traces)
+                return false;
+            auto reconstructed =
+                omega::runtime::RunCaptureReplaySession::Create(
+                    std::move(*traces));
+            if (!reconstructed)
+                return false;
+            auto frame = reconstructed->Next();
+            const auto elapsed = frame ? frame->elapsed() : std::nullopt;
+            if (!frame || !elapsed || frame->terminal_input() ||
+                !reconstructed->complete() ||
+                reconstructed->remaining_frames() != 0U)
+            {
+                return false;
+            }
+            if (!combined_target_flow_capture->AppendInput(frame->input()) ||
+                !combined_target_flow_capture->AppendElapsed(*elapsed))
+            {
+                return false;
+            }
+            ++combined_target_flow_frame_count;
+            return true;
+        };
         const bool crossing_ready =
             SameProximityTriggerState(
                 Access::DiagnosticProximityTriggerState(*app), {}) &&
             Access::ArmNextRunElapsed(
                 *app, settings.frame.simulation_step * 6) &&
-            PushKey(SDL_SCANCODE_D, true);
+            PushKey(SDL_SCANCODE_D, true) &&
+            PushMouseButton(SDL_BUTTON_RIGHT, true, app_window->id,
+                exact_target_x, exact_target_y) &&
+            PushMouseButton(SDL_BUTTON_LEFT, true, app_window->id,
+                exact_target_x, exact_target_y);
         auto crossing = app->RunWithCapture(1);
         const auto crossed_position = Access::DebugLocomotionPosition(*app);
         const auto crossed_state =
             Access::DiagnosticProximityTriggerState(*app);
+        const auto crossed_target_action = CapturedActionState(
+            crossing, omega::app::kDebugTargetAction);
+        const auto crossed_fire_action = CapturedActionState(
+            crossing, omega::app::kDebugFireAction);
+        const auto* crossing_pair = crossing ? crossing->trace_pair() : nullptr;
+        const auto crossing_pointer = crossing_pair != nullptr
+            ? crossing_pair->input_trace().PointerAt(0U)
+            : std::nullopt;
         const auto crossed_actor_commands =
             Access::DiagnosticActorDrawList(*app).commands();
         const auto crossed_overlay_commands =
             Access::DiagnosticSceneOverlayDrawList(*app).commands();
         const omega::app::GpuHostSnapshot trigger_gpu_after =
             Access::GpuSnapshot(*app);
-        const auto* crossing_pair = crossing ? crossing->trace_pair() : nullptr;
         const auto crossing_elapsed = crossing_pair != nullptr
             ? crossing_pair->scheduler_elapsed_trace().FrameAt(0U)
             : std::nullopt;
         Check(crossing_ready && crossing && !crossing->failure() &&
                   crossing_pair != nullptr && crossing_elapsed &&
                   crossing_elapsed->elapsed == settings.frame.simulation_step * 6 &&
+                  crossing_pointer == kExactTargetPointer &&
+                  IsFreshPress(crossed_target_action) &&
+                  IsFreshPress(crossed_fire_action) &&
                   crossing->result().planned_simulation_steps == 6U &&
                   crossing->result().executed_simulation_steps == 6U &&
                   crossed_position &&
                   *crossed_position ==
                       omega::simulation::Position3{.x = 6, .z = 1} &&
                   !crossed_state.inside && crossed_state.objective_complete &&
-                  crossed_actor_commands.size() == 2U &&
-                  crossed_overlay_commands.empty() &&
-                  Access::CurrentFrontEndDrawList(*app).empty() &&
+                  Access::DiagnosticTargetFireState(*app) ==
+                      omega::gameplay::DiagnosticTargetFireState{} &&
+                  crossed_actor_commands.size() == 6U &&
+                  crossed_actor_commands[2].destination ==
+                      *kTargetDestination &&
+                  crossed_actor_commands[3].destination ==
+                      kExactTargetCues[0U] &&
+                  crossed_actor_commands[4].destination ==
+                      kExactTargetCues[1U] &&
+                  crossed_actor_commands[5].destination == kExactFireCue &&
+                  crossed_overlay_commands.size() == 4U &&
+                  crossed_overlay_commands[0].destination ==
+                      *kTargetDestination &&
+                  crossed_overlay_commands[1].destination ==
+                      kExactTargetCues[0U] &&
+                  crossed_overlay_commands[2].destination ==
+                      kExactTargetCues[1U] &&
+                  crossed_overlay_commands[3].destination == kExactFireCue &&
+                  DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                      Access::DiagnosticSceneOverlayDrawList(*app)) &&
                   SameTextureResidency(trigger_gpu_before, trigger_gpu_after) &&
                   trigger_gpu_after.meshes == trigger_gpu_before.meshes &&
                   trigger_gpu_after.successful_mesh_uploads ==
@@ -3424,43 +3557,220 @@ void CheckDiagnosticSceneMissionActivation(
                       trigger_persistence_records_before &&
                   Access::PersistenceLogicalValueBytes(*app) ==
                       trigger_persistence_bytes_before,
-            "one captured six-step move enters and exits the fixed volume, latches completion, removes the armed overlay, and changes neither GPU residency nor persistence");
-        auto crossing_traces = crossing
-            ? std::move(*crossing).TakeTracePair()
+            "one exact aimed-fire input frame enters and exits the fixed volume in six steps, remains ineligible against frame-start proximity, and publishes target, bars, then fire without resource or persistence mutation");
+        Check(append_target_flow_capture(crossing),
+            "the exact crossing capture starts one contiguous target-flow trace");
+
+        const bool crossing_release_queued =
+            PushKey(SDL_SCANCODE_D, false) &&
+            PushMouseButton(SDL_BUTTON_LEFT, false, app_window->id,
+                exact_target_x, exact_target_y) &&
+            PushMouseButton(SDL_BUTTON_RIGHT, false, app_window->id,
+                exact_target_x, exact_target_y) &&
+            Access::ArmNextRunElapsed(
+                *app, std::chrono::nanoseconds::zero());
+        auto crossing_release = app->RunWithCapture(1);
+        const auto crossing_release_overlay =
+            Access::DiagnosticSceneOverlayDrawList(*app).commands();
+        Check(crossing_release_queued && crossing_release &&
+                  !crossing_release->failure() &&
+                  crossing_release->result().planned_simulation_steps == 0U &&
+                  crossing_release->result().executed_simulation_steps == 0U &&
+                  Access::DiagnosticTargetFireState(*app) ==
+                      omega::gameplay::DiagnosticTargetFireState{} &&
+                  crossing_release_overlay.size() == 1U &&
+                  crossing_release_overlay[0].destination ==
+                      *kTargetDestination,
+            "releasing the gated crossing chord leaves the ready target visible on the next zero-step input frame");
+        Check(append_target_flow_capture(crossing_release),
+            "the crossing release remains contiguous in the target-flow trace");
+
+        const omega::app::GpuHostSnapshot target_flow_gpu_before =
+            Access::GpuSnapshot(*app);
+        const bool miss_queued =
+            PushMouseButton(SDL_BUTTON_RIGHT, true, app_window->id,
+                pointer_x, pointer_y) &&
+            PushMouseButton(SDL_BUTTON_LEFT, true, app_window->id,
+                pointer_x, pointer_y) &&
+            Access::ArmNextRunElapsed(
+                *app, std::chrono::nanoseconds::zero());
+        auto miss = app->RunWithCapture(1);
+        const auto* miss_pair = miss ? miss->trace_pair() : nullptr;
+        const auto miss_pointer = miss_pair != nullptr
+            ? miss_pair->input_trace().PointerAt(0U)
             : std::nullopt;
-        bool crossing_replay_matches = false;
-        if (crossing_traces)
+        const auto miss_overlay =
+            Access::DiagnosticSceneOverlayDrawList(*app).commands();
+        Check(miss_queued && miss && !miss->failure() &&
+                  miss->result().planned_simulation_steps == 0U &&
+                  miss->result().executed_simulation_steps == 0U &&
+                  miss_pointer == kQuarterThreeQuarterPointer &&
+                  Access::DiagnosticTargetFireState(*app) ==
+                      omega::gameplay::DiagnosticTargetFireState{} &&
+                  miss_overlay.size() == 4U &&
+                  miss_overlay[0].destination == *kTargetDestination &&
+                  miss_overlay[1].destination == kExpectedTargetCues[0U] &&
+                  miss_overlay[2].destination == kExpectedTargetCues[1U] &&
+                  miss_overlay[3].destination == kExpectedFireCue &&
+                  SameTextureResidency(target_flow_gpu_before,
+                      Access::GpuSnapshot(*app)) &&
+                  Access::GpuSnapshot(*app).meshes ==
+                      target_flow_gpu_before.meshes &&
+                  Access::PersistenceGeneration(*app) ==
+                      trigger_persistence_generation_before &&
+                  Access::PersistenceRecordCount(*app) ==
+                      trigger_persistence_records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) ==
+                      trigger_persistence_bytes_before,
+            "an off-target indexed aimed-fire attempt retains target, bars, and fire in exact overlay order without simulation, residency, or persistence mutation");
+        Check(append_target_flow_capture(miss),
+            "the off-target miss remains contiguous in the target-flow trace");
+
+        const bool miss_release_queued =
+            PushMouseButton(SDL_BUTTON_LEFT, false, app_window->id,
+                pointer_x, pointer_y) &&
+            PushMouseButton(SDL_BUTTON_RIGHT, false, app_window->id,
+                pointer_x, pointer_y) &&
+            Access::ArmNextRunElapsed(
+                *app, std::chrono::nanoseconds::zero());
+        auto miss_release = app->RunWithCapture(1);
+        Check(miss_release_queued && miss_release &&
+                  !miss_release->failure() &&
+                  miss_release->result().planned_simulation_steps == 0U &&
+                  miss_release->result().executed_simulation_steps == 0U &&
+                  Access::DiagnosticTargetFireState(*app) ==
+                      omega::gameplay::DiagnosticTargetFireState{} &&
+                  Access::DiagnosticSceneOverlayDrawList(*app).commands().size() ==
+                      1U &&
+                  Access::DiagnosticSceneOverlayDrawList(*app)
+                          .commands()[0]
+                          .destination == *kTargetDestination,
+            "releasing the indexed miss chord leaves the ready target visible on a zero-step frame");
+        Check(append_target_flow_capture(miss_release),
+            "the miss release remains contiguous in the target-flow trace");
+
+        const bool hit_queued =
+            PushMouseButton(SDL_BUTTON_RIGHT, true, app_window->id,
+                exact_target_x, exact_target_y) &&
+            PushMouseButton(SDL_BUTTON_LEFT, true, app_window->id,
+                exact_target_x, exact_target_y) &&
+            Access::ArmNextRunElapsed(
+                *app, std::chrono::nanoseconds::zero());
+        auto hit = app->RunWithCapture(1);
+        const auto* hit_pair = hit ? hit->trace_pair() : nullptr;
+        const auto hit_pointer = hit_pair != nullptr
+            ? hit_pair->input_trace().PointerAt(0U)
+            : std::nullopt;
+        const auto hit_overlay =
+            Access::DiagnosticSceneOverlayDrawList(*app).commands();
+        Check(hit_queued && hit && !hit->failure() &&
+                  hit->result().planned_simulation_steps == 0U &&
+                  hit->result().executed_simulation_steps == 0U &&
+                  hit_pointer == kExactTargetPointer &&
+                  Access::DiagnosticTargetFireState(*app) ==
+                      omega::gameplay::DiagnosticTargetFireState{
+                          .target_complete = true} &&
+                  hit_overlay.size() == 3U &&
+                  hit_overlay[0].destination == kExactTargetCues[0U] &&
+                  hit_overlay[1].destination == kExactTargetCues[1U] &&
+                  hit_overlay[2].destination == kExactFireCue &&
+                  SameTextureResidency(target_flow_gpu_before,
+                      Access::GpuSnapshot(*app)) &&
+                  Access::GpuSnapshot(*app).meshes ==
+                      target_flow_gpu_before.meshes &&
+                  Access::PersistenceGeneration(*app) ==
+                      trigger_persistence_generation_before &&
+                  Access::PersistenceRecordCount(*app) ==
+                      trigger_persistence_records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) ==
+                      trigger_persistence_bytes_before,
+            "an exact indexed RMB plus LMB hit removes the target on its hit frame while retaining target bars then fire without resource or persistence mutation");
+        Check(append_target_flow_capture(hit),
+            "the exact completed hit remains contiguous in the target-flow trace");
+
+        const bool hit_release_queued =
+            PushMouseButton(SDL_BUTTON_LEFT, false, app_window->id,
+                exact_target_x, exact_target_y) &&
+            PushMouseButton(SDL_BUTTON_RIGHT, false, app_window->id,
+                exact_target_x, exact_target_y) &&
+            Access::ArmNextRunElapsed(
+                *app, std::chrono::nanoseconds::zero());
+        auto hit_release = app->RunWithCapture(1);
+        const auto live_completed_proximity =
+            Access::DiagnosticProximityTriggerState(*app);
+        const auto live_completed_target =
+            Access::DiagnosticTargetFireState(*app);
+        Check(hit_release_queued && hit_release &&
+                  !hit_release->failure() &&
+                  hit_release->result().planned_simulation_steps == 0U &&
+                  hit_release->result().executed_simulation_steps == 0U &&
+                  SameProximityTriggerState(
+                      live_completed_proximity,
+                      {.inside = false, .objective_complete = true}) &&
+                  live_completed_target ==
+                      omega::gameplay::DiagnosticTargetFireState{
+                          .target_complete = true} &&
+                  Access::DiagnosticSceneOverlayDrawList(*app).empty(),
+            "the zero-step hit release preserves both launch-local completions and removes all transient indexed overlays");
+        Check(append_target_flow_capture(hit_release),
+            "the hit release completes the contiguous target-flow trace");
+
+        std::optional<omega::runtime::RunCaptureTracePair>
+            combined_target_flow_traces;
+        if (combined_target_flow_capture &&
+            combined_target_flow_frame_count == kTargetFlowFrameCount)
         {
-            auto crossing_replay = omega::app::RunReplaySession::Create(
-                std::move(*crossing_traces),
+            auto finished =
+                std::move(*combined_target_flow_capture).Finish();
+            if (finished)
+                combined_target_flow_traces.emplace(std::move(*finished));
+        }
+        bool completed_target_replay_matches = false;
+        if (combined_target_flow_traces)
+        {
+            auto replay = omega::app::RunReplaySession::Create(
+                std::move(*combined_target_flow_traces),
                 omega::app::RunReplaySessionConfig{
                     .scheduler = settings.frame,
                     .enable_debug_locomotion = true,
+                    .enable_debug_target_fire = true,
                 });
-            if (crossing_replay)
+            if (replay)
             {
-                auto replayed_crossing = crossing_replay->Next();
-                const auto replayed_trigger_state =
-                    crossing_replay->diagnostic_proximity_trigger_state();
-                crossing_replay_matches = replayed_crossing &&
-                    replayed_crossing->frame_plan() &&
-                    replayed_crossing->frame_plan()->simulation_steps == 6U &&
-                    replayed_trigger_state &&
+                bool frames_match = true;
+                std::size_t replayed_frames = 0U;
+                while (replay->state() ==
+                       omega::app::RunReplaySessionState::Ready)
+                {
+                    auto frame = replay->Next();
+                    const auto plan = frame ? frame->frame_plan() : std::nullopt;
+                    const std::uint32_t expected_steps =
+                        replayed_frames == 0U ? 6U : 0U;
+                    if (!frame || !plan ||
+                        plan->simulation_steps != expected_steps)
+                    {
+                        frames_match = false;
+                        break;
+                    }
+                    ++replayed_frames;
+                }
+                const auto replayed_proximity =
+                    replay->diagnostic_proximity_trigger_state();
+                const auto replayed_target =
+                    replay->diagnostic_target_fire_state();
+                completed_target_replay_matches = frames_match &&
+                    replayed_frames == kTargetFlowFrameCount &&
+                    replay->state() ==
+                        omega::app::RunReplaySessionState::Complete &&
+                    replay->remaining_frames() == 0U &&
+                    replayed_proximity && replayed_target &&
                     SameProximityTriggerState(
-                        *replayed_trigger_state, crossed_state);
+                        *replayed_proximity, live_completed_proximity) &&
+                    *replayed_target == live_completed_target;
             }
         }
-        Check(crossing_replay_matches,
-            "a fresh replay of the exact live capture reproduces its completed trigger state");
-        Check(PushKey(SDL_SCANCODE_D, false) &&
-                  Access::ArmNextRunElapsed(
-                      *app, std::chrono::nanoseconds::zero()) &&
-                  app->Run(1).has_value() &&
-                  SameProximityTriggerState(
-                      Access::DiagnosticProximityTriggerState(*app),
-                      {.inside = false, .objective_complete = true}) &&
-                  Access::DiagnosticSceneOverlayDrawList(*app).empty(),
-            "the zero-step movement release preserves the completed objective and removed marker");
+        Check(completed_target_replay_matches,
+            "one fresh replay of the exact contiguous live crossing, releases, miss, and hit reproduces the completed proximity and target states");
 
         const omega::app::GpuHostSnapshot before_return = Access::GpuSnapshot(*app);
         const bool returned = PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value();
@@ -3473,8 +3783,11 @@ void CheckDiagnosticSceneMissionActivation(
                    Access::CurrentFrontEndMeshDrawList(*app).empty() &&
                    SameProximityTriggerState(
                        Access::DiagnosticProximityTriggerState(*app),
-                       {.inside = false, .objective_complete = true}),
-            "the DiagnosticPlay menu edge returns to BriefingRoom before packet selection while preserving launch-local completion");
+                       {.inside = false, .objective_complete = true}) &&
+                   Access::DiagnosticTargetFireState(*app) ==
+                       omega::gameplay::DiagnosticTargetFireState{
+                           .target_complete = true},
+            "the DiagnosticPlay menu edge returns to BriefingRoom before packet selection while preserving both launch-local completions");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the diagnostic-scene return edge releases in BriefingRoom");
 
@@ -3495,12 +3808,15 @@ void CheckDiagnosticSceneMissionActivation(
                   SameProximityTriggerState(
                       Access::DiagnosticProximityTriggerState(*app),
                       {.inside = false, .objective_complete = true}) &&
+                  Access::DiagnosticTargetFireState(*app) ==
+                      omega::gameplay::DiagnosticTargetFireState{
+                          .target_complete = true} &&
                   Access::DiagnosticSceneOverlayDrawList(*app).empty() &&
                   Access::CurrentFrontEndDrawList(*app).empty() &&
                   SameTextureResidency(
                       round_trip_gpu_before, round_trip_gpu_after) &&
                   round_trip_gpu_after.meshes == round_trip_gpu_before.meshes,
-            "a zero-step BriefingRoom redeploy preserves completed launch-local state, keeps the objective marker absent, and uploads no resources");
+            "a zero-step BriefingRoom redeploy preserves both completed launch-local states, keeps objective and target markers absent, and uploads no resources");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value() &&
                   PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
                   Access::FrontEnd(*app).mode ==
@@ -3508,8 +3824,11 @@ void CheckDiagnosticSceneMissionActivation(
                   SameProximityTriggerState(
                       Access::DiagnosticProximityTriggerState(*app),
                       {.inside = false, .objective_complete = true}) &&
+                  Access::DiagnosticTargetFireState(*app) ==
+                      omega::gameplay::DiagnosticTargetFireState{
+                          .target_complete = true} &&
                   PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
-            "the completed objective remains latched across a full play-briefing-play-briefing round trip");
+            "the completed objective and target remain latched across a full play-briefing-play-briefing round trip");
 
         const omega::app::GpuHostSnapshot before_release = Access::GpuSnapshot(*app);
         Access::ReleaseDiagnosticScenePresentation(*app);
@@ -7432,6 +7751,163 @@ int main()
               DrawListsEqual(OmegaAppTestAccess::DiagnosticActorDrawList(*app),
                   keyboard_mouse_base_actor_draw_list),
         "releasing the mouse chord restores the ordinary actor/objective draw without menu mutation");
+
+    constexpr auto kTargetMarkerDestination =
+        omega::app::PlanProjectDiagnosticTargetMarkerDestination(
+            omega::gameplay::DiagnosticProximityTriggerState{
+                .objective_complete = true},
+            omega::gameplay::DiagnosticTargetFireState{});
+    static_assert(kTargetMarkerDestination.has_value());
+    constexpr omega::runtime::PointerPositionQ16 kExactTargetPointer{
+        .x = 49'152U,
+        .y = 32'768U,
+    };
+    constexpr auto kExactTargetCues =
+        omega::app::PlanProjectDiagnosticTargetCueRectangles(
+            std::optional<omega::runtime::PointerPositionQ16>{
+                kExactTargetPointer});
+    constexpr auto kExactTargetFireCue =
+        omega::app::PlanProjectDiagnosticFireCueRectangle(
+            std::optional<omega::runtime::PointerPositionQ16>{
+                kExactTargetPointer});
+    const auto has_exact_base_actor_prefix =
+        [keyboard_mouse_base_commands](
+            const std::span<const omega::runtime::RenderTextureBlitCommand>
+                commands) {
+            return keyboard_mouse_base_commands.size() >= 2U &&
+                   commands.size() >= 2U &&
+                   commands[0] == keyboard_mouse_base_commands[0] &&
+                   commands[1] == keyboard_mouse_base_commands[1];
+        };
+    const omega::app::GpuHostSnapshot target_flow_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    const std::size_t target_flow_binding_count =
+        OmegaAppTestAccess::InputBindingCount(*app);
+    const std::size_t target_flow_action_count =
+        OmegaAppTestAccess::InputActionCount(*app);
+    const auto target_flow_persistence_generation =
+        OmegaAppTestAccess::PersistenceGeneration(*app);
+    const auto target_flow_persistence_records =
+        OmegaAppTestAccess::PersistenceRecordCount(*app);
+    const auto target_flow_persistence_bytes =
+        OmegaAppTestAccess::PersistenceLogicalValueBytes(*app);
+    OmegaAppTestAccess::SetDiagnosticProximityTriggerState(
+        *app, {.objective_complete = true});
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(
+              *app, std::chrono::nanoseconds::zero()),
+        "the fallback target-ready frame arms with zero elapsed");
+    auto target_ready = app->RunWithCapture(1);
+    const auto target_ready_commands =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app).commands();
+    Check(target_ready && !target_ready->failure() &&
+              target_ready->result().planned_simulation_steps == 0U &&
+              target_ready->result().executed_simulation_steps == 0U &&
+              OmegaAppTestAccess::DiagnosticTargetFireState(*app) ==
+                  omega::gameplay::DiagnosticTargetFireState{} &&
+              target_ready_commands.size() == 3U &&
+              has_exact_base_actor_prefix(target_ready_commands) &&
+              marker_command_is_exact(
+                  target_ready_commands[2], *kTargetMarkerDestination),
+        "completed proximity replaces the fallback objective marker with the exact project target on a successful zero-step frame");
+
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(
+              *app, std::chrono::nanoseconds::zero()) &&
+              PushMouseButton(SDL_BUTTON_RIGHT, true, app_window->id,
+                  pointer_x, pointer_y) &&
+              PushMouseButton(SDL_BUTTON_LEFT, true, app_window->id,
+                  pointer_x, pointer_y),
+        "the fallback miss chord enters the input queue at an off-target pointer");
+    auto target_miss = app->RunWithCapture(1);
+    const auto target_miss_commands =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app).commands();
+    Check(target_miss && !target_miss->failure() &&
+              target_miss->result().planned_simulation_steps == 0U &&
+              OmegaAppTestAccess::DiagnosticTargetFireState(*app) ==
+                  omega::gameplay::DiagnosticTargetFireState{} &&
+              target_miss_commands.size() == 6U &&
+              has_exact_base_actor_prefix(target_miss_commands) &&
+              marker_command_is_exact(
+                  target_miss_commands[2], *kTargetMarkerDestination) &&
+              marker_command_is_exact(target_miss_commands[3],
+                  kPositionedTargetCueDestinations[0U]) &&
+              marker_command_is_exact(target_miss_commands[4],
+                  kPositionedTargetCueDestinations[1U]) &&
+              marker_command_is_exact(target_miss_commands[5],
+                  kPositionedFireCueDestination),
+        "an off-target aimed fire attempt preserves the fallback target and orders target bars then fire after it");
+    Check(PushMouseButton(SDL_BUTTON_LEFT, false) &&
+              PushMouseButton(SDL_BUTTON_RIGHT, false) &&
+              OmegaAppTestAccess::ArmNextRunElapsed(
+                  *app, std::chrono::nanoseconds::zero()) &&
+              app->Run(1).has_value(),
+        "the fallback miss chord releases without advancing simulation");
+
+    const float exact_target_x =
+        static_cast<float>(app_window->logical_width) * 3.0F / 4.0F;
+    const float exact_target_y =
+        static_cast<float>(app_window->logical_height) / 2.0F;
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(
+              *app, std::chrono::nanoseconds::zero()) &&
+              PushMouseButton(SDL_BUTTON_RIGHT, true, app_window->id,
+                  exact_target_x, exact_target_y) &&
+              PushMouseButton(SDL_BUTTON_LEFT, true, app_window->id,
+                  exact_target_x, exact_target_y),
+        "the exact fallback aimed-fire chord enters the input queue");
+    auto target_hit = app->RunWithCapture(1);
+    const auto* target_hit_pair = target_hit ? target_hit->trace_pair() : nullptr;
+    const auto target_hit_pointer = target_hit_pair != nullptr
+        ? target_hit_pair->input_trace().PointerAt(0U)
+        : std::nullopt;
+    const auto target_hit_commands =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app).commands();
+    Check(target_hit && !target_hit->failure() &&
+              target_hit->result().planned_simulation_steps == 0U &&
+              target_hit->result().executed_simulation_steps == 0U &&
+              target_hit_pointer == kExactTargetPointer &&
+              OmegaAppTestAccess::DiagnosticTargetFireState(*app) ==
+                  omega::gameplay::DiagnosticTargetFireState{
+                      .target_complete = true} &&
+              target_hit_commands.size() == 5U &&
+              has_exact_base_actor_prefix(target_hit_commands) &&
+              marker_command_is_exact(
+                  target_hit_commands[2], kExactTargetCues[0U]) &&
+              marker_command_is_exact(
+                  target_hit_commands[3], kExactTargetCues[1U]) &&
+              marker_command_is_exact(
+                  target_hit_commands[4], kExactTargetFireCue),
+        "an exact aimed RMB plus LMB hit latches completion, removes the fallback target on the hit frame, and retains ordered transient cues");
+    Check(PushMouseButton(SDL_BUTTON_LEFT, false) &&
+              PushMouseButton(SDL_BUTTON_RIGHT, false) &&
+              OmegaAppTestAccess::ArmNextRunElapsed(
+                  *app, std::chrono::nanoseconds::zero()) &&
+              app->Run(1).has_value() &&
+              OmegaAppTestAccess::DiagnosticActorDrawList(*app).commands().size() ==
+                  2U &&
+              OmegaAppTestAccess::DiagnosticTargetFireState(*app).target_complete,
+        "releasing the exact hit chord leaves only the fallback base and actor with completion latched");
+
+    OmegaAppTestAccess::SetDiagnosticProximityTriggerState(*app, {});
+    OmegaAppTestAccess::SetDiagnosticTargetFireState(*app, {});
+    Check(OmegaAppTestAccess::ArmNextRunElapsed(
+              *app, std::chrono::nanoseconds::zero()) &&
+              app->Run(1).has_value() &&
+              DrawListsEqual(OmegaAppTestAccess::DiagnosticActorDrawList(*app),
+                  keyboard_mouse_base_actor_draw_list) &&
+              SameTextureResidency(target_flow_gpu_before,
+                  OmegaAppTestAccess::GpuSnapshot(*app)) &&
+              OmegaAppTestAccess::GpuSnapshot(*app).meshes ==
+                  target_flow_gpu_before.meshes &&
+              OmegaAppTestAccess::InputBindingCount(*app) ==
+                  target_flow_binding_count &&
+              OmegaAppTestAccess::InputActionCount(*app) ==
+                  target_flow_action_count &&
+              OmegaAppTestAccess::PersistenceGeneration(*app) ==
+                  target_flow_persistence_generation &&
+              OmegaAppTestAccess::PersistenceRecordCount(*app) ==
+                  target_flow_persistence_records &&
+              OmegaAppTestAccess::PersistenceLogicalValueBytes(*app) ==
+                  target_flow_persistence_bytes,
+        "the fallback target fixture restores its launch-local state without GPU residency, input schema, gamepad, or persistence ownership changes");
 
     const omega::app::GpuHostSnapshot ready_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);

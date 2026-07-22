@@ -1895,6 +1895,45 @@ Still unclaimed: retail trigger coordinates, objectives, missions, checkpoints, 
 collision response, camera, weapons, damage, AI, owner-corpus values, PCSX2 equivalence, or visual
 parity. No proprietary input, captured value, private address, or private path is recorded by E-0118.
 
+## Diagnostic pointer target and fire resolution (E-0119, 2026-07-22)
+
+- E-0119 adds an allocation-free `omega_gameplay` reducer over one inclusive normalized Q16 target.
+  It validates the target and optional pointer before forming a successor, acquires only while the
+  target action is held with an available in-bounds pointer, treats each enabled fire press as one
+  attempt, and monotonically latches completion only for an acquired attempt. Disabled or completed
+  state is inert and clears transient acquisition; missing-pointer, untargeted, and outside-target
+  attempts miss.
+- The fixed project target is `{left 47104, top 30720, right 51200, bottom 34816}`. Proximity
+  completion at frame start is the enable input, so a crossing and aimed shot in one multi-step frame
+  cannot hit. `OmegaApp` evaluates once per normal input frame, uses both the pre-reduction play
+  context and post-reduction simulation gate, and publishes only after every scheduled step succeeds.
+  Successful zero-step play frames can accept an edge. The launch-local state survives BriefingRoom
+  round trips and is never written to native persistence.
+- The completed proximity marker is replaced in that rendered frame by the target marker, which
+  reuses the existing texture and disappears on hit. Fallback texture order is base, actor,
+  objective-or-target, two targeting bars, then fire. Indexed presentation retains environment and
+  actor meshes plus objective-or-target, two bars, and fire overlays. No texture, mesh, input-schema,
+  gamepad, or persistence resource was added.
+- Fresh replay optionally owns the same state, follows the identical frame-start and menu gates,
+  transfers it on move, clears it from inert sources, and exposes an owned copy. Production fresh
+  replay enables the reducer from the captured logical fire/target schema and compares its exact
+  final state with the live app. One real-host test reconstructs six contiguous exact SDL capture
+  frames through the public capture APIs and proves the live crossing, releases, miss, hit, and final
+  completion replay identically.
+- A serialized full MSVC Debug build completed with zero warnings or errors; CTest passed 76/76;
+  focused reducer/replay/marker tests passed 3/3; direct Direct3D12 app-capture and opening-movie
+  smokes passed; the isolated production capture/replay CLI smoke passed; tooling passed 361/361;
+  Python compile-all passed; the native dependency gate passed 296 files; both ledger gates passed
+  119 records; and the staged public-tree gate passed 477 indexed text blobs. Hosted CI, exact-main
+  validation, owner-input comparison, retail fidelity, and visual parity remain pending.
+
+This is project-authored normalized 2D diagnostic behavior, not a retail targeting, camera, aim,
+weapon, projectile, raycast, damage, health, combat, or AI implementation. Only tracked clean-room
+source and project-generated fixtures informed and validated E-0119. A separate private research
+inventory supplied no target/fire value or behavior to this slice. No private or owner file,
+proprietary byte, captured value, raw address, private path, disc image, executable, save,
+memory-card image, savestate, emulator state, or PCSX2 observation is recorded by E-0119.
+
 ## Private PCSX2 producer readiness (E-0099, 2026-07-20)
 
 - A separately maintained local branch based on official PCSX2

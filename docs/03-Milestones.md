@@ -1252,6 +1252,12 @@ E-0118 adds one inclusive project X/Z proximity volume evaluated after every suc
 It reports outside/entered/inside/exited transitions, latches one launch-local diagnostic objective,
 removes its project marker after activation, and reproduces the same state in fresh replay. It is not
 a retail trigger, objective, mission, checkpoint, persistence, collision, or combat implementation.
+E-0119 adds one fixed project-owned normalized target after that objective completes. Held RMB/T plus
+an available in-bounds normalized pointer sample acquires it; an LMB/Space press attempts once per
+play input frame and only an acquired attempt latches completion. The target marker replaces the
+completed objective marker and disappears on a hit, while replay reproduces the same owned result.
+This is not a retail camera, aim, weapon, raycast, projectile, damage, health, combat, or target
+implementation.
 
 - Skeletons, animation, player movement, camera, collision, weapons, and basic AI.
 - Deterministic capture/replay for input and simulation state.
@@ -1259,7 +1265,8 @@ a retail trigger, objective, mission, checkpoint, persistence, collision, or com
 ## M5: First mission loop
 
 Status: in progress. E-0118 supplies the first project-owned movement-to-trigger-to-latched-objective
-vertical seam, with deterministic live/replay state and diagnostic presentation only.
+vertical seam. E-0119 extends that seam through mouse target acquisition and one latched hit, with
+deterministic live/replay state and diagnostic presentation only.
 
 - Independently rewritten native mission behavior required by MINSK.
 - Objectives, triggers, combat, inventory, checkpoints, failure, and completion.
