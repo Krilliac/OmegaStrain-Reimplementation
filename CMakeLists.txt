@@ -38,6 +38,7 @@ option(OMEGA_RUN_GPU_SMOKE_TEST
 
 add_library(omega_core STATIC
     native/src/archive/hog_archive.cpp
+    native/src/asset/model_ir_validate.cpp
     native/src/asset/pop_terrain_index.cpp
     native/src/vfs/virtual_file_system.cpp
 )
@@ -158,6 +159,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/job_service.cpp
     native/src/runtime/launch_options.cpp
     native/src/runtime/log_service.cpp
+    native/src/runtime/model_pose_evaluation.cpp
     native/src/runtime/packed24_transfer_debug_image.cpp
     native/src/runtime/render_draw_list.cpp
     native/src/runtime/render_mesh_draw_list.cpp
@@ -2648,6 +2650,8 @@ if(BUILD_TESTING)
         native/tests/job_service_tests.cpp
         native/tests/launch_options_tests.cpp
         native/tests/log_service_tests.cpp
+        native/tests/model_ir_validate_tests.cpp
+        native/tests/model_pose_evaluation_tests.cpp
         native/tests/spatial_debug_image_tests.cpp
         native/tests/pop_level_manifest_decoder_tests.cpp
         native/tests/pop_post_terrain_hypothesis_descriptor_tests.cpp

@@ -114,6 +114,8 @@ int VumRenderPayloadDescriptorFailureCount();
 int GameDataServiceFailureCount();
 int LaunchOptionsFailureCount();
 int LogServiceFailureCount();
+int ModelIrValidateFailureCount();
+int ModelPoseEvaluationFailureCount();
 int ConfigServiceFailureCount();
 int JobServiceFailureCount();
 int SpatialDebugImageFailureCount();
@@ -387,6 +389,8 @@ int main()
     failures += GameDataServiceFailureCount();
     failures += LaunchOptionsFailureCount();
     failures += LogServiceFailureCount();
+    failures += ModelIrValidateFailureCount();
+    failures += ModelPoseEvaluationFailureCount();
     failures += ConfigServiceFailureCount();
     failures += JobServiceFailureCount();
     failures += SpatialDebugImageFailureCount();
