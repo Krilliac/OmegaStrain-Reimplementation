@@ -569,6 +569,35 @@ if(BUILD_TESTING)
         )
     endfunction()
 
+    # Independent C++ construction of the public producer wire vector. The Python
+    # parser consumes the same checked-in ASCII-hex fixture, preventing its test
+    # builder and the fixed-width producer contract from drifting together.
+    add_executable(omega_scene_fragment_wire_contract_tests
+        native/tests/scene_fragment_wire_contract_tests.cpp
+    )
+    if(MSVC)
+        target_compile_options(omega_scene_fragment_wire_contract_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_scene_fragment_wire_contract_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+        )
+    endif()
+    add_test(NAME omega_scene_fragment_wire_contract_tests
+        COMMAND omega_scene_fragment_wire_contract_tests
+            "${CMAKE_CURRENT_SOURCE_DIR}/analysis/fixtures/scene_fragment_v1/synthetic-producer.hex"
+    )
+    set_tests_properties(omega_scene_fragment_wire_contract_tests PROPERTIES TIMEOUT 10)
+
     if(WIN32)
         unset(OMEGA_LAUNCH_TEST_POWERSHELL CACHE)
         unset(OMEGA_LAUNCH_TEST_POWERSHELL)

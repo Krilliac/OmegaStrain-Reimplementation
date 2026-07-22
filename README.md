@@ -1499,6 +1499,8 @@ Architecture, completion criteria, and the compatibility-first engine/SDK direct
   boundary, and native verifier.
 - `analysis/formats/TDX.md` — validated texture block, plane, palette, and zero-suffix contract.
 - `analysis/formats/VUM.md` — validated material catalog and render-payload boundary contract.
+- `analysis/formats/SCENE-FRAGMENT.md` — bounded private-fragment parser, anonymous transform
+  observation contract, and the exact camera/geometry semantics blockers.
 - `analysis/elf/loader-hints.md` — confirmed executable evidence and open loader questions.
 - `third_party/pcsx2/` — ignored official PCSX2 checkout and build.
 - `runtime/` — ignored isolated PCSX2 data/configuration and logs.
