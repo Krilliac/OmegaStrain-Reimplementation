@@ -237,6 +237,18 @@ Studio's historical engine source or internal toolchain.
   limits, descriptor rejections, privacy equivalence, unsafe entries, and identity/content races.
   No owner-corpus run is recorded. Acceptance is not retail validity, semantic decode, UI/menu
   evidence, format or consumer meaning, rendering behavior, or PCSX2 parity.
+- E-0114 adds the bounded renderer-neutral `SceneIR`, generation-safe indexed-mesh pool and draw-list
+  contracts, SDL GPU mesh submission, and the first native application composition of canonical
+  level geometry. `OmegaApp` builds one project-owned global diagnostic projection that preserves
+  relative offsets and scale along its selected aggregate axes, validates every
+  camera-times-instance transform before upload, transactionally uploads
+  the complete mesh set, and publishes mesh commands only in `DiagnosticPlay`; the existing actor,
+  fire, and targeting cues remain ordered texture overlays. Generated and Direct3D12 fixtures cover
+  ordered multi-mesh rendering, full prefix rollback, stale/foreign handle rejection, matrix order,
+  exact pixel presentation beneath an overlay, and zero-residual teardown. The app presentation and
+  large smoke scenarios are heap/sibling-owned so checked Windows builds retain bounded stack use.
+  This is a project-authored diagnostic view: it establishes no retail placement, camera,
+  visibility, material, lighting, collision, draw order, owner-corpus publication, or visual parity.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public

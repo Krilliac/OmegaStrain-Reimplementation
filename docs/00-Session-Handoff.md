@@ -1764,11 +1764,12 @@ behavioral parity.
 Still unclaimed: a private metadata-only native owner-corpus acceptance run, retail opcode/type/event
 semantics, runtime consumption, or behavioral parity.
 
-## Native spatial scene application integration (E-0113, 2026-07-21)
+## Native spatial scene application integration (E-0114, 2026-07-21)
 
 - `OmegaApp` builds the bounded project-owned global-coordinate diagnostic `SceneIR` once when
   canonical `LevelContentIR` is present. One aggregate projection preserves decoded inter-cell
-  offsets and scale without assigning retail axis or placement meaning; the app transactionally
+  offsets and scale along its selected aggregate axes without assigning retail axis or placement
+  meaning; the app transactionally
   uploads its complete mesh set and retains fixed generation-safe mesh and draw-list values for the
   app lifetime.
 - Profiles, Characters, BriefingRoom, Controls, AssetTopology, opening-movie, keyboard/mouse, and
