@@ -450,8 +450,10 @@ struct Iso9660PrimaryVolume
             primary.volume_bytes > image_bytes)
             return std::unexpected("ISO9660 declared volume exceeds the image range");
 
-        const std::size_t root_length = ByteValue(bytes[156]);
-        if (root_length < 34 || root_length > bytes.size() - 156)
+        if (ByteValue(bytes[881]) != 1)
+            return std::unexpected("ISO9660 file structure version is invalid");
+        constexpr std::size_t root_length = 34;
+        if (ByteValue(bytes[156]) != root_length)
             return std::unexpected("ISO9660 root directory record is malformed");
         auto root = ParseIso9660DirectoryRecord(bytes.subspan(156, root_length));
         if (!root)
@@ -491,6 +493,8 @@ struct Iso9660DirectoryTask
     std::string path;
     std::uint32_t extent_sector = 0;
     std::uint32_t data_length = 0;
+    std::uint32_t parent_extent_sector = 0;
+    std::uint32_t parent_data_length = 0;
     std::uint32_t depth = 0;
 };
 
@@ -509,6 +513,8 @@ BuildIso9660Index(std::ifstream& stream, const Iso9660PrimaryVolume& primary,
         .path = {},
         .extent_sector = primary.root.extent_sector,
         .data_length = primary.root.data_length,
+        .parent_extent_sector = primary.root.extent_sector,
+        .parent_data_length = primary.root.data_length,
         .depth = 0,
     });
     directory_extents.insert(primary.root.extent_sector);
@@ -528,6 +534,7 @@ BuildIso9660Index(std::ifstream& stream, const Iso9660PrimaryVolume& primary,
             return std::unexpected(directory_offset.error());
 
         std::uint64_t consumed = 0;
+        std::size_t directory_record_ordinal = 0;
         while (consumed < directory.data_length)
         {
             const std::uint64_t remaining = directory.data_length - consumed;
@@ -571,9 +578,26 @@ BuildIso9660Index(std::ifstream& stream, const Iso9660PrimaryVolume& primary,
                 {
                     if (!record->is_directory())
                         return std::unexpected("ISO9660 special directory entry is not a directory");
+                    if (directory_record_ordinal > 1 ||
+                        ByteValue(record->identifier.front()) != directory_record_ordinal)
+                        return std::unexpected("ISO9660 special directory entries are out of order");
+                    const bool is_current_directory = directory_record_ordinal == 0;
+                    const std::uint32_t expected_extent = is_current_directory
+                                                              ? directory.extent_sector
+                                                              : directory.parent_extent_sector;
+                    const std::uint32_t expected_length = is_current_directory
+                                                              ? directory.data_length
+                                                              : directory.parent_data_length;
+                    if (record->extent_sector != expected_extent ||
+                        record->data_length != expected_length)
+                        return std::unexpected(
+                            "ISO9660 special directory entry does not match its hierarchy");
+                    ++directory_record_ordinal;
                     position += record_length;
                     continue;
                 }
+                if (directory_record_ordinal < 2)
+                    return std::unexpected("ISO9660 directory is missing its special entries");
 
                 std::uint64_t next_name_bytes = 0;
                 if (!CheckedAdd(cumulative_name_bytes, record->identifier.size(), next_name_bytes) ||
@@ -626,6 +650,8 @@ BuildIso9660Index(std::ifstream& stream, const Iso9660PrimaryVolume& primary,
                         .path = std::move(*path),
                         .extent_sector = record->extent_sector,
                         .data_length = record->data_length,
+                        .parent_extent_sector = directory.extent_sector,
+                        .parent_data_length = directory.data_length,
                         .depth = directory.depth + 1,
                     });
                 }
@@ -643,10 +669,13 @@ BuildIso9660Index(std::ifstream& stream, const Iso9660PrimaryVolume& primary,
                         .size = record->data_length,
                     });
                 }
+                ++directory_record_ordinal;
                 position += record_length;
             }
             consumed += block_bytes;
         }
+        if (directory_record_ordinal < 2)
+            return std::unexpected("ISO9660 directory is missing its special entries");
     }
     return files;
 }
