@@ -73,6 +73,16 @@
       "jobs": 1
     },
     {
+      "name": "vs2022-launcher-debug",
+      "displayName": "Visual Studio 2022 - Debug launcher and game",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Debug",
+      "targets": [
+        "openomega_launcher"
+      ],
+      "jobs": 1
+    },
+    {
       "name": "vs2022-game-relwithdebinfo",
       "displayName": "Visual Studio 2022 - RelWithDebInfo game",
       "configurePreset": "vs2022-x64",

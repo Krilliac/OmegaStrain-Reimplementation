@@ -1347,14 +1347,17 @@ Studio's historical engine source or internal toolchain.
 
 ## Quick start: native game
 
-Build the standalone native game once, then double-click `Play-OpenOmega.cmd` or run it from a
-terminal. The launcher never starts a build implicitly; if the executable is missing, it prints the
-exact configure/build commands to run.
+Build the native launcher and game once, then double-click `Play-OpenOmega.cmd`. The separate
+`openomega_launcher.exe` presents only prelaunch setup: choose an extracted NTSC-U data folder or
+an owned ISO, optionally enable a gamepad, then Play. Profiles, character creation and selection,
+the briefing room, mission selection, and gameplay remain inside `openomega.exe`. The launcher uses
+compact antialiased DirectWrite text and native Windows pickers; it never embeds or copies retail
+data. It also never starts a build implicitly, and prints exact build commands when missing.
 
 ```powershell
 cmake --preset vs2022-x64
-cmake --build --preset vs2022-game-debug
-.\Play-OpenOmega.cmd -Preset vs2022-x64
+cmake --build --preset vs2022-launcher-debug
+.\Play-OpenOmega.cmd
 ```
 
 The default path is keyboard and mouse only: W/A/S/D or the arrow keys navigate and move; Return,
@@ -1362,6 +1365,7 @@ keypad Enter, or F1 selects; Space or left mouse selects/fires; Escape, Backspac
 goes back in menus; T or held right mouse targets in play; and F10 quits. Gamepad discovery remains
 off unless the player explicitly supplies `--set=input.gamepad_enabled=true`.
 
+Supplying arguments to `Play-OpenOmega.cmd` retains the direct-game developer path.
 `scripts/run-openomega.ps1` accepts `-Config Debug|RelWithDebInfo|Release`,
 `-Preset auto|msvc|vs2022-x64`, an optional `-ConfigFile`, and any remaining native game arguments.
 It runs from the repository root and forwards the game's exit code:
@@ -1372,8 +1376,9 @@ powershell -NoProfile -File .\scripts\run-openomega.ps1 -ConfigFile .\openomega.
 ```
 
 Double-click `Open-OpenOmega-VS.cmd` to generate and open the Visual Studio 2022 x64 solution. The
-solution keeps the game, provisional SDK tool, engine libraries, compatibility layers, platform
-backend, and tests in separate projects/folders, with `openomega` as the default startup project.
+solution keeps the launcher, game, provisional SDK tool, engine libraries, compatibility layers,
+platform backend, and tests in separate projects/folders, with `openomega_launcher` as the default
+startup project. Set `openomega` as startup whenever the debugger should begin inside the game.
 The command generates IDE files but deliberately does not compile; build the solution once before
 using a library project as an executable debug host.
 

@@ -216,6 +216,23 @@ int RuntimeSettingsFailureCount()
             "a direct root never inherits the configured level code");
     }
 
+    const std::string unicode_root_bytes = "configured/\xCE\xA9-data";
+    auto unicode_content = omega::runtime::ParseConfigText(
+        "content.data_root = " + unicode_root_bytes + "\n");
+    if (unicode_content)
+    {
+        auto resolved_unicode = omega::runtime::ResolveContentLaunchProfile(
+            no_content_options, *unicode_content);
+        const std::u8string expected_utf8 = u8"configured/\u03A9-data";
+        Check(resolved_unicode && resolved_unicode->has_value() &&
+                  (*resolved_unicode)->data_root == std::filesystem::path(expected_utf8),
+            "configured UTF-8 content paths resolve without the Windows ANSI code page");
+    }
+    else
+    {
+        Check(false, "a valid UTF-8 content path parses");
+    }
+
     auto missing_content_root = omega::runtime::ParseConfigText(
         "content.level_code = MINSK\n");
     Check(missing_content_root.has_value(), "the missing-root fixture parses");

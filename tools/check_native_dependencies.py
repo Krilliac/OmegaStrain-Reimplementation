@@ -233,6 +233,8 @@ _DEBUG_SUBSYSTEM_ENTRY_BREAK_SOURCES = frozenset(
         "native/apps/openomega/native_persistence.cpp",
         "native/apps/openomega/omega_app.cpp",
         "native/apps/openomega/sdl_platform_service.cpp",
+        "native/apps/openomega_launcher/launcher_config.cpp",
+        "native/apps/openomega_launcher/launcher_window.cpp",
         "native/src/archive/hog_archive.cpp",
         "native/src/compat/ps2_memory_card_image.cpp",
         "native/src/content/game_data_service.cpp",
@@ -264,6 +266,11 @@ _RUNTIME_EDGES = frozenset(
     {"omega_runtime", "omega_content", "omega_assets", "omega_core"}
 )
 _SDL_EDGES = frozenset({"omega_sdl_backend", "omega_runtime"})
+_LAUNCHER_CORE_EDGES = frozenset({"omega_launcher_core", "omega_runtime"})
+_LAUNCHER_HOST_EDGES = frozenset(
+    {"omega_launcher_host", "omega_launcher_core", "omega_content"}
+)
+_LAUNCHER_EXE_EDGES = frozenset({"openomega_launcher", "omega_launcher_host"})
 _APP_EDGES = frozenset(
     {
         "openomega",
@@ -421,6 +428,31 @@ MODULE_RULES = (
 )
 
 EXACT_MODULE_RULES = {
+    "native/apps/openomega_launcher/launcher_config.cpp": ModuleRule(
+        "native/apps/openomega_launcher/launcher_config.cpp",
+        "omega_launcher_core",
+        _LAUNCHER_CORE_EDGES,
+    ),
+    "native/apps/openomega_launcher/launcher_config.h": ModuleRule(
+        "native/apps/openomega_launcher/launcher_config.h",
+        "omega_launcher_core",
+        _LAUNCHER_CORE_EDGES,
+    ),
+    "native/apps/openomega_launcher/launcher_window.cpp": ModuleRule(
+        "native/apps/openomega_launcher/launcher_window.cpp",
+        "omega_launcher_host",
+        _LAUNCHER_HOST_EDGES,
+    ),
+    "native/apps/openomega_launcher/launcher_window.h": ModuleRule(
+        "native/apps/openomega_launcher/launcher_window.h",
+        "omega_launcher_host",
+        _LAUNCHER_HOST_EDGES,
+    ),
+    "native/apps/openomega_launcher/main.cpp": ModuleRule(
+        "native/apps/openomega_launcher/main.cpp",
+        "openomega_launcher",
+        _LAUNCHER_EXE_EDGES,
+    ),
     "native/include/omega/debug/subsystem_entry_break.h": ModuleRule(
         "native/include/omega/debug/subsystem_entry_break.h",
         "omega_debug",

@@ -9,6 +9,15 @@ include_guard(GLOBAL)
 # builds and Visual Studio builds should expose the same layout below their own
 # binary directories, so launchers never need to understand generator defaults.
 function(omega_configure_product_outputs)
+    if(TARGET openomega_launcher)
+        set_target_properties(openomega_launcher PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY
+                "${CMAKE_BINARY_DIR}/products/game/$<CONFIG>"
+            PDB_OUTPUT_DIRECTORY
+                "${CMAKE_BINARY_DIR}/products/game/$<CONFIG>"
+        )
+    endif()
+
     if(TARGET openomega)
         set_target_properties(openomega PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY
@@ -139,8 +148,13 @@ function(omega_configure_visual_studio)
     set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER
         "Developer Utilities/CMake")
 
-    omega_set_visual_studio_startup_project(openomega omega_tool)
+    omega_set_visual_studio_startup_project(openomega_launcher openomega omega_tool)
 
+    _omega_vs_assign_folder("Products/Launcher"
+        openomega_launcher)
+    _omega_vs_assign_folder("Products/Launcher/Libraries"
+        omega_launcher_core
+        omega_launcher_host)
     _omega_vs_assign_folder("Products/Game"
         openomega)
     _omega_vs_assign_folder("Products/Game/Libraries"
@@ -196,6 +210,8 @@ function(omega_configure_visual_studio)
         omega_character_front_end_flow_tests
         omega_diagnostic_actor_marker_tests
         omega_opening_movie_safety_tests)
+    _omega_vs_assign_folder("Tests/Products/Launcher"
+        omega_launcher_config_tests)
     _omega_vs_assign_folder("Tests/Products/Game/Persistence"
         omega_native_persistence_tests
         omega_native_character_session_tests)
@@ -327,6 +343,10 @@ function(omega_configure_visual_studio)
         omega_content omega_level_texture_store_tests omega_content)
     _omega_vs_map_library_to_host(
         omega_runtime omega_input_trace_tests omega_runtime)
+    _omega_vs_map_library_to_host(
+        omega_launcher_core openomega_launcher omega_launcher_core)
+    _omega_vs_map_library_to_host(
+        omega_launcher_host openomega_launcher omega_launcher_host)
 
     foreach(library_target IN ITEMS
             omega_app_core

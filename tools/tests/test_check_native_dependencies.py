@@ -52,6 +52,14 @@ class NativeDependencyGateTests(unittest.TestCase):
             ("native/src/content/example.cpp", "omega/retail/pop_level_manifest_decoder.h"),
             ("native/src/runtime/example.cpp", "omega/content/game_data_service.h"),
             ("native/apps/openomega/sdl_example.cpp", "omega/runtime/render_frame_packet.h"),
+            (
+                "native/apps/openomega_launcher/launcher_config.cpp",
+                "omega/runtime/config_service.h",
+            ),
+            (
+                "native/apps/openomega_launcher/launcher_window.cpp",
+                "omega/content/game_data_service.h",
+            ),
             ("native/apps/openomega/example.cpp", "omega/simulation/simulation_world.h"),
             ("native/apps/openomega/example.cpp", "omega/profiles/profile_catalog.h"),
             ("native/apps/openomega/example.cpp", "omega/media/nv12_to_rgba8.h"),
@@ -72,6 +80,8 @@ class NativeDependencyGateTests(unittest.TestCase):
             "native/apps/openomega/native_persistence.cpp",
             "native/apps/openomega/omega_app.cpp",
             "native/apps/openomega/sdl_platform_service.cpp",
+            "native/apps/openomega_launcher/launcher_config.cpp",
+            "native/apps/openomega_launcher/launcher_window.cpp",
             "native/src/archive/hog_archive.cpp",
             "native/src/compat/ps2_memory_card_image.cpp",
             "native/src/content/game_data_service.cpp",

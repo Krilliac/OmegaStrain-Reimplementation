@@ -71,6 +71,18 @@ MAPPINGS = (
         "if (!IsValidConfig(config))",
     ),
     (
+        "native/apps/openomega_launcher/launcher_config.cpp",
+        "omega_launcher_core",
+        "LoadLauncherPreferences(\n    const std::filesystem::path& config_path)",
+        "auto existing = LoadExistingStore(config_path)",
+    ),
+    (
+        "native/apps/openomega_launcher/launcher_window.cpp",
+        "omega_launcher_host",
+        "int RunLauncher(HINSTANCE instance, const int show_command)",
+        "LauncherWindow launcher(instance, DefaultConfigurationPath())",
+    ),
+    (
         "native/apps/openomega/front_end.cpp",
         "omega_app_core",
         "MakeFrontEndStartupModel(",
@@ -147,7 +159,11 @@ class SubsystemEntryBreakPolicyTests(unittest.TestCase):
             r'OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY\("([a-z0-9_]+)"\);'
         )
 
-        shipping_roots = (ROOT / "native/src", ROOT / "native/apps/openomega")
+        shipping_roots = (
+            ROOT / "native/src",
+            ROOT / "native/apps/openomega",
+            ROOT / "native/apps/openomega_launcher",
+        )
         for shipping_root in shipping_roots:
             for path in shipping_root.rglob("*.cpp"):
                 source = read(path)
