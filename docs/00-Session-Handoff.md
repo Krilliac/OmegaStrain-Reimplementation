@@ -1869,6 +1869,32 @@ weapon behavior, projectile, raycast, damage, collision, coordinate-axis parity,
 PCSX2 equivalence, or visual parity. No proprietary input, captured value, private address, or private
 path is recorded by E-0117.
 
+## Diagnostic proximity objective (E-0118, 2026-07-22)
+
+- E-0118 adds an allocation-free `omega_gameplay` reducer over an inclusive signed X/Z volume and an
+  owned two-boolean state. It rejects reversed bounds without mutation, ignores Y, classifies each
+  observation as outside, entered, inside, or exited, and latches objective completion on the first
+  in-volume observation.
+- The fixed project zone is X `[3,5]`, Z `[-1,1]`, reachable from the origin with keyboard movement.
+  `OmegaApp` evaluates it after every successful fixed simulation step, so a multi-step frame cannot
+  skip activation even when its final position has already exited. Menus, zero-step frames, and
+  terminal or failed steps do not advance it. State remains launch-local across BriefingRoom returns
+  and is not stored in native persistence.
+- One project-generated rectangle reuses the existing diagnostic marker texture while the objective
+  is armed and disappears after completion. It adds no mesh allocation and leaves actor, target, and
+  fire ordering deterministic. Fresh replay enables the same reducer only with diagnostic locomotion
+  and exposes an optional owned final state for comparison.
+- Project-generated core, replay, and real-host fixtures cover invalid bounds, inclusive faces and
+  corners, signed extremes, entry/inside/exit/reentry, monotonic latching, multi-step crossing,
+  menu/zero-step/terminal nonmutation, move lifecycle, presentation removal, and replay equality.
+  A serialized full MSVC Debug build completed with zero warnings or errors; CTest passed 75/75,
+  focused reducer/replay/marker tests passed 3/3, and the direct real-host app-capture smoke passed.
+  Hosted CI, exact-main validation, and retail comparison remain pending.
+
+Still unclaimed: retail trigger coordinates, objectives, missions, checkpoints, persistence,
+collision response, camera, weapons, damage, AI, owner-corpus values, PCSX2 equivalence, or visual
+parity. No proprietary input, captured value, private address, or private path is recorded by E-0118.
+
 ## Private PCSX2 producer readiness (E-0099, 2026-07-20)
 
 - A separately maintained local branch based on official PCSX2

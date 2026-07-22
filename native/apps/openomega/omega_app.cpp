@@ -1044,6 +1044,10 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         log->Error("startup", error);
         return std::unexpected(std::string(error));
     }
+    constexpr auto diagnostic_objective_destination =
+        PlanProjectDiagnosticObjectiveMarkerDestination(
+            gameplay::DiagnosticProximityTriggerState{});
+    static_assert(diagnostic_objective_destination.has_value());
     const std::array diagnostic_actor_commands{
         diagnostic_hidden_draw_list.commands().front(),
         runtime::RenderTextureBlitCommand{
@@ -1051,6 +1055,13 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             .source = full_source,
             .destination = PlanProjectDiagnosticActorMarkerDestination(
                 simulation::Position3{}),
+            .fit_mode = runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        },
+        runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_actor_marker_texture,
+            .source = full_source,
+            .destination = *diagnostic_objective_destination,
             .fit_mode = runtime::RenderTextureFitMode::Stretch,
             .filter_mode = runtime::RenderTextureFilterMode::Nearest,
         },
@@ -1065,6 +1076,18 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         return std::unexpected(std::string(error));
     }
     diagnostic_actor_draw_list = std::move(*created_actor_draw_list);
+    auto created_scene_overlay_draw_list = runtime::RenderDrawList::Create(
+        std::span<const runtime::RenderTextureBlitCommand>{
+            diagnostic_actor_commands.data() + 2U, 1U});
+    if (!created_scene_overlay_draw_list)
+    {
+        constexpr std::string_view error =
+            "SDL/GPU diagnostic scene overlay draw-list creation failed";
+        log->Error("startup", error);
+        return std::unexpected(std::string(error));
+    }
+    diagnostic_scene_overlay_draw_list =
+        std::move(*created_scene_overlay_draw_list);
 
     diagnostic_commands[diagnostic_base_command_count] =
         runtime::RenderTextureBlitCommand{
@@ -2245,6 +2268,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             };
         }
 
+        gameplay::DiagnosticProximityTriggerState next_proximity_trigger_state =
+            diagnostic_proximity_trigger_state_;
         for (std::uint32_t step = 0; step < plan.simulation_steps; ++step)
         {
             if (simulation_->AdvanceOneStep(simulation_input) !=
@@ -2262,7 +2287,44 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 };
             }
             ++result.executed_simulation_steps;
+            if (simulation_allowed)
+            {
+                const std::optional<simulation::Position3> moved_position =
+                    simulation_->PositionOf(debug_locomotion_entity_);
+                if (!moved_position)
+                {
+                    (void)ContainOpeningMovieAudio();
+                    jobs_->WaitForIdle();
+                    constexpr std::string_view error =
+                        "diagnostic actor position is unavailable";
+                    log_->Error("simulation", error);
+                    return RunLoopResult{
+                        .result = result,
+                        .operational_error = std::string(error),
+                        .capture_error = std::nullopt,
+                    };
+                }
+                const auto trigger_step =
+                    gameplay::AdvanceDiagnosticProximityTrigger(
+                        gameplay::kProjectDiagnosticObjectiveVolume,
+                        next_proximity_trigger_state, *moved_position);
+                if (!trigger_step)
+                {
+                    (void)ContainOpeningMovieAudio();
+                    jobs_->WaitForIdle();
+                    constexpr std::string_view error =
+                        "diagnostic proximity trigger evaluation failed";
+                    log_->Error("simulation", error);
+                    return RunLoopResult{
+                        .result = result,
+                        .operational_error = std::string(error),
+                        .capture_error = std::nullopt,
+                    };
+                }
+                next_proximity_trigger_state = trigger_step->state;
+            }
         }
+        diagnostic_proximity_trigger_state_ = next_proximity_trigger_state;
 
         const simulation::SimulationState simulation_snapshot = simulation_->Snapshot();
         const bool movie_is_active = IsBootSequenceActive(boot_sequence_state_);
@@ -2892,7 +2954,8 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
         .right = runtime::kNormalizedRenderExtent,
         .bottom = runtime::kNormalizedRenderExtent,
     };
-    std::array<runtime::RenderTextureBlitCommand, 5U> commands{};
+    // Fixed worst case: base, actor, armed objective, two target bars, and fire.
+    std::array<runtime::RenderTextureBlitCommand, 6U> commands{};
     const std::span<const runtime::RenderTextureBlitCommand> base_commands =
         diagnostic_hidden_draw_list_.commands();
     if (base_commands.size() > 1U)
@@ -2913,6 +2976,19 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
         .filter_mode = runtime::RenderTextureFilterMode::Nearest,
     };
     const std::size_t overlay_command_offset = command_count;
+    const auto objective_destination =
+        PlanProjectDiagnosticObjectiveMarkerDestination(
+            diagnostic_proximity_trigger_state_);
+    if (objective_destination)
+    {
+        commands[command_count++] = runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_actor_marker_texture_,
+            .source = full_source,
+            .destination = *objective_destination,
+            .fit_mode = runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        };
+    }
     if (debug_target_held_)
     {
         const auto target_cue_destinations =

@@ -11,6 +11,7 @@
 #include "sdl_input_service.h"
 #include "sdl_platform_service.h"
 
+#include "omega/gameplay/diagnostic_proximity_trigger.h"
 #include "omega/runtime/asset_service.h"
 #include "omega/runtime/config_service.h"
 #include "omega/runtime/content_startup.h"
@@ -289,7 +290,8 @@ private:
     runtime::RenderTextureHandle diagnostic_texture_;
     runtime::RenderTextureHandle diagnostic_actor_marker_texture_;
     // Allocation-free post-step presentation value. It retains the immutable
-    // base command followed by the actor marker command while DiagnosticPlay is active.
+    // base command followed by the actor marker, armed objective marker, and contextual cues
+    // while DiagnosticPlay is active.
     runtime::RenderDrawList diagnostic_actor_draw_list_;
     // Heap-owned presentation storage. Indirection keeps the complete fixed mesh and overlay
     // command backing out of OmegaApp value/expected stack storage; per-frame overlay replacement
@@ -334,6 +336,9 @@ private:
     // the active-row cue are both derived from it against the current model.
     std::optional<profiles::ProfileId> active_profile_id_;
     std::optional<profiles::CharacterId> active_character_id_;
+    // Launch-local project diagnostic state. It survives front-end round trips, is never written
+    // to native persistence, and latches only from successful DiagnosticPlay simulation steps.
+    gameplay::DiagnosticProximityTriggerState diagnostic_proximity_trigger_state_{};
     // Contextual native playtest controls. Mouse/keyboard actions update these
     // only when DiagnosticPlay was already active at frame input time, so the
     // same physical controls remain menu select/back aliases without leaking a

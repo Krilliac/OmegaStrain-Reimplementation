@@ -131,7 +131,12 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
 
     RunReplaySession session(
         std::move(*scheduler), std::move(*world), std::move(*replay),
-        debug_locomotion_entity, config.initial_front_end_state,
+        debug_locomotion_entity,
+        debug_locomotion_entity
+            ? std::optional<gameplay::DiagnosticProximityTriggerState>{
+                  gameplay::DiagnosticProximityTriggerState{}}
+            : std::nullopt,
+        config.initial_front_end_state,
         config.front_end_visible_profile_slots,
         config.front_end_total_profile_count,
         config.front_end_visible_character_slots_by_profile,
@@ -144,6 +149,8 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
     simulation::SimulationWorld&& simulation,
     runtime::RunCaptureReplaySession&& replay,
     const std::optional<simulation::EntityId> debug_locomotion_entity,
+    const std::optional<gameplay::DiagnosticProximityTriggerState>
+        diagnostic_proximity_trigger_state,
     const std::optional<FrontEndState> front_end_state,
     const std::uint8_t front_end_visible_profile_slots,
     const std::size_t front_end_total_profile_count,
@@ -156,6 +163,7 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
       simulation_(std::in_place, std::move(simulation)),
       replay_(std::in_place, std::move(replay)),
       debug_locomotion_entity_(debug_locomotion_entity),
+      diagnostic_proximity_trigger_state_(diagnostic_proximity_trigger_state),
       front_end_state_(front_end_state),
       front_end_visible_profile_slots_(front_end_visible_profile_slots),
       front_end_total_profile_count_(front_end_total_profile_count),
@@ -181,6 +189,8 @@ RunReplaySession::RunReplaySession(RunReplaySession&& other) noexcept
       replay_(std::move(other.replay_)),
       debug_locomotion_entity_(std::exchange(
           other.debug_locomotion_entity_, std::nullopt)),
+      diagnostic_proximity_trigger_state_(std::exchange(
+          other.diagnostic_proximity_trigger_state_, std::nullopt)),
       front_end_state_(std::exchange(
           other.front_end_state_, std::nullopt)),
       front_end_visible_profile_slots_(std::exchange(
@@ -214,6 +224,7 @@ void RunReplaySession::NormalizeInert() noexcept
 {
     replay_.reset();
     debug_locomotion_entity_.reset();
+    diagnostic_proximity_trigger_state_.reset();
     front_end_state_.reset();
     front_end_visible_profile_slots_ = 0U;
     front_end_total_profile_count_ = 0U;
@@ -414,6 +425,10 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
         };
     }
 
+    std::optional<gameplay::DiagnosticProximityTriggerState>
+        next_diagnostic_proximity_trigger_state =
+            diagnostic_proximity_trigger_state_;
+    bool diagnostic_proximity_trigger_advanced = false;
     for (std::uint32_t step = 0U; step < plan.simulation_steps; ++step)
     {
         if (simulation_->AdvanceOneStep(simulation_input) !=
@@ -423,6 +438,39 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             return std::unexpected(Error(RunReplayOperation::Next,
                 RunReplayErrorCode::SimulationRepresentationExhausted));
         }
+        if (next_diagnostic_proximity_trigger_state)
+        {
+            if (!debug_locomotion_entity_)
+            {
+                state_ = RunReplaySessionState::Failed;
+                return std::unexpected(Error(RunReplayOperation::Next,
+                    RunReplayErrorCode::DiagnosticProximityTriggerFailed));
+            }
+            const std::optional<simulation::Position3> position =
+                simulation_->PositionOf(*debug_locomotion_entity_);
+            if (!position)
+            {
+                state_ = RunReplaySessionState::Failed;
+                return std::unexpected(Error(RunReplayOperation::Next,
+                    RunReplayErrorCode::DiagnosticProximityTriggerFailed));
+            }
+            const auto advanced = gameplay::AdvanceDiagnosticProximityTrigger(
+                gameplay::kProjectDiagnosticObjectiveVolume,
+                *next_diagnostic_proximity_trigger_state, *position);
+            if (!advanced)
+            {
+                state_ = RunReplaySessionState::Failed;
+                return std::unexpected(Error(RunReplayOperation::Next,
+                    RunReplayErrorCode::DiagnosticProximityTriggerFailed));
+            }
+            *next_diagnostic_proximity_trigger_state = advanced->state;
+            diagnostic_proximity_trigger_advanced = true;
+        }
+    }
+    if (diagnostic_proximity_trigger_advanced)
+    {
+        diagnostic_proximity_trigger_state_ =
+            next_diagnostic_proximity_trigger_state;
     }
 
     state_ = replay_->complete()
@@ -469,6 +517,12 @@ RunReplaySession::debug_locomotion_position() const noexcept
     if (!simulation_ || !debug_locomotion_entity_)
         return std::nullopt;
     return simulation_->PositionOf(*debug_locomotion_entity_);
+}
+
+std::optional<gameplay::DiagnosticProximityTriggerState>
+RunReplaySession::diagnostic_proximity_trigger_state() const noexcept
+{
+    return diagnostic_proximity_trigger_state_;
 }
 
 std::optional<runtime::RenderTargetRectQ16>

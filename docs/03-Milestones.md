@@ -1248,11 +1248,18 @@ W/A/S/D plus arrows navigate/move without a controller; the gamepad subsystem is
 unless `--set=input.gamepad_enabled=true` explicitly opts in. These are deliberately not retail
 actor, transform, mouse sensitivity/acceleration, crosshair, camera, weapon/projectile/raycast,
 damage, collision, coordinate-axis, or scene-placement implementations or parity claims.
+E-0118 adds one inclusive project X/Z proximity volume evaluated after every successful fixed step.
+It reports outside/entered/inside/exited transitions, latches one launch-local diagnostic objective,
+removes its project marker after activation, and reproduces the same state in fresh replay. It is not
+a retail trigger, objective, mission, checkpoint, persistence, collision, or combat implementation.
 
 - Skeletons, animation, player movement, camera, collision, weapons, and basic AI.
 - Deterministic capture/replay for input and simulation state.
 
 ## M5: First mission loop
+
+Status: in progress. E-0118 supplies the first project-owned movement-to-trigger-to-latched-objective
+vertical seam, with deterministic live/replay state and diagnostic presentation only.
 
 - Independently rewritten native mission behavior required by MINSK.
 - Objectives, triggers, combat, inventory, checkpoints, failure, and completion.

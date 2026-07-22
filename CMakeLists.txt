@@ -99,6 +99,7 @@ target_compile_features(omega_simulation PUBLIC cxx_std_23)
 
 add_library(omega_gameplay STATIC
     native/src/gameplay/debug_locomotion.cpp
+    native/src/gameplay/diagnostic_proximity_trigger.cpp
 )
 target_include_directories(omega_gameplay PUBLIC native/include)
 target_link_libraries(omega_gameplay PUBLIC omega_simulation)
@@ -1709,6 +1710,32 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_gameplay_tests COMMAND omega_gameplay_tests)
     set_tests_properties(omega_gameplay_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_diagnostic_proximity_trigger_tests
+        native/tests/diagnostic_proximity_trigger_tests.cpp
+    )
+    target_link_libraries(omega_diagnostic_proximity_trigger_tests PRIVATE omega_gameplay)
+    if(MSVC)
+        target_compile_options(omega_diagnostic_proximity_trigger_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_diagnostic_proximity_trigger_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_diagnostic_proximity_trigger_tests
+        COMMAND omega_diagnostic_proximity_trigger_tests)
+    set_tests_properties(omega_diagnostic_proximity_trigger_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_front_end_tests
         native/tests/front_end_tests.cpp

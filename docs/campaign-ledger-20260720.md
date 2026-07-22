@@ -170,6 +170,14 @@ The unkeyed digests do not authenticate source, establish provenance, or provide
 filesystem snapshot. No owner-corpus run is recorded. The semantic GUI/font/menu gate remains
 closed.
 
+## Follow-on implementation: E-0118 diagnostic proximity objective
+
+Campaign candidate N8 was later implemented as one project-owned, platform-free inclusive X/Z
+proximity reducer, launch-local objective latch, deterministic live/replay integration, and bounded
+diagnostic marker. It closes only the synthetic movement-to-trigger seam identified by the campaign;
+it supplies no retail trigger coordinates, objective graph, mission behavior, checkpoint semantics,
+collision, combat, AI, owner-corpus result, PCSX2 equivalence, or visual-parity claim.
+
 ## Remaining cutscene/menu blockers (honest)
 - Cutscene playback is Windows-only and selected through an external `--opening-movie` path; retail-
   intro discovery from game data is absent. Transition reliability also requires a defined practical
