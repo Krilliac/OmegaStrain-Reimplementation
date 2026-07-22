@@ -18,6 +18,10 @@
 namespace omega::content
 {
 class GameDataService;
+namespace detail
+{
+struct FrontEndScreenBundleTestAccess;
+}
 
 enum class FrontEndScreenKey
 {
@@ -105,6 +109,7 @@ private:
 
     friend class GameDataService;
     friend class FrontEndScreenBundle;
+    friend struct detail::FrontEndScreenBundleTestAccess;
 };
 
 // Fully owned canonical presentation data for one retail front-end screen. The
@@ -283,5 +288,6 @@ private:
     RetailFrontEndPresentationCapability presentation_capability_;
 
     friend class GameDataService;
+    friend struct detail::FrontEndScreenBundleTestAccess;
 };
 } // namespace omega::content

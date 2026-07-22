@@ -49,6 +49,10 @@ class NativeDependencyGateTests(unittest.TestCase):
                 "native/src/frontend_text/example.cpp",
                 "omega/retail/fnt_v3_decoder.h",
             ),
+            (
+                "native/src/frontend_presentation/example.cpp",
+                "omega/content/front_end_screen_bundle.h",
+            ),
             ("native/src/profiles/example.cpp", "omega/persistence/save_database.h"),
             ("native/src/simulation/example.cpp", "omega/asset/decode.h"),
             ("native/src/media/example.cpp", "omega/asset/decode.h"),
@@ -629,6 +633,64 @@ class NativeDependencyGateTests(unittest.TestCase):
                 )
         self.assert_rejected(
             "native/src/frontend_text/example.cpp",
+            "#include <windows.h>\n",
+            "unapproved external header",
+        )
+
+    def test_frontend_presentation_is_a_pure_owned_composition_boundary(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/include/omega/frontend_presentation/compositor.h": (
+                    "#pragma once\n"
+                    "#include <expected>\n"
+                    '#include "omega/frontend/compositor_math.h"\n'
+                ),
+                "native/src/frontend_presentation/compositor.cpp": (
+                    '#include "omega/frontend_presentation/compositor.h"\n'
+                    '#include "omega/content/front_end_screen_bundle.h"\n'
+                    '#include "omega/frontend_text/text_layout.h"\n'
+                ),
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(errors, [])
+
+        header_rule = gate.module_rule(
+            Path("native/include/omega/frontend_presentation/compositor.h")
+        )
+        source_rule = gate.module_rule(
+            Path("native/src/frontend_presentation/compositor.cpp")
+        )
+        self.assertIsNotNone(header_rule)
+        self.assertIsNotNone(source_rule)
+        self.assertEqual(header_rule.name, "omega_frontend_presentation")
+        self.assertEqual(source_rule.name, "omega_frontend_presentation")
+        expected_edges = frozenset(
+            {
+                "omega_frontend_presentation",
+                "omega_content",
+                "omega_frontend",
+                "omega_frontend_text",
+            }
+        )
+        self.assertEqual(header_rule.allowed_omega_modules, expected_edges)
+        self.assertEqual(source_rule.allowed_omega_modules, expected_edges)
+        self.assertTrue(header_rule.platform_neutral)
+        self.assertTrue(source_rule.platform_neutral)
+
+        for include, message in (
+            ("omega/runtime/render_frame_packet.h", "forbidden dependency"),
+            ("omega/simulation/simulation_world.h", "forbidden dependency"),
+            ("pcsx2/GS/GS.h", "forbidden PCSX2 header"),
+        ):
+            with self.subTest(include=include):
+                self.assert_rejected(
+                    "native/src/frontend_presentation/example.cpp",
+                    f'#include "{include}"\n',
+                    message,
+                )
+        self.assert_rejected(
+            "native/src/frontend_presentation/example.cpp",
             "#include <windows.h>\n",
             "unapproved external header",
         )
