@@ -582,7 +582,7 @@ void DrawChrome(DebugImage &image, const std::string_view section,
                 const std::string_view index) noexcept {
   DrawCornerMarks(image);
   FillRect(image, 72, 52, 816, 1, Color{58U, 91U, 99U, 125U});
-  DrawText(image, "OPENOMEGA / OPERATIONS TERMINAL", 72.0F, 68.0F,
+  DrawText(image, "AGENCY / SECURE OPERATIONS TERMINAL", 72.0F, 68.0F,
            TextStyle{.height = 12.0F,
                      .stroke_radius = 0.62F,
                      .tracking = 0.16F,
@@ -628,12 +628,12 @@ void DrawHelp(DebugImage &image, const std::string_view help) noexcept {
 void DrawTitleScreen(DebugImage &image,
                      const TacticalMenuImageModel &model) noexcept {
   DrawChrome(image, "SECURE ACCESS", "01 / 04");
-  DrawText(image, "OMEGA STRAIN", 92.0F, 148.0F,
+  DrawText(image, "SYPHON FILTER", 92.0F, 148.0F,
            TextStyle{.height = 34.0F,
                      .stroke_radius = 1.35F,
                      .tracking = 0.14F,
                      .color = kIce});
-  DrawText(image, "COVERT OPERATIONS NETWORK", 94.0F, 193.0F,
+  DrawText(image, "THE OMEGA STRAIN", 94.0F, 193.0F,
            TextStyle{.height = 13.0F,
                      .stroke_radius = 0.68F,
                      .tracking = 0.19F,
