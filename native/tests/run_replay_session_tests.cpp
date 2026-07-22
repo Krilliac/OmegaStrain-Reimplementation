@@ -137,6 +137,15 @@ constexpr RenderTargetRectQ16 kForwardTwoMarkerDestination{
     .bottom = 31'744U,
 };
 
+// FrontEndState's default is the canonical player-facing Title. Replay fixtures
+// that exercise gameplay must opt into gameplay explicitly; relying on a
+// default-constructed state made the old synthetic menu contract silently
+// change meaning when Title became the canonical startup surface.
+constexpr FrontEndState kGameplayFrontEndState{
+    .mode = FrontEndMode::Gameplay,
+    .selected_main_row = FrontEndMainRow::CreateAgent,
+};
+
 static_assert(omega::app::PlanProjectDiagnosticActorMarkerDestination(Position3{}) ==
               kOriginMarkerDestination);
 static_assert(omega::app::PlanProjectDiagnosticActorMarkerDestination(Position3{.z = 1}) ==
@@ -1539,8 +1548,9 @@ void CheckDiagnosticTargetFireReplay()
         },
     };
     RunReplaySessionConfig menu_config = target_config;
-    menu_config.initial_front_end_state = FrontEndState{};
+    menu_config.initial_front_end_state = kGameplayFrontEndState;
     menu_config.front_end_capabilities.can_start_diagnostic_campaign = true;
+    menu_config.front_end_capabilities.supports_character_selection = true;
     auto menu_created = RunReplaySession::Create(
         BuildScriptedPair(actions, menu_frames), menu_config);
     RunReplaySession menu = TakeSession(
@@ -1567,7 +1577,7 @@ void CheckDiagnosticTargetFireReplay()
               controls_released->frame_plan()->simulation_steps == 0U &&
               redeployed->front_end_command().type ==
                   FrontEndCommandType::StartDiagnosticCampaign &&
-              menu.front_end_state() == FrontEndState{} &&
+              menu.front_end_state() == kGameplayFrontEndState &&
               SameDiagnosticProximityTrigger(
                   menu.diagnostic_proximity_trigger_state(), false, true) &&
               SameDiagnosticTargetFire(
@@ -1713,7 +1723,7 @@ void CheckDiagnosticMissionLifecycleReplay()
         "the replay-complete error preserves the exact ready mission state");
 
     RunReplaySessionConfig already_deployed_config = coherent_config;
-    already_deployed_config.initial_front_end_state = FrontEndState{};
+    already_deployed_config.initial_front_end_state = kGameplayFrontEndState;
     auto already_deployed_created = RunReplaySession::Create(
         BuildPair(actions, 1U, no_elapsed), already_deployed_config);
     RunReplaySession already_deployed = TakeSession(already_deployed_created,
@@ -1739,7 +1749,7 @@ void CheckDiagnosticMissionLifecycleReplay()
     Check(SameDiagnosticMissionLifecycle(
               required_gate.diagnostic_mission_lifecycle_state(),
               DiagnosticMissionStatus::Ready) &&
-              required_gate.front_end_state() == FrontEndState{} &&
+              required_gate.front_end_state() == kGameplayFrontEndState &&
               !required_gate.front_end_active_profile_is_confirmed() &&
               !required_gate.front_end_active_character_is_confirmed(),
         "closed confirmation mirrors keep an initial DiagnosticPlay mission ready");
@@ -1819,7 +1829,7 @@ void CheckDiagnosticMissionLifecycleReplay()
               deployed->frame_plan()->simulation_steps == 0U &&
               deployed->front_end_command().type ==
                   FrontEndCommandType::StartDiagnosticCampaign &&
-              success.front_end_state() == FrontEndState{} &&
+              success.front_end_state() == kGameplayFrontEndState &&
               success.debug_locomotion_position() == Position3{} &&
               SameDiagnosticProximityTrigger(
                   success.diagnostic_proximity_trigger_state(), false, false) &&
@@ -1869,7 +1879,7 @@ void CheckDiagnosticMissionLifecycleReplay()
               redeployed_after_success->frame_plan()->simulation_steps == 2U &&
               redeployed_after_success->front_end_command().type ==
                   FrontEndCommandType::StartDiagnosticCampaign &&
-              success.front_end_state() == FrontEndState{} &&
+              success.front_end_state() == kGameplayFrontEndState &&
               success.debug_locomotion_position() == Position3{} &&
               SameDiagnosticProximityTrigger(
                   success.diagnostic_proximity_trigger_state(), false, false) &&
@@ -1893,7 +1903,7 @@ void CheckDiagnosticMissionLifecycleReplay()
     const auto disabled_hit = disabled.Next();
     Check(disabled_deploy && disabled_crossing && disabled_hit &&
               !disabled.diagnostic_mission_lifecycle_state() &&
-              disabled.front_end_state() == FrontEndState{} &&
+              disabled.front_end_state() == kGameplayFrontEndState &&
               SameDiagnosticTargetFire(
                   disabled.diagnostic_target_fire_state(), false, true),
         "the default-disabled option preserves the prior target completion and play-mode behavior");
@@ -2235,30 +2245,28 @@ void CheckFrontEndModalGate()
             .transitions = primary_down},
     };
     constexpr std::array expected_modal_states{
-        FrontEndState{.mode = FrontEndMode::Main,
-            .selected_main_row = FrontEndMainRow::StartDiagnostic},
-        FrontEndState{.mode = FrontEndMode::Main,
-            .selected_main_row = FrontEndMainRow::Profiles},
-        FrontEndState{.mode = FrontEndMode::Main,
-            .selected_main_row = FrontEndMainRow::Profiles},
-        FrontEndState{.mode = FrontEndMode::Profiles,
-            .selected_main_row = FrontEndMainRow::Profiles},
-        FrontEndState{.mode = FrontEndMode::Profiles,
-            .selected_main_row = FrontEndMainRow::Profiles},
-        FrontEndState{.mode = FrontEndMode::Profiles,
-            .selected_main_row = FrontEndMainRow::Profiles,
-            .selected_profile_slot = FrontEndProfileSlot::Second},
-        FrontEndState{.mode = FrontEndMode::Profiles,
-            .selected_main_row = FrontEndMainRow::Profiles,
-            .selected_profile_slot = FrontEndProfileSlot::Second},
-        FrontEndState{.mode = FrontEndMode::Main,
-            .selected_main_row = FrontEndMainRow::Profiles},
-        FrontEndState{.mode = FrontEndMode::Main,
-            .selected_main_row = FrontEndMainRow::Profiles},
-        FrontEndState{.mode = FrontEndMode::Main,
-            .selected_main_row = FrontEndMainRow::StartDiagnostic},
-        FrontEndState{.mode = FrontEndMode::Main,
-            .selected_main_row = FrontEndMainRow::StartDiagnostic},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::CreateAgent},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::LoadAgent},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::LoadAgent},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::LoadAgent},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::LoadAgent},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::Quit},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::Quit},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::Quit},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::Quit},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::LoadAgent},
+        FrontEndState{.mode = FrontEndMode::Title,
+            .selected_main_row = FrontEndMainRow::LoadAgent},
     };
     constexpr std::array expected_primary_held{
         false, false, false, true, true, true, false, true, true, false, false,
@@ -2308,8 +2316,7 @@ void CheckFrontEndModalGate()
                   frame->front_end_command() ==
                       (index == 7U
                            ? FrontEndCommand{
-                                 .type = FrontEndCommandType::SetActiveProfile,
-                                 .profile_slot = FrontEndProfileSlot::Second,
+                                 .type = FrontEndCommandType::RequestQuit,
                              }
                            : FrontEndCommand{}) &&
                   modal.scheduler_state() == modal_scheduler_origin &&
@@ -2317,7 +2324,7 @@ void CheckFrontEndModalGate()
                   modal.debug_locomotion_position() == modal_position_origin &&
                   modal.diagnostic_actor_marker_destination() ==
                       modal_marker_origin,
-            "main and profile-card edges discard elapsed and freeze every "
+            "canonical Title edges discard elapsed and freeze every "
             "simulation and marker value");
     }
     auto activated = modal.Next();
@@ -2325,30 +2332,20 @@ void CheckFrontEndModalGate()
     const auto activated_scheduler = modal.scheduler_state();
     const auto activated_world = modal.simulation_state();
     Check(activated && activated->elapsed() == milliseconds{15} && activated_plan &&
-              activated->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::StartDiagnosticCampaign,
-                  .profile_slot = FrontEndProfileSlot::First,
-              } &&
-              activated_plan->simulation_steps == 1U &&
-              activated_plan->interpolation_alpha == 0.5 &&
+              activated->front_end_command() == FrontEndCommand{} &&
+              activated_plan->simulation_steps == 0U &&
+              activated_plan->interpolation_alpha == 0.0 &&
               !activated_plan->clamped_delta && !activated_plan->dropped_time &&
-              modal.front_end_state() == FrontEndState{} &&
-              activated_scheduler &&
-              *activated_scheduler == FrameSchedulerState{
-                  .config = modal_config.scheduler,
-                  .accumulated_remainder = milliseconds{5},
-                  .total_planned_steps = 1U,
+              modal.front_end_state() == FrontEndState{
+                  .mode = FrontEndMode::Title,
+                  .selected_main_row = FrontEndMainRow::LoadAgent,
               } &&
-              activated_world && SameSimulation(*activated_world,
-                  SimulationState{
-                      .completed_steps = 1U,
-                      .simulated_time = milliseconds{10},
-                      .alive_entities = 1U,
-                  }) &&
+              activated_scheduler == modal_scheduler_origin &&
+              SameSimulation(activated_world, modal_world_origin) &&
               modal.debug_locomotion_position() == Position3{} &&
               modal.diagnostic_actor_marker_destination() ==
                   kOriginMarkerDestination,
-        "activation schedules only its own elapsed and retains the derived origin marker");
+        "Load Agent remains modal without a character-capable owner route");
 
     constexpr std::array primary_up{
         InputTransition{.code = 2U, .pressed = false}};
@@ -2380,31 +2377,19 @@ void CheckFrontEndModalGate()
         ScriptedElapsedFrame{.elapsed = milliseconds{15},
             .transitions = previous_up_primary_down},
     };
-    constexpr FrontEndState topology_row{
-        .mode = FrontEndMode::AssetTopology,
-        .selected_main_row = FrontEndMainRow::AssetTopology,
-    };
     constexpr FrontEndState main_asset_row{
-        .mode = FrontEndMode::Main,
+        .mode = FrontEndMode::Title,
         .selected_main_row = FrontEndMainRow::AssetTopology,
-    };
-    constexpr FrontEndState main_controls_row{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::Controls,
-    };
-    constexpr FrontEndState main_profiles_row{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::Profiles,
     };
     constexpr std::array expected_topology_modal_states{
-        topology_row,
-        topology_row,
-        topology_row,
-        main_asset_row,
-        main_controls_row,
-        main_controls_row,
-        main_profiles_row,
-        main_profiles_row,
+        omega::app::InitialFrontEndState(),
+        omega::app::InitialFrontEndState(),
+        omega::app::InitialFrontEndState(),
+        omega::app::InitialFrontEndState(),
+        omega::app::InitialFrontEndState(),
+        omega::app::InitialFrontEndState(),
+        omega::app::InitialFrontEndState(),
+        omega::app::InitialFrontEndState(),
         omega::app::InitialFrontEndState(),
     };
     constexpr std::array expected_topology_primary_held{
@@ -2455,7 +2440,7 @@ void CheckFrontEndModalGate()
                   topology.scheduler_state() == topology_scheduler_origin &&
                   SameSimulation(topology.simulation_state(), topology_world_origin) &&
                   topology.debug_locomotion_position() == topology_position_origin,
-            "asset-topology entry, held/release edges, return, and navigation discard elapsed and freeze every simulation owner");
+            "an obsolete diagnostic Title row normalizes once and every later Title edge remains modal");
     }
     auto topology_activated = topology.Next();
     const auto topology_activated_plan =
@@ -2465,27 +2450,16 @@ void CheckFrontEndModalGate()
     Check(topology_activated &&
               topology_activated->elapsed() == milliseconds{15} &&
               topology_activated_plan &&
-              topology_activated_plan->simulation_steps == 1U &&
-              topology_activated_plan->interpolation_alpha == 0.5 &&
+              topology_activated_plan->simulation_steps == 0U &&
+              topology_activated_plan->interpolation_alpha == 0.0 &&
               !topology_activated_plan->clamped_delta &&
               !topology_activated_plan->dropped_time &&
-              topology.front_end_state() == FrontEndState{} &&
-              topology_activated_scheduler &&
-              *topology_activated_scheduler == FrameSchedulerState{
-                  .config = topology_config.scheduler,
-                  .accumulated_remainder = milliseconds{5},
-                  .total_planned_steps = 1U,
-              } &&
-              topology_activated_world &&
-              SameSimulation(*topology_activated_world,
-                  SimulationState{
-                      .completed_steps = 1U,
-                      .simulated_time = milliseconds{10},
-                      .alive_entities = 1U,
-                  }) &&
+              topology.front_end_state() == omega::app::InitialFrontEndState() &&
+              topology_activated_scheduler == topology_scheduler_origin &&
+              SameSimulation(topology_activated_world, topology_world_origin) &&
               topology.debug_locomotion_position() == Position3{} &&
               topology.state() == RunReplaySessionState::Complete,
-        "diagnostic play resumes with only its own elapsed after every asset-topology sample is discarded");
+        "obsolete diagnostic rows cannot bypass canonical Title or schedule simulation");
 
     constexpr std::array open_with_forward{
         InputTransition{.code = 0U, .pressed = true},
@@ -2508,10 +2482,11 @@ void CheckFrontEndModalGate()
     RunCaptureTracePair reopen_pair = BuildScriptedPair(menu_actions, reopen_frames);
     RunReplaySessionConfig reopen_config = ValidConfig();
     reopen_config.enable_debug_locomotion = true;
-    reopen_config.initial_front_end_state = FrontEndState{};
+    reopen_config.initial_front_end_state = kGameplayFrontEndState;
     reopen_config.front_end_capabilities = FrontEndCapabilities{
         .can_create_first_profile = false,
         .can_start_diagnostic_campaign = true,
+        .supports_character_selection = true,
     };
     auto reopen_created =
         RunReplaySession::Create(std::move(reopen_pair), reopen_config);
@@ -2539,25 +2514,26 @@ void CheckFrontEndModalGate()
         Check(frame && frame->elapsed() == reopen_frames[index].elapsed && plan &&
                   plan->simulation_steps == 0U && !plan->clamped_delta &&
                   !plan->dropped_time &&
-                  reopen.front_end_state() ==
-                      omega::app::InitialFrontEndState() &&
+                   reopen.front_end_state() == FrontEndState{
+                       .mode = FrontEndMode::BriefingRoom,
+                       .selected_main_row = FrontEndMainRow::CreateAgent,
+                   } &&
                   reopen.scheduler_state() == scheduler_before_open &&
                   SameSimulation(reopen.simulation_state(), world_before_open) &&
                   reopen.debug_locomotion_position() == position_before_open &&
                   reopen.diagnostic_actor_marker_destination() ==
                       marker_before_open,
-            "opening with held movement and later modal frames freezes locomotion and its marker");
+        "opening Briefing Room with held movement and later modal frames freezes locomotion and its marker");
     }
     auto resumed = reopen.Next();
     const auto resumed_plan = resumed ? resumed->frame_plan() : std::nullopt;
     Check(resumed && resumed->elapsed() == milliseconds{5} && resumed_plan &&
               resumed->front_end_command() == FrontEndCommand{
                   .type = FrontEndCommandType::StartDiagnosticCampaign,
-                  .profile_slot = FrontEndProfileSlot::First,
               } &&
               resumed_plan->simulation_steps == 1U &&
               resumed_plan->interpolation_alpha == 0.0 &&
-              reopen.front_end_state() == FrontEndState{} &&
+              reopen.front_end_state() == kGameplayFrontEndState &&
               reopen.scheduler_state() == FrameSchedulerState{
                   .config = reopen_config.scheduler,
                   .total_planned_steps = 1U,
@@ -2609,16 +2585,12 @@ void CheckFrontEndModalGate()
                   omega::app::kFrontEndNextAction) &&
               cancel_frame->front_end_command() == FrontEndCommand{} &&
               cancel_priority.front_end_state() ==
-                  FrontEndState{
-                      .mode = FrontEndMode::Main,
-                      .selected_main_row = FrontEndMainRow::Profiles,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
-                  } &&
+                  omega::app::InitialFrontEndState() &&
               cancel_plan->simulation_steps == 0U &&
               cancel_priority.scheduler_state() == cancel_scheduler_origin &&
               SameSimulation(cancel_priority.simulation_state(), cancel_world_origin) &&
               cancel_priority.debug_locomotion_position() == cancel_position_origin,
-        "replay cancel has priority over confirm and navigation, returns Profiles to its Main row, and emits no command");
+        "replay cancel has priority over confirm and navigation, returns staging to canonical Title, and emits no command");
 
     constexpr std::array terminal_transitions{
         InputTransition{.code = 0U, .pressed = true},
@@ -2678,13 +2650,18 @@ void CheckFirstProfileCreationReplay()
             .elapsed = std::chrono::seconds{4}, .transitions = primary_down},
     };
     constexpr FrontEndState profiles_first{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
+        .mode = FrontEndMode::ProfileOwnerStaging,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
         .selected_profile_slot = FrontEndProfileSlot::First,
     };
     constexpr FrontEndState main_profiles{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::Profiles,
+        .mode = FrontEndMode::Title,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
+        .selected_profile_slot = FrontEndProfileSlot::First,
+    };
+    constexpr FrontEndState selection_first{
+        .mode = FrontEndMode::AgentSelection,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
         .selected_profile_slot = FrontEndProfileSlot::First,
     };
 
@@ -2696,6 +2673,7 @@ void CheckFirstProfileCreationReplay()
     create_config.front_end_total_profile_count = 0U;
     create_config.front_end_capabilities = FrontEndCapabilities{
         .can_create_first_profile = true,
+        .supports_character_selection = true,
     };
     auto create_result =
         RunReplaySession::Create(std::move(create_pair), create_config);
@@ -2749,7 +2727,7 @@ void CheckFirstProfileCreationReplay()
                   .type = FrontEndCommandType::SetActiveProfile,
                   .profile_slot = FrontEndProfileSlot::First,
               } &&
-              replay.front_end_state() == main_profiles &&
+              replay.front_end_state() == selection_first &&
               select_plan->simulation_steps == 0U &&
               replay.scheduler_state() == scheduler_origin &&
               SameSimulation(replay.simulation_state(), simulation_origin) &&
@@ -2774,11 +2752,11 @@ void CheckFirstProfileCreationReplay()
     auto legacy_frame = legacy.Next();
     Check(legacy_frame && legacy_frame->frame_plan() &&
               legacy_frame->front_end_command() == FrontEndCommand{} &&
-              legacy.front_end_state() == main_profiles &&
+              legacy.front_end_state() == profiles_first &&
               legacy_frame->frame_plan()->simulation_steps == 0U &&
               legacy.scheduler_state() == legacy_scheduler_origin &&
               SameSimulation(legacy.simulation_state(), legacy_simulation_origin),
-        "default-false replay capability preserves the legacy empty-profile return behavior");
+        "default-closed replay capability leaves empty owner staging inert");
 
     RunCaptureTracePair nonempty_total_pair =
         BuildScriptedPair(primary_action, one_primary_frame);
@@ -2796,7 +2774,7 @@ void CheckFirstProfileCreationReplay()
     auto nonempty_total_frame = nonempty_total.Next();
     Check(nonempty_total_frame &&
               nonempty_total_frame->front_end_command() == FrontEndCommand{} &&
-              nonempty_total.front_end_state() == main_profiles,
+              nonempty_total.front_end_state() == profiles_first,
         "a nonzero startup total keeps an explicit creation request closed");
 
     RunCaptureTracePair nonempty_visible_pair =
@@ -2819,7 +2797,7 @@ void CheckFirstProfileCreationReplay()
                   .type = FrontEndCommandType::SetActiveProfile,
                   .profile_slot = FrontEndProfileSlot::First,
               } &&
-              nonempty_visible.front_end_state() == main_profiles &&
+              nonempty_visible.front_end_state() == selection_first &&
               !nonempty_visible.front_end_active_profile_is_confirmed(),
         "a nonzero startup visible count keeps creation closed and an impossible zero-total selection cannot open the confirmation gate");
 
@@ -2882,723 +2860,378 @@ void CheckFirstProfileCreationReplay()
 // replayed creation leaves it closed.
 void CheckDiagnosticPlayGateReplay()
 {
-    constexpr std::array<std::uint32_t, 4U> menu_actions{
-        omega::app::kFrontEndPreviousAction,
-        omega::app::kFrontEndNextAction,
-        omega::app::kFrontEndPrimaryAction,
-        omega::app::kFrontEndCancelAction,
-    };
-    constexpr std::array previous_down{
-        InputTransition{.code = 0U, .pressed = true}};
-    constexpr std::array previous_up{
-        InputTransition{.code = 0U, .pressed = false}};
-    constexpr std::array next_down{
-        InputTransition{.code = 1U, .pressed = true}};
-    constexpr std::array next_up{
-        InputTransition{.code = 1U, .pressed = false}};
+    constexpr std::array<std::uint32_t, 1U> primary_action{
+        omega::app::kFrontEndPrimaryAction};
+    constexpr std::array<InputTransition, 0U> no_transitions{};
     constexpr std::array primary_down{
-        InputTransition{.code = 2U, .pressed = true}};
+        InputTransition{.code = 0U, .pressed = true}};
     constexpr std::array primary_up{
-        InputTransition{.code = 2U, .pressed = false}};
-    constexpr std::array primary_and_previous_down{
-        InputTransition{.code = 2U, .pressed = true},
-        InputTransition{.code = 0U, .pressed = true},
-    };
-    constexpr std::array cancel_down{
-        InputTransition{.code = 3U, .pressed = true}};
-    constexpr std::array cancel_up{
-        InputTransition{.code = 3U, .pressed = false}};
+        InputTransition{.code = 0U, .pressed = false}};
 
-    constexpr FrontEndState main_start = omega::app::InitialFrontEndState();
-    constexpr FrontEndState main_profiles{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
+    constexpr FrontEndState title_load{
+        .mode = FrontEndMode::Title,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
     };
-    constexpr FrontEndState profiles_first{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
+    constexpr FrontEndState staging_create{
+        .mode = FrontEndMode::ProfileOwnerStaging,
+        .selected_main_row = FrontEndMainRow::CreateAgent,
     };
-    constexpr FrontEndState diagnostic_play{
-        .mode = FrontEndMode::DiagnosticPlay,
-        .selected_main_row = FrontEndMainRow::StartDiagnostic,
-        .selected_profile_slot = FrontEndProfileSlot::First,
+    constexpr FrontEndState selection_load{
+        .mode = FrontEndMode::AgentSelection,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
     };
-    constexpr FrontEndCapabilities gate_enabled{
+    constexpr FrontEndState briefing_load{
+        .mode = FrontEndMode::BriefingRoom,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
+    };
+    constexpr FrontEndState gameplay_load{
+        .mode = FrontEndMode::Gameplay,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
+    };
+    constexpr FrontEndCapabilities gated_route{
         .can_start_diagnostic_campaign = true,
         .requires_active_profile_for_diagnostic_play = true,
+        .supports_character_selection = true,
+        .requires_active_character_for_diagnostic_play = true,
     };
-    constexpr FrontEndCapabilities create_and_gate_enabled{
+
+    const std::array hostile_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{15},
+            .transitions = no_transitions},
+    };
+    RunReplaySessionConfig hostile_config = ValidConfig();
+    hostile_config.enable_debug_locomotion = true;
+    hostile_config.initial_front_end_state = gameplay_load;
+    hostile_config.front_end_visible_profile_slots = 1U;
+    hostile_config.front_end_total_profile_count = 1U;
+    hostile_config.front_end_visible_character_slots_by_profile[0U] = 1U;
+    hostile_config.front_end_total_character_counts_by_profile[0U] = 1U;
+    hostile_config.front_end_capabilities = gated_route;
+    auto hostile_created = RunReplaySession::Create(
+        BuildScriptedPair(primary_action, hostile_frames), hostile_config);
+    RunReplaySession hostile = TakeSession(
+        hostile_created, "the hostile preconfirmed gameplay replay is created");
+    const auto hostile_scheduler = hostile.scheduler_state();
+    const auto hostile_world = hostile.simulation_state();
+    auto hostile_frame = hostile.Next();
+    Check(hostile_frame && hostile_frame->frame_plan() &&
+              hostile_frame->front_end_command() == FrontEndCommand{} &&
+              hostile.front_end_state() == omega::app::InitialFrontEndState() &&
+              !hostile.front_end_active_profile_is_confirmed() &&
+              !hostile.front_end_active_character_is_confirmed() &&
+              hostile_frame->frame_plan()->simulation_steps == 0U &&
+              hostile.scheduler_state() == hostile_scheduler &&
+              SameSimulation(hostile.simulation_state(), hostile_world),
+        "an initial Gameplay state cannot pre-open either replay authorization mirror");
+
+    const std::array creation_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{15},
+            .transitions = primary_down},
+    };
+    RunReplaySessionConfig creation_config = ValidConfig();
+    creation_config.initial_front_end_state = staging_create;
+    creation_config.front_end_capabilities = FrontEndCapabilities{
         .can_create_first_profile = true,
-        .can_start_diagnostic_campaign = true,
-        .requires_active_profile_for_diagnostic_play = true,
+        .supports_character_selection = true,
     };
+    auto creation_created = RunReplaySession::Create(
+        BuildScriptedPair(primary_action, creation_frames), creation_config);
+    RunReplaySession creation = TakeSession(
+        creation_created, "the focused owner-creation replay is created");
+    auto creation_frame = creation.Next();
+    Check(creation_frame && creation_frame->frame_plan() &&
+              creation_frame->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::CreateProfileOwner,
+                  .profile_slot = FrontEndProfileSlot::First,
+              } &&
+              creation.front_end_state() == staging_create &&
+              !creation.front_end_active_profile_is_confirmed() &&
+              !creation.front_end_active_character_is_confirmed() &&
+              creation_frame->frame_plan()->simulation_steps == 0U,
+        "owner creation advances the bounded model but cannot publish confirmation");
 
-    // Public replay configuration can supply a non-default initial menu state,
-    // but it cannot supply an already-confirmed authorization. Even an initial
-    // DiagnosticPlay state therefore fails closed without needing an input
-    // edge, before its elapsed time can schedule simulation.
-    const std::array hostile_initial_frames{
-        ScriptedElapsedFrame{.elapsed = milliseconds{15}},
-    };
-    RunCaptureTracePair hostile_initial_pair =
-        BuildScriptedPair(menu_actions, hostile_initial_frames);
-    RunReplaySessionConfig hostile_initial_config = ValidConfig();
-    hostile_initial_config.enable_debug_locomotion = true;
-    hostile_initial_config.initial_front_end_state = diagnostic_play;
-    hostile_initial_config.front_end_visible_profile_slots = 1U;
-    hostile_initial_config.front_end_total_profile_count = 1U;
-    hostile_initial_config.front_end_capabilities = gate_enabled;
-    auto hostile_initial_created = RunReplaySession::Create(
-        std::move(hostile_initial_pair), hostile_initial_config);
-    RunReplaySession hostile_initial = TakeSession(
-        hostile_initial_created,
-        "the hostile initial diagnostic-play replay is created closed");
-    const auto hostile_initial_scheduler = hostile_initial.scheduler_state();
-    const auto hostile_initial_world = hostile_initial.simulation_state();
-    Check(hostile_initial.front_end_state() == diagnostic_play &&
-              !hostile_initial.front_end_active_profile_is_confirmed(),
-          "a non-default initial DiagnosticPlay state cannot pre-open replay "
-          "authorization");
-    auto hostile_initial_frame = hostile_initial.Next();
-    Check(hostile_initial_frame && hostile_initial_frame->frame_plan() &&
-              hostile_initial_frame->front_end_command() == FrontEndCommand{} &&
-              hostile_initial.front_end_state() == main_start &&
-              !hostile_initial.front_end_active_profile_is_confirmed() &&
-              hostile_initial_frame->frame_plan()->simulation_steps == 0U &&
-              hostile_initial_frame->frame_plan()->interpolation_alpha == 0.0 &&
-              hostile_initial.scheduler_state() == hostile_initial_scheduler &&
-              SameSimulation(hostile_initial.simulation_state(),
-                  hostile_initial_world) &&
-              hostile_initial.debug_locomotion_position() == Position3{},
-          "the edge-free hostile DiagnosticPlay frame fails closed before its "
-          "elapsed time can mutate simulation");
-
-    // Creation is also a public replay command, but it is not confirmation. Pin
-    // that distinction independently from the longer interaction below.
-    const std::array hostile_creation_frames{
+    const std::array route_frames{
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
+            .transitions = primary_up},
         ScriptedElapsedFrame{.elapsed = milliseconds{15},
             .transitions = primary_down},
     };
-    RunCaptureTracePair hostile_creation_pair =
-        BuildScriptedPair(menu_actions, hostile_creation_frames);
-    RunReplaySessionConfig hostile_creation_config = ValidConfig();
-    hostile_creation_config.initial_front_end_state = profiles_first;
-    hostile_creation_config.front_end_capabilities = create_and_gate_enabled;
-    auto hostile_creation_created = RunReplaySession::Create(
-        std::move(hostile_creation_pair), hostile_creation_config);
-    RunReplaySession hostile_creation = TakeSession(
-        hostile_creation_created,
-        "the focused first-profile creation replay is created closed");
-    auto hostile_creation_frame = hostile_creation.Next();
-    Check(hostile_creation_frame && hostile_creation_frame->frame_plan() &&
-              hostile_creation_frame->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::CreateFirstProfile,
+    RunReplaySessionConfig route_config = ValidConfig();
+    route_config.enable_debug_locomotion = true;
+    route_config.initial_front_end_state = title_load;
+    route_config.front_end_visible_profile_slots = 1U;
+    route_config.front_end_total_profile_count = 1U;
+    route_config.front_end_visible_character_slots_by_profile[0U] = 1U;
+    route_config.front_end_total_character_counts_by_profile[0U] = 1U;
+    route_config.front_end_capabilities = gated_route;
+    auto route_created = RunReplaySession::Create(
+        BuildScriptedPair(primary_action, route_frames), route_config);
+    RunReplaySession source = TakeSession(
+        route_created, "the canonical Load Agent replay is created");
+    const auto route_scheduler_origin = source.scheduler_state();
+    const auto route_world_origin = source.simulation_state();
+
+    auto profile_frame = source.Next();
+    Check(profile_frame && profile_frame->frame_plan() &&
+              profile_frame->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::ConfirmProfileOwner,
                   .profile_slot = FrontEndProfileSlot::First,
               } &&
-              hostile_creation.front_end_state() == profiles_first &&
-              !hostile_creation.front_end_active_profile_is_confirmed() &&
-              hostile_creation_frame->frame_plan()->simulation_steps == 0U,
-          "a replayed creation cannot initialize or publish active-profile "
-          "confirmation");
+              source.front_end_state() == selection_load &&
+              source.front_end_active_profile_is_confirmed() &&
+              !source.front_end_active_character_is_confirmed() &&
+              profile_frame->frame_plan()->simulation_steps == 0U &&
+              source.scheduler_state() == route_scheduler_origin &&
+              SameSimulation(source.simulation_state(), route_world_origin),
+        "Load Agent confirms exactly one bounded owner before agent selection");
 
-    // One existing bounded profile, nothing confirmed. Start Diagnostic is
-    // inert; the replay must explicitly navigate to Profiles and publish a
-    // selection before the same supported start can enter play.
-    const std::array unconfirmed_frames{
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = next_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = next_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = previous_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = previous_up},
-        ScriptedElapsedFrame{.elapsed = milliseconds{15},
-            .transitions = primary_and_previous_down},
-    };
-    RunCaptureTracePair unconfirmed_pair =
-        BuildScriptedPair(menu_actions, unconfirmed_frames);
-    RunReplaySessionConfig unconfirmed_config = ValidConfig();
-    unconfirmed_config.enable_debug_locomotion = true;
-    unconfirmed_config.initial_front_end_state = main_start;
-    unconfirmed_config.front_end_visible_profile_slots = 1U;
-    unconfirmed_config.front_end_total_profile_count = 1U;
-    unconfirmed_config.front_end_capabilities = gate_enabled;
-    auto unconfirmed_created =
-        RunReplaySession::Create(std::move(unconfirmed_pair), unconfirmed_config);
-    RunReplaySession unconfirmed = TakeSession(
-        unconfirmed_created, "the unconfirmed diagnostic-play gate replay is created");
-    const auto gate_scheduler_origin = unconfirmed.scheduler_state();
-    const auto gate_world_origin = unconfirmed.simulation_state();
-    Check(!unconfirmed.front_end_active_profile_is_confirmed() &&
-              unconfirmed.front_end_state() == main_start,
-        "an explicitly gated replay begins closed without copying any confirmation");
+    RunReplaySession route = std::move(source);
+    Check(source.state() == RunReplaySessionState::Inert &&
+              !source.front_end_state() &&
+              !source.front_end_active_profile_is_confirmed() &&
+              !source.front_end_active_character_is_confirmed() &&
+              route.front_end_state() == selection_load &&
+              route.front_end_active_profile_is_confirmed() &&
+              !route.front_end_active_character_is_confirmed(),
+        "session move transfers the opened owner mirror and leaves the source inert");
 
-    auto inert_start_frame = unconfirmed.Next();
-    const auto inert_start_plan =
-        inert_start_frame ? inert_start_frame->frame_plan() : std::nullopt;
-    Check(inert_start_frame && inert_start_plan &&
-              inert_start_frame->input().WasPressed(
-                  omega::app::kFrontEndPrimaryAction) &&
-              inert_start_frame->front_end_command() == FrontEndCommand{} &&
-              unconfirmed.front_end_state() == main_start &&
-              !unconfirmed.front_end_active_profile_is_confirmed() &&
-              inert_start_plan->simulation_steps == 0U &&
-              inert_start_plan->interpolation_alpha == 0.0 &&
-              !inert_start_plan->clamped_delta && !inert_start_plan->dropped_time &&
-              unconfirmed.scheduler_state() == gate_scheduler_origin &&
-              SameSimulation(unconfirmed.simulation_state(), gate_world_origin) &&
-              unconfirmed.debug_locomotion_position() == Position3{} &&
-              unconfirmed.diagnostic_actor_marker_destination() ==
-                  kOriginMarkerDestination,
-        "an unconfirmed Start Diagnostic edge is inert, publishes no command, "
-        "discards its elapsed value, and freezes every simulation and marker value");
-
-    constexpr std::array setup_states{
-        main_start,
-        main_profiles,
-        main_profiles,
-        profiles_first,
-        profiles_first,
-    };
-    for (const FrontEndState expected_state : setup_states)
-    {
-        auto setup_frame = unconfirmed.Next();
-        Check(setup_frame && setup_frame->frame_plan() &&
-                  setup_frame->front_end_command() == FrontEndCommand{} &&
-                  unconfirmed.front_end_state() == expected_state &&
-                  !unconfirmed.front_end_active_profile_is_confirmed() &&
-                  setup_frame->frame_plan()->simulation_steps == 0U &&
-                  unconfirmed.scheduler_state() == gate_scheduler_origin &&
-                  SameSimulation(unconfirmed.simulation_state(), gate_world_origin),
-            "explicit navigation to the bounded Profiles surface remains modal and leaves the gate closed");
-    }
-
-    auto selection_frame = unconfirmed.Next();
-    Check(selection_frame && selection_frame->frame_plan() &&
-              selection_frame->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::SetActiveProfile,
+    auto profile_release = route.Next();
+    auto character_frame = route.Next();
+    Check(profile_release && profile_release->frame_plan() &&
+              profile_release->front_end_command() == FrontEndCommand{} &&
+              character_frame && character_frame->frame_plan() &&
+              character_frame->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::ConfirmAgent,
                   .profile_slot = FrontEndProfileSlot::First,
+                  .character_slot = FrontEndCharacterSlot::First,
               } &&
-              unconfirmed.front_end_state() == main_profiles &&
-              unconfirmed.front_end_active_profile_is_confirmed() &&
-              selection_frame->frame_plan()->simulation_steps == 0U &&
-              unconfirmed.scheduler_state() == gate_scheduler_origin &&
-              SameSimulation(unconfirmed.simulation_state(), gate_world_origin),
-        "only a replayed selection command opens the replay-local gate, and it still "
-        "schedules nothing from its own modal frame");
+              route.front_end_state() == briefing_load &&
+              route.front_end_active_profile_is_confirmed() &&
+              route.front_end_active_character_is_confirmed() &&
+              character_frame->frame_plan()->simulation_steps == 0U &&
+              route.scheduler_state() == route_scheduler_origin &&
+              SameSimulation(route.simulation_state(), route_world_origin),
+        "agent selection opens only the agent mirror and remains modal");
 
-    RunReplaySession confirmed_replay = std::move(unconfirmed);
-    Check(unconfirmed.state() == RunReplaySessionState::Inert &&
-              !unconfirmed.front_end_state() &&
-              !unconfirmed.front_end_active_profile_is_confirmed(),
-        "moving an opened replay leaves the source inert with the gate closed again");
-    Check(confirmed_replay.front_end_state() == main_profiles &&
-              confirmed_replay.front_end_active_profile_is_confirmed() &&
-              confirmed_replay.state() == RunReplaySessionState::Ready,
-        "session move transfers the opened gate together with the menu state");
-
-    constexpr std::array expected_confirmed_states{
-        main_profiles,
-        main_start,
-        main_start,
-    };
-    for (std::size_t index = 0U; index < expected_confirmed_states.size(); ++index)
-    {
-        auto frame = confirmed_replay.Next();
-        Check(frame && frame->frame_plan() &&
-                  frame->front_end_command() == FrontEndCommand{} &&
-                  confirmed_replay.front_end_state() ==
-                      expected_confirmed_states[index] &&
-                  confirmed_replay.front_end_active_profile_is_confirmed() &&
-                  frame->frame_plan()->simulation_steps == 0U &&
-                  confirmed_replay.scheduler_state() == gate_scheduler_origin &&
-                  SameSimulation(
-                      confirmed_replay.simulation_state(), gate_world_origin),
-            "release and navigation edges after the opened gate stay modal and "
-            "preserve the replayed confirmation");
-    }
-
-    auto play_frame = confirmed_replay.Next();
-    const auto play_plan = play_frame ? play_frame->frame_plan() : std::nullopt;
-    const auto play_scheduler = confirmed_replay.scheduler_state();
-    const auto play_world = confirmed_replay.simulation_state();
-    Check(play_frame && play_plan && play_frame->elapsed() == milliseconds{15} &&
+    auto character_release = route.Next();
+    auto play_frame = route.Next();
+    Check(character_release && character_release->frame_plan() &&
+              character_release->front_end_command() == FrontEndCommand{} &&
+              play_frame && play_frame->frame_plan() &&
               play_frame->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::StartDiagnosticCampaign,
-                  .profile_slot = FrontEndProfileSlot::First,
+                  .type = FrontEndCommandType::StartCampaign,
               } &&
-              confirmed_replay.front_end_state() == diagnostic_play &&
-              confirmed_replay.front_end_active_profile_is_confirmed() &&
-              play_plan->simulation_steps == 1U &&
-              play_plan->interpolation_alpha == 0.5 &&
-              !play_plan->clamped_delta && !play_plan->dropped_time &&
-              play_scheduler && *play_scheduler == FrameSchedulerState{
-                  .config = unconfirmed_config.scheduler,
+              route.front_end_state() == gameplay_load &&
+              route.front_end_active_profile_is_confirmed() &&
+              route.front_end_active_character_is_confirmed() &&
+              play_frame->frame_plan()->simulation_steps == 1U &&
+              play_frame->frame_plan()->interpolation_alpha == 0.5 &&
+              route.scheduler_state() == FrameSchedulerState{
+                  .config = route_config.scheduler,
                   .accumulated_remainder = milliseconds{5},
                   .total_planned_steps = 1U,
               } &&
-              play_world && SameSimulation(*play_world,
-                  SimulationState{
-                      .completed_steps = 1U,
-                      .simulated_time = milliseconds{10},
-                      .alive_entities = 1U,
-                  }) &&
-              confirmed_replay.debug_locomotion_position() == Position3{} &&
-              confirmed_replay.diagnostic_actor_marker_destination() ==
-                  kOriginMarkerDestination &&
-              confirmed_replay.state() == RunReplaySessionState::Complete,
-        "the same Start Diagnostic edge publishes the persistence-free typed command "
-        "once the replay-local gate is open, advances exactly one step, and keeps "
-        "held modal movement out of the transition frame");
+              route.debug_locomotion_position() == Position3{} &&
+              route.state() == RunReplaySessionState::Complete,
+        "only the confirmed canonical route enters Gameplay and schedules its own elapsed value");
 
-    // A replayed creation publishes no confirmation, so the gate stays closed even
-    // though the logical model now holds one selectable profile.
-    const std::array creation_frames{
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = cancel_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = cancel_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = previous_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = previous_up},
+    const std::array closed_frames{
         ScriptedElapsedFrame{.elapsed = milliseconds{15},
-            .transitions = primary_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = next_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = next_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up},
-        ScriptedElapsedFrame{.elapsed = milliseconds{15},
-            .transitions = primary_down},
+            .transitions = no_transitions},
     };
-    RunCaptureTracePair creation_pair =
-        BuildScriptedPair(menu_actions, creation_frames);
-    RunReplaySessionConfig creation_config = ValidConfig();
-    creation_config.initial_front_end_state = profiles_first;
-    creation_config.front_end_visible_profile_slots = 0U;
-    creation_config.front_end_total_profile_count = 0U;
-    creation_config.front_end_capabilities = create_and_gate_enabled;
-    auto creation_created =
-        RunReplaySession::Create(std::move(creation_pair), creation_config);
-    RunReplaySession creation = TakeSession(
-        creation_created, "the gated first-profile creation replay is created");
-    const auto creation_scheduler_origin = creation.scheduler_state();
-    const auto creation_world_origin = creation.simulation_state();
-
-    auto created_frame = creation.Next();
-    Check(created_frame && created_frame->frame_plan() &&
-              created_frame->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::CreateFirstProfile,
-                  .profile_slot = FrontEndProfileSlot::First,
-              } &&
-              creation.front_end_state() == profiles_first &&
-              !creation.front_end_active_profile_is_confirmed() &&
-              created_frame->frame_plan()->simulation_steps == 0U,
-        "a replayed first-profile creation publishes its bounded command and leaves "
-        "the diagnostic-play gate closed");
-
-    constexpr std::array expected_creation_states{
-        profiles_first,
-        main_profiles,
-        main_profiles,
-        main_start,
-        main_start,
-    };
-    for (std::size_t index = 0U; index < expected_creation_states.size(); ++index)
-    {
-        auto frame = creation.Next();
-        Check(frame && frame->frame_plan() &&
-                  frame->front_end_command() == FrontEndCommand{} &&
-                  creation.front_end_state() == expected_creation_states[index] &&
-                  !creation.front_end_active_profile_is_confirmed() &&
-                  frame->frame_plan()->simulation_steps == 0U,
-            "cancel and navigation after a replayed creation publish no command and "
-            "cannot open the gate");
-    }
-
-    auto creation_inert_start = creation.Next();
-    Check(creation_inert_start && creation_inert_start->frame_plan() &&
-              creation_inert_start->elapsed() == milliseconds{15} &&
-              creation_inert_start->front_end_command() == FrontEndCommand{} &&
-              creation.front_end_state() == main_start &&
-              !creation.front_end_active_profile_is_confirmed() &&
-              creation_inert_start->frame_plan()->simulation_steps == 0U &&
-              creation.scheduler_state() == creation_scheduler_origin &&
-              SameSimulation(creation.simulation_state(), creation_world_origin),
-        "Start Diagnostic remains inert after a replayed creation because creation "
-        "never publishes a confirmation");
-
-    auto creation_release = creation.Next();
-    Check(creation_release && creation_release->frame_plan() &&
-              creation_release->front_end_command() == FrontEndCommand{} &&
-              creation.front_end_state() == main_start &&
-              !creation.front_end_active_profile_is_confirmed(),
-        "the inert primary release after creation leaves the gate closed");
-
-    constexpr std::array creation_setup_states{
-        main_profiles,
-        main_profiles,
-        profiles_first,
-        profiles_first,
-    };
-    for (const FrontEndState expected_state : creation_setup_states)
-    {
-        auto setup_frame = creation.Next();
-        Check(setup_frame && setup_frame->frame_plan() &&
-                  setup_frame->front_end_command() == FrontEndCommand{} &&
-                  creation.front_end_state() == expected_state &&
-                  !creation.front_end_active_profile_is_confirmed() &&
-                  setup_frame->frame_plan()->simulation_steps == 0U &&
-                  creation.scheduler_state() == creation_scheduler_origin &&
-                  SameSimulation(creation.simulation_state(), creation_world_origin),
-            "post-creation navigation reaches Profiles without inventing confirmation");
-    }
-
-    auto creation_selection = creation.Next();
-    Check(creation_selection && creation_selection->frame_plan() &&
-              creation_selection->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::SetActiveProfile,
-                  .profile_slot = FrontEndProfileSlot::First,
-              } &&
-              creation.front_end_state() == main_profiles &&
-              creation.front_end_active_profile_is_confirmed() &&
-              creation_selection->frame_plan()->simulation_steps == 0U &&
-              creation.scheduler_state() == creation_scheduler_origin &&
-              SameSimulation(creation.simulation_state(), creation_world_origin) &&
-              creation.state() == RunReplaySessionState::Complete,
-        "selecting the logically created profile is what opens the replay gate");
-
-    // Closed start support remains inert even when no confirmation gate is
-    // requested.
-    const std::array closed_support_frames{
-        ScriptedElapsedFrame{.elapsed = milliseconds{15},
-            .transitions = primary_down},
-    };
-    RunCaptureTracePair closed_support_pair =
-        BuildScriptedPair(menu_actions, closed_support_frames);
-    RunReplaySessionConfig closed_support_config = ValidConfig();
-    closed_support_config.initial_front_end_state = main_start;
-    closed_support_config.front_end_visible_profile_slots = 1U;
-    closed_support_config.front_end_total_profile_count = 1U;
-    auto closed_support_created = RunReplaySession::Create(
-        std::move(closed_support_pair), closed_support_config);
-    RunReplaySession closed_support = TakeSession(
-        closed_support_created, "the closed-support diagnostic replay is created");
-    const auto closed_support_scheduler = closed_support.scheduler_state();
-    const auto closed_support_world = closed_support.simulation_state();
-    auto closed_support_frame = closed_support.Next();
-    const auto closed_support_plan = closed_support_frame
-        ? closed_support_frame->frame_plan()
-        : std::nullopt;
-    Check(closed_support_frame && closed_support_plan &&
-              closed_support_frame->front_end_command() == FrontEndCommand{} &&
-              closed_support.front_end_state() == main_start &&
-              !closed_support.front_end_active_profile_is_confirmed() &&
-              closed_support_plan->simulation_steps == 0U &&
-              closed_support_plan->interpolation_alpha == 0.0 &&
-              closed_support.scheduler_state() == closed_support_scheduler &&
-              SameSimulation(closed_support.simulation_state(), closed_support_world),
-        "closed diagnostic-start support is inert and discards elapsed time");
+    RunReplaySessionConfig closed_config = ValidConfig();
+    closed_config.initial_front_end_state = briefing_load;
+    closed_config.front_end_capabilities.supports_character_selection = true;
+    auto closed_created = RunReplaySession::Create(
+        BuildScriptedPair(primary_action, closed_frames), closed_config);
+    RunReplaySession closed = TakeSession(
+        closed_created, "the closed campaign-support replay is created");
+    const auto closed_scheduler = closed.scheduler_state();
+    const auto closed_world = closed.simulation_state();
+    auto closed_frame = closed.Next();
+    Check(closed_frame && closed_frame->frame_plan() &&
+              closed_frame->front_end_command() == FrontEndCommand{} &&
+              closed.front_end_state() == omega::app::InitialFrontEndState() &&
+              closed_frame->frame_plan()->simulation_steps == 0U &&
+              closed.scheduler_state() == closed_scheduler &&
+              SameSimulation(closed.simulation_state(), closed_world),
+        "closed campaign support fails Briefing Room to Title before scheduling");
 }
 
 void CheckFrontEndActionAliasReplay()
 {
     constexpr std::array actions{
-        omega::app::kFrontEndPreviousAction,
-        omega::app::kFrontEndNextAction,
         omega::app::kDebugMoveLeftAction,
         omega::app::kDebugMoveRightAction,
-        omega::app::kFrontEndPrimaryAction,
-        omega::app::kFrontEndCancelAction,
         omega::app::kDebugFireAction,
         omega::app::kDebugTargetAction,
     };
     constexpr std::array left_down{
-        InputTransition{.code = 2U, .pressed = true}};
+        InputTransition{.code = 0U, .pressed = true}};
     constexpr std::array right_down{
-        InputTransition{.code = 3U, .pressed = true}};
+        InputTransition{.code = 1U, .pressed = true}};
     constexpr std::array fire_down{
-        InputTransition{.code = 6U, .pressed = true}};
+        InputTransition{.code = 2U, .pressed = true}};
     constexpr std::array target_down{
-        InputTransition{.code = 7U, .pressed = true}};
+        InputTransition{.code = 3U, .pressed = true}};
     constexpr std::array fire_and_target_down{
-        InputTransition{.code = 6U, .pressed = true},
-        InputTransition{.code = 7U, .pressed = true},
+        InputTransition{.code = 2U, .pressed = true},
+        InputTransition{.code = 3U, .pressed = true},
     };
-    constexpr FrontEndState main_profiles{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::Profiles,
+    constexpr FrontEndState title_load{
+        .mode = FrontEndMode::Title,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
     };
 
     const std::array left_frames{
-        ScriptedElapsedFrame{.elapsed = milliseconds{10},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = left_down},
     };
     RunReplaySessionConfig left_config = ValidConfig();
-    left_config.initial_front_end_state = main_profiles;
+    left_config.initial_front_end_state = title_load;
     auto left_created = RunReplaySession::Create(
         BuildScriptedPair(actions, left_frames), left_config);
     RunReplaySession left = TakeSession(
-        left_created, "the left-alias replay is created");
+        left_created, "the modal left-alias replay is created");
     auto left_frame = left.Next();
-    Check(left_frame && left_frame->front_end_command() == FrontEndCommand{} &&
-              left.front_end_state() == FrontEndState{
-                  .mode = FrontEndMode::Main,
-                  .selected_main_row = FrontEndMainRow::StartDiagnostic,
-              } &&
-              left_frame->frame_plan() &&
+    Check(left_frame && left_frame->frame_plan() &&
+              left.front_end_state() == omega::app::InitialFrontEndState() &&
+              left_frame->front_end_command() == FrontEndCommand{} &&
               left_frame->frame_plan()->simulation_steps == 0U,
-        "action 4 replays as the modal previous alias without advancing simulation");
+        "action 4 replays as canonical Title previous without physical provenance");
 
     const std::array right_frames{
-        ScriptedElapsedFrame{.elapsed = milliseconds{10},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = right_down},
     };
     RunReplaySessionConfig right_config = ValidConfig();
-    right_config.initial_front_end_state = main_profiles;
+    right_config.initial_front_end_state = title_load;
     auto right_created = RunReplaySession::Create(
         BuildScriptedPair(actions, right_frames), right_config);
     RunReplaySession right = TakeSession(
-        right_created, "the right-alias replay is created");
+        right_created, "the modal right-alias replay is created");
     auto right_frame = right.Next();
-    Check(right_frame && right_frame->front_end_command() == FrontEndCommand{} &&
+    Check(right_frame && right_frame->frame_plan() &&
               right.front_end_state() == FrontEndState{
-                  .mode = FrontEndMode::Main,
-                  .selected_main_row = FrontEndMainRow::Controls,
+                  .mode = FrontEndMode::Title,
+                  .selected_main_row = FrontEndMainRow::Quit,
               } &&
-              right_frame->frame_plan() &&
+              right_frame->front_end_command() == FrontEndCommand{} &&
               right_frame->frame_plan()->simulation_steps == 0U,
-        "action 5 replays as the modal next alias without advancing simulation");
+        "action 5 replays as canonical Title next without physical provenance");
 
     const std::array fire_frames{
-        ScriptedElapsedFrame{.elapsed = milliseconds{10},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = fire_down},
     };
     RunReplaySessionConfig fire_config = ValidConfig();
-    fire_config.initial_front_end_state = main_profiles;
+    fire_config.initial_front_end_state = title_load;
     fire_config.front_end_visible_profile_slots = 1U;
     fire_config.front_end_total_profile_count = 1U;
+    fire_config.front_end_capabilities.supports_character_selection = true;
     auto fire_created = RunReplaySession::Create(
         BuildScriptedPair(actions, fire_frames), fire_config);
     RunReplaySession fire = TakeSession(
-        fire_created, "the fire-select replay is created");
+        fire_created, "the modal fire-select replay is created");
     auto fire_frame = fire.Next();
-    Check(fire_frame && fire_frame->front_end_command() == FrontEndCommand{} &&
-              fire.front_end_state() == FrontEndState{
-                  .mode = FrontEndMode::Profiles,
-                  .selected_main_row = FrontEndMainRow::Profiles,
+    Check(fire_frame && fire_frame->frame_plan() &&
+              fire_frame->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::ConfirmProfileOwner,
+                  .profile_slot = FrontEndProfileSlot::First,
               } &&
-              fire_frame->frame_plan() &&
+              fire.front_end_state() == FrontEndState{
+                  .mode = FrontEndMode::AgentSelection,
+                  .selected_main_row = FrontEndMainRow::LoadAgent,
+              } &&
+              fire.front_end_active_profile_is_confirmed() &&
               fire_frame->frame_plan()->simulation_steps == 0U,
         "action 8 replays as modal select without physical-device provenance");
 
     const std::array target_frames{
-        ScriptedElapsedFrame{.elapsed = milliseconds{10},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
             .transitions = target_down},
     };
     RunReplaySessionConfig target_config = ValidConfig();
     target_config.initial_front_end_state = FrontEndState{
-        .mode = FrontEndMode::Controls,
-        .selected_main_row = FrontEndMainRow::Controls,
+        .mode = FrontEndMode::AgentCreation,
+        .selected_main_row = FrontEndMainRow::CreateAgent,
     };
+    target_config.front_end_capabilities.supports_character_selection = true;
     auto target_created = RunReplaySession::Create(
         BuildScriptedPair(actions, target_frames), target_config);
     RunReplaySession target = TakeSession(
-        target_created, "the target-back replay is created");
+        target_created, "the modal target-back replay is created");
     auto target_frame = target.Next();
-    Check(target_frame && target_frame->front_end_command() == FrontEndCommand{} &&
-              target.front_end_state() == FrontEndState{
-                  .mode = FrontEndMode::Main,
-                  .selected_main_row = FrontEndMainRow::Controls,
-              } &&
-              target_frame->frame_plan() &&
+    Check(target_frame && target_frame->frame_plan() &&
+              target_frame->front_end_command() == FrontEndCommand{} &&
+              target.front_end_state() == omega::app::InitialFrontEndState() &&
               target_frame->frame_plan()->simulation_steps == 0U,
         "action 9 replays as modal back without physical-device provenance");
 
     const std::array gameplay_frames{
-        ScriptedElapsedFrame{.elapsed = milliseconds{10},
+        ScriptedElapsedFrame{.elapsed = milliseconds{15},
             .transitions = fire_and_target_down},
     };
     RunReplaySessionConfig gameplay_config = ValidConfig();
-    gameplay_config.initial_front_end_state = FrontEndState{};
+    gameplay_config.initial_front_end_state = kGameplayFrontEndState;
     gameplay_config.front_end_capabilities.can_start_diagnostic_campaign = true;
     auto gameplay_created = RunReplaySession::Create(
         BuildScriptedPair(actions, gameplay_frames), gameplay_config);
     RunReplaySession gameplay = TakeSession(
-        gameplay_created, "the gameplay fire-target replay is created");
+        gameplay_created, "the gameplay fire/target replay is created");
     auto gameplay_frame = gameplay.Next();
     Check(gameplay_frame &&
               gameplay_frame->front_end_command() == FrontEndCommand{} &&
-              gameplay.front_end_state() == FrontEndState{} &&
+              gameplay.front_end_state() == kGameplayFrontEndState &&
               gameplay_frame->frame_plan() &&
               gameplay_frame->frame_plan()->simulation_steps == 1U,
-        "actions 8 and 9 remain gameplay-only in DiagnosticPlay");
+        "actions 8 and 9 remain gameplay-only in Gameplay");
 }
 
 void CheckCharacterFlowReplay()
 {
-    constexpr std::array menu_actions{
-        omega::app::kFrontEndPreviousAction,
-        omega::app::kFrontEndNextAction,
-        omega::app::kDebugMoveLeftAction,
-        omega::app::kDebugMoveRightAction,
+    constexpr std::array actions{
         omega::app::kFrontEndPrimaryAction,
         omega::app::kFrontEndCancelAction,
         omega::app::kDebugFireAction,
-        omega::app::kDebugTargetAction,
     };
     constexpr std::array primary_down{
-        InputTransition{.code = 4U, .pressed = true}};
+        InputTransition{.code = 0U, .pressed = true}};
     constexpr std::array primary_up{
-        InputTransition{.code = 4U, .pressed = false}};
-    constexpr std::array target_down{
-        InputTransition{.code = 7U, .pressed = true}};
-    constexpr std::array target_up{
-        InputTransition{.code = 7U, .pressed = false}};
-    constexpr std::array fire_and_forward_down{
-        InputTransition{.code = 6U, .pressed = true},
-        InputTransition{.code = 0U, .pressed = true},
-    };
-    constexpr FrontEndState profiles_second{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::Second,
-    };
-    constexpr FrontEndState characters_first{
-        .mode = FrontEndMode::Characters,
-        .selected_main_row = FrontEndMainRow::Profiles,
-    };
-    constexpr FrontEndState main_start{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::StartDiagnostic,
-    };
-    constexpr FrontEndState briefing_first{
-        .mode = FrontEndMode::BriefingRoom,
-        .selected_main_row = FrontEndMainRow::StartDiagnostic,
-    };
+        InputTransition{.code = 0U, .pressed = false}};
+    constexpr std::array cancel_down{
+        InputTransition{.code = 1U, .pressed = true}};
+    constexpr std::array cancel_up{
+        InputTransition{.code = 1U, .pressed = false}};
+    constexpr std::array fire_down{
+        InputTransition{.code = 2U, .pressed = true}};
 
-    // Supplying character snapshots cannot alter the legacy profile-selection
-    // route while character selection support remains disabled.
-    const std::array legacy_frames{
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_down},
-    };
-    RunReplaySessionConfig legacy_config = ValidConfig();
-    legacy_config.initial_front_end_state = profiles_second;
-    legacy_config.front_end_visible_profile_slots = 3U;
-    legacy_config.front_end_total_profile_count = 3U;
-    legacy_config.front_end_visible_character_slots_by_profile = {2U, 0U, 1U};
-    legacy_config.front_end_total_character_counts_by_profile = {2U, 0U, 1U};
-    legacy_config.front_end_capabilities.requires_active_character_for_diagnostic_play = true;
-    legacy_config.front_end_capabilities.can_create_first_character = true;
-    auto legacy_created = RunReplaySession::Create(
-        BuildScriptedPair(menu_actions, legacy_frames), legacy_config);
-    RunReplaySession legacy = TakeSession(
-        legacy_created, "the character-snapshot legacy replay is created");
-    auto legacy_selection = legacy.Next();
-    Check(legacy_selection && legacy_selection->frame_plan() &&
-              legacy_selection->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::SetActiveProfile,
-                  .profile_slot = FrontEndProfileSlot::Second,
-              } &&
-              legacy.front_end_state() == FrontEndState{
-                  .mode = FrontEndMode::Main,
-                  .selected_main_row = FrontEndMainRow::Profiles,
-              } &&
-              legacy.front_end_active_profile_is_confirmed() &&
-              !legacy.front_end_active_character_is_confirmed() &&
-              legacy_selection->frame_plan()->simulation_steps == 0U,
-        "character snapshots preserve the legacy profile-to-Main route when selection support is closed");
-
-    // The character gate is independently effective even when the profile gate
-    // is not requested.
-    const std::array gated_frames{
-        ScriptedElapsedFrame{.elapsed = milliseconds{15},
-            .transitions = primary_down},
-    };
-    RunReplaySessionConfig gated_config = ValidConfig();
-    gated_config.initial_front_end_state = main_start;
-    gated_config.front_end_capabilities = FrontEndCapabilities{
-        .can_start_diagnostic_campaign = true,
-        .supports_character_selection = true,
-        .requires_active_character_for_diagnostic_play = true,
-    };
-    auto gated_created = RunReplaySession::Create(
-        BuildScriptedPair(menu_actions, gated_frames), gated_config);
-    RunReplaySession gated = TakeSession(
-        gated_created, "the character-only gated replay is created");
-    const auto gated_scheduler = gated.scheduler_state();
-    const auto gated_simulation = gated.simulation_state();
-    auto gated_start = gated.Next();
-    Check(gated_start && gated_start->frame_plan() &&
-              gated_start->front_end_command() == FrontEndCommand{} &&
-              gated.front_end_state() == main_start &&
-              !gated.front_end_active_profile_is_confirmed() &&
-              !gated.front_end_active_character_is_confirmed() &&
-              gated_start->frame_plan()->simulation_steps == 0U &&
-              gated.scheduler_state() == gated_scheduler &&
-              SameSimulation(gated.simulation_state(), gated_simulation),
-        "the configured character gate leaves Start Diagnostic inert and freezes simulation while its mirror is closed");
-
-    const std::array character_frames{
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = target_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = target_up},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_down},
-        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4},
-            .transitions = primary_up},
-        ScriptedElapsedFrame{.elapsed = milliseconds{15},
-            .transitions = fire_and_forward_down},
+    const std::array creation_frames{
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = cancel_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = cancel_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = milliseconds{15}, .transitions = fire_down},
     };
     RunReplaySessionConfig config = ValidConfig();
     config.enable_debug_locomotion = true;
-    config.initial_front_end_state = profiles_second;
-    config.front_end_visible_profile_slots = 3U;
-    config.front_end_total_profile_count = 3U;
-    // Selecting the empty second snapshot must not accidentally consume either
-    // neighboring profile's nonempty character counts.
-    config.front_end_visible_character_slots_by_profile = {2U, 0U, 1U};
-    config.front_end_total_character_counts_by_profile = {2U, 0U, 1U};
+    config.initial_front_end_state = omega::app::InitialFrontEndState();
     config.front_end_capabilities = FrontEndCapabilities{
+        .can_create_first_profile = true,
         .can_start_diagnostic_campaign = true,
         .requires_active_profile_for_diagnostic_play = true,
         .supports_character_selection = true,
@@ -3606,159 +3239,156 @@ void CheckCharacterFlowReplay()
         .requires_active_character_for_diagnostic_play = true,
     };
     auto created = RunReplaySession::Create(
-        BuildScriptedPair(menu_actions, character_frames), config);
+        BuildScriptedPair(actions, creation_frames), config);
     RunReplaySession source = TakeSession(
-        created, "the full character-flow replay is created");
+        created, "the canonical Create Agent replay is created");
     const auto scheduler_origin = source.scheduler_state();
-    const auto simulation_origin = source.simulation_state();
-    Check(!source.front_end_active_profile_is_confirmed() &&
-              !source.front_end_active_character_is_confirmed() &&
-              SameDiagnosticProximityTrigger(
-                  source.diagnostic_proximity_trigger_state(), false, false),
-        "both identity-free replay mirrors begin closed beside one armed outside project trigger");
+    const auto world_origin = source.simulation_state();
 
-    auto selected_profile = source.Next();
-    Check(selected_profile && selected_profile->frame_plan() &&
-              selected_profile->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::SetActiveProfile,
-                  .profile_slot = FrontEndProfileSlot::Second,
+    auto owner_create = source.Next();
+    auto owner_create_release = source.Next();
+    auto owner_confirm = source.Next();
+    Check(owner_create && owner_create->frame_plan() &&
+              owner_create->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::CreateProfileOwner,
+                  .profile_slot = FrontEndProfileSlot::First,
               } &&
-              source.front_end_state() == characters_first &&
+              owner_create_release && owner_create_release->frame_plan() &&
+              owner_create_release->front_end_command() == FrontEndCommand{} &&
+              owner_confirm && owner_confirm->frame_plan() &&
+              owner_confirm->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::ConfirmProfileOwner,
+                  .profile_slot = FrontEndProfileSlot::First,
+              } &&
+              source.front_end_state() == FrontEndState{
+                  .mode = FrontEndMode::AgentCreation,
+                  .selected_main_row = FrontEndMainRow::CreateAgent,
+              } &&
               source.front_end_active_profile_is_confirmed() &&
               !source.front_end_active_character_is_confirmed() &&
-              selected_profile->frame_plan()->simulation_steps == 0U &&
               source.scheduler_state() == scheduler_origin &&
-              SameSimulation(source.simulation_state(), simulation_origin),
-        "profile selection loads only its indexed empty character snapshot and routes to Characters");
+              SameSimulation(source.simulation_state(), world_origin),
+        "Create Agent creates then explicitly confirms its owner without scheduling");
 
-    auto profile_release = source.Next();
-    auto created_character = source.Next();
-    Check(profile_release && profile_release->front_end_command() == FrontEndCommand{} &&
-              created_character && created_character->frame_plan() &&
-              created_character->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::CreateFirstCharacter,
+    auto owner_confirm_release = source.Next();
+    auto agent_create = source.Next();
+    auto agent_create_release = source.Next();
+    auto agent_confirm = source.Next();
+    Check(owner_confirm_release && owner_confirm_release->frame_plan() &&
+              agent_create && agent_create->frame_plan() &&
+              agent_create->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::CreateAgent,
                   .profile_slot = FrontEndProfileSlot::First,
                   .character_slot = FrontEndCharacterSlot::First,
               } &&
-              source.front_end_state() == characters_first &&
-              source.front_end_active_profile_is_confirmed() &&
-              !source.front_end_active_character_is_confirmed() &&
-              created_character->frame_plan()->simulation_steps == 0U &&
-              source.scheduler_state() == scheduler_origin &&
-              SameSimulation(source.simulation_state(), simulation_origin),
-        "first-character creation advances only the selected replay-local logical snapshot from zero to one");
-
-    auto character_release = source.Next();
-    auto selected_character = source.Next();
-    Check(character_release && character_release->front_end_command() == FrontEndCommand{} &&
-              selected_character && selected_character->frame_plan() &&
-              selected_character->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::SetActiveCharacter,
+              agent_create_release && agent_create_release->frame_plan() &&
+              agent_confirm && agent_confirm->frame_plan() &&
+              agent_confirm->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::ConfirmAgent,
                   .profile_slot = FrontEndProfileSlot::First,
                   .character_slot = FrontEndCharacterSlot::First,
               } &&
-              source.front_end_state() == briefing_first &&
+              source.front_end_state() == FrontEndState{
+                  .mode = FrontEndMode::BriefingRoom,
+                  .selected_main_row = FrontEndMainRow::CreateAgent,
+              } &&
               source.front_end_active_profile_is_confirmed() &&
               source.front_end_active_character_is_confirmed() &&
-              selected_character->frame_plan()->simulation_steps == 0U &&
               source.scheduler_state() == scheduler_origin &&
-              SameSimulation(source.simulation_state(), simulation_origin),
-        "selecting the replay-created character opens its identity-free mirror and enters Briefing Room");
+              SameSimulation(source.simulation_state(), world_origin),
+        "agent creation advances only its selected bounded snapshot and confirmation enters Briefing Room");
 
-    const auto menu_before_move = source.front_end_state();
-    const auto trigger_before_move =
-        source.diagnostic_proximity_trigger_state();
     RunReplaySession replay = std::move(source);
     Check(source.state() == RunReplaySessionState::Inert &&
               !source.front_end_state() &&
-              !source.diagnostic_proximity_trigger_state() &&
               !source.front_end_active_profile_is_confirmed() &&
               !source.front_end_active_character_is_confirmed() &&
-              replay.state() == RunReplaySessionState::Ready &&
-              replay.front_end_state() == menu_before_move &&
-              SameDiagnosticProximityTrigger(
-                  replay.diagnostic_proximity_trigger_state(), trigger_before_move) &&
               replay.front_end_active_profile_is_confirmed() &&
               replay.front_end_active_character_is_confirmed(),
-        "move construction transfers both replay mirrors and leaves the source observably inert");
+        "move construction transfers both replay mirrors and leaves the source inert");
 
     auto selection_release = replay.Next();
+    auto back_to_selection = replay.Next();
+    auto cancel_release_frame = replay.Next();
+    auto reselect = replay.Next();
     Check(selection_release && selection_release->frame_plan() &&
-              selection_release->front_end_command() == FrontEndCommand{} &&
-              selection_release->frame_plan()->simulation_steps == 0U &&
-              replay.front_end_state() == briefing_first &&
-              replay.front_end_active_profile_is_confirmed() &&
-              replay.front_end_active_character_is_confirmed() &&
-              replay.scheduler_state() == scheduler_origin &&
-              SameSimulation(replay.simulation_state(), simulation_origin),
-        "the post-selection release preserves Briefing Room and both gates without advancing simulation");
-
-    auto briefing_cancel = replay.Next();
-    auto cancel_release = replay.Next();
-    Check(briefing_cancel && briefing_cancel->frame_plan() &&
-              briefing_cancel->front_end_command() == FrontEndCommand{} &&
-              briefing_cancel->frame_plan()->simulation_steps == 0U &&
-              replay.front_end_state() == characters_first &&
-              cancel_release && cancel_release->frame_plan() &&
-              cancel_release->front_end_command() == FrontEndCommand{} &&
-              cancel_release->frame_plan()->simulation_steps == 0U &&
-              replay.front_end_active_profile_is_confirmed() &&
-              replay.front_end_active_character_is_confirmed() &&
-              replay.scheduler_state() == scheduler_origin &&
-              SameSimulation(replay.simulation_state(), simulation_origin),
-        "Briefing Room cancel returns to Characters without closing either replay authorization mirror");
-
-    auto reselected_character = replay.Next();
-    auto reselection_release = replay.Next();
-    Check(reselected_character && reselected_character->frame_plan() &&
-              reselected_character->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::SetActiveCharacter,
+              back_to_selection && back_to_selection->frame_plan() &&
+              back_to_selection->front_end_command() == FrontEndCommand{} &&
+              back_to_selection->frame_plan()->simulation_steps == 0U &&
+              cancel_release_frame && cancel_release_frame->frame_plan() &&
+              reselect && reselect->frame_plan() &&
+              reselect->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::ConfirmAgent,
                   .profile_slot = FrontEndProfileSlot::First,
                   .character_slot = FrontEndCharacterSlot::First,
               } &&
-              reselected_character->frame_plan()->simulation_steps == 0U &&
-              reselection_release && reselection_release->frame_plan() &&
-              reselection_release->front_end_command() == FrontEndCommand{} &&
-              reselection_release->frame_plan()->simulation_steps == 0U &&
-              replay.front_end_state() == briefing_first &&
+              replay.front_end_state() == FrontEndState{
+                  .mode = FrontEndMode::BriefingRoom,
+                  .selected_main_row = FrontEndMainRow::CreateAgent,
+              } &&
               replay.front_end_active_profile_is_confirmed() &&
               replay.front_end_active_character_is_confirmed() &&
               replay.scheduler_state() == scheduler_origin &&
-              SameSimulation(replay.simulation_state(), simulation_origin),
-        "reselecting the character returns to Briefing Room before mission confirmation");
+              SameSimulation(replay.simulation_state(), world_origin),
+        "Briefing cancel and explicit reselection preserve authorization while remaining modal");
 
+    auto reselect_release = replay.Next();
     auto started = replay.Next();
-    const auto started_plan = started ? started->frame_plan() : std::nullopt;
-    const auto started_scheduler = replay.scheduler_state();
-    const auto started_simulation = replay.simulation_state();
-    Check(started && started_plan &&
+    Check(reselect_release && reselect_release->frame_plan() &&
+              started && started->frame_plan() &&
               started->front_end_command() == FrontEndCommand{
-                  .type = FrontEndCommandType::StartDiagnosticCampaign,
-                  .profile_slot = FrontEndProfileSlot::First,
-                  .character_slot = FrontEndCharacterSlot::First,
+                  .type = FrontEndCommandType::StartCampaign,
               } &&
-              replay.front_end_state() == FrontEndState{} &&
+              replay.front_end_state() == kGameplayFrontEndState &&
               replay.front_end_active_profile_is_confirmed() &&
               replay.front_end_active_character_is_confirmed() &&
-              started_plan->simulation_steps == 1U &&
-              started_plan->interpolation_alpha == 0.5 &&
-              !started_plan->clamped_delta && !started_plan->dropped_time &&
-              started_scheduler && *started_scheduler == FrameSchedulerState{
-                  .config = config.scheduler,
-                  .accumulated_remainder = milliseconds{5},
-                  .total_planned_steps = 1U,
-              } &&
-              started_simulation && SameSimulation(*started_simulation,
-                  SimulationState{
-                      .completed_steps = 1U,
-                      .simulated_time = milliseconds{10},
-                      .alive_entities = 1U,
-                  }) &&
+              started->frame_plan()->simulation_steps == 1U &&
+              started->frame_plan()->interpolation_alpha == 0.5 &&
               replay.debug_locomotion_position() == Position3{} &&
-              SameDiagnosticProximityTrigger(
-                  replay.diagnostic_proximity_trigger_state(), false, false) &&
               replay.state() == RunReplaySessionState::Complete,
-        "fire-select mission confirmation enters DiagnosticPlay without leaking held menu movement or mutating the outside project trigger");
+        "fire-select mission confirmation enters Gameplay without leaking modal input");
+
+    const std::array load_frames{
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_down},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_up},
+        ScriptedElapsedFrame{.elapsed = std::chrono::seconds{4}, .transitions = primary_down},
+    };
+    RunReplaySessionConfig load_config = ValidConfig();
+    load_config.initial_front_end_state = FrontEndState{
+        .mode = FrontEndMode::Title,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
+        .selected_profile_slot = FrontEndProfileSlot::Second,
+    };
+    load_config.front_end_visible_profile_slots = 2U;
+    load_config.front_end_total_profile_count = 2U;
+    load_config.front_end_visible_character_slots_by_profile[1U] = 1U;
+    load_config.front_end_total_character_counts_by_profile[1U] = 1U;
+    load_config.front_end_capabilities.supports_character_selection = true;
+    auto load_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, load_frames), load_config);
+    RunReplaySession load = TakeSession(
+        load_created, "the profile-scoped Load Agent replay is created");
+    auto load_owner = load.Next();
+    auto load_release = load.Next();
+    auto load_agent = load.Next();
+    Check(load_owner && load_owner->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::ConfirmProfileOwner,
+                  .profile_slot = FrontEndProfileSlot::Second,
+              } &&
+              load_release && load_agent &&
+              load_agent->front_end_command() == FrontEndCommand{
+                  .type = FrontEndCommandType::ConfirmAgent,
+                  .profile_slot = FrontEndProfileSlot::Second,
+                  .character_slot = FrontEndCharacterSlot::First,
+              } &&
+              load.front_end_state() == FrontEndState{
+                  .mode = FrontEndMode::BriefingRoom,
+                  .selected_main_row = FrontEndMainRow::LoadAgent,
+                  .selected_profile_slot = FrontEndProfileSlot::Second,
+              } &&
+              load.front_end_active_profile_is_confirmed() &&
+              load.front_end_active_character_is_confirmed(),
+        "Load Agent resolves only the selected profile's bounded character snapshot");
 }
 
 void CheckMoveLifecycle()
@@ -3818,7 +3448,7 @@ void CheckReplayAllocationRetry()
     constexpr std::array<nanoseconds, 1U> elapsed_values{milliseconds{31}};
     RunCaptureTracePair pair = BuildPair(actions, 1U, elapsed_values);
     RunReplaySessionConfig config = ValidConfig();
-    config.initial_front_end_state = FrontEndState{};
+    config.initial_front_end_state = kGameplayFrontEndState;
     config.front_end_capabilities.can_start_diagnostic_campaign = true;
     auto created = RunReplaySession::Create(std::move(pair), config);
     RunReplaySession session =
