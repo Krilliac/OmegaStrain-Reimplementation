@@ -265,6 +265,8 @@ function(omega_configure_visual_studio)
         omega_skas_text_envelope_decoder_tests
         omega_vpk_wrapper_envelope_decoder_tests
         omega_fnt_envelope_descriptor_tests
+        omega_fnt_v3_decoder_tests
+        omega_retail_string_table_decoder_tests
         omega_gui_envelope_descriptor_tests
         omega_ie_envelope_descriptor_tests
         omega_tbl_envelope_descriptor_tests
