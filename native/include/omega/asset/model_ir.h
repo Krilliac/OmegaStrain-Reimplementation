@@ -14,7 +14,7 @@ namespace omega::asset
 {
 // Fixed per-vertex skin-influence ceiling. This is a project-owned authoring bound chosen for
 // SkinInfluenceIR's fixed-size storage; no tracked SKM/SKA/SKAS evidence establishes how many (if
-// any) bone influences a retail vertex carries. See docs/adr/0007-project-owned-model-pose-ir.md.
+// any) bone influences a retail vertex carries. See docs/adr/0008-project-owned-model-pose-ir.md.
 inline constexpr std::size_t kMaximumSkinInfluencesPerVertex = 4;
 
 // Project-owned hard ceiling on joints per SkeletonIR. Chosen as a generous authoring bound, not a
