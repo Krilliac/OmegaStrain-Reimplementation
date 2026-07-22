@@ -164,6 +164,7 @@ target_compile_features(omega_content PUBLIC cxx_std_23)
 
 add_library(omega_frontend_presentation STATIC
     native/src/frontend_presentation/retail_frontend_timeline.cpp
+    native/src/frontend_presentation/retail_frontend_texture_sampler.cpp
     native/src/frontend_presentation/retail_title_compositor.cpp
 )
 target_include_directories(omega_frontend_presentation PUBLIC native/include)
@@ -3105,6 +3106,36 @@ if(BUILD_TESTING)
     add_test(NAME omega_frontend_timeline_tests
         COMMAND omega_frontend_timeline_tests)
     set_tests_properties(omega_frontend_timeline_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_frontend_texture_sampler_tests
+        native/tests/frontend_texture_sampler_tests.cpp
+    )
+    target_link_libraries(omega_frontend_texture_sampler_tests PRIVATE
+        omega_frontend_presentation
+        omega_content
+    )
+    target_compile_features(omega_frontend_texture_sampler_tests PRIVATE cxx_std_23)
+    if(MSVC)
+        target_compile_options(omega_frontend_texture_sampler_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_frontend_texture_sampler_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_frontend_texture_sampler_tests
+        COMMAND omega_frontend_texture_sampler_tests)
+    set_tests_properties(omega_frontend_texture_sampler_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_lpd_envelope_decoder_tests
         native/tests/lpd_envelope_decoder_tests.cpp

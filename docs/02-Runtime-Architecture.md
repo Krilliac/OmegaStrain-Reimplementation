@@ -337,8 +337,9 @@ The current native build targets express the same direction:
 - `omega_frontend_presentation`: a platform-neutral presentation boundary whose static entry point
   composes an immutable retail screen bundle into one owned canonical RGBA8 frame and whose live
   timeline entry point owns only per-instance value state. The static subset accepts only results
-  invariant to unresolved projection, sampling, draw-order, text, animation, action, and
-  output-alpha rules; required unsupported semantics reject the whole frame;
+  invariant to projection, texture composition, draw-order, text, animation, action, and
+  output-alpha rules that it does not yet implement; required unsupported semantics reject the
+  whole frame;
 - `omega_media`: bounded MPEG/program-stream and owned decoded-media values. Its current
   Media-Foundation-named public header and `platform_code` error field are transitional internal
   contracts, not promoted SDK APIs, even though Windows SDK types remain hidden;
@@ -387,6 +388,18 @@ binding and searches only that scope, so same-named members in different HOGs ca
 atlases use the same metadata-bearing value through their separate font-archive lookup. The static
 title compositor still rejects all textured input and now distinguishes a declared texture whose
 binding is absent from merely unsupported texture sampling; neither case returns a partial frame.
+
+The platform-neutral retail frontend sampler is a separate stateless value kernel over one live
+`FrontEndTextureBinding`. Its explicitly named bilinear-repeat entry point maps normalized ST to
+texel coordinates, subtracts one half texel, repeats each axis, fetches four expanded indexed-4 or
+indexed-8 palette entries, and bilinearly interpolates straight normalized channels. The fixed
+512-by-512 extent, exact 16/256-entry palettes, exact owned index count, selected palette indices,
+finite coordinates, encoding, and TCC mode all fail closed through identity-free typed errors. When
+TCC uses palette alpha, the result carries the interpolated GS-normalized alpha multiplier; when
+TCC ignores texture alpha, the result carries an explicit identity multiplier so a later compositor
+must retain vertex/node alpha. The kernel allocates nothing and retains no view. It establishes no
+projection, triangle fill, FST, blend, depth, draw-order, output-alpha, or complete Title-frame
+contract, and the fail-closed static compositor does not yet invoke it.
 
 The Windows prelaunch process is deliberately outside the game composition graph.
 `openomega_launcher.exe` owns only owner-data selection, validation, the default-off gamepad
