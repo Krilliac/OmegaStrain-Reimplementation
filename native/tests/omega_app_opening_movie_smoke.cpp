@@ -70,6 +70,12 @@ struct OmegaAppTestAccess final
         return app.boot_sequence_state_;
     }
 
+    [[nodiscard]] static bool OpeningMovieSkipArmed(
+        const OmegaApp& app) noexcept
+    {
+        return app.opening_movie_skip_armed_;
+    }
+
     [[nodiscard]] static FrontEndState FrontEnd(const OmegaApp& app) noexcept
     {
         return app.front_end_state_;
@@ -421,13 +427,32 @@ private:
     std::filesystem::path root_;
 };
 
-[[nodiscard]] bool PushKey(
-    const SDL_Scancode scancode, const bool pressed)
+[[nodiscard]] bool PushKey(const SDL_Scancode scancode, const bool pressed,
+    const bool repeat = false)
 {
     SDL_Event event{};
     event.type = pressed ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
     event.key.scancode = scancode;
     event.key.down = pressed;
+    event.key.repeat = repeat;
+    return SDL_PushEvent(&event);
+}
+
+[[nodiscard]] bool PushMouseButton(
+    const Uint8 button, const bool pressed)
+{
+    SDL_Event event{};
+    event.type = pressed ? SDL_EVENT_MOUSE_BUTTON_DOWN
+                         : SDL_EVENT_MOUSE_BUTTON_UP;
+    event.button.button = button;
+    event.button.down = pressed;
+    return SDL_PushEvent(&event);
+}
+
+[[nodiscard]] bool PushQuit()
+{
+    SDL_Event event{};
+    event.type = SDL_EVENT_QUIT;
     return SDL_PushEvent(&event);
 }
 
@@ -473,6 +498,7 @@ struct GeneratedPlaybackConfig
     GeneratedPlaybackMode mode = GeneratedPlaybackMode::NaturalCompletion;
     std::size_t complete_after_advance = 2U;
     std::optional<std::size_t> queue_skip_after_advance;
+    SDL_Scancode queued_skip_scancode = SDL_SCANCODE_RETURN;
     bool supply_audio = false;
     std::uint32_t presentation_width = kGeneratedWidth;
     std::uint32_t presentation_height = kGeneratedHeight;
@@ -545,7 +571,7 @@ public:
         {
             observation_->skip_event_attempted = true;
             observation_->skip_event_queued =
-                PushKey(SDL_SCANCODE_RETURN, true);
+                PushKey(config_.queued_skip_scancode, true);
         }
 
         const bool completed =
@@ -706,7 +732,8 @@ void CheckTransitionCleanup(const OmegaApp& app, const AppBaseline& before,
     const std::uint64_t expected_movie_frames,
     const std::string_view context,
     const std::uint64_t expected_control_failure_delta = 0U,
-    const std::uint64_t expected_front_end_draws = 3U)
+    const std::uint64_t expected_front_end_draws = 3U,
+    const std::uint64_t expected_discard_delta = 2U)
 {
     const GpuHostSnapshot gpu = OmegaAppTestAccess::Gpu(app);
     const AudioServiceSnapshot audio = OmegaAppTestAccess::Audio(app);
@@ -731,8 +758,8 @@ void CheckTransitionCleanup(const OmegaApp& app, const AppBaseline& before,
                   expected_control_failure_delta,
         context, "audio control-failure accounting matches the script");
     Check(audio.opening_movie_discard_count ==
-              before.audio.opening_movie_discard_count + 2U,
-        context, "transition and run epilogue each perform containment");
+              before.audio.opening_movie_discard_count + expected_discard_delta,
+        context, "movie-run containment count matches the scripted boundaries");
     Check(SameSimulationState(
               OmegaAppTestAccess::Simulation(app), before.simulation),
         context, "modal movie and transition frames do not simulate");
@@ -1030,17 +1057,21 @@ void CheckNaturalCompletionAndActionableMenu()
 
 void CheckScheduledSkip(const std::size_t advance_count,
     const std::string_view context,
-    const SDL_Scancode early_skip_scancode = SDL_SCANCODE_RETURN,
+    const SDL_Scancode skip_scancode = SDL_SCANCODE_RETURN,
     const bool verify_held_skip_alias = false)
 {
+    Check(advance_count != 0U, context,
+        "scheduled skips require at least one rendered movie frame");
+    if (advance_count == 0U)
+        return;
+
     auto observation = std::make_shared<GeneratedPlaybackObservation>();
     GeneratedPlaybackConfig config{
         .mode = GeneratedPlaybackMode::ScheduledSkip,
         .complete_after_advance = advance_count + 2U,
-        .queue_skip_after_advance = advance_count == 0U
-            ? std::nullopt
-            : std::optional<std::size_t>{advance_count},
-        .supply_audio = advance_count != 0U,
+        .queue_skip_after_advance = advance_count,
+        .queued_skip_scancode = skip_scancode,
+        .supply_audio = true,
     };
     auto app = CreateApp(std::make_unique<GeneratedOpeningMovie>(
         config, observation));
@@ -1048,11 +1079,6 @@ void CheckScheduledSkip(const std::size_t advance_count,
     if (!app)
         return;
 
-    if (advance_count == 0U)
-    {
-        Check(PushKey(early_skip_scancode, true), context,
-            "early skip edge enters the SDL queue");
-    }
     const AppBaseline before = CaptureBaseline(*app);
     const int frame_limit = static_cast<int>(advance_count + 1U);
     auto skipped = app->Run(frame_limit);
@@ -1065,32 +1091,25 @@ void CheckScheduledSkip(const std::size_t advance_count,
     Check(observation->advance_calls == advance_count &&
               observation->destruction_count == 1U,
         context, "primary skip bypasses the player on the transition frame");
-    if (advance_count == 0U)
-    {
-        Check(!observation->skip_event_attempted &&
-                  observation->audio_read_calls == 0U,
-            context, "early skip occurs before video or PCM publication");
-    }
-    else
-    {
-        Check(observation->skip_event_attempted &&
-                  observation->skip_event_queued,
-            context, "the selected playback position schedules one primary edge");
-        Check(observation->audio_read_calls != 0U &&
-                  observation->audio_frames_returned != 0U,
-            context, "mid/late playback supplies generated PCM before skip");
-        Check(OmegaAppTestAccess::Audio(*app)
-                      .opening_movie_session_generation ==
-                  before.audio.opening_movie_session_generation + 1U,
-            context, "generated PCM starts exactly one real SDL audio session");
-    }
+    Check(observation->skip_event_attempted &&
+              observation->skip_event_queued,
+        context, "the selected playback position schedules one fresh keyboard edge");
+    Check(observation->audio_read_calls != 0U &&
+              observation->audio_frames_returned != 0U,
+        context, "playback supplies generated PCM before the armed skip");
+    Check(OmegaAppTestAccess::Audio(*app)
+                  .opening_movie_session_generation ==
+              before.audio.opening_movie_session_generation + 1U,
+        context, "generated PCM starts exactly one real SDL audio session");
     Check(OmegaAppTestAccess::BootSequence(*app).phase ==
               BootSequencePhase::Skipped,
         context, "primary input records a skipped boot sequence");
     Check(OmegaAppTestAccess::FrontEnd(*app) ==
               omega::app::InitialFrontEndState(),
         context, "the skip primary edge is not forwarded into the menu");
-    CheckTransitionCleanup(*app, before, advance_count == 0U ? 0U : 1U,
+    Check(!OmegaAppTestAccess::OpeningMovieSkipArmed(*app), context,
+        "front-end transition clears the launch-local movie skip arm");
+    CheckTransitionCleanup(*app, before, 1U,
         advance_count + 1U, advance_count, context);
     if (verify_held_skip_alias)
     {
@@ -1102,7 +1121,7 @@ void CheckScheduledSkip(const std::size_t advance_count,
             context,
             "the held fire alias cannot repeat into the first subsequent menu input frame");
         const bool released_alias_frame =
-            PushKey(early_skip_scancode, false) &&
+            PushKey(skip_scancode, false) &&
             RunOneModalFrameWithExactDraws(*app, 3U, context);
         Check(released_alias_frame &&
                   OmegaAppTestAccess::FrontEnd(*app) ==
@@ -1110,6 +1129,157 @@ void CheckScheduledSkip(const std::size_t advance_count,
             context,
             "the fire-alias release is consumed without selecting a menu row");
     }
+}
+
+void CheckLaunchInputArmingAndF10Policy()
+{
+    constexpr std::string_view context = "launch-input-arming-f10";
+    auto observation = std::make_shared<GeneratedPlaybackObservation>();
+    auto app = CreateApp(std::make_unique<GeneratedOpeningMovie>(
+        GeneratedPlaybackConfig{
+            .mode = GeneratedPlaybackMode::ScheduledSkip,
+        },
+        observation));
+    Check(app.has_value(), context, "generated playback app starts");
+    if (!app)
+        return;
+
+    const AppBaseline before = CaptureBaseline(*app);
+    Check(PushKey(SDL_SCANCODE_F10, true), context,
+        "a launch-queued F10 edge enters SDL's queue");
+    auto launch_frame = app->Run(1);
+    Check(launch_frame && launch_frame->rendered_frames == 1U &&
+              launch_frame->input_frames == 1U &&
+              launch_frame->planned_simulation_steps == 0U &&
+              launch_frame->executed_simulation_steps == 0U &&
+              !launch_frame->quit_requested,
+        context,
+        "launch-queued F10 is swallowed while the first movie frame renders");
+    Check(observation->advance_calls == 1U &&
+              observation->destruction_count == 0U &&
+              OmegaAppTestAccess::HasOpeningMoviePlayback(*app) &&
+              omega::app::IsBootSequenceActive(
+                  OmegaAppTestAccess::BootSequence(*app)) &&
+              OmegaAppTestAccess::OpeningMovieSkipArmed(*app),
+        context,
+        "only the successful first movie submission arms later skip input");
+
+    Check(PushKey(SDL_SCANCODE_F10, false), context,
+        "the launch-queued F10 release enters SDL's queue");
+    auto release_frame = app->Run(1);
+    Check(release_frame && release_frame->rendered_frames == 1U &&
+              !release_frame->quit_requested &&
+              observation->advance_calls == 2U &&
+              omega::app::IsBootSequenceActive(
+                  OmegaAppTestAccess::BootSequence(*app)) &&
+              OmegaAppTestAccess::OpeningMovieSkipArmed(*app),
+        context,
+        "F10 release is swallowed and cannot skip or quit the armed movie");
+
+    Check(PushKey(SDL_SCANCODE_F10, true), context,
+        "a fresh armed F10 edge enters SDL's queue");
+    auto skipped = app->Run(1);
+    Check(skipped && skipped->rendered_frames == 1U &&
+              skipped->input_frames == 1U &&
+              skipped->planned_simulation_steps == 0U &&
+              skipped->executed_simulation_steps == 0U &&
+              !skipped->quit_requested &&
+              observation->advance_calls == 2U &&
+              observation->destruction_count == 1U &&
+              OmegaAppTestAccess::BootSequence(*app).phase ==
+                  BootSequencePhase::Skipped &&
+              !OmegaAppTestAccess::OpeningMovieSkipArmed(*app),
+        context,
+        "fresh armed F10 skips into the menu instead of terminating the app");
+    CheckTransitionCleanup(*app, before, 1U, 3U, 2U,
+        context, 0U, 3U, 4U);
+
+    const bool skip_release_swallowed =
+        PushKey(SDL_SCANCODE_F10, false) &&
+        RunOneModalFrameWithExactDraws(*app, 3U, context);
+    Check(skip_release_swallowed, context,
+        "the skip F10 release remains inert in the front end");
+    Check(PushKey(SDL_SCANCODE_F10, true), context,
+        "a post-movie F10 edge enters SDL's queue");
+    auto quit = app->Run(1);
+    Check(quit && quit->rendered_frames == 0U &&
+              quit->input_frames == 1U && quit->quit_requested,
+        context, "normal F10 quit resumes after movie playback");
+}
+
+void CheckAnyMouseButtonSkipsAfterArming()
+{
+    constexpr std::string_view context = "any-mouse-button-skip";
+    auto observation = std::make_shared<GeneratedPlaybackObservation>();
+    auto app = CreateApp(std::make_unique<GeneratedOpeningMovie>(
+        GeneratedPlaybackConfig{
+            .mode = GeneratedPlaybackMode::ScheduledSkip,
+        },
+        observation));
+    Check(app.has_value(), context, "generated playback app starts");
+    if (!app)
+        return;
+
+    auto armed_frame = app->Run(1);
+    Check(armed_frame && armed_frame->rendered_frames == 1U &&
+              !armed_frame->quit_requested &&
+              observation->advance_calls == 1U &&
+              OmegaAppTestAccess::OpeningMovieSkipArmed(*app),
+        context, "one successful movie frame arms mouse skipping");
+    const AppBaseline before_transition = CaptureBaseline(*app);
+
+    Check(PushMouseButton(SDL_BUTTON_MIDDLE, true), context,
+        "an unbound middle-mouse down enters SDL's queue");
+    auto skipped = app->Run(1);
+    Check(skipped && skipped->rendered_frames == 1U &&
+              skipped->input_frames == 1U &&
+              skipped->planned_simulation_steps == 0U &&
+              skipped->executed_simulation_steps == 0U &&
+              !skipped->quit_requested &&
+              observation->advance_calls == 1U &&
+              observation->destruction_count == 1U &&
+              OmegaAppTestAccess::BootSequence(*app).phase ==
+                  BootSequencePhase::Skipped &&
+              OmegaAppTestAccess::FrontEnd(*app) ==
+                  omega::app::InitialFrontEndState(),
+        context,
+        "any fresh mouse-button down skips without requiring a logical binding");
+    CheckTransitionCleanup(*app, before_transition, 0U, 1U, 0U, context);
+}
+
+void CheckHostQuitPreemptsMovieSkip()
+{
+    constexpr std::string_view context = "host-quit-preempts-movie-skip";
+    auto observation = std::make_shared<GeneratedPlaybackObservation>();
+    auto app = CreateApp(std::make_unique<GeneratedOpeningMovie>(
+        GeneratedPlaybackConfig{
+            .mode = GeneratedPlaybackMode::ScheduledSkip,
+        },
+        observation));
+    Check(app.has_value(), context, "generated playback app starts");
+    if (!app)
+        return;
+
+    const auto before_simulation = OmegaAppTestAccess::Simulation(*app);
+    Check(PushKey(SDL_SCANCODE_A, true) && PushQuit(), context,
+        "a fresh keyboard edge and host quit enter SDL's queue together");
+    auto quit = app->Run(1);
+    Check(quit && quit->rendered_frames == 0U &&
+              quit->input_frames == 1U &&
+              quit->planned_simulation_steps == 0U &&
+              quit->executed_simulation_steps == 0U &&
+              quit->quit_requested,
+        context, "host quit terminates the run before movie skip or rendering");
+    Check(observation->advance_calls == 0U &&
+              observation->destruction_count == 0U &&
+              OmegaAppTestAccess::HasOpeningMoviePlayback(*app) &&
+              omega::app::IsBootSequenceActive(
+                  OmegaAppTestAccess::BootSequence(*app)) &&
+              !OmegaAppTestAccess::OpeningMovieSkipArmed(*app) &&
+              SameSimulationState(
+                  before_simulation, OmegaAppTestAccess::Simulation(*app)),
+        context,
+        "host quit has priority over the simultaneous keyboard skip signal");
 }
 
 void CheckOverReportedPcmRejection()
@@ -1359,6 +1529,10 @@ void CheckPersistenceBackedMovieProfileFlow(
             ? GeneratedPlaybackMode::NaturalCompletion
             : GeneratedPlaybackMode::ScheduledSkip,
         .complete_after_advance = 2U,
+        .queue_skip_after_advance = entry == PersistentMovieEntry::PrimarySkip
+            ? std::optional<std::size_t>{1U}
+            : std::nullopt,
+        .queued_skip_scancode = SDL_SCANCODE_F1,
     };
     {
         auto app = CreatePersistentApp(
@@ -1394,24 +1568,22 @@ void CheckPersistenceBackedMovieProfileFlow(
         }
         else
         {
-            Check(PushKey(SDL_SCANCODE_F1, true), context,
-                "the movie-skip Primary edge enters the SDL queue");
-            auto skipped = app->Run(1);
-            Check(skipped && skipped->rendered_frames == 1 &&
-                      skipped->input_frames == 1U &&
+            auto skipped = app->Run(2);
+            Check(skipped && skipped->rendered_frames == 2 &&
+                      skipped->input_frames == 2U &&
                       skipped->planned_simulation_steps == 0U &&
                       skipped->executed_simulation_steps == 0U &&
                       !skipped->quit_requested,
                 context,
-                "the Primary skip renders one Profiles transition frame without simulation");
-            Check(observation->advance_calls == 0U &&
+                "the Primary skip renders one movie frame and one Profiles transition frame without simulation");
+            Check(observation->advance_calls == 1U &&
                       observation->audio_read_calls == 0U &&
                       observation->destruction_count == 1U &&
                       OmegaAppTestAccess::BootSequence(*app).phase ==
                           BootSequencePhase::Skipped,
                 context,
-                "the early Primary edge skips before movie publication");
-            CheckTransitionCleanup(*app, before_transition, 0U, 1U, 0U,
+                "the first rendered movie frame arms the scheduled Primary edge");
+            CheckTransitionCleanup(*app, before_transition, 1U, 2U, 1U,
                 context, 0U, 2U);
         }
 
@@ -1852,8 +2024,11 @@ int main()
     CheckAmbiguousSourceRejection();
     CheckInvalidMetadataRejection();
     CheckNaturalCompletionAndActionableMenu();
-    CheckScheduledSkip(0U, "early-skip");
-    CheckScheduledSkip(0U, "space-fire-alias-skip", SDL_SCANCODE_SPACE, true);
+    CheckLaunchInputArmingAndF10Policy();
+    CheckHostQuitPreemptsMovieSkip();
+    CheckScheduledSkip(1U, "any-key-skip", SDL_SCANCODE_A);
+    CheckScheduledSkip(1U, "space-fire-alias-skip", SDL_SCANCODE_SPACE, true);
+    CheckAnyMouseButtonSkipsAfterArming();
     CheckScheduledSkip(2U, "mid-skip");
     CheckScheduledSkip(5U, "late-skip");
     CheckOverReportedPcmRejection();

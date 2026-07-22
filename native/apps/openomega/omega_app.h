@@ -299,6 +299,10 @@ private:
     runtime::RenderTextureHandle opening_movie_texture_;
     runtime::RenderDrawList opening_movie_draw_list_;
     BootSequenceState boot_sequence_state_{};
+    // Launch-time SDL events are swallowed until one movie frame has reached
+    // the host successfully. A later fresh keyboard/mouse press (or the
+    // opt-in gamepad primary action) may then complete the modal boot sequence.
+    bool opening_movie_skip_armed_ = false;
     // Fixed producer scratch for one complete native audio-ring refill. It owns only decoded PCM
     // and is never accessed by the SDL callback.
     std::array<std::int16_t,
