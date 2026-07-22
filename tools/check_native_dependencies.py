@@ -242,6 +242,8 @@ _DEBUG_SUBSYSTEM_ENTRY_BREAK_SOURCES = frozenset(
         "native/src/media/mpeg_program_stream_descriptor.cpp",
         "native/src/persistence/save_database.cpp",
         "native/src/profiles/profile_catalog.cpp",
+        "native/src/retail/fnt_v3_decoder.cpp",
+        "native/src/retail/retail_string_table_decoder.cpp",
         "native/src/retail/vag_adpcm_decoder.cpp",
         "native/src/runtime/input_trace.cpp",
         "native/src/simulation/simulation_world.cpp",
