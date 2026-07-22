@@ -291,6 +291,14 @@ Studio's historical engine source or internal toolchain.
   `--set=input.gamepad_enabled=true` explicitly opts in. This is synthetic diagnostic input and
   presentation policy only. It establishes no retail mouse sensitivity, acceleration, crosshair,
   camera, weapon, projectile, raycast, damage, collision, coordinate-axis, or parity semantics.
+- E-0118 adds one allocation-free project diagnostic proximity reducer over an inclusive signed X/Z
+  volume. Each successful fixed simulation step classifies the positioned actor as outside, entered,
+  inside, or exited; the first in-volume observation latches one launch-local objective that survives
+  later exits and BriefingRoom round trips but is never persisted. A fixed visible rectangle marks the
+  still-armed zone and disappears after activation. Fresh replay applies the same reducer after each
+  reconstructed step and exposes the same owned trigger state. This is a synthetic movement-to-
+  objective seam only: it establishes no retail coordinate, trigger, objective, mission, checkpoint,
+  collision, AI, combat, or persistence behavior.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public

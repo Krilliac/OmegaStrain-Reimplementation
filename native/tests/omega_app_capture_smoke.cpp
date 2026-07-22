@@ -665,6 +665,12 @@ struct OmegaAppTestAccess final
         return app.simulation_->PositionOf(app.debug_locomotion_entity_);
     }
 
+    [[nodiscard]] static gameplay::DiagnosticProximityTriggerState
+    DiagnosticProximityTriggerState(const OmegaApp& app) noexcept
+    {
+        return app.diagnostic_proximity_trigger_state_;
+    }
+
     [[nodiscard]] static runtime::FrameSchedulerState SchedulerSnapshot(
         const OmegaApp& app) noexcept
     {
@@ -836,6 +842,14 @@ void Check(const bool condition, const std::string_view message)
            left.alive_entities == right.alive_entities;
 }
 
+[[nodiscard]] constexpr bool SameProximityTriggerState(
+    const omega::gameplay::DiagnosticProximityTriggerState left,
+    const omega::gameplay::DiagnosticProximityTriggerState right) noexcept
+{
+    return left.inside == right.inside &&
+           left.objective_complete == right.objective_complete;
+}
+
 [[nodiscard]] bool IsOneVisibleMenuSubmission(
     const omega::app::GpuHostSnapshot& before,
     const omega::app::GpuHostSnapshot& after) noexcept
@@ -943,7 +957,7 @@ void Check(const bool condition, const std::string_view message)
     return SameTextureResidency(before, after) &&
            after.frame_submissions == before.frame_submissions + 1U &&
            after.blit_submissions == before.blit_submissions + 1U &&
-           after.successful_blit_draws == before.successful_blit_draws + 2U &&
+           after.successful_blit_draws == before.successful_blit_draws + 3U &&
            after.clear_submissions == before.clear_submissions &&
            after.unavailable_swapchain_submissions ==
                before.unavailable_swapchain_submissions &&
@@ -951,14 +965,14 @@ void Check(const bool condition, const std::string_view message)
                before.rejected_nondefault_texture_handles;
 }
 
-[[nodiscard]] bool IsOneDiagnosticActorOnlySubmission(
+[[nodiscard]] bool IsOneDiagnosticActorAndObjectiveSubmission(
     const omega::app::GpuHostSnapshot& before,
     const omega::app::GpuHostSnapshot& after) noexcept
 {
     return SameTextureResidency(before, after) &&
            after.frame_submissions == before.frame_submissions + 1U &&
            after.blit_submissions == before.blit_submissions + 1U &&
-           after.successful_blit_draws == before.successful_blit_draws + 1U &&
+           after.successful_blit_draws == before.successful_blit_draws + 2U &&
            after.clear_submissions == before.clear_submissions &&
            after.unavailable_swapchain_submissions ==
                before.unavailable_swapchain_submissions &&
@@ -2963,6 +2977,10 @@ void CheckDiagnosticSceneMissionActivation(
         const omega::app::GpuHostSnapshot initial_gpu = Access::GpuSnapshot(*app);
         const auto scene_commands = Access::DiagnosticSceneMeshDrawList(*app).commands();
         const auto scene_overlay = Access::DiagnosticSceneOverlayDrawList(*app).commands();
+        constexpr auto kObjectiveDestination =
+            omega::app::PlanProjectDiagnosticObjectiveMarkerDestination(
+                omega::gameplay::DiagnosticProximityTriggerState{});
+        static_assert(kObjectiveDestination.has_value());
         const omega::runtime::RenderMeshHandle initial_environment_mesh_handle =
             scene_commands.empty() ? omega::runtime::RenderMeshHandle{}
                                    : scene_commands.front().mesh;
@@ -3002,9 +3020,14 @@ void CheckDiagnosticSceneMissionActivation(
                       } &&
                   scene_commands[1].raster_mode ==
                       omega::runtime::RenderMeshRasterMode::Fill &&
-                  scene_overlay.empty() &&
-                  Access::CurrentFrontEndMeshDrawList(*app).empty(),
-            "the validated environment-plus-actor scene remains resident but hidden in Profiles");
+                   scene_overlay.size() == 1U &&
+                   scene_overlay[0].texture ==
+                       Access::DiagnosticActorMarkerTexture(*app) &&
+                   scene_overlay[0].destination == *kObjectiveDestination &&
+                   SameProximityTriggerState(
+                       Access::DiagnosticProximityTriggerState(*app), {}) &&
+                   Access::CurrentFrontEndMeshDrawList(*app).empty(),
+            "the validated environment-plus-actor scene and armed objective remain resident but hidden in Profiles");
 
         const bool reached_briefing =
             PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
@@ -3053,18 +3076,21 @@ void CheckDiagnosticSceneMissionActivation(
                   play_gpu.successful_mesh_releases ==
                       briefing_gpu.successful_mesh_releases &&
                   play_gpu.frame_submissions == briefing_gpu.frame_submissions + 1U &&
-                  play_gpu.blit_submissions == briefing_gpu.blit_submissions &&
-                  play_gpu.successful_blit_draws ==
-                      briefing_gpu.successful_blit_draws &&
+                   play_gpu.blit_submissions == briefing_gpu.blit_submissions + 1U &&
+                   play_gpu.successful_blit_draws ==
+                       briefing_gpu.successful_blit_draws + 1U &&
                   play_gpu.mesh_submissions == briefing_gpu.mesh_submissions + 1U &&
                   play_gpu.successful_mesh_draws ==
                       briefing_gpu.successful_mesh_draws + 2U &&
-                  Access::CurrentFrontEndMeshDrawList(*app).size() == 2U &&
-                  Access::DiagnosticSceneOverlayDrawList(*app).empty() &&
-                  Access::CurrentFrontEndDrawList(*app).empty() &&
-                  DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
-                      Access::DiagnosticSceneOverlayDrawList(*app)),
-            "the positioned BriefingRoom mission click records the exact project pointer, publishes environment then magenta actor, and emits no deploy-click fire cue or resource upload");
+                   Access::CurrentFrontEndMeshDrawList(*app).size() == 2U &&
+                   Access::DiagnosticSceneOverlayDrawList(*app).commands().size() == 1U &&
+                   Access::DiagnosticSceneOverlayDrawList(*app).commands()[0].destination ==
+                       *kObjectiveDestination &&
+                   SameProximityTriggerState(
+                       Access::DiagnosticProximityTriggerState(*app), {}) &&
+                   DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                       Access::DiagnosticSceneOverlayDrawList(*app)),
+            "the positioned BriefingRoom mission click records the exact project pointer, publishes environment, actor, and armed objective, and emits no deploy-click activation or fire cue");
 
         Check(PushMouseButton(SDL_BUTTON_LEFT, false) && app->Run(1).has_value(),
             "the diagnostic-scene mission click releases in DiagnosticPlay");
@@ -3110,7 +3136,11 @@ void CheckDiagnosticSceneMissionActivation(
                        movement_gpu_before, movement_gpu_after) &&
                    movement_gpu_after.successful_mesh_draws ==
                       movement_gpu_before.successful_mesh_draws + 2U &&
-                  Access::CurrentFrontEndDrawList(*app).empty(),
+                   Access::CurrentFrontEndDrawList(*app).commands().size() == 1U &&
+                   Access::CurrentFrontEndDrawList(*app).commands()[0].destination ==
+                       *kObjectiveDestination &&
+                   SameProximityTriggerState(
+                       Access::DiagnosticProximityTriggerState(*app), {}),
             "one keyboard simulation step keeps the environment prefix immutable and updates only the actor mesh transform without GPU resource churn");
 
         Check(PushKey(SDL_SCANCODE_W, false) &&
@@ -3127,20 +3157,45 @@ void CheckDiagnosticSceneMissionActivation(
         const auto target_overlay =
             Access::DiagnosticSceneOverlayDrawList(*app).commands();
         Check(target_pressed && target_frame && !target_frame->failure() &&
-                  target_overlay.size() == 2U && moved_position &&
-                  target_overlay[0].texture ==
-                      Access::DiagnosticActorMarkerTexture(*app) &&
-                  target_overlay[1].texture ==
-                      Access::DiagnosticActorMarkerTexture(*app) &&
-                  target_overlay[0].destination !=
-                      omega::app::PlanProjectDiagnosticActorMarkerDestination(
-                          *moved_position) &&
-                  target_overlay[1].destination !=
-                      omega::app::PlanProjectDiagnosticActorMarkerDestination(
-                          *moved_position) &&
+                   target_overlay.size() == 3U && moved_position &&
+                   target_overlay[0].texture ==
+                       Access::DiagnosticActorMarkerTexture(*app) &&
+                   target_overlay[1].texture ==
+                       Access::DiagnosticActorMarkerTexture(*app) &&
+                   target_overlay[2].texture ==
+                       Access::DiagnosticActorMarkerTexture(*app) &&
+                   target_overlay[0].destination == *kObjectiveDestination &&
+                   target_overlay[1].destination !=
+                       omega::app::PlanProjectDiagnosticActorMarkerDestination(
+                           *moved_position) &&
+                   target_overlay[2].destination !=
+                       omega::app::PlanProjectDiagnosticActorMarkerDestination(
+                           *moved_position) &&
                   DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
                       Access::DiagnosticSceneOverlayDrawList(*app)),
-            "held right mouse publishes only the two target cues above the actor mesh, never a duplicate marker");
+            "held right mouse publishes the armed objective followed by two target cues above the actor mesh, never a duplicate actor marker");
+        const bool chord_pressed = PushMouseButton(SDL_BUTTON_LEFT, true) &&
+            Access::ArmNextRunElapsed(*app, std::chrono::nanoseconds::zero());
+        auto chord_frame = app->RunWithCapture(1);
+        const auto chord_overlay =
+            Access::DiagnosticSceneOverlayDrawList(*app).commands();
+        constexpr auto kExpectedTargetCues =
+            omega::app::PlanProjectDiagnosticTargetCueRectangles(
+                std::optional<omega::runtime::PointerPositionQ16>{
+                    kQuarterThreeQuarterPointer});
+        constexpr auto kExpectedFireCue =
+            omega::app::PlanProjectDiagnosticFireCueRectangle(
+                std::optional<omega::runtime::PointerPositionQ16>{
+                    kQuarterThreeQuarterPointer});
+        Check(chord_pressed && chord_frame && !chord_frame->failure() &&
+                  chord_overlay.size() == 4U &&
+                  chord_overlay[0].destination == *kObjectiveDestination &&
+                  chord_overlay[1].destination == kExpectedTargetCues[0U] &&
+                  chord_overlay[2].destination == kExpectedTargetCues[1U] &&
+                  chord_overlay[3].destination == kExpectedFireCue,
+            "the indexed scene overlay preserves objective, horizontal target, vertical target, then fire ordering at the fixed scratch maximum");
+        Check(PushMouseButton(SDL_BUTTON_LEFT, false),
+            "the indexed-scene chord fire edge releases");
         Check(PushMouseButton(SDL_BUTTON_RIGHT, false) && app->Run(1).has_value(),
             "the scene target cue releases without changing mesh ownership");
 
@@ -3150,13 +3205,16 @@ void CheckDiagnosticSceneMissionActivation(
         const auto fire_overlay =
             Access::DiagnosticSceneOverlayDrawList(*app).commands();
         Check(fire_pressed && fire_frame && !fire_frame->failure() &&
-                  fire_overlay.size() == 1U && moved_position &&
-                  fire_overlay[0].texture ==
-                      Access::DiagnosticActorMarkerTexture(*app) &&
-                  fire_overlay[0].destination !=
-                      omega::app::PlanProjectDiagnosticActorMarkerDestination(
-                          *moved_position),
-            "left mouse fire publishes only its project cue above the actor mesh");
+                   fire_overlay.size() == 2U && moved_position &&
+                   fire_overlay[0].texture ==
+                       Access::DiagnosticActorMarkerTexture(*app) &&
+                   fire_overlay[1].texture ==
+                       Access::DiagnosticActorMarkerTexture(*app) &&
+                   fire_overlay[0].destination == *kObjectiveDestination &&
+                   fire_overlay[1].destination !=
+                       omega::app::PlanProjectDiagnosticActorMarkerDestination(
+                           *moved_position),
+            "left mouse fire publishes the armed objective before its project cue above the actor mesh");
         Check(PushMouseButton(SDL_BUTTON_LEFT, false) && app->Run(1).has_value(),
             "the scene fire cue releases without changing mesh ownership");
 
@@ -3313,6 +3371,97 @@ void CheckDiagnosticSceneMissionActivation(
         Check(Access::ArmNextRunElapsed(*app, std::chrono::nanoseconds::zero()) &&
                   app->Run(1).has_value(),
             "the restored retained-scene state resumes rendering after atomic failures");
+
+        const omega::app::GpuHostSnapshot trigger_gpu_before =
+            Access::GpuSnapshot(*app);
+        const auto trigger_persistence_generation_before =
+            Access::PersistenceGeneration(*app);
+        const auto trigger_persistence_records_before =
+            Access::PersistenceRecordCount(*app);
+        const auto trigger_persistence_bytes_before =
+            Access::PersistenceLogicalValueBytes(*app);
+        const bool crossing_ready =
+            SameProximityTriggerState(
+                Access::DiagnosticProximityTriggerState(*app), {}) &&
+            Access::ArmNextRunElapsed(
+                *app, settings.frame.simulation_step * 6) &&
+            PushKey(SDL_SCANCODE_D, true);
+        auto crossing = app->RunWithCapture(1);
+        const auto crossed_position = Access::DebugLocomotionPosition(*app);
+        const auto crossed_state =
+            Access::DiagnosticProximityTriggerState(*app);
+        const auto crossed_actor_commands =
+            Access::DiagnosticActorDrawList(*app).commands();
+        const auto crossed_overlay_commands =
+            Access::DiagnosticSceneOverlayDrawList(*app).commands();
+        const omega::app::GpuHostSnapshot trigger_gpu_after =
+            Access::GpuSnapshot(*app);
+        const auto* crossing_pair = crossing ? crossing->trace_pair() : nullptr;
+        const auto crossing_elapsed = crossing_pair != nullptr
+            ? crossing_pair->scheduler_elapsed_trace().FrameAt(0U)
+            : std::nullopt;
+        Check(crossing_ready && crossing && !crossing->failure() &&
+                  crossing_pair != nullptr && crossing_elapsed &&
+                  crossing_elapsed->elapsed == settings.frame.simulation_step * 6 &&
+                  crossing->result().planned_simulation_steps == 6U &&
+                  crossing->result().executed_simulation_steps == 6U &&
+                  crossed_position &&
+                  *crossed_position ==
+                      omega::simulation::Position3{.x = 6, .z = 1} &&
+                  !crossed_state.inside && crossed_state.objective_complete &&
+                  crossed_actor_commands.size() == 2U &&
+                  crossed_overlay_commands.empty() &&
+                  Access::CurrentFrontEndDrawList(*app).empty() &&
+                  SameTextureResidency(trigger_gpu_before, trigger_gpu_after) &&
+                  trigger_gpu_after.meshes == trigger_gpu_before.meshes &&
+                  trigger_gpu_after.successful_mesh_uploads ==
+                      trigger_gpu_before.successful_mesh_uploads &&
+                  trigger_gpu_after.successful_mesh_releases ==
+                      trigger_gpu_before.successful_mesh_releases &&
+                  Access::PersistenceGeneration(*app) ==
+                      trigger_persistence_generation_before &&
+                  Access::PersistenceRecordCount(*app) ==
+                      trigger_persistence_records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) ==
+                      trigger_persistence_bytes_before,
+            "one captured six-step move enters and exits the fixed volume, latches completion, removes the armed overlay, and changes neither GPU residency nor persistence");
+        auto crossing_traces = crossing
+            ? std::move(*crossing).TakeTracePair()
+            : std::nullopt;
+        bool crossing_replay_matches = false;
+        if (crossing_traces)
+        {
+            auto crossing_replay = omega::app::RunReplaySession::Create(
+                std::move(*crossing_traces),
+                omega::app::RunReplaySessionConfig{
+                    .scheduler = settings.frame,
+                    .enable_debug_locomotion = true,
+                });
+            if (crossing_replay)
+            {
+                auto replayed_crossing = crossing_replay->Next();
+                const auto replayed_trigger_state =
+                    crossing_replay->diagnostic_proximity_trigger_state();
+                crossing_replay_matches = replayed_crossing &&
+                    replayed_crossing->frame_plan() &&
+                    replayed_crossing->frame_plan()->simulation_steps == 6U &&
+                    replayed_trigger_state &&
+                    SameProximityTriggerState(
+                        *replayed_trigger_state, crossed_state);
+            }
+        }
+        Check(crossing_replay_matches,
+            "a fresh replay of the exact live capture reproduces its completed trigger state");
+        Check(PushKey(SDL_SCANCODE_D, false) &&
+                  Access::ArmNextRunElapsed(
+                      *app, std::chrono::nanoseconds::zero()) &&
+                  app->Run(1).has_value() &&
+                  SameProximityTriggerState(
+                      Access::DiagnosticProximityTriggerState(*app),
+                      {.inside = false, .objective_complete = true}) &&
+                  Access::DiagnosticSceneOverlayDrawList(*app).empty(),
+            "the zero-step movement release preserves the completed objective and removed marker");
+
         const omega::app::GpuHostSnapshot before_return = Access::GpuSnapshot(*app);
         const bool returned = PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value();
         const omega::app::GpuHostSnapshot after_return = Access::GpuSnapshot(*app);
@@ -3320,11 +3469,47 @@ void CheckDiagnosticSceneMissionActivation(
                   Access::FrontEnd(*app).mode ==
                       omega::app::FrontEndMode::BriefingRoom &&
                   after_return.mesh_submissions == before_return.mesh_submissions &&
-                  after_return.successful_mesh_draws == before_return.successful_mesh_draws &&
-                  Access::CurrentFrontEndMeshDrawList(*app).empty(),
-            "the DiagnosticPlay menu edge returns to BriefingRoom before packet selection and suppresses the scene");
+                   after_return.successful_mesh_draws == before_return.successful_mesh_draws &&
+                   Access::CurrentFrontEndMeshDrawList(*app).empty() &&
+                   SameProximityTriggerState(
+                       Access::DiagnosticProximityTriggerState(*app),
+                       {.inside = false, .objective_complete = true}),
+            "the DiagnosticPlay menu edge returns to BriefingRoom before packet selection while preserving launch-local completion");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the diagnostic-scene return edge releases in BriefingRoom");
+
+        const omega::app::GpuHostSnapshot round_trip_gpu_before =
+            Access::GpuSnapshot(*app);
+        const bool reentered =
+            Access::ArmNextRunElapsed(
+                *app, std::chrono::nanoseconds::zero()) &&
+            PushKey(SDL_SCANCODE_F1, true);
+        auto round_trip = app->RunWithCapture(1);
+        const omega::app::GpuHostSnapshot round_trip_gpu_after =
+            Access::GpuSnapshot(*app);
+        Check(reentered && round_trip && !round_trip->failure() &&
+                  round_trip->result().planned_simulation_steps == 0U &&
+                  round_trip->result().executed_simulation_steps == 0U &&
+                  Access::FrontEnd(*app).mode ==
+                      omega::app::FrontEndMode::DiagnosticPlay &&
+                  SameProximityTriggerState(
+                      Access::DiagnosticProximityTriggerState(*app),
+                      {.inside = false, .objective_complete = true}) &&
+                  Access::DiagnosticSceneOverlayDrawList(*app).empty() &&
+                  Access::CurrentFrontEndDrawList(*app).empty() &&
+                  SameTextureResidency(
+                      round_trip_gpu_before, round_trip_gpu_after) &&
+                  round_trip_gpu_after.meshes == round_trip_gpu_before.meshes,
+            "a zero-step BriefingRoom redeploy preserves completed launch-local state, keeps the objective marker absent, and uploads no resources");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value() &&
+                  PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
+                  Access::FrontEnd(*app).mode ==
+                      omega::app::FrontEndMode::BriefingRoom &&
+                  SameProximityTriggerState(
+                      Access::DiagnosticProximityTriggerState(*app),
+                      {.inside = false, .objective_complete = true}) &&
+                  PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the completed objective remains latched across a full play-briefing-play-briefing round trip");
 
         const omega::app::GpuHostSnapshot before_release = Access::GpuSnapshot(*app);
         Access::ReleaseDiagnosticScenePresentation(*app);
@@ -4395,8 +4580,12 @@ void CheckComposedGeneratedMenuAcceptance(
         Access::DiagnosticActorDrawList(*app);
     const auto actor_commands = actor_draw_list.commands();
     const auto hidden_commands = Access::DiagnosticHiddenDrawList(*app).commands();
+    constexpr auto kObjectiveDestination =
+        omega::app::PlanProjectDiagnosticObjectiveMarkerDestination(
+            omega::gameplay::DiagnosticProximityTriggerState{});
+    static_assert(kObjectiveDestination.has_value());
     const bool marker_command_is_visible =
-        actor_commands.size() == 2U && hidden_commands.size() == 1U &&
+        actor_commands.size() == 3U && hidden_commands.size() == 1U &&
         actor_commands[0] == hidden_commands[0] &&
         actor_commands[1].texture == marker_texture &&
         actor_commands[1].source == kFullSource &&
@@ -4404,6 +4593,13 @@ void CheckComposedGeneratedMenuAcceptance(
         actor_commands[1].fit_mode ==
             omega::runtime::RenderTextureFitMode::Stretch &&
         actor_commands[1].filter_mode ==
+            omega::runtime::RenderTextureFilterMode::Nearest &&
+        actor_commands[2].texture == marker_texture &&
+        actor_commands[2].source == kFullSource &&
+        actor_commands[2].destination == *kObjectiveDestination &&
+        actor_commands[2].fit_mode ==
+            omega::runtime::RenderTextureFitMode::Stretch &&
+        actor_commands[2].filter_mode ==
             omega::runtime::RenderTextureFilterMode::Nearest;
     Check(play_queued && play &&
               play->completion() ==
@@ -4428,6 +4624,8 @@ void CheckComposedGeneratedMenuAcceptance(
               play_simulation.simulated_time == settings.frame.simulation_step &&
               play_simulation.alive_entities == 1U && play_position &&
               *play_position == omega::simulation::Position3{} &&
+              SameProximityTriggerState(
+                  Access::DiagnosticProximityTriggerState(*app), {}) &&
               marker_command_is_visible &&
               DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
                   actor_draw_list) &&
@@ -5144,6 +5342,9 @@ int main()
     Check(OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
               omega::simulation::Position3{},
         "the host creates one positioned synthetic diagnostic entity at the origin");
+    Check(SameProximityTriggerState(
+              OmegaAppTestAccess::DiagnosticProximityTriggerState(*app), {}),
+        "the app owns one default launch-local diagnostic proximity trigger state");
     Check(OmegaAppTestAccess::HasInputBinding(*app, InputDevice::Keyboard,
               static_cast<std::uint16_t>(SDL_SCANCODE_W),
               omega::app::kDebugMoveForwardAction) &&
@@ -5361,8 +5562,12 @@ int main()
         hidden_commands[0].filter_mode ==
             omega::runtime::RenderTextureFilterMode::Nearest;
     const auto actor_commands = initial_actor_draw_list.commands();
+    constexpr auto kObjectiveDestination =
+        omega::app::PlanProjectDiagnosticObjectiveMarkerDestination(
+            omega::gameplay::DiagnosticProximityTriggerState{});
+    static_assert(kObjectiveDestination.has_value());
     const bool actor_list_is_exact =
-        actor_commands.size() == 2U && hidden_commands.size() == 1U &&
+        actor_commands.size() == 3U && hidden_commands.size() == 1U &&
         actor_commands[0] == hidden_commands[0] &&
         actor_commands[1].texture == diagnostic_actor_marker_texture &&
         actor_commands[1].source == kFullMenuSource &&
@@ -5370,6 +5575,13 @@ int main()
         actor_commands[1].fit_mode ==
             omega::runtime::RenderTextureFitMode::Stretch &&
         actor_commands[1].filter_mode ==
+            omega::runtime::RenderTextureFilterMode::Nearest &&
+        actor_commands[2].texture == diagnostic_actor_marker_texture &&
+        actor_commands[2].source == kFullMenuSource &&
+        actor_commands[2].destination == *kObjectiveDestination &&
+        actor_commands[2].fit_mode ==
+            omega::runtime::RenderTextureFitMode::Stretch &&
+        actor_commands[2].filter_mode ==
             omega::runtime::RenderTextureFilterMode::Nearest;
     bool visible_lists_are_exact = true;
     for (std::size_t row = 0U; row < initial_visible_draw_lists.size(); ++row)
@@ -5588,7 +5800,7 @@ int main()
     OmegaAppTestAccess::SetFrontEndState(*app, omega::app::FrontEndState{});
     Check(DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
               initial_actor_draw_list),
-        "a valid DiagnosticPlay state selects the base-then-actor draw list");
+        "a valid DiagnosticPlay state selects the base-actor-objective draw list");
     OmegaAppTestAccess::SetFrontEndState(
         *app, omega::app::InitialFrontEndState());
 
@@ -6030,7 +6242,9 @@ int main()
               normal_result.executed_simulation_steps == 1U &&
               normal_debug_position &&
               normal_debug_position->x == 0 && normal_debug_position->y == 0 &&
-              normal_debug_position->z == 0,
+              normal_debug_position->z == 0 &&
+              SameProximityTriggerState(
+                  OmegaAppTestAccess::DiagnosticProximityTriggerState(*app), {}),
         "one Return-plus-W frame enters diagnostic play and advances simulation "
         "without leaking modal movement into the deployment step");
     const omega::app::GpuHostSnapshot normal_gpu =
@@ -6039,7 +6253,7 @@ int main()
         OmegaAppTestAccess::DiagnosticActorDrawList(*app);
     const auto normal_actor_commands = normal_actor_draw_list.commands();
     const std::optional<omega::runtime::RenderTargetRectQ16>
-        normal_actor_destination = normal_actor_commands.size() == 2U
+        normal_actor_destination = normal_actor_commands.size() == 3U
         ? std::optional<omega::runtime::RenderTargetRectQ16>{
               normal_actor_commands[1].destination}
         : std::nullopt;
@@ -6070,7 +6284,7 @@ int main()
                   initial_profiles_draw_list) &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticControlsDrawList(*app),
                   initial_controls_draw_list) &&
-              normal_actor_commands.size() == 2U &&
+              normal_actor_commands.size() == 3U &&
               hidden_commands.size() == 1U &&
               normal_actor_commands[0] == hidden_commands[0] &&
               normal_actor_commands[1].texture ==
@@ -6081,6 +6295,14 @@ int main()
               normal_actor_commands[1].fit_mode ==
                   omega::runtime::RenderTextureFitMode::Stretch &&
               normal_actor_commands[1].filter_mode ==
+                  omega::runtime::RenderTextureFilterMode::Nearest &&
+              normal_actor_commands[2].texture ==
+                  diagnostic_actor_marker_texture &&
+              normal_actor_commands[2].source == kFullMenuSource &&
+              normal_actor_commands[2].destination == *kObjectiveDestination &&
+              normal_actor_commands[2].fit_mode ==
+                  omega::runtime::RenderTextureFitMode::Stretch &&
+              normal_actor_commands[2].filter_mode ==
                   omega::runtime::RenderTextureFilterMode::Nearest &&
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   normal_actor_draw_list) &&
@@ -7209,7 +7431,7 @@ int main()
               OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticActorDrawList(*app),
                   keyboard_mouse_base_actor_draw_list),
-        "releasing the mouse chord restores the ordinary actor draw without menu mutation");
+        "releasing the mouse chord restores the ordinary actor/objective draw without menu mutation");
 
     const omega::app::GpuHostSnapshot ready_gpu =
         OmegaAppTestAccess::GpuSnapshot(*app);
@@ -7255,6 +7477,8 @@ int main()
 
     const auto debug_position_before_terminal =
         OmegaAppTestAccess::DebugLocomotionPosition(*app);
+    const auto trigger_state_before_terminal =
+        OmegaAppTestAccess::DiagnosticProximityTriggerState(*app);
     const omega::runtime::FrameSchedulerState scheduler_before_terminal =
         OmegaAppTestAccess::SchedulerSnapshot(*app);
     const std::uint64_t terminal_frame_index =
@@ -7307,6 +7531,9 @@ int main()
                   diagnostic_asset_transfer_texture &&
               OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
                   debug_position_before_terminal &&
+              SameProximityTriggerState(
+                  OmegaAppTestAccess::DiagnosticProximityTriggerState(*app),
+                  trigger_state_before_terminal) &&
               DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
                   initial_hidden_draw_list) &&
               DrawListArraysEqual(OmegaAppTestAccess::FrontEndMainDrawLists(*app),
@@ -7323,7 +7550,7 @@ int main()
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   ready_actor_draw_list) &&
               terminal_gpu == ready_gpu,
-        "terminal action-6 and action-7 edges perform no render or menu/resource mutation");
+        "terminal action-6 and action-7 edges perform no trigger, render, menu, or resource mutation");
 
     Check(PushQuitKey(false) && PushKey(SDL_SCANCODE_F1, false) &&
               PushKey(SDL_SCANCODE_BACKSPACE, false),
@@ -7386,12 +7613,16 @@ int main()
               continued->result().input_frames == 1U &&
               continued->result().rendered_frames == 1 &&
               OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
-              continued_actor_commands.size() == 1U &&
+              continued_actor_commands.size() == 2U &&
               continued_actor_commands[0].texture ==
                   diagnostic_actor_marker_texture &&
-              IsOneDiagnosticActorOnlySubmission(
+              continued_actor_commands[1].texture ==
+                  diagnostic_actor_marker_texture &&
+              continued_actor_commands[1].destination ==
+                  *kObjectiveDestination &&
+              IsOneDiagnosticActorAndObjectiveSubmission(
                   failure_gpu_after, continued_gpu),
-        "capture resumes with one actor-only submission at the scheduler boundary");
+        "capture resumes with actor and armed-objective submissions at the scheduler boundary");
     if (continued_pair != nullptr)
     {
         Check(continued_pair->input_trace().first_frame_index() ==
@@ -7406,8 +7637,8 @@ int main()
         OmegaAppTestAccess::GpuSnapshot(*app);
     Check(plain && plain->rendered_frames == 1 && plain->input_frames == 1U &&
               !plain->quit_requested &&
-              IsOneDiagnosticActorOnlySubmission(continued_gpu, plain_gpu),
-        "plain Run adds one actor-only submission without reuploading any texture");
+              IsOneDiagnosticActorAndObjectiveSubmission(continued_gpu, plain_gpu),
+        "plain Run adds actor and armed-objective submissions without reuploading any texture");
 
     Check(OmegaAppTestAccess::ArmNextRunElapsed(
               *app, std::chrono::nanoseconds::zero()),

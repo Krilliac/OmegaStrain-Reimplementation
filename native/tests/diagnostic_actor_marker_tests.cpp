@@ -18,6 +18,7 @@ namespace
 using omega::app::PlanProjectDiagnosticActorMarkerDestination;
 using omega::app::PlanProjectDiagnosticActorMeshTransform;
 using omega::app::PlanProjectDiagnosticFireCueRectangle;
+using omega::app::PlanProjectDiagnosticObjectiveMarkerDestination;
 using omega::app::PlanProjectDiagnosticTargetCueRectangles;
 using omega::asset::Matrix4x4IR;
 using omega::runtime::PointerPositionQ16;
@@ -329,6 +330,41 @@ void CheckPointerCueContract()
                   RenderTargetRectQ16{60'672U, 60'672U, 62'208U, 62'208U});
 }
 
+void CheckObjectiveMarkerContract()
+{
+    using State = omega::gameplay::DiagnosticProximityTriggerState;
+    using Result = std::optional<RenderTargetRectQ16>;
+    static_assert(std::is_same_v<decltype(
+                      PlanProjectDiagnosticObjectiveMarkerDestination(State{})),
+        Result>);
+    static_assert(noexcept(
+        PlanProjectDiagnosticObjectiveMarkerDestination(State{})));
+
+    constexpr Result armed =
+        PlanProjectDiagnosticObjectiveMarkerDestination(State{});
+    constexpr Result occupied =
+        PlanProjectDiagnosticObjectiveMarkerDestination(State{.inside = true});
+    constexpr Result completed =
+        PlanProjectDiagnosticObjectiveMarkerDestination(
+            State{.inside = true, .objective_complete = true});
+    constexpr RenderTargetRectQ16 expected{
+        .left = 35'840U,
+        .top = 31'744U,
+        .right = 37'888U,
+        .bottom = 33'792U,
+    };
+    static_assert(armed == Result{expected});
+    static_assert(occupied == armed);
+    static_assert(!completed);
+
+    Check(armed && IsValidDestination(*armed) &&
+              IsAcceptedByRenderDrawList(*armed),
+        "the exact armed objective rectangle is renderer-valid");
+    Check(!PlanProjectDiagnosticObjectiveMarkerDestination(
+              State{.objective_complete = true}),
+        "a completed launch-local objective removes its presentation marker");
+}
+
 void CheckPointerCueBoundarySet()
 {
     CheckPointerCuePosition(std::nullopt, 32'768U, 32'768U,
@@ -477,6 +513,7 @@ int main()
 {
     CheckContract();
     CheckPointerCueContract();
+    CheckObjectiveMarkerContract();
     CheckPointerCueBoundarySet();
     CheckCompleteVisibleGrid();
     CheckCompleteInt16AxisSweeps();

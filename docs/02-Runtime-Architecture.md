@@ -2273,6 +2273,34 @@ mouse sensitivity, acceleration, crosshair, camera, weapon, projectile, raycast,
 coordinate-axis parity, owner-corpus value, emulator equivalence, or visual parity. It retains no
 proprietary input, raw address, or private path.
 
+### E-0118 diagnostic proximity objective
+
+`AdvanceDiagnosticProximityTrigger` is an allocation-free, platform-free gameplay reducer. Its
+caller supplies an inclusive signed X/Z volume, prior owned state, and one owned `Position3`. Reversed
+X or Z bounds return `InvalidVolume` without changing caller values. Y is deliberately ignored. The
+result owns the next inside flag, monotonic objective-complete latch, transition classification
+(`Outside`, `Entered`, `Inside`, or `Exited`), and a one-step `activated_now` edge.
+
+The native diagnostic composition fixes its project zone to X `[3,5]`, Z `[-1,1]`. `OmegaApp`
+evaluates the reducer after every successful simulation step and before presentation refresh. This
+per-step position matters when a bounded frame plan crosses the complete zone: activation remains
+latched even if the final position is outside. Modal front-end time is zeroed before scheduling, so
+menus and zero-step frames cannot mutate the objective. BriefingRoom round trips retain the launch-
+local value; no persistence record or reset-on-entry policy is introduced.
+
+`PlanProjectDiagnosticObjectiveMarkerDestination` projects the armed zone through the same fixed
+1,024-Q16-unit X/Z presentation policy as the actor marker and returns no rectangle after completion.
+The live host reuses the existing marker texture without another upload. Fallback ordering is base,
+actor, objective, target bars, then fire; indexed-scene overlays contain objective, target, and fire
+without consuming the already-full environment-plus-actor mesh budget.
+
+`RunReplaySession` owns the same optional state only when diagnostic locomotion is enabled. It
+advances after each successful fresh simulation step, leaves terminal/menu/zero-step states alone,
+transfers the value on move, and exposes an owned optional copy for live/replay comparison. This
+establishes only a synthetic movement-to-objective seam. It assigns no retail coordinate, trigger,
+objective, mission, checkpoint, persistence, collision, camera, weapon, damage, AI, or parity
+semantics.
+
 ### Project-owned front-end cancel action
 
 Logical action 7 remains the distinct project-owned cancel edge. Keyboard Escape and Backspace map

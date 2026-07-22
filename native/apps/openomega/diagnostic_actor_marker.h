@@ -1,5 +1,6 @@
 #pragma once
 
+#include "omega/gameplay/diagnostic_proximity_trigger.h"
 #include "omega/runtime/diagnostic_actor_scene.h"
 #include "omega/runtime/input_tracker.h"
 #include "omega/runtime/render_draw_list.h"
@@ -49,6 +50,35 @@ PlanProjectDiagnosticActorMarkerDestination(
         .top = static_cast<std::uint32_t>(center_y - half_extent),
         .right = static_cast<std::uint32_t>(center_x + half_extent),
         .bottom = static_cast<std::uint32_t>(center_y + half_extent),
+    };
+}
+
+// [any thread; reentrant] Projects the one fixed, synthetic diagnostic objective volume through
+// the same 1,024-Q16-per-unit X/Z presentation policy as the actor marker. The armed rectangle is
+// visible only until the launch-local objective latches complete. This assigns no retail trigger,
+// mission, camera, coordinate-scale, or persistence semantics.
+[[nodiscard]] constexpr std::optional<runtime::RenderTargetRectQ16>
+PlanProjectDiagnosticObjectiveMarkerDestination(
+    const gameplay::DiagnosticProximityTriggerState state) noexcept
+{
+    if (state.objective_complete)
+        return std::nullopt;
+
+    constexpr std::int64_t center =
+        static_cast<std::int64_t>(runtime::kNormalizedRenderExtent) / 2;
+    constexpr std::int64_t unit =
+        static_cast<std::int64_t>(runtime::kNormalizedRenderExtent) / 64;
+    constexpr gameplay::DiagnosticProximityVolumeXZ volume =
+        gameplay::kProjectDiagnosticObjectiveVolume;
+    static_assert(unit == 1'024);
+    static_assert(volume.min_x <= volume.max_x);
+    static_assert(volume.min_z <= volume.max_z);
+
+    return runtime::RenderTargetRectQ16{
+        .left = static_cast<std::uint32_t>(center + volume.min_x * unit),
+        .top = static_cast<std::uint32_t>(center - volume.max_z * unit),
+        .right = static_cast<std::uint32_t>(center + volume.max_x * unit),
+        .bottom = static_cast<std::uint32_t>(center - volume.min_z * unit),
     };
 }
 

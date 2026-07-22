@@ -3,6 +3,7 @@
 #include "diagnostic_actor_marker.h"
 #include "front_end.h"
 
+#include "omega/gameplay/diagnostic_proximity_trigger.h"
 #include "omega/runtime/frame_scheduler.h"
 #include "omega/runtime/run_capture_replay.h"
 #include "omega/simulation/simulation_world.h"
@@ -102,6 +103,7 @@ enum class RunReplayErrorCode
     SimulationRepresentationExhausted,
     DebugLocomotionEntityCreateFailed,
     DebugLocomotionPlanFailed,
+    DiagnosticProximityTriggerFailed,
 };
 
 [[nodiscard]] constexpr std::string_view RunReplayErrorCodeName(
@@ -129,6 +131,8 @@ enum class RunReplayErrorCode
         return "debug-locomotion-entity-create-failed";
     case RunReplayErrorCode::DebugLocomotionPlanFailed:
         return "debug-locomotion-plan-failed";
+    case RunReplayErrorCode::DiagnosticProximityTriggerFailed:
+        return "diagnostic-proximity-trigger-failed";
     }
     return "unknown";
 }
@@ -158,6 +162,8 @@ enum class RunReplayErrorCode
         return "run replay debug locomotion entity creation failed";
     case RunReplayErrorCode::DebugLocomotionPlanFailed:
         return "run replay debug locomotion planning failed";
+    case RunReplayErrorCode::DiagnosticProximityTriggerFailed:
+        return "run replay diagnostic proximity trigger failed";
     }
     return "run replay error is unknown";
 }
@@ -267,6 +273,11 @@ public:
     // locomotion option created its positioned diagnostic entity.
     [[nodiscard]] std::optional<simulation::Position3>
     debug_locomotion_position() const noexcept;
+    // [game thread; no concurrent use] Owned project-diagnostic objective state. This optional is
+    // present exactly when replay owns the explicitly enabled positioned locomotion entity; it is
+    // not retail mission, objective, checkpoint, or trigger behavior.
+    [[nodiscard]] std::optional<gameplay::DiagnosticProximityTriggerState>
+    diagnostic_proximity_trigger_state() const noexcept;
     // [game thread; no concurrent use] Derived from the current owned position through the fixed
     // project diagnostic presentation policy. No marker state or renderer resource is retained;
     // null means the positioned diagnostic entity is absent or this session is inert.
@@ -291,6 +302,8 @@ private:
         simulation::SimulationWorld&& simulation,
         runtime::RunCaptureReplaySession&& replay,
         std::optional<simulation::EntityId> debug_locomotion_entity,
+        std::optional<gameplay::DiagnosticProximityTriggerState>
+            diagnostic_proximity_trigger_state,
         std::optional<FrontEndState> front_end_state,
         std::uint8_t front_end_visible_profile_slots,
         std::size_t front_end_total_profile_count,
@@ -305,6 +318,8 @@ private:
     std::optional<simulation::SimulationWorld> simulation_;
     std::optional<runtime::RunCaptureReplaySession> replay_;
     std::optional<simulation::EntityId> debug_locomotion_entity_;
+    std::optional<gameplay::DiagnosticProximityTriggerState>
+        diagnostic_proximity_trigger_state_;
     std::optional<FrontEndState> front_end_state_;
     std::uint8_t front_end_visible_profile_slots_ = 0U;
     std::size_t front_end_total_profile_count_ = 0U;

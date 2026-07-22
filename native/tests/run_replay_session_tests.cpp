@@ -83,6 +83,7 @@ using omega::app::RunReplayOperation;
 using omega::app::RunReplaySession;
 using omega::app::RunReplaySessionConfig;
 using omega::app::RunReplaySessionState;
+using omega::gameplay::DiagnosticProximityTriggerState;
 using omega::runtime::FramePlan;
 using omega::runtime::FrameScheduler;
 using omega::runtime::FrameSchedulerState;
@@ -414,6 +415,24 @@ struct PairObservation
            (!left || SameSimulation(*left, *right));
 }
 
+[[nodiscard]] bool SameDiagnosticProximityTrigger(
+    const std::optional<DiagnosticProximityTriggerState>& state,
+    const bool inside, const bool objective_complete) noexcept
+{
+    return state && state->inside == inside &&
+           state->objective_complete == objective_complete;
+}
+
+[[nodiscard]] bool SameDiagnosticProximityTrigger(
+    const std::optional<DiagnosticProximityTriggerState>& left,
+    const std::optional<DiagnosticProximityTriggerState>& right) noexcept
+{
+    if (left.has_value() != right.has_value())
+        return false;
+    return !left || (left->inside == right->inside &&
+                        left->objective_complete == right->objective_complete);
+}
+
 void CheckContractAndTaxonomy()
 {
     static_assert(!std::is_default_constructible_v<RunReplaySession>);
@@ -434,6 +453,8 @@ void CheckContractAndTaxonomy()
         std::declval<const RunReplaySession&>().simulation_state()));
     static_assert(noexcept(
         std::declval<const RunReplaySession&>().debug_locomotion_position()));
+    static_assert(noexcept(std::declval<const RunReplaySession&>()
+                               .diagnostic_proximity_trigger_state()));
     static_assert(noexcept(std::declval<const RunReplaySession&>()
                                .diagnostic_actor_marker_destination()));
     static_assert(noexcept(
@@ -472,6 +493,10 @@ void CheckContractAndTaxonomy()
     static_assert(std::is_same_v<
         decltype(std::declval<const RunReplaySession&>().debug_locomotion_position()),
         std::optional<Position3>>);
+    static_assert(std::is_same_v<
+        decltype(std::declval<const RunReplaySession&>()
+                     .diagnostic_proximity_trigger_state()),
+        std::optional<DiagnosticProximityTriggerState>>);
     static_assert(std::is_same_v<
         decltype(std::declval<const RunReplaySession&>()
                      .diagnostic_actor_marker_destination()),
@@ -524,6 +549,8 @@ void CheckContractAndTaxonomy()
                       RunReplayErrorCode::DebugLocomotionEntityCreateFailed) == 8);
     static_assert(static_cast<int>(
                       RunReplayErrorCode::DebugLocomotionPlanFailed) == 9);
+    static_assert(static_cast<int>(
+                      RunReplayErrorCode::DiagnosticProximityTriggerFailed) == 10);
 
     struct ErrorContract
     {
@@ -557,6 +584,9 @@ void CheckContractAndTaxonomy()
         ErrorContract{RunReplayErrorCode::DebugLocomotionPlanFailed,
             "debug-locomotion-plan-failed",
             "run replay debug locomotion planning failed"},
+        ErrorContract{RunReplayErrorCode::DiagnosticProximityTriggerFailed,
+            "diagnostic-proximity-trigger-failed",
+            "run replay diagnostic proximity trigger failed"},
     };
     for (const auto& contract : contracts)
     {
@@ -1048,12 +1078,200 @@ void CheckDebugLocomotionOptIn()
     Check(neutral && neutral->frame_plan() &&
               neutral->frame_plan()->simulation_steps == 2U &&
               !disabled.debug_locomotion_position() &&
+              !disabled.diagnostic_proximity_trigger_state() &&
               !disabled.diagnostic_actor_marker_destination() &&
               disabled_state && SameSimulation(*disabled_state, SimulationState{
                   .completed_steps = 2U,
                   .simulated_time = milliseconds{20},
               }),
         "the default-disabled replay preserves clock-only E0059 behavior for the same schema");
+}
+
+void CheckDiagnosticProximityTriggerReplay()
+{
+    constexpr std::array<std::uint32_t, 1U> actions{
+        omega::app::kDebugMoveRightAction,
+    };
+    constexpr std::array right_down{
+        InputTransition{.code = 0U, .pressed = true},
+    };
+    const std::array path_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{5},
+            .transitions = right_down},
+        ScriptedElapsedFrame{.elapsed = milliseconds{15},
+            .transitions = {}},
+        ScriptedElapsedFrame{.elapsed = milliseconds{10},
+            .transitions = {}},
+        ScriptedElapsedFrame{.elapsed = milliseconds{20},
+            .transitions = {}},
+        ScriptedElapsedFrame{.elapsed = milliseconds{10},
+            .transitions = {}},
+    };
+    RunReplaySessionConfig path_config = ValidConfig();
+    path_config.enable_debug_locomotion = true;
+    auto path_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, path_frames,
+            TerminalReasons{.host_quit_requested = true}),
+        path_config);
+    RunReplaySession path = TakeSession(
+        path_created, "the diagnostic proximity path replay is created");
+    Check(path.debug_locomotion_position() == Position3{} &&
+              SameDiagnosticProximityTrigger(
+                  path.diagnostic_proximity_trigger_state(), false, false),
+        "an enabled positioned replay creates one armed outside project trigger");
+
+    auto zero_step = path.Next();
+    Check(zero_step && zero_step->frame_plan() &&
+              zero_step->frame_plan()->simulation_steps == 0U &&
+              path.debug_locomotion_position() == Position3{} &&
+              SameDiagnosticProximityTrigger(
+                  path.diagnostic_proximity_trigger_state(), false, false),
+        "a zero-step frame cannot sample or mutate the project trigger");
+
+    auto outside = path.Next();
+    Check(outside && outside->frame_plan() &&
+              outside->frame_plan()->simulation_steps == 2U &&
+              path.debug_locomotion_position() == Position3{.x = 2} &&
+              SameDiagnosticProximityTrigger(
+                  path.diagnostic_proximity_trigger_state(), false, false),
+        "successful outside steps preserve an armed incomplete project trigger");
+
+    auto entered = path.Next();
+    Check(entered && entered->frame_plan() &&
+              entered->frame_plan()->simulation_steps == 1U &&
+              path.debug_locomotion_position() == Position3{.x = 3} &&
+              SameDiagnosticProximityTrigger(
+                  path.diagnostic_proximity_trigger_state(), true, true),
+        "the first inclusive-volume sample enters and latches the project objective");
+
+    const auto trigger_before_move =
+        path.diagnostic_proximity_trigger_state();
+    RunReplaySession moved_path = std::move(path);
+    Check(path.state() == RunReplaySessionState::Inert &&
+              !path.debug_locomotion_position() &&
+              !path.diagnostic_proximity_trigger_state() &&
+              moved_path.debug_locomotion_position() == Position3{.x = 3} &&
+              SameDiagnosticProximityTrigger(
+                  moved_path.diagnostic_proximity_trigger_state(), trigger_before_move),
+        "move construction transfers the latched project trigger and leaves the source inert");
+
+    auto remained_inside = moved_path.Next();
+    Check(remained_inside && remained_inside->frame_plan() &&
+              remained_inside->frame_plan()->simulation_steps == 2U &&
+              moved_path.debug_locomotion_position() == Position3{.x = 5} &&
+              SameDiagnosticProximityTrigger(
+                  moved_path.diagnostic_proximity_trigger_state(), true, true),
+        "later inclusive-volume samples remain inside without clearing the objective latch");
+
+    auto exited = moved_path.Next();
+    Check(exited && exited->frame_plan() &&
+              exited->frame_plan()->simulation_steps == 1U &&
+              moved_path.debug_locomotion_position() == Position3{.x = 6} &&
+              SameDiagnosticProximityTrigger(
+                  moved_path.diagnostic_proximity_trigger_state(), false, true),
+        "the first outside sample exits while preserving the completed objective latch");
+
+    const auto trigger_before_terminal =
+        moved_path.diagnostic_proximity_trigger_state();
+    const auto position_before_terminal = moved_path.debug_locomotion_position();
+    auto terminal = moved_path.Next();
+    Check(terminal && terminal->terminal_input() && !terminal->frame_plan() &&
+              moved_path.state() == RunReplaySessionState::Complete &&
+              moved_path.debug_locomotion_position() == position_before_terminal &&
+              SameDiagnosticProximityTrigger(
+                  moved_path.diagnostic_proximity_trigger_state(),
+                  trigger_before_terminal),
+        "a terminal frame cannot sample or mutate the project trigger");
+
+    const std::array crossing_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{60},
+            .transitions = right_down},
+    };
+    RunReplaySessionConfig crossing_config = ValidConfig();
+    crossing_config.enable_debug_locomotion = true;
+    crossing_config.scheduler.max_steps_per_frame = 6U;
+    crossing_config.scheduler.max_frame_delta = milliseconds{60};
+    auto first_crossing_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, crossing_frames), crossing_config);
+    auto second_crossing_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, crossing_frames), crossing_config);
+    RunReplaySession first_crossing = TakeSession(first_crossing_created,
+        "the first multi-step crossing replay is created");
+    RunReplaySession second_crossing = TakeSession(second_crossing_created,
+        "the second multi-step crossing replay is created");
+    auto first_crossed = first_crossing.Next();
+    auto second_crossed = second_crossing.Next();
+    Check(first_crossed && second_crossed && first_crossed->frame_plan() &&
+              second_crossed->frame_plan() &&
+              first_crossed->frame_plan()->simulation_steps == 6U &&
+              SamePlan(*first_crossed->frame_plan(),
+                  *second_crossed->frame_plan()) &&
+              first_crossing.debug_locomotion_position() == Position3{.x = 6} &&
+              first_crossing.debug_locomotion_position() ==
+                  second_crossing.debug_locomotion_position() &&
+              SameSimulation(first_crossing.simulation_state(),
+                  second_crossing.simulation_state()) &&
+              first_crossing.state() == second_crossing.state() &&
+              SameDiagnosticProximityTrigger(
+                  first_crossing.diagnostic_proximity_trigger_state(), false, true) &&
+              SameDiagnosticProximityTrigger(
+                  first_crossing.diagnostic_proximity_trigger_state(),
+                  second_crossing.diagnostic_proximity_trigger_state()),
+        "each fixed step is sampled so two independent multi-step crossings deterministically latch enter then exit");
+
+    RunReplaySessionConfig menu_config = ValidConfig();
+    menu_config.enable_debug_locomotion = true;
+    menu_config.initial_front_end_state = omega::app::InitialFrontEndState();
+    const std::array menu_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{25},
+            .transitions = right_down},
+    };
+    auto menu_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, menu_frames), menu_config);
+    RunReplaySession menu = TakeSession(
+        menu_created, "the menu-gated project trigger replay is created");
+    auto gated = menu.Next();
+    Check(gated && gated->frame_plan() &&
+              gated->frame_plan()->simulation_steps == 0U &&
+              menu.debug_locomotion_position() == Position3{} &&
+              SameDiagnosticProximityTrigger(
+                  menu.diagnostic_proximity_trigger_state(), false, false),
+        "menu-gated elapsed input cannot sample or mutate the project trigger");
+
+    const std::array failure_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{10},
+            .transitions = right_down},
+    };
+    auto failure_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, failure_frames), path_config);
+    RunReplaySession failure = TakeSession(
+        failure_created, "the allocation-failure project trigger replay is created");
+    replay_session_test_allocation::Arm(0U);
+    const auto failed = failure.Next();
+    replay_session_test_allocation::Disarm();
+    CheckError(failed, RunReplayOperation::Next,
+        RunReplayErrorCode::ReplayNextFailed,
+        "a lower replay failure remains fixed before project-trigger advancement",
+        RunCaptureReplayErrorCode::AllocationFailed);
+    Check(failure.state() == RunReplaySessionState::Ready &&
+              failure.debug_locomotion_position() == Position3{} &&
+              SameDiagnosticProximityTrigger(
+                  failure.diagnostic_proximity_trigger_state(), false, false),
+        "a replay failure cannot sample, mutate, or duplicate the enabled project trigger");
+
+    RunReplaySessionConfig legacy_config = crossing_config;
+    legacy_config.enable_debug_locomotion = false;
+    auto legacy_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, crossing_frames), legacy_config);
+    RunReplaySession legacy = TakeSession(
+        legacy_created, "the legacy project-trigger-neutral replay is created");
+    auto legacy_crossed = legacy.Next();
+    Check(!legacy.diagnostic_proximity_trigger_state() && legacy_crossed &&
+              legacy_crossed->frame_plan() &&
+              legacy_crossed->frame_plan()->simulation_steps == 6U &&
+              !legacy.debug_locomotion_position() &&
+              !legacy.diagnostic_proximity_trigger_state(),
+        "legacy locomotion-off replay never enables project trigger state");
 }
 
 void CheckFrontEndModalGate()
@@ -2557,8 +2775,10 @@ void CheckCharacterFlowReplay()
     const auto scheduler_origin = source.scheduler_state();
     const auto simulation_origin = source.simulation_state();
     Check(!source.front_end_active_profile_is_confirmed() &&
-              !source.front_end_active_character_is_confirmed(),
-        "both identity-free replay mirrors begin closed");
+              !source.front_end_active_character_is_confirmed() &&
+              SameDiagnosticProximityTrigger(
+                  source.diagnostic_proximity_trigger_state(), false, false),
+        "both identity-free replay mirrors begin closed beside one armed outside project trigger");
 
     auto selected_profile = source.Next();
     Check(selected_profile && selected_profile->frame_plan() &&
@@ -2609,13 +2829,18 @@ void CheckCharacterFlowReplay()
         "selecting the replay-created character opens its identity-free mirror and enters Briefing Room");
 
     const auto menu_before_move = source.front_end_state();
+    const auto trigger_before_move =
+        source.diagnostic_proximity_trigger_state();
     RunReplaySession replay = std::move(source);
     Check(source.state() == RunReplaySessionState::Inert &&
               !source.front_end_state() &&
+              !source.diagnostic_proximity_trigger_state() &&
               !source.front_end_active_profile_is_confirmed() &&
               !source.front_end_active_character_is_confirmed() &&
               replay.state() == RunReplaySessionState::Ready &&
               replay.front_end_state() == menu_before_move &&
+              SameDiagnosticProximityTrigger(
+                  replay.diagnostic_proximity_trigger_state(), trigger_before_move) &&
               replay.front_end_active_profile_is_confirmed() &&
               replay.front_end_active_character_is_confirmed(),
         "move construction transfers both replay mirrors and leaves the source observably inert");
@@ -2693,8 +2918,10 @@ void CheckCharacterFlowReplay()
                       .alive_entities = 1U,
                   }) &&
               replay.debug_locomotion_position() == Position3{} &&
+              SameDiagnosticProximityTrigger(
+                  replay.diagnostic_proximity_trigger_state(), false, false) &&
               replay.state() == RunReplaySessionState::Complete,
-        "fire-select mission confirmation replays into DiagnosticPlay without leaking held menu movement into its first simulation step");
+        "fire-select mission confirmation enters DiagnosticPlay without leaking held menu movement or mutating the outside project trigger");
 }
 
 void CheckMoveLifecycle()
@@ -2825,6 +3052,7 @@ int main()
     CheckElapsedOracleAndPartialPrefix();
     CheckTerminalBehavior();
     CheckDebugLocomotionOptIn();
+    CheckDiagnosticProximityTriggerReplay();
     CheckFrontEndModalGate();
     CheckFirstProfileCreationReplay();
     CheckDiagnosticPlayGateReplay();
