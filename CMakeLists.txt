@@ -160,6 +160,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/run_capture_replay.cpp
     native/src/runtime/run_capture_session.cpp
     native/src/runtime/scheduler_elapsed_trace.cpp
+    native/src/runtime/scene_transform.cpp
     native/src/runtime/spatial_diagnostic_scene.cpp
     native/src/runtime/spatial_debug_image.cpp
     native/src/runtime/tdx_indexed8_candidate_debug_image.cpp
@@ -1874,6 +1875,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_render_draw_list_tests COMMAND omega_render_draw_list_tests)
     set_tests_properties(omega_render_draw_list_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_scene_transform_tests
+        native/tests/scene_transform_tests.cpp
+    )
+    target_link_libraries(omega_scene_transform_tests PRIVATE omega_runtime)
+    if(MSVC)
+        target_compile_options(omega_scene_transform_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_scene_transform_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_scene_transform_tests COMMAND omega_scene_transform_tests)
+    set_tests_properties(omega_scene_transform_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_spatial_diagnostic_scene_tests
         native/tests/spatial_diagnostic_scene_tests.cpp

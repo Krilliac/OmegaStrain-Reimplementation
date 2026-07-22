@@ -1112,12 +1112,20 @@ void InstallSyntheticSpatialTriangle(
 void CheckDiagnosticScenePresentationTransactions()
 {
     using Access = omega::app::detail::OmegaAppTestAccess;
-    constexpr omega::asset::Matrix4x4IR camera{
+    constexpr omega::asset::Matrix4x4IR world_to_view{
         .row_major = {
-            2.0F, 0.0F, 0.0F, 1.0F,
-            0.0F, 3.0F, 0.0F, -2.0F,
+            2.0F, 0.0F, 0.0F, 0.0F,
+            0.0F, 3.0F, 0.0F, 0.0F,
             0.0F, 0.0F, 1.0F, 0.0F,
             0.0F, 0.0F, 0.0F, 1.0F,
+        },
+    };
+    constexpr omega::asset::Matrix4x4IR view_to_clip{
+        .row_major = {
+            1.0F, 1.0F, 0.0F, 0.0F,
+            0.0F, 1.0F, 0.0F, 0.0F,
+            0.0F, 0.0F, 1.0F, 0.0F,
+            0.5F, 0.0F, 0.0F, 1.0F,
         },
     };
     constexpr omega::asset::Matrix4x4IR local{
@@ -1128,12 +1136,20 @@ void CheckDiagnosticScenePresentationTransactions()
             0.0F, 0.0F, 0.0F, 1.0F,
         },
     };
-    constexpr omega::asset::Matrix4x4IR camera_times_local{
+    constexpr omega::asset::Matrix4x4IR object_to_clip_with_local{
         .row_major = {
-            2.0F, 0.0F, 0.0F, 9.0F,
-            0.0F, 3.0F, 0.0F, 13.0F,
+            2.0F, 3.0F, 0.0F, 23.0F,
+            0.0F, 3.0F, 0.0F, 15.0F,
             0.0F, 0.0F, 1.0F, 0.0F,
-            0.0F, 0.0F, 0.0F, 1.0F,
+            1.0F, 0.0F, 0.0F, 5.0F,
+        },
+    };
+    constexpr omega::asset::Matrix4x4IR object_to_clip_without_local{
+        .row_major = {
+            2.0F, 3.0F, 0.0F, 0.0F,
+            0.0F, 3.0F, 0.0F, 0.0F,
+            0.0F, 0.0F, 1.0F, 0.0F,
+            1.0F, 0.0F, 0.0F, 1.0F,
         },
     };
     omega::asset::SceneIR scene;
@@ -1151,7 +1167,8 @@ void CheckDiagnosticScenePresentationTransactions()
             .local_to_world = omega::asset::kIdentityMatrix4x4IR,
         },
     };
-    scene.camera.world_to_clip = camera;
+    scene.camera.world_to_view = world_to_view;
+    scene.camera.view_to_clip = view_to_clip;
 
     auto created_platform = omega::app::SdlPlatformService::Create();
     Check(created_platform.has_value(),
@@ -1187,9 +1204,9 @@ void CheckDiagnosticScenePresentationTransactions()
                       built->mesh_handles[1].valid() &&
                       built->mesh_handles[0] != built->mesh_handles[1] &&
                       commands[0].mesh == built->mesh_handles[1] &&
-                      commands[0].object_to_clip == camera_times_local &&
+                      commands[0].object_to_clip == object_to_clip_with_local &&
                       commands[1].mesh == built->mesh_handles[0] &&
-                      commands[1].object_to_clip == camera &&
+                      commands[1].object_to_clip == object_to_clip_without_local &&
                       resident.successful_mesh_uploads == 2U &&
                       resident.successful_mesh_upload_logical_bytes == 96U &&
                       resident.successful_mesh_releases == 0U &&
@@ -1204,7 +1221,7 @@ void CheckDiagnosticScenePresentationTransactions()
                       resident.meshes.resident_triangle_indices == 6U &&
                       resident.meshes.reserved_logical_bytes == 0U &&
                       resident.meshes.resident_logical_bytes == 96U,
-                "two meshes retain exact generations and compose world-to-clip times local-to-world in instance order");
+                "two meshes retain exact generations and compose view-to-clip, world-to-view, and local-to-world in instance order");
             if (built)
             {
                 built->draw_list = {};
@@ -1267,6 +1284,43 @@ void CheckDiagnosticScenePresentationTransactions()
                       rolled_back.meshes.reserved_logical_bytes == 0U &&
                       rolled_back.meshes.resident_logical_bytes == 0U,
                 "a forced second upload failure releases the exact successful prefix with zero residual residency");
+        }
+    }
+
+    {
+        auto created_host = omega::app::SdlGpuHost::Create(platform, false,
+            omega::runtime::RenderTexturePoolConfig{
+                .slot_capacity = 1U,
+                .maximum_resident_logical_bytes = 4U,
+            },
+            omega::runtime::RenderMeshPoolConfig{
+                .slot_capacity = 2U,
+                .maximum_resident_positions = 6U,
+                .maximum_resident_triangle_indices = 6U,
+                .maximum_resident_logical_bytes = 96U,
+            });
+        Check(created_host.has_value(),
+            "the non-finite scene-transform rejection host initializes");
+        if (created_host)
+        {
+            auto host = std::move(*created_host);
+            omega::asset::SceneIR invalid_scene = scene;
+            invalid_scene.camera.view_to_clip.row_major[0] =
+                std::numeric_limits<float>::infinity();
+            auto rejected =
+                Access::BuildDiagnosticScenePresentation(host, invalid_scene);
+            const omega::app::GpuHostSnapshot unchanged = host.Snapshot();
+            Check(!rejected &&
+                      rejected.error() ==
+                          "diagnostic scene transform is non-finite" &&
+                      unchanged.successful_mesh_uploads == 0U &&
+                      unchanged.successful_mesh_upload_logical_bytes == 0U &&
+                      unchanged.successful_mesh_releases == 0U &&
+                      unchanged.meshes.slot_capacity == 2U &&
+                      unchanged.meshes.free_slots == 2U &&
+                      unchanged.meshes.reserved_slots == 0U &&
+                      unchanged.meshes.resident_slots == 0U,
+                "a non-finite camera stage preserves the fixed app error and rejects before mesh upload");
         }
     }
 }
@@ -2462,7 +2516,7 @@ void CheckDiagnosticSceneMissionActivation(
                   scene_overlay[0].texture ==
                       Access::DiagnosticActorMarkerTexture(*app) &&
                   Access::CurrentFrontEndMeshDrawList(*app).empty(),
-            "the validated scene packet composes camera times instance and remains hidden in Profiles");
+            "the validated scene packet composes both camera stages and the instance transform and remains hidden in Profiles");
 
         const bool reached_briefing =
             PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&

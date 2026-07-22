@@ -18,7 +18,8 @@ struct SceneMeshInstanceIR
 
 struct SceneCameraIR
 {
-    Matrix4x4IR world_to_clip = kIdentityMatrix4x4IR;
+    Matrix4x4IR world_to_view = kIdentityMatrix4x4IR;
+    Matrix4x4IR view_to_clip = kIdentityMatrix4x4IR;
 
     bool operator==(const SceneCameraIR&) const = default;
 };

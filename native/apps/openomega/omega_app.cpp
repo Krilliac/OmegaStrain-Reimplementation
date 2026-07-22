@@ -6,13 +6,13 @@
 
 #include "omega/gameplay/debug_locomotion.h"
 #include "omega/runtime/level_texture_topology_preview.h"
+#include "omega/runtime/scene_transform.h"
 #include "omega/runtime/spatial_diagnostic_scene.h"
 
 #include <SDL3/SDL.h>
 
 #include <array>
 #include <chrono>
-#include <cmath>
 #include <cstddef>
 #include <exception>
 #include <limits>
@@ -44,26 +44,6 @@ constexpr profiles::CharacterId kFirstCharacterId =
                                       0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U});
 constexpr std::array<std::byte, 4U> kDiagnosticActorMarkerRgba8{
     std::byte{255U}, std::byte{64U}, std::byte{224U}, std::byte{255U}};
-
-[[nodiscard]] asset::Matrix4x4IR MultiplyMatrices(
-    const asset::Matrix4x4IR& left, const asset::Matrix4x4IR& right) noexcept
-{
-    asset::Matrix4x4IR result;
-    for (std::size_t row = 0U; row < 4U; ++row)
-    {
-        for (std::size_t column = 0U; column < 4U; ++column)
-        {
-            double value = 0.0;
-            for (std::size_t inner = 0U; inner < 4U; ++inner)
-            {
-                value += static_cast<double>(left.row_major[row * 4U + inner]) *
-                         static_cast<double>(right.row_major[inner * 4U + column]);
-            }
-            result.row_major[row * 4U + column] = static_cast<float>(value);
-        }
-    }
-    return result;
-}
 
 class DiagnosticSceneRollbackGuard final
 {
@@ -138,16 +118,14 @@ OmegaApp::BuildDiagnosticScenePresentation(
             return std::unexpected(
                 std::string{"diagnostic scene instance references an unavailable mesh"});
         }
-        object_to_clip[instance_index] = MultiplyMatrices(
-            scene.camera.world_to_clip, instance.local_to_world);
-        for (const float value : object_to_clip[instance_index].row_major)
+        auto composed = runtime::ComposeObjectToClip(
+            scene.camera, instance.local_to_world);
+        if (!composed)
         {
-            if (!std::isfinite(value))
-            {
-                return std::unexpected(
-                    std::string{"diagnostic scene transform is non-finite"});
-            }
+            return std::unexpected(
+                std::string{"diagnostic scene transform is non-finite"});
         }
+        object_to_clip[instance_index] = *composed;
     }
 
     std::unique_ptr<DiagnosticScenePresentation> presentation{

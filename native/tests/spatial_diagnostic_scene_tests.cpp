@@ -79,10 +79,11 @@ int main()
         "non-empty diagnostics concatenate into one mesh and one instance");
     if (scene)
     {
-        Check(IsIdentity(scene->camera.world_to_clip) &&
+        Check(IsIdentity(scene->camera.world_to_view) &&
+                  IsIdentity(scene->camera.view_to_clip) &&
                   IsIdentity(scene->mesh_instances[0].local_to_world) &&
                   scene->mesh_instances[0].render_mesh_index == 0U,
-            "the project diagnostic scene uses explicit identity camera and instance transforms");
+            "the project diagnostic scene uses explicit identity camera stages and instance transform");
         const auto& mesh = scene->render_meshes[0];
         Check(mesh.positions.size() == 6U &&
                   mesh.triangle_indices == std::vector<std::uint32_t>({0U, 1U, 2U, 3U, 4U, 5U}),
@@ -135,9 +136,10 @@ int main()
         "global diagnostic construction succeeds without mutating its source IR");
     Check(global_scene && global_scene->render_meshes.size() == 1U &&
               global_scene->mesh_instances.size() == 1U &&
-              IsIdentity(global_scene->camera.world_to_clip) &&
+              IsIdentity(global_scene->camera.world_to_view) &&
+              IsIdentity(global_scene->camera.view_to_clip) &&
               IsIdentity(global_scene->mesh_instances[0].local_to_world),
-        "the global diagnostic emits one owned mesh with project identity transforms");
+        "the global diagnostic emits one owned mesh with project identity camera stages and instance transform");
     if (global_scene && global_scene->render_meshes.size() == 1U)
     {
         const auto& positions = global_scene->render_meshes[0].positions;
@@ -236,12 +238,15 @@ int main()
 
     auto empty_scene = omega::runtime::BuildSpatialDiagnosticScene({});
     Check(empty_scene && empty_scene->render_meshes.empty() &&
-              empty_scene->mesh_instances.empty() && IsIdentity(empty_scene->camera.world_to_clip),
+              empty_scene->mesh_instances.empty() &&
+              IsIdentity(empty_scene->camera.world_to_view) &&
+              IsIdentity(empty_scene->camera.view_to_clip),
         "an empty level produces an identity-camera scene without empty GPU-facing resources");
     auto global_empty_scene = omega::runtime::BuildGlobalSpatialDiagnosticScene({});
     Check(global_empty_scene && global_empty_scene->render_meshes.empty() &&
               global_empty_scene->mesh_instances.empty() &&
-              IsIdentity(global_empty_scene->camera.world_to_clip),
+              IsIdentity(global_empty_scene->camera.world_to_view) &&
+              IsIdentity(global_empty_scene->camera.view_to_clip),
         "an empty level also produces an empty global diagnostic scene");
     omega::asset::LevelSpatialIR triangle_free{
         .terrain_cells = {omega::asset::SpatialMeshIR{
