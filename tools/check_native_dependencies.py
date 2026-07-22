@@ -269,6 +269,7 @@ _FRONTEND_TEXT_EDGES = frozenset(
 _FRONTEND_PRESENTATION_EDGES = frozenset(
     {
         "omega_frontend_presentation",
+        "omega_assets",
         "omega_content",
         "omega_frontend",
         "omega_frontend_text",

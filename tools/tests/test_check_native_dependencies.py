@@ -643,6 +643,7 @@ class NativeDependencyGateTests(unittest.TestCase):
                 "native/include/omega/frontend_presentation/compositor.h": (
                     "#pragma once\n"
                     "#include <expected>\n"
+                    '#include "omega/asset/frontend_ir.h"\n'
                     '#include "omega/frontend/compositor_math.h"\n'
                 ),
                 "native/src/frontend_presentation/compositor.cpp": (
@@ -668,6 +669,7 @@ class NativeDependencyGateTests(unittest.TestCase):
         expected_edges = frozenset(
             {
                 "omega_frontend_presentation",
+                "omega_assets",
                 "omega_content",
                 "omega_frontend",
                 "omega_frontend_text",
