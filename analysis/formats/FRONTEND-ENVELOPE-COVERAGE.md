@@ -10,7 +10,7 @@ semantic decoder, UI/menu reconstruction, or behavioral observation.
 ## Command
 
 ```powershell
-.\build\msvc\Debug\omega_tool.exe frontend-envelope-coverage-verify-tree <root>
+.\build/msvc/products/sdk/Debug/omega_tool.exe frontend-envelope-coverage-verify-tree <root>
 ```
 
 The command recursively discovers regular top-level `.HOG` files below one supplied root. It uses

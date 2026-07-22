@@ -1345,36 +1345,67 @@ Studio's historical engine source or internal toolchain.
   and assigns no geometry, topology, vertex, material, packet, draw, placement, visibility, or
   gameplay semantics.
 
-## Quick start
+## Quick start: native game
+
+Build the standalone native game once, then double-click `Play-OpenOmega.cmd` or run it from a
+terminal. The launcher never starts a build implicitly; if the executable is missing, it prints the
+exact configure/build commands to run.
 
 ```powershell
-powershell -NoProfile -File .\scripts\launch-omega.ps1
+cmake --preset vs2022-x64
+cmake --build --preset vs2022-game-debug
+.\Play-OpenOmega.cmd -Preset vs2022-x64
+```
+
+The default path is keyboard and mouse only: W/A/S/D or the arrow keys navigate and move; Return,
+keypad Enter, or F1 selects; Space or left mouse selects/fires; Escape, Backspace, or right mouse
+goes back in menus; T or held right mouse targets in play; and F10 quits. Gamepad discovery remains
+off unless the player explicitly supplies `--set=input.gamepad_enabled=true`.
+
+`scripts/run-openomega.ps1` accepts `-Config Debug|RelWithDebInfo|Release`,
+`-Preset auto|msvc|vs2022-x64`, an optional `-ConfigFile`, and any remaining native game arguments.
+It runs from the repository root and forwards the game's exit code:
+
+```powershell
+.\Play-OpenOmega.cmd --frames=120 --capture-run --replay-capture
+powershell -NoProfile -File .\scripts\run-openomega.ps1 -ConfigFile .\openomega.cfg --frames=120
+```
+
+Double-click `Open-OpenOmega-VS.cmd` to generate and open the Visual Studio 2022 x64 solution. The
+solution keeps the game, provisional SDK tool, engine libraries, compatibility layers, platform
+backend, and tests in separate projects/folders, with `openomega` as the default startup project.
+The command generates IDE files but deliberately does not compile; build the solution once before
+using a library project as an executable debug host.
+
+## PCSX2 behavioral reference (private, optional)
+
+The emulator remains a research/reference lane and is not required to launch the native game. Start
+the user's locally installed reference environment with the explicitly named script:
+
+```powershell
+powershell -NoProfile -File .\scripts\launch-pcsx2-reference.ps1
 ```
 
 Open the PCSX2 debugger and break at the game entry point:
 
 ```powershell
-powershell -NoProfile -File .\scripts\launch-omega.ps1 -Debugger
+powershell -NoProfile -File .\scripts\launch-pcsx2-reference.ps1 -Debugger
 ```
 
-Load the recovered resume state:
+Load the recovered resume state or print the exact command without launching another emulator
+instance:
 
 ```powershell
-powershell -NoProfile -File .\scripts\launch-omega.ps1 -Resume
-```
-
-Print the exact command without launching another emulator instance:
-
-```powershell
-powershell -NoProfile -File .\scripts\launch-omega.ps1 -Debugger -DryRun
+powershell -NoProfile -File .\scripts\launch-pcsx2-reference.ps1 -Resume
+powershell -NoProfile -File .\scripts\launch-pcsx2-reference.ps1 -Debugger -DryRun
 ```
 
 Static analysis confirms that `-lMINSK` is valid attached argument syntax and selects the MINSK
 entry. The user-facing meaning of `-x` and the resulting gameplay state remain unverified; the
-launcher can test the pair explicitly against the private reference environment:
+reference launcher can test the pair explicitly against the private environment:
 
 ```powershell
-powershell -NoProfile -File .\scripts\launch-omega.ps1 -Debugger -GameArgs '-x -lMINSK'
+powershell -NoProfile -File .\scripts\launch-pcsx2-reference.ps1 -Debugger -GameArgs '-x -lMINSK'
 ```
 
 ## Native runtime build
@@ -1387,23 +1418,23 @@ cmake --preset msvc
 cmake --build --preset msvc-debug
 ctest --preset msvc-debug
 .\build\msvc\Debug\omega_sdl_gpu_texture_smoke.exe
-.\build\msvc\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe frontend-envelope-coverage-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe pop-post-terrain-hypotheses-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe level-spatial-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe level-material-catalogs-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe level-texture-store-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --probe-only
-.\build\msvc\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
-python -B .\tools\probe_native_levels.py .\build\msvc\Debug\openomega.exe .\private\extracted-disc --aggregate-only
-.\build\msvc\Debug\openomega.exe --frames=120
-.\build\msvc\Debug\openomega.exe --frames=120 --capture-run
-.\build\msvc\Debug\openomega.exe --frames=120 --capture-run --replay-capture
-.\build\msvc\Debug\openomega.exe --config=.\openomega.cfg --set=log.minimum_severity=debug --frames=120
+.\build\msvc\products\sdk\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
+.\build\msvc\products\sdk\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
+.\build\msvc\products\sdk\Debug\omega_tool.exe frontend-envelope-coverage-verify-tree .\private\extracted-disc
+.\build\msvc\products\sdk\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
+.\build\msvc\products\sdk\Debug\omega_tool.exe pop-post-terrain-hypotheses-verify-tree .\private\extracted-disc
+.\build\msvc\products\sdk\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
+.\build\msvc\products\sdk\Debug\omega_tool.exe level-spatial-verify-tree .\private\extracted-disc
+.\build\msvc\products\sdk\Debug\omega_tool.exe level-material-catalogs-verify-tree .\private\extracted-disc
+.\build\msvc\products\sdk\Debug\omega_tool.exe level-texture-store-verify-tree .\private\extracted-disc
+.\build\msvc\products\sdk\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
+.\build\msvc\products\game\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --probe-only
+.\build\msvc\products\game\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
+python -B .\tools\probe_native_levels.py .\build\msvc\products\game\Debug\openomega.exe .\private\extracted-disc --aggregate-only
+.\build\msvc\products\game\Debug\openomega.exe --frames=120
+.\build\msvc\products\game\Debug\openomega.exe --frames=120 --capture-run
+.\build\msvc\products\game\Debug\openomega.exe --frames=120 --capture-run --replay-capture
+.\build\msvc\products\game\Debug\openomega.exe --config=.\openomega.cfg --set=log.minimum_severity=debug --frames=120
 ```
 
 `openomega` is the pure-native SDL3/SDL_GPU host shell. `--frames=N` is an automated smoke mode

@@ -214,7 +214,7 @@ The aggregate verifier streams one asset at a time, discards each decoded catalo
 sanitized counters, and never prints source paths or names:
 
 ```powershell
-build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc
+build/msvc/products/sdk/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc
 ```
 
 The level-composition verifier separately exercises `GameDataService` manifest-to-cell traversal
@@ -223,7 +223,7 @@ reference, and error counts; diagnostics contain no level codes, paths, member n
 payloads, or inferred roles:
 
 ```powershell
-build/msvc/Debug/omega_tool.exe level-material-catalogs-verify-tree private/extracted-disc
+build/msvc/products/sdk/Debug/omega_tool.exe level-material-catalogs-verify-tree private/extracted-disc
 ```
 
 The confirmed baseline is 7,036 catalogs, 38,793 owned names, 38,899 material records, 42,631

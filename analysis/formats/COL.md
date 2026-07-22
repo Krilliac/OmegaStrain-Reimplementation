@@ -77,7 +77,7 @@ VUM payloads, or TDX pixels. The SDL GPU leaf receives only the generic owned im
 
 ## Aggregate native validation
 
-`build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc` independently
+`build/msvc/products/sdk/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc` independently
 decodes all 7,036 spans with zero semantic errors and reports only aggregate values:
 
 | Measure | Total |
@@ -96,7 +96,7 @@ Synthetic regressions cover both supported versions, direct and node roots, empt
 input ownership, opaque-field immunity, malformed numerics/references/topology, and exact/one-below
 resource budgets.
 
-`build/msvc/Debug/omega_tool.exe level-spatial-verify-tree private/extracted-disc` additionally
+`build/msvc/products/sdk/Debug/omega_tool.exe level-spatial-verify-tree private/extracted-disc` additionally
 drives the complete content-service path for all 18 levels and 5,351 manifest cells. It reports
 5,351 meshes, 20,203 canonical nodes, 93,356 leaves, 889,640 vertices, 1,239,980 triangles and leaf
 references, 2,137 normalized empty meshes, and zero errors. `tools/probe_native_levels.py` verifies

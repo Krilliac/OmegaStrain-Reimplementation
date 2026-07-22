@@ -332,7 +332,7 @@ python -B .\tools\fingerprint_assets.py `
   .\private\extracted-disc `
   .\analysis\formats\asset-fingerprints.json
 
-.\build\msvc\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
+.\build/msvc/products/sdk/Debug/omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
 ```
 
 The JSON is deterministic for the same corpus and contains aggregate metadata only.
