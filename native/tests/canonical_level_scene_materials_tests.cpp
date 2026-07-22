@@ -93,6 +93,12 @@ int main()
         jointly_relabelled.material_catalogs[0].source_cell_ordinal.value = 1U;
         Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(jointly_relabelled),
               "matching but noncanonical duplicate ordinals do not masquerade as provenance");
+
+        auto association_limits = omega::runtime::CanonicalLevelSceneMaterialLimits{};
+        association_limits.maximum_catalogs = 1U;
+        Check(!omega::runtime::ValidateCanonicalLevelSceneMaterialAssociation(*paired,
+                                                                              association_limits),
+              "association validation is bounded by tighten-only cell limits");
     }
 
     // Mismatched cardinality is rejected before any composition.

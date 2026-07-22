@@ -133,10 +133,17 @@ namespace
 } // namespace
 
 std::expected<void, std::string> ValidateCanonicalLevelSceneMaterialAssociation(
-    const CanonicalLevelSceneWithMaterials& content)
+    const CanonicalLevelSceneWithMaterials& content,
+    const CanonicalLevelSceneMaterialLimits& limits)
 {
+    if (!AreTightenedLimits(limits))
+        return std::unexpected(
+            "canonical level scene material limits may only tighten safety maxima");
     if (content.scene.cells.size() != content.material_catalogs.size())
         return std::unexpected("canonical level scene material association cardinality is invalid");
+    if (content.scene.cells.size() > limits.scene.maximum_cells ||
+        content.material_catalogs.size() > limits.maximum_catalogs)
+        return std::unexpected("canonical level scene material association exceeds the cell limit");
     if (content.scene.cells.size() > std::numeric_limits<std::uint32_t>::max())
         return std::unexpected("canonical level scene material source ordinal count is invalid");
     for (std::size_t index = 0U; index < content.scene.cells.size(); ++index)
@@ -171,7 +178,7 @@ std::expected<CanonicalLevelSceneWithMaterials, std::string> BuildCanonicalLevel
                 .catalog = content.material_catalogs.terrain_cells[index],
             });
         }
-        auto association = ValidateCanonicalLevelSceneMaterialAssociation(result);
+        auto association = ValidateCanonicalLevelSceneMaterialAssociation(result, limits);
         if (!association)
             return std::unexpected(std::move(association.error()));
         return result;

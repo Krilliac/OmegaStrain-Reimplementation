@@ -47,7 +47,8 @@ struct CanonicalLevelSceneWithMaterials
 // [any worker thread; reentrant] Checks the output cardinality and exact
 // typed-ordinal pairing.
 [[nodiscard]] std::expected<void, std::string> ValidateCanonicalLevelSceneMaterialAssociation(
-    const CanonicalLevelSceneWithMaterials& content);
+    const CanonicalLevelSceneWithMaterials& content,
+    const CanonicalLevelSceneMaterialLimits& limits = CanonicalLevelSceneMaterialLimits{});
 
 // [any worker thread; reentrant] Builds and explicitly tags the positional
 // relationship documented by LevelContentIR. Limits are fixed safety maxima:
