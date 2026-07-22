@@ -1,4 +1,5 @@
 #include "omega/archive/hog_archive.h"
+#include "omega/debug/subsystem_entry_break.h"
 
 #include <algorithm>
 #include <array>
@@ -404,6 +405,7 @@ std::expected<HogIndex, std::string> HogIndex::Open(const std::filesystem::path&
 
 std::expected<HogIndex, std::string> HogIndex::Open(const HogReadSource& source)
 {
+    OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_core");
     const HogFileRange range{.offset = 0, .size = source.size};
     auto valid_range = ValidateSourceRange(source, range, source.size);
     if (!valid_range)

@@ -1,4 +1,5 @@
 #include "omega/compat/ps2_memory_card_image.h"
+#include "omega/debug/subsystem_entry_break.h"
 
 #include <algorithm>
 #include <array>
@@ -142,6 +143,7 @@ ClassifyLayout(const std::size_t image_bytes) {
 
 std::expected<Ps2MemoryCardImageDescriptor, Ps2MemoryCardImageError>
 InspectPs2MemoryCardImage(const std::span<const std::byte> image) {
+  OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_ps2_compat");
   const auto layout = ClassifyLayout(image.size());
   if (!layout)
     return std::unexpected(layout.error());

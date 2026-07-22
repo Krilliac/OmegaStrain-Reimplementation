@@ -1,5 +1,6 @@
 #include "omega/profiles/profile_catalog.h"
 
+#include "omega/debug/subsystem_entry_break.h"
 #include "omega/persistence/save_database.h"
 
 #include <algorithm>
@@ -349,6 +350,7 @@ DecodeSummary(const ProfileId id, const SaveRecord &record) {
 
 std::optional<ProfileId>
 ProfileId::Parse(const std::string_view text) noexcept {
+  OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_profiles");
   if (text.size() != 32U)
     return std::nullopt;
   std::array<std::uint8_t, 16U> bytes{};

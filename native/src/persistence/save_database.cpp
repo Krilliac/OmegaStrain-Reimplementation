@@ -1,4 +1,5 @@
 #include "omega/persistence/save_database.h"
+#include "omega/debug/subsystem_entry_break.h"
 
 #include <algorithm>
 #include <array>
@@ -1273,6 +1274,7 @@ struct SaveDatabase::Impl {
 
 std::string_view
 SaveDatabaseErrorCodeName(const SaveDatabaseErrorCode code) noexcept {
+  OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_persistence");
   switch (code) {
   case SaveDatabaseErrorCode::InvalidConfiguration:
     return "invalid-configuration";

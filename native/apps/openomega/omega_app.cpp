@@ -5,6 +5,7 @@
 #include "run_replay_session.h"
 
 #include "omega/gameplay/debug_locomotion.h"
+#include "omega/debug/subsystem_entry_break.h"
 #include "omega/runtime/diagnostic_actor_scene.h"
 #include "omega/runtime/level_texture_topology_preview.h"
 #include "omega/runtime/scene_transform.h"
@@ -245,6 +246,7 @@ std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore confi
     NativePersistence native_persistence, const bool debug_device,
     std::optional<std::filesystem::path> opening_movie_path)
 {
+    OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_app_host");
     return CreateWithTextureConfig(std::move(config), settings, std::move(content),
         std::make_unique<NativePersistence>(std::move(native_persistence)),
         debug_device, {}, std::move(opening_movie_path));

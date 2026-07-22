@@ -1,4 +1,5 @@
 #include "omega/media/mpeg_program_stream_descriptor.h"
+#include "omega/debug/subsystem_entry_break.h"
 
 #include <algorithm>
 #include <limits>
@@ -523,6 +524,7 @@ struct ScanSummary
 asset::DecodeResult<MpegProgramStreamDescriptor> InspectMpegProgramStream(
     const std::span<const std::byte> bytes, const asset::DecodeLimits limits)
 {
+    OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_media");
     if (bytes.size() > kMpegProgramStreamMaximumInputBytes)
     {
         return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,

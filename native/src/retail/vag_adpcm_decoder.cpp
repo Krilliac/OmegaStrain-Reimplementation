@@ -1,4 +1,5 @@
 #include "omega/retail/vag_adpcm_decoder.h"
+#include "omega/debug/subsystem_entry_break.h"
 
 #include <algorithm>
 #include <array>
@@ -92,6 +93,7 @@ constexpr std::array<std::array<std::int32_t, 2>, 5> kPredictorCoefficients{{
 asset::DecodeResult<asset::MonoPcm16IR> DecodeVagAdpcm(const std::span<const std::byte> bytes,
                                                        const asset::DecodeLimits limits)
 {
+    OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_retail_formats");
     constexpr std::uint64_t hard_maximum_input_bytes =
         kHeaderBytes + kMaximumDataBytes + kMaximumTailBytes;
     if (bytes.size() > limits.maximum_input_bytes || bytes.size() > hard_maximum_input_bytes)

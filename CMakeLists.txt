@@ -541,6 +541,35 @@ if(OMEGA_BUILD_RUNTIME)
     endif()
 endif()
 
+# Keep the hook opt-in at the target and configuration boundary.  The header
+# repeats these guards defensively, so Release, clang-cl, and non-Windows builds
+# all preprocess every call site to a literal no-op.
+set(OMEGA_SUBSYSTEM_ENTRY_BREAK_TARGETS
+    omega_core
+    omega_persistence
+    omega_profiles
+    omega_ps2_compat
+    omega_media
+    omega_simulation
+    omega_gameplay
+    omega_retail_formats
+    omega_content
+    omega_runtime
+    omega_app_core
+    omega_native_persistence
+    omega_app_host
+    omega_sdl_backend
+)
+if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    foreach(target_name IN LISTS OMEGA_SUBSYSTEM_ENTRY_BREAK_TARGETS)
+        if(TARGET "${target_name}")
+            target_compile_definitions("${target_name}" PRIVATE
+                $<$<CONFIG:Debug>:OPENOMEGA_ENABLE_SUBSYSTEM_ENTRY_BREAK=1>
+            )
+        endif()
+    endforeach()
+endif()
+
 include(CTest)
 if(OMEGA_RUN_GPU_SMOKE_TEST AND NOT BUILD_TESTING)
     message(FATAL_ERROR "OMEGA_RUN_GPU_SMOKE_TEST requires BUILD_TESTING=ON")
@@ -569,6 +598,79 @@ if(BUILD_TESTING)
             "OPENOMEGA_DISABLE_STARTUP_DIALOG=1"
         )
     endfunction()
+
+    add_executable(omega_simulation_entry_break_host
+        native/tests/debug_subsystem_entry_break_simulation_host.cpp
+    )
+    target_link_libraries(omega_simulation_entry_break_host PRIVATE
+        omega_simulation
+    )
+    if(MSVC)
+        target_compile_options(omega_simulation_entry_break_host PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_simulation_entry_break_host PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_simulation_entry_break_host
+        COMMAND omega_simulation_entry_break_host
+    )
+    set_tests_properties(omega_simulation_entry_break_host PROPERTIES
+        TIMEOUT 5
+    )
+
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        add_executable(omega_subsystem_entry_break_contract_tests
+            native/tests/subsystem_entry_break_contract_tests.cpp
+        )
+        target_include_directories(omega_subsystem_entry_break_contract_tests PRIVATE
+            native/include
+        )
+        target_compile_definitions(omega_subsystem_entry_break_contract_tests PRIVATE
+            $<$<CONFIG:Debug>:OPENOMEGA_ENABLE_SUBSYSTEM_ENTRY_BREAK=1>
+        )
+        target_compile_options(omega_subsystem_entry_break_contract_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+
+        set(OMEGA_SUBSYSTEM_ENTRY_BREAK_CONTRACT_SCENARIOS
+            exact
+            case
+            suffix
+            whitespace
+            non_ascii
+            maximum
+            too_long
+            empty
+            absent
+        )
+        foreach(scenario IN LISTS OMEGA_SUBSYSTEM_ENTRY_BREAK_CONTRACT_SCENARIOS)
+            set(test_name "omega_subsystem_entry_break_contract_${scenario}")
+            add_test(NAME "${test_name}"
+                COMMAND omega_subsystem_entry_break_contract_tests "${scenario}"
+            )
+            set_tests_properties("${test_name}" PROPERTIES
+                CONFIGURATIONS Debug
+                TIMEOUT 5
+            )
+        endforeach()
+    endif()
 
     # Independent C++ construction of the public producer wire vector. The Python
     # parser consumes the same checked-in ASCII-hex fixture, preventing its test

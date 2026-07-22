@@ -1,4 +1,5 @@
 #include "omega/simulation/simulation_world.h"
+#include "omega/debug/subsystem_entry_break.h"
 
 #include <exception>
 #include <limits>
@@ -25,6 +26,7 @@ namespace
 std::expected<SimulationWorld, std::string> SimulationWorld::Create(
     const SimulationWorldConfig& config)
 {
+    OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_simulation");
     if (config.fixed_step <= std::chrono::nanoseconds::zero())
         return std::unexpected("simulation fixed step must be positive");
     auto entities = EntityRegistry::Create(config.maximum_entities);

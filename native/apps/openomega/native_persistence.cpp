@@ -1,6 +1,8 @@
 #include "native_persistence.h"
 #include "front_end.h"
 
+#include "omega/debug/subsystem_entry_break.h"
+
 #include <array>
 #include <cstddef>
 #include <new>
@@ -581,6 +583,7 @@ std::string_view ActiveProfileConfirmationErrorCodeName(
 std::expected<NativePersistence, NativePersistenceStartupError> NativePersistence::Bootstrap(
     std::filesystem::path directory)
 {
+    OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_native_persistence");
     return Bootstrap(std::move(directory), DefaultNativePersistenceLimits());
 }
 
