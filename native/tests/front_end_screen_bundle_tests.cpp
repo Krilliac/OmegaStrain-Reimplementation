@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -34,6 +35,28 @@ void Check(const bool condition, const std::string_view message)
         std::cerr << "FAILED: " << message << '\n';
         ++failures;
     }
+}
+
+[[nodiscard]] std::optional<std::filesystem::path> PrivateRetailDataPath()
+{
+#if defined(_WIN32)
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const wchar_t* const value = _wgetenv(L"OPENOMEGA_PRIVATE_RETAIL_DATA");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    if (value == nullptr || value[0] == L'\0')
+        return std::nullopt;
+    return std::filesystem::path(value);
+#else
+    const char* const value = std::getenv("OPENOMEGA_PRIVATE_RETAIL_DATA");
+    if (value == nullptr || value[0] == '\0')
+        return std::nullopt;
+    return std::filesystem::path(value);
+#endif
 }
 
 void AppendU16(std::vector<std::byte>& bytes, const std::uint16_t value)
@@ -175,7 +198,7 @@ void AppendGuiNode(std::vector<std::byte>& bytes, const GuiNode& node)
         AppendF32(bytes, 0.25F);
         AppendF32(bytes, 0.5F);
         AppendF32(bytes, 0.75F);
-        AppendU32(bytes, 0x12345678U);
+        AppendU32(bytes, 2U);
     }
     AppendU16(bytes, static_cast<std::uint16_t>(node.children.size()));
     for (const auto& child : node.children)
@@ -682,6 +705,49 @@ int main()
     CheckDecodeError(Load(root, FrontEndScreenKey::Title, tight_limits),
         omega::asset::DecodeErrorCode::LimitExceeded,
         "caller-tightened aggregate item limits cannot be reset by child decoders");
+
+    if (const auto private_data = PrivateRetailDataPath())
+    {
+        auto service = omega::content::GameDataService::Open(
+            {.root = *private_data});
+        Check(service.has_value(),
+            "the optional owner-supplied retail source mounts without exposing its identity");
+        if (service)
+        {
+            for (const auto& screen : kScreens)
+            {
+                auto loaded = service->LoadFrontEndScreen(screen.key);
+                Check(loaded.has_value(),
+                    "each fixed route loads from the optional owner-supplied retail source");
+                if (!loaded)
+                {
+                    std::cerr << "PRIVATE_SMOKE: "
+                              << omega::content::GameDataErrorCodeName(loaded.error().code)
+                              << ": " << loaded.error().message;
+                    if (loaded.error().decode_error)
+                    {
+                        std::cerr << " (decode-code="
+                                  << static_cast<unsigned>(
+                                         loaded.error().decode_error->code);
+                        if (loaded.error().decode_error->byte_offset)
+                            std::cerr << ", offset="
+                                      << *loaded.error().decode_error->byte_offset;
+                        std::cerr << ", detail="
+                                  << loaded.error().decode_error->message << ')';
+                    }
+                    std::cerr << '\n';
+                    continue;
+                }
+                Check(loaded->key() == screen.key &&
+                          loaded->presentation_capability().valid() &&
+                          !loaded->widget_document().root.identifier.empty() &&
+                          !loaded->visual_document().root.identifier.empty() &&
+                          !loaded->screen_textures().empty() && !loaded->fonts().empty() &&
+                          !loaded->font_atlases().empty() && !loaded->strings().entries.empty(),
+                    "an owner-supplied route yields a complete owned retail presentation bundle");
+            }
+        }
+    }
 
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
