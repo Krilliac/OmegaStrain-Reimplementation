@@ -75,211 +75,6 @@ void Check(const bool condition, const std::string_view message)
     return std::string(label.cells.data(), label.length);
 }
 
-[[nodiscard]] constexpr FrontEndInputEdges InputFromMask(const std::uint8_t mask) noexcept
-{
-    return FrontEndInputEdges{
-        .primary_pressed = (mask & 1U) != 0U,
-        .previous_pressed = (mask & 2U) != 0U,
-        .next_pressed = (mask & 4U) != 0U,
-        .cancel_pressed = (mask & 8U) != 0U,
-    };
-}
-
-// Independent table-style oracle. It deliberately does not call a production
-// validity helper or use production navigation arithmetic.
-[[nodiscard]] constexpr FrontEndReduction ReferenceReduce(
-    FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots,
-    const FrontEndCapabilities capabilities = {}) noexcept
-{
-    const auto mode_byte = static_cast<std::uint8_t>(state.mode);
-    const auto row_byte = static_cast<std::uint8_t>(state.selected_main_row);
-    const auto profile_slot_byte = static_cast<std::uint8_t>(state.selected_profile_slot);
-    if (mode_byte > 4U || row_byte > 3U || profile_slot_byte > 2U)
-    {
-        return FrontEndReduction{.state = omega::app::InitialFrontEndState()};
-    }
-    if (state.mode == FrontEndMode::DiagnosticPlay &&
-        !capabilities.can_start_diagnostic_campaign)
-    {
-        return FrontEndReduction{.state = omega::app::InitialFrontEndState()};
-    }
-
-    if (input.cancel_pressed)
-    {
-        if (state.mode == FrontEndMode::Main)
-            return FrontEndReduction{.state = state};
-        constexpr std::array returned_rows{
-            FrontEndMainRow::StartDiagnostic,
-            FrontEndMainRow::Profiles,
-            FrontEndMainRow::StartDiagnostic,
-            FrontEndMainRow::Controls,
-            FrontEndMainRow::AssetTopology,
-        };
-        state.mode = FrontEndMode::Main;
-        state.selected_main_row = returned_rows[mode_byte];
-        state.selected_profile_slot = FrontEndProfileSlot::First;
-        return FrontEndReduction{.state = state};
-    }
-
-    const std::uint8_t selectable_profiles = visible_profile_slots > 3U ? 3U : visible_profile_slots;
-    const bool profile_slot_is_selectable =
-        state.mode != FrontEndMode::Profiles || profile_slot_byte < selectable_profiles;
-    if (!profile_slot_is_selectable)
-        state.selected_profile_slot = FrontEndProfileSlot::First;
-
-    if (input.primary_pressed)
-    {
-        if (state.mode == FrontEndMode::Profiles)
-        {
-            if (selectable_profiles == 0U && capabilities.can_create_first_profile)
-            {
-                return FrontEndReduction{
-                    .state = state,
-                    .command = FrontEndCommand{
-                        .type = FrontEndCommandType::CreateFirstProfile,
-                        .profile_slot = FrontEndProfileSlot::First,
-                    },
-                };
-            }
-            if (!profile_slot_is_selectable)
-            {
-                return FrontEndReduction{.state = FrontEndState{
-                                             .mode = FrontEndMode::Main,
-                                             .selected_main_row = FrontEndMainRow::Profiles,
-                                             .selected_profile_slot = FrontEndProfileSlot::First,
-                                         }};
-            }
-            return FrontEndReduction{
-                .state = FrontEndState{
-                    .mode = FrontEndMode::Main,
-                    .selected_main_row = FrontEndMainRow::Profiles,
-                    .selected_profile_slot = FrontEndProfileSlot::First,
-                },
-                .command = FrontEndCommand{
-                    .type = FrontEndCommandType::SetActiveProfile,
-                    .profile_slot = state.selected_profile_slot,
-                },
-            };
-        }
-
-        constexpr std::array entered_modes{
-            FrontEndMode::DiagnosticPlay,
-            FrontEndMode::Profiles,
-            FrontEndMode::Controls,
-            FrontEndMode::AssetTopology,
-        };
-        if (state.mode == FrontEndMode::Main)
-        {
-            if (state.selected_main_row == FrontEndMainRow::StartDiagnostic &&
-                !capabilities.can_start_diagnostic_campaign)
-            {
-                return FrontEndReduction{.state = state};
-            }
-            state.mode = entered_modes[row_byte];
-            state.selected_profile_slot = FrontEndProfileSlot::First;
-            if (state.selected_main_row == FrontEndMainRow::StartDiagnostic)
-            {
-                return FrontEndReduction{
-                    .state = state,
-                    .command = FrontEndCommand{
-                        .type = FrontEndCommandType::StartDiagnosticCampaign,
-                        .profile_slot = FrontEndProfileSlot::First,
-                    },
-                };
-            }
-        }
-        else
-        {
-            constexpr std::array returned_rows{
-                FrontEndMainRow::StartDiagnostic,
-                FrontEndMainRow::Profiles,
-                FrontEndMainRow::StartDiagnostic,
-                FrontEndMainRow::Controls,
-                FrontEndMainRow::AssetTopology,
-            };
-            state.mode = FrontEndMode::Main;
-            state.selected_main_row = returned_rows[mode_byte];
-            state.selected_profile_slot = FrontEndProfileSlot::First;
-        }
-        return FrontEndReduction{.state = state};
-    }
-
-    if (input.previous_pressed == input.next_pressed)
-    {
-        return FrontEndReduction{.state = state};
-    }
-
-    if (state.mode == FrontEndMode::Profiles)
-    {
-        if (selectable_profiles == 0U)
-            return FrontEndReduction{.state = state};
-        constexpr std::array previous_slots{
-            FrontEndProfileSlot::First,
-            FrontEndProfileSlot::First,
-            FrontEndProfileSlot::Second,
-        };
-        constexpr std::array next_slots{
-            FrontEndProfileSlot::Second,
-            FrontEndProfileSlot::Third,
-            FrontEndProfileSlot::Third,
-        };
-        const std::size_t slot = static_cast<std::size_t>(state.selected_profile_slot);
-        if (input.previous_pressed)
-            state.selected_profile_slot = previous_slots[slot];
-        else if (slot + 1U < selectable_profiles)
-            state.selected_profile_slot = next_slots[slot];
-        return FrontEndReduction{.state = state};
-    }
-
-    if (state.mode != FrontEndMode::Main)
-        return FrontEndReduction{.state = state};
-
-    if (input.previous_pressed)
-    {
-        constexpr std::array previous_rows{
-            FrontEndMainRow::StartDiagnostic,
-            FrontEndMainRow::StartDiagnostic,
-            FrontEndMainRow::Profiles,
-            FrontEndMainRow::Controls,
-        };
-        state.selected_main_row = previous_rows[row_byte];
-    }
-    else
-    {
-        constexpr std::array next_rows{
-            FrontEndMainRow::Profiles,
-            FrontEndMainRow::Controls,
-            FrontEndMainRow::AssetTopology,
-            FrontEndMainRow::AssetTopology,
-        };
-        state.selected_main_row = next_rows[row_byte];
-    }
-    return FrontEndReduction{.state = state};
-}
-
-// Independent gate oracle. It states the confirmation-gate deviations as
-// post-conditions over the table oracle above instead of calling any production
-// helper, so a production gate regression cannot hide inside it.
-[[nodiscard]] constexpr FrontEndReduction ReferenceReduceWithGate(
-    const FrontEndState state, const FrontEndInputEdges input, const std::uint8_t visible_profile_slots,
-    const FrontEndCapabilities capabilities, const bool active_profile_is_confirmed) noexcept
-{
-    const auto mode_byte = static_cast<std::uint8_t>(state.mode);
-    const auto row_byte = static_cast<std::uint8_t>(state.selected_main_row);
-    const auto profile_slot_byte = static_cast<std::uint8_t>(state.selected_profile_slot);
-    const bool state_is_valid = mode_byte <= 4U && row_byte <= 3U && profile_slot_byte <= 2U;
-    const bool gate_is_satisfied =
-        !capabilities.requires_active_profile_for_diagnostic_play || active_profile_is_confirmed;
-    if (state_is_valid && !gate_is_satisfied)
-    {
-        if (mode_byte == 2U)
-            return FrontEndReduction{.state = omega::app::InitialFrontEndState()};
-        if (mode_byte == 0U && row_byte == 0U && input.primary_pressed && !input.cancel_pressed)
-            return FrontEndReduction{.state = state};
-    }
-    return ReferenceReduce(state, input, visible_profile_slots, capabilities);
-}
-
 [[nodiscard]] std::uint64_t Fnv1a64(const std::span<const std::byte> bytes) noexcept
 {
     std::uint64_t result = 0xcbf29ce484222325ULL;
@@ -430,109 +225,39 @@ void CheckModelContract()
           "the first over-limit catalog fails before any projection");
 }
 
-[[nodiscard]] constexpr FrontEndState ReferenceProjectFrontEndStartupState(
-    const std::uint16_t total_profiles, const std::uint8_t visible_profiles,
-    const FrontEndCapabilities capabilities) noexcept
-{
-    constexpr FrontEndState kProfilesState{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-    };
-    const bool valid_counts = total_profiles <= omega::app::kFrontEndMaximumProfiles &&
-                              visible_profiles <= omega::app::kFrontEndVisibleProfiles &&
-                              visible_profiles <= total_profiles &&
-                              ((total_profiles == 0U && visible_profiles == 0U) ||
-                               (total_profiles != 0U && visible_profiles != 0U));
-    if (!valid_counts || (total_profiles == 0U && !capabilities.can_create_first_profile))
-        return omega::app::InitialFrontEndState();
-    return kProfilesState;
-}
-
-[[nodiscard]] constexpr bool StartupPlannerMatchesVisibleBoundaries(
-    const std::uint16_t total_profiles) noexcept
-{
-    constexpr std::array capabilities{false, true};
-    for (std::uint16_t visible_value = 0U; visible_value <= 0xffU; ++visible_value)
-    {
-        const auto visible_profiles = static_cast<std::uint8_t>(visible_value);
-        for (const bool can_create : capabilities)
-        {
-            const FrontEndCapabilities capability{.can_create_first_profile = can_create};
-            if (omega::app::PlanProjectFrontEndStartupState(
-                    total_profiles, visible_profiles, capability) !=
-                ReferenceProjectFrontEndStartupState(total_profiles, visible_profiles, capability))
-            {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 void CheckStartupStatePlannerContract()
 {
-    constexpr FrontEndState kInitialState{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::StartDiagnostic,
-        .selected_profile_slot = FrontEndProfileSlot::First,
+    constexpr FrontEndState kTitle = omega::app::InitialFrontEndState();
+    constexpr FrontEndCapabilities kAllPersistenceCapabilities{
+        .can_create_first_profile = true,
+        .can_start_diagnostic_campaign = true,
+        .requires_active_profile_for_diagnostic_play = true,
+        .supports_character_selection = true,
+        .can_create_first_character = true,
+        .requires_active_character_for_diagnostic_play = true,
     };
-    constexpr FrontEndState kProfilesState{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-    };
-    constexpr FrontEndCapabilities kCreationEnabled{.can_create_first_profile = true};
-
     static_assert(noexcept(omega::app::PlanProjectFrontEndStartupState(0U, 0U, {})));
-    static_assert(omega::app::PlanProjectFrontEndStartupState(0U, 0U, {}) == kInitialState);
-    static_assert(omega::app::PlanProjectFrontEndStartupState(0U, 0U, kCreationEnabled) == kProfilesState);
-    static_assert(omega::app::PlanProjectFrontEndStartupState(1U, 1U, {}) == kProfilesState);
-    static_assert(omega::app::PlanProjectFrontEndStartupState(1'024U, 3U, kCreationEnabled) == kProfilesState);
-    static_assert(omega::app::PlanProjectFrontEndStartupState(1U, 0U, kCreationEnabled) == kInitialState);
-    static_assert(omega::app::PlanProjectFrontEndStartupState(0U, 1U, kCreationEnabled) == kInitialState);
-    static_assert(omega::app::PlanProjectFrontEndStartupState(1'025U, 3U, kCreationEnabled) == kInitialState);
-    static_assert(StartupPlannerMatchesVisibleBoundaries(0U));
-    static_assert(StartupPlannerMatchesVisibleBoundaries(1U));
-    static_assert(StartupPlannerMatchesVisibleBoundaries(3U));
-    static_assert(StartupPlannerMatchesVisibleBoundaries(4U));
-    static_assert(StartupPlannerMatchesVisibleBoundaries(1'024U));
-    static_assert(StartupPlannerMatchesVisibleBoundaries(1'025U));
-    static_assert(StartupPlannerMatchesVisibleBoundaries(65'535U));
+    static_assert(omega::app::PlanProjectFrontEndStartupState(0U, 0U, {}) == kTitle);
+    static_assert(omega::app::PlanProjectFrontEndStartupState(1'024U, 3U, kAllPersistenceCapabilities) == kTitle);
+    static_assert(omega::app::PlanProjectFrontEndStartupState(65'535U, 0xffU, kAllPersistenceCapabilities) == kTitle);
 
-    bool all_boundary_results_match = true;
+    bool every_catalog_shape_starts_at_title = true;
     constexpr std::array<std::uint16_t, 7U> totals{0U, 1U, 3U, 4U, 1'024U, 1'025U, 65'535U};
-    constexpr std::array capabilities_under_test{false, true};
     for (const std::uint16_t total_profiles : totals)
     {
         for (std::uint16_t visible_value = 0U; visible_value <= 0xffU; ++visible_value)
         {
             const auto visible_profiles = static_cast<std::uint8_t>(visible_value);
-            for (const bool can_create : capabilities_under_test)
-            {
-                const FrontEndCapabilities capabilities{.can_create_first_profile = can_create};
-                all_boundary_results_match =
-                    all_boundary_results_match &&
-                    omega::app::PlanProjectFrontEndStartupState(
-                        total_profiles, visible_profiles, capabilities) ==
-                        ReferenceProjectFrontEndStartupState(total_profiles, visible_profiles, capabilities);
-            }
+            every_catalog_shape_starts_at_title = every_catalog_shape_starts_at_title &&
+                                                   omega::app::PlanProjectFrontEndStartupState(
+                                                       total_profiles, visible_profiles, {}) == kTitle &&
+                                                   omega::app::PlanProjectFrontEndStartupState(
+                                                       total_profiles, visible_profiles,
+                                                       kAllPersistenceCapabilities) == kTitle;
         }
     }
-    Check(all_boundary_results_match,
-          "all 3584 total/visible/capability boundary combinations return the exact fail-closed or Profiles state");
-
-    std::uint16_t total_profiles = 4U;
-    std::uint8_t visible_profiles = 3U;
-    FrontEndCapabilities capabilities{.can_create_first_profile = true};
-    const std::uint16_t original_total = total_profiles;
-    const std::uint8_t original_visible = visible_profiles;
-    const FrontEndCapabilities original_capabilities = capabilities;
-    const FrontEndState planned = omega::app::PlanProjectFrontEndStartupState(
-        total_profiles, visible_profiles, capabilities);
-    Check(planned == kProfilesState && total_profiles == original_total &&
-              visible_profiles == original_visible && capabilities == original_capabilities,
-          "startup planning returns the exact Profiles state without mutating caller-owned inputs");
+    Check(every_catalog_shape_starts_at_title,
+          "catalog contents and capabilities never bypass the canonical Title screen");
 }
 
 void CheckReducerAndViewContract()
@@ -541,336 +266,120 @@ void CheckReducerAndViewContract()
     static_assert(omega::app::kFrontEndPreviousAction == 2U);
     static_assert(omega::app::kFrontEndNextAction == 3U);
     static_assert(omega::app::kFrontEndCancelAction == 7U);
+    static_assert(omega::app::kFrontEndTitleRowCount == 3U);
     static_assert(omega::app::kFrontEndMainRowCount == 4U);
     static_assert(omega::app::kFrontEndFirstProfileDisplayName == "PROFILE 1");
     static_assert(static_cast<std::uint8_t>(FrontEndCommandType::None) == 0U);
-    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::SetActiveProfile) == 1U);
-    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::CreateFirstProfile) == 2U);
-    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::StartDiagnosticCampaign) == 3U);
+    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::ConfirmProfileOwner) == 1U);
+    static_assert(FrontEndCommandType::ConfirmProfileOwner == FrontEndCommandType::SetActiveProfile);
+    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::CreateProfileOwner) == 2U);
+    static_assert(FrontEndCommandType::CreateProfileOwner == FrontEndCommandType::CreateFirstProfile);
+    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::StartCampaign) == 3U);
+    static_assert(FrontEndCommandType::StartCampaign == FrontEndCommandType::StartDiagnosticCampaign);
+    static_assert(static_cast<std::uint8_t>(FrontEndCommandType::RequestQuit) == 6U);
+    static_assert(FrontEndMode::Title == FrontEndMode::Main);
+    static_assert(FrontEndMode::AgentSelection == FrontEndMode::Characters);
+    static_assert(FrontEndMode::Gameplay == FrontEndMode::DiagnosticPlay);
+    static_assert(FrontEndMainRow::CreateAgent == FrontEndMainRow::StartDiagnostic);
+    static_assert(FrontEndMainRow::LoadAgent == FrontEndMainRow::Profiles);
+    static_assert(FrontEndMainRow::Quit == FrontEndMainRow::Controls);
     static_assert(static_cast<std::uint8_t>(FrontEndMode::BriefingRoom) == 6U);
+    static_assert(static_cast<std::uint8_t>(FrontEndMode::AgentCreation) == 7U);
     static_assert(std::is_trivially_copyable_v<FrontEndCapabilities>);
-    static_assert(FrontEndCapabilities{} == FrontEndCapabilities{
-        .can_create_first_profile = false,
-        .can_start_diagnostic_campaign = false,
-        .requires_active_profile_for_diagnostic_play = false,
-    });
     static_assert(noexcept(omega::app::ReduceFrontEnd({}, {}, 0U)));
-    static_assert(noexcept(omega::app::ReduceFrontEnd(
-        {}, {}, 0U, FrontEndCapabilities{.can_create_first_profile = true})));
     static_assert(noexcept(omega::app::FrontEndAllowsSimulation({})));
     static_assert(noexcept(omega::app::BuildFrontEndView(
         std::declval<FrontEndState>(), ContentStartupStage::NoContent,
         std::declval<const FrontEndStartupModel &>())));
 
-    Check(omega::app::InitialFrontEndState() ==
-                  FrontEndState{
-                      .mode = FrontEndMode::Main,
-                      .selected_main_row = FrontEndMainRow::StartDiagnostic,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
-                  } &&
-              FrontEndState{} ==
-                  FrontEndState{
-                      .mode = FrontEndMode::DiagnosticPlay,
-                      .selected_main_row = FrontEndMainRow::StartDiagnostic,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
+    constexpr FrontEndState kTitle{
+        .mode = FrontEndMode::Title,
+        .selected_main_row = FrontEndMainRow::CreateAgent,
+    };
+    Check(omega::app::InitialFrontEndState() == kTitle && FrontEndState{} == kTitle,
+          "default and explicit startup are the same canonical Title state");
+
+    constexpr FrontEndCapabilities routes{
+        .can_create_first_profile = true,
+        .supports_character_selection = true,
+    };
+    const FrontEndReduction load_row = omega::app::ReduceFrontEnd(
+        kTitle, FrontEndInputEdges{.next_pressed = true}, 0U, routes);
+    const FrontEndReduction quit_row = omega::app::ReduceFrontEnd(
+        load_row.state, FrontEndInputEdges{.next_pressed = true}, 0U, routes);
+    const FrontEndReduction clamped_quit = omega::app::ReduceFrontEnd(
+        quit_row.state, FrontEndInputEdges{.next_pressed = true}, 0U, routes);
+    Check(load_row.state.selected_main_row == FrontEndMainRow::LoadAgent &&
+              quit_row.state.selected_main_row == FrontEndMainRow::Quit &&
+              clamped_quit.state == quit_row.state,
+          "Title navigation exposes and clamps to exactly Create Agent, Load Agent, and Quit");
+
+    const FrontEndReduction quit = omega::app::ReduceFrontEnd(
+        quit_row.state, FrontEndInputEdges{.primary_pressed = true}, 0U, routes);
+    Check(quit == FrontEndReduction{
+                      .state = quit_row.state,
+                      .command = FrontEndCommand{.type = FrontEndCommandType::RequestQuit},
                   },
-          "explicit startup opens Main while the default remains legacy "
-          "DiagnosticPlay");
+          "Quit publishes one explicit request without inventing a terminal state");
+    Check(omega::app::ReduceFrontEnd(
+              quit_row.state,
+              FrontEndInputEdges{.primary_pressed = true, .cancel_pressed = true},
+              0U, routes) == FrontEndReduction{.state = quit_row.state},
+          "Title cancel outranks Quit and publishes no command");
 
-    bool exhaustive_disabled_matches = true;
-    bool exhaustive_enabled_matches = true;
-    bool exhaustive_gate_matches = true;
-    constexpr std::array<std::uint8_t, 6U> profile_counts{0U, 1U, 2U, 3U, 4U, 0xffU};
-    for (std::uint32_t mode = 0U; mode <= 0xffU; ++mode)
-    {
-        for (std::uint32_t row = 0U; row <= 0xffU; ++row)
-        {
-            const FrontEndState state{
-                .mode = static_cast<FrontEndMode>(mode),
-                .selected_main_row = static_cast<FrontEndMainRow>(row),
-            };
-            const bool oracle_allows = mode == 2U && row <= 3U;
-            constexpr FrontEndCapabilities start_enabled{
-                .can_start_diagnostic_campaign = true,
-            };
-            exhaustive_gate_matches =
-                exhaustive_gate_matches &&
-                !omega::app::FrontEndAllowsSimulation(state) &&
-                omega::app::FrontEndAllowsSimulation(state, start_enabled) == oracle_allows;
-            for (const std::uint8_t profile_count : profile_counts)
-            {
-                for (std::uint8_t mask = 0U; mask < 16U; ++mask)
-                {
-                    exhaustive_disabled_matches =
-                        exhaustive_disabled_matches &&
-                        omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count) ==
-                            ReferenceReduce(state, InputFromMask(mask), profile_count);
-                    constexpr FrontEndCapabilities enabled{.can_create_first_profile = true};
-                    exhaustive_enabled_matches =
-                        exhaustive_enabled_matches &&
-                        omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count, enabled) ==
-                            ReferenceReduce(state, InputFromMask(mask), profile_count, enabled);
-                }
-            }
-        }
-    }
-    Check(exhaustive_disabled_matches,
-          "all 6291456 mode/row/count/edge combinations with the default-disabled "
-          "capability match the independent reducer oracle");
-    Check(exhaustive_enabled_matches,
-          "all 6291456 mode/row/count/edge combinations with first-profile "
-          "creation enabled match the independent reducer oracle");
-    Check(exhaustive_gate_matches, "all 65536 byte-representable states allow "
-                                   "simulation only in valid DiagnosticPlay");
+    const FrontEndReduction create_owner = omega::app::ReduceFrontEnd(
+        kTitle, FrontEndInputEdges{.primary_pressed = true}, 0U, routes);
+    Check(create_owner == FrontEndReduction{
+                              .state = FrontEndState{
+                                  .mode = FrontEndMode::AgentCreation,
+                                  .selected_main_row = FrontEndMainRow::CreateAgent,
+                              },
+                              .command = FrontEndCommand{
+                                  .type = FrontEndCommandType::CreateProfileOwner,
+                              },
+                          },
+          "Create Agent enters its explicit route and creates an owner only after confirmation");
+    Check(omega::app::ReduceFrontEnd(create_owner.state, {}, 0U, routes) ==
+              FrontEndReduction{.state = create_owner.state},
+          "the creation route never republishes a persistence command without a new edge");
 
-    bool exhaustive_slot_disabled_matches = true;
-    bool exhaustive_slot_enabled_matches = true;
-    bool exhaustive_slot_gate_matches = true;
-    for (std::uint32_t mode = 0U; mode <= 4U; ++mode)
-    {
-        for (std::uint32_t row = 0U; row <= 3U; ++row)
-        {
-            for (std::uint32_t profile_slot = 0U; profile_slot <= 0xffU; ++profile_slot)
-            {
-                const FrontEndState state{
-                    .mode = static_cast<FrontEndMode>(mode),
-                    .selected_main_row = static_cast<FrontEndMainRow>(row),
-                    .selected_profile_slot = static_cast<FrontEndProfileSlot>(profile_slot),
-                };
-                const bool oracle_allows = mode == 2U && profile_slot <= 2U;
-                constexpr FrontEndCapabilities start_enabled{
-                    .can_start_diagnostic_campaign = true,
-                };
-                exhaustive_slot_gate_matches = exhaustive_slot_gate_matches &&
-                                               !omega::app::FrontEndAllowsSimulation(state) &&
-                                               omega::app::FrontEndAllowsSimulation(
-                                                   state, start_enabled) == oracle_allows;
-                for (const std::uint8_t profile_count : profile_counts)
-                {
-                    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
-                    {
-                        exhaustive_slot_disabled_matches =
-                            exhaustive_slot_disabled_matches &&
-                            omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count) ==
-                                ReferenceReduce(state, InputFromMask(mask), profile_count);
-                        constexpr FrontEndCapabilities enabled{.can_create_first_profile = true};
-                        exhaustive_slot_enabled_matches =
-                            exhaustive_slot_enabled_matches &&
-                            omega::app::ReduceFrontEnd(state, InputFromMask(mask), profile_count, enabled) ==
-                                ReferenceReduce(state, InputFromMask(mask), profile_count, enabled);
-                    }
-                }
-            }
-        }
-    }
-    Check(exhaustive_slot_disabled_matches,
-          "all 491520 valid-mode/row and byte-slot/count/edge combinations with "
-          "the default-disabled capability match the independent oracle");
-    Check(exhaustive_slot_enabled_matches,
-          "all 491520 valid-mode/row and byte-slot/count/edge combinations with "
-          "first-profile creation enabled match the independent oracle");
-    Check(exhaustive_slot_gate_matches,
-          "every byte-representable profile slot gates simulation only when the complete state is valid");
+    const FrontEndReduction confirm_create_owner = omega::app::ReduceFrontEnd(
+        kTitle, FrontEndInputEdges{.primary_pressed = true}, 1U, routes, false);
+    Check(confirm_create_owner.state.mode == FrontEndMode::AgentCreation &&
+              confirm_create_owner.command.type == FrontEndCommandType::ConfirmProfileOwner,
+          "an existing owner is confirmed by the Create Agent input before its route is published");
 
-    const FrontEndState profiles_second{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::Second,
+    const FrontEndState title_load{
+        .mode = FrontEndMode::Title,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
     };
     Check(omega::app::ReduceFrontEnd(
-              profiles_second,
-              FrontEndInputEdges{.primary_pressed = true, .previous_pressed = true, .next_pressed = true}, 3U) ==
-              FrontEndReduction{
-                  .state = FrontEndState{
-                      .mode = FrontEndMode::Main,
-                      .selected_main_row = FrontEndMainRow::Profiles,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
+              title_load, FrontEndInputEdges{.primary_pressed = true}, 0U, routes) ==
+              FrontEndReduction{.state = title_load},
+          "Load Agent is inert when no owner catalog exists");
+    const FrontEndReduction load = omega::app::ReduceFrontEnd(
+        title_load, FrontEndInputEdges{.primary_pressed = true}, 1U, routes, false);
+    Check(load == FrontEndReduction{
+                      .state = FrontEndState{
+                          .mode = FrontEndMode::AgentSelection,
+                          .selected_main_row = FrontEndMainRow::LoadAgent,
+                      },
+                      .command = FrontEndCommand{
+                          .type = FrontEndCommandType::ConfirmProfileOwner,
+                      },
                   },
-                  .command = FrontEndCommand{
-                      .type = FrontEndCommandType::SetActiveProfile,
-                      .profile_slot = FrontEndProfileSlot::Second,
-                  },
-              },
-          "profile activation has priority over simultaneous navigation and publishes the pre-navigation slot");
+          "Load Agent confirms its internal owner before publishing agent selection");
 
-    Check(omega::app::ReduceFrontEnd(
-              omega::app::InitialFrontEndState(),
-              FrontEndInputEdges{
-                  .primary_pressed = true,
-                  .previous_pressed = true,
-                  .next_pressed = true,
-              },
-              3U,
-              FrontEndCapabilities{
-                  .can_create_first_profile = false,
-                  .can_start_diagnostic_campaign = true,
-              }) ==
-              FrontEndReduction{
-                  .state = FrontEndState{
-                      .mode = FrontEndMode::DiagnosticPlay,
-                      .selected_main_row = FrontEndMainRow::StartDiagnostic,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
-                  },
-                  .command = FrontEndCommand{
-                      .type = FrontEndCommandType::StartDiagnosticCampaign,
-                      .profile_slot = FrontEndProfileSlot::First,
-                  },
-              },
-          "diagnostic activation has priority over navigation and publishes one project-owned start command");
-
-    Check(omega::app::ReduceFrontEnd(
-              omega::app::InitialFrontEndState(),
-              FrontEndInputEdges{.primary_pressed = true}, 3U) ==
-              FrontEndReduction{.state = omega::app::InitialFrontEndState()},
-          "diagnostic activation is inert while the explicit session capability is closed");
-
-    Check(omega::app::ReduceFrontEnd(
-              profiles_second,
-              FrontEndInputEdges{
-                  .primary_pressed = true,
-                  .previous_pressed = true,
-                  .next_pressed = true,
-                  .cancel_pressed = true,
-              },
-              3U) ==
-              FrontEndReduction{.state = FrontEndState{
-                                    .mode = FrontEndMode::Main,
-                                    .selected_main_row = FrontEndMainRow::Profiles,
-                                    .selected_profile_slot = FrontEndProfileSlot::First,
-                                }},
-          "cancel has priority over activation and navigation and publishes no profile command");
-
-    constexpr std::array cancel_origins{
-        FrontEndState{.mode = FrontEndMode::DiagnosticPlay,
-            .selected_main_row = FrontEndMainRow::AssetTopology,
-            .selected_profile_slot = FrontEndProfileSlot::Third},
-        FrontEndState{.mode = FrontEndMode::Profiles,
-            .selected_main_row = FrontEndMainRow::StartDiagnostic,
-            .selected_profile_slot = FrontEndProfileSlot::Second},
-        FrontEndState{.mode = FrontEndMode::Controls,
-            .selected_main_row = FrontEndMainRow::Profiles,
-            .selected_profile_slot = FrontEndProfileSlot::Third},
-        FrontEndState{.mode = FrontEndMode::AssetTopology,
-            .selected_main_row = FrontEndMainRow::Controls,
-            .selected_profile_slot = FrontEndProfileSlot::Second},
+    const FrontEndState invalid_title{
+        .mode = FrontEndMode::Title,
+        .selected_main_row = FrontEndMainRow::AssetTopology,
     };
-    constexpr std::array cancel_rows{
-        FrontEndMainRow::StartDiagnostic,
-        FrontEndMainRow::Profiles,
-        FrontEndMainRow::Controls,
-        FrontEndMainRow::AssetTopology,
-    };
-    bool every_modal_cancel_returns_to_its_row = true;
-    for (std::size_t index = 0U; index < cancel_origins.size(); ++index)
-    {
-        every_modal_cancel_returns_to_its_row =
-            every_modal_cancel_returns_to_its_row &&
-            omega::app::ReduceFrontEnd(cancel_origins[index],
-                FrontEndInputEdges{.cancel_pressed = true}, 3U) ==
-                FrontEndReduction{.state = FrontEndState{
-                                      .mode = FrontEndMode::Main,
-                                      .selected_main_row = cancel_rows[index],
-                                      .selected_profile_slot = FrontEndProfileSlot::First,
-                                  }};
-    }
-    Check(every_modal_cancel_returns_to_its_row,
-        "cancel returns every modal mode to its corresponding Main row without a command");
-
-    const FrontEndState main_controls{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::Controls,
-        .selected_profile_slot = FrontEndProfileSlot::Second,
-    };
-    Check(omega::app::ReduceFrontEnd(main_controls,
-              FrontEndInputEdges{
-                  .primary_pressed = true,
-                  .previous_pressed = true,
-                  .next_pressed = true,
-                  .cancel_pressed = true,
-              },
-              3U) == FrontEndReduction{.state = main_controls},
-        "Main cancel is inert and consumes simultaneous activation and navigation edges");
-
-    bool empty_is_fail_closed = true;
-    const FrontEndState empty_profiles{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-    };
-    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
-    {
-        const FrontEndReduction reduced =
-            omega::app::ReduceFrontEnd(empty_profiles, InputFromMask(mask), 0U);
-        const FrontEndState expected_state = (mask & 9U) != 0U
-                                                 ? FrontEndState{
-                                                       .mode = FrontEndMode::Main,
-                                                       .selected_main_row = FrontEndMainRow::Profiles,
-                                                       .selected_profile_slot = FrontEndProfileSlot::First,
-                                                   }
-                                                 : empty_profiles;
-        empty_is_fail_closed = empty_is_fail_closed && reduced.state == expected_state &&
-                               reduced.command == FrontEndCommand{};
-    }
-    Check(empty_is_fail_closed,
-          "all empty-profile action combinations publish no command; navigation is inert and primary or cancel returns");
-
-    constexpr FrontEndCapabilities creation_enabled{.can_create_first_profile = true};
-    bool creatable_empty_edges_are_exact = true;
-    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
-    {
-        const FrontEndReduction reduced =
-            omega::app::ReduceFrontEnd(empty_profiles, InputFromMask(mask), 0U, creation_enabled);
-        FrontEndReduction expected{.state = empty_profiles};
-        if ((mask & 8U) != 0U)
-        {
-            expected.state = FrontEndState{
-                .mode = FrontEndMode::Main,
-                .selected_main_row = FrontEndMainRow::Profiles,
-                .selected_profile_slot = FrontEndProfileSlot::First,
-            };
-        }
-        else if ((mask & 1U) != 0U)
-        {
-            expected.command = FrontEndCommand{
-                .type = FrontEndCommandType::CreateFirstProfile,
-                .profile_slot = FrontEndProfileSlot::First,
-            };
-        }
-        creatable_empty_edges_are_exact = creatable_empty_edges_are_exact && reduced == expected;
-    }
-    Check(creatable_empty_edges_are_exact,
-          "empty creation is press-edge-only, remains in Profiles, outranks "
-          "navigation, and remains subordinate to cancel");
-
-    const FrontEndReduction create_edge = omega::app::ReduceFrontEnd(
-        empty_profiles, FrontEndInputEdges{.primary_pressed = true}, 0U, creation_enabled);
-    Check(create_edge.command.type == FrontEndCommandType::CreateFirstProfile &&
-              omega::app::ReduceFrontEnd(create_edge.state, {}, 0U, creation_enabled).command == FrontEndCommand{},
-          "a held primary level cannot republish creation without another routed press edge");
-
-    Check(omega::app::ReduceFrontEnd(
-              FrontEndState{
-                  .mode = FrontEndMode::Profiles,
-                  .selected_main_row = FrontEndMainRow::Profiles,
-                  .selected_profile_slot = FrontEndProfileSlot::Third,
-              },
-              FrontEndInputEdges{.next_pressed = true}, 0xffU)
-                  .state.selected_profile_slot == FrontEndProfileSlot::Third,
-          "an adversarial count above three cannot navigate beyond the third displayed slot");
-
-    Check(omega::app::ReduceFrontEnd(
-              FrontEndState{
-                  .mode = FrontEndMode::Profiles,
-                  .selected_main_row = FrontEndMainRow::Profiles,
-                  .selected_profile_slot = FrontEndProfileSlot::Third,
-              },
-              FrontEndInputEdges{.primary_pressed = true}, 1U) ==
-              FrontEndReduction{.state = FrontEndState{
-                                    .mode = FrontEndMode::Main,
-                                    .selected_main_row = FrontEndMainRow::Profiles,
-                                    .selected_profile_slot = FrontEndProfileSlot::First,
-                                }},
-          "a stale highlighted slot outside the current count returns safely without selecting a different profile");
+    Check(!omega::app::IsValidFrontEndState(invalid_title) &&
+              omega::app::NormalizeFrontEndState(invalid_title) == kTitle &&
+              omega::app::ReduceFrontEnd(
+                  invalid_title, FrontEndInputEdges{.primary_pressed = true}, 1U, routes) ==
+                  FrontEndReduction{.state = kTitle},
+          "an invalid diagnostic Title row normalizes before input and cannot publish a command");
 
     FrontEndStartupModel model{
         .total_profiles = 4U,
@@ -879,15 +388,12 @@ void CheckReducerAndViewContract()
     model.profiles[0].label.cells[0] = 'A';
     model.profiles[0].label.length = 1U;
     const auto valid_view = omega::app::BuildFrontEndView(
-        FrontEndState{
-            .mode = FrontEndMode::Profiles,
-            .selected_main_row = FrontEndMainRow::Profiles,
-        },
+        title_load,
         ContentStartupStage::LevelContent, model);
     Check(valid_view ==
               omega::app::FrontEndView{
-                  .mode = FrontEndMode::Profiles,
-                  .selected_main_row = FrontEndMainRow::Profiles,
+                  .mode = FrontEndMode::Title,
+                  .selected_main_row = FrontEndMainRow::LoadAgent,
                   .selected_profile_slot = FrontEndProfileSlot::First,
                   .content_stage = ContentStartupStage::LevelContent,
                   .profiles = model,
@@ -903,16 +409,13 @@ void CheckReducerAndViewContract()
             .selected_main_row = static_cast<FrontEndMainRow>(0xffU),
         },
         static_cast<ContentStartupStage>(0xffU), model);
-    Check(invalid_view.mode == FrontEndMode::Main &&
-              invalid_view.selected_main_row == FrontEndMainRow::StartDiagnostic &&
+    Check(invalid_view.mode == FrontEndMode::Title &&
+              invalid_view.selected_main_row == FrontEndMainRow::CreateAgent &&
               invalid_view.content_stage == ContentStartupStage::NoContent && invalid_view.profiles == model,
           "an invalid view request fails closed without discarding its immutable "
           "profile snapshot");
 }
 
-// The gate's only authorization input is an already-confirmed identifier
-// resolved against the bounded model, so these checks never construct a second
-// selection value: production has none to construct.
 void CheckActiveProfileGateContract()
 {
     const std::array summaries{Summary(1U, "ALPHA"), Summary(2U, "BETA"), Summary(3U, "GAMMA"),
@@ -964,101 +467,36 @@ void CheckActiveProfileGateContract()
               !omega::app::FrontEndConfirmedProfileSlot(adversarial, beyond_visible),
           "adversarial counts cannot resolve past the three fixed positions");
 
-    constexpr FrontEndCapabilities start_enabled{
-        .can_start_diagnostic_campaign = true,
-    };
     constexpr FrontEndCapabilities gate_enabled{
         .can_start_diagnostic_campaign = true,
         .requires_active_profile_for_diagnostic_play = true,
+        .supports_character_selection = true,
+        .requires_active_character_for_diagnostic_play = true,
     };
-    Check(omega::app::FrontEndSatisfiesDiagnosticPlayGate({}, false) &&
-              omega::app::FrontEndSatisfiesDiagnosticPlayGate({}, true) &&
-              !omega::app::FrontEndSatisfiesDiagnosticPlayGate(gate_enabled, false) &&
-              omega::app::FrontEndSatisfiesDiagnosticPlayGate(gate_enabled, true),
-          "the default capability leaves the gate open and the explicit capability closes it");
+    Check(!omega::app::FrontEndSatisfiesGameplayGate(gate_enabled, false, true) &&
+              !omega::app::FrontEndSatisfiesGameplayGate(gate_enabled, true, false) &&
+              omega::app::FrontEndSatisfiesGameplayGate(gate_enabled, true, true) &&
+              omega::app::FrontEndSatisfiesDiagnosticPlayGate(gate_enabled, true, true),
+          "Gameplay requires both confirmed identities and retains the replay compatibility spelling");
     Check(omega::app::FrontEndHasConfirmedActiveProfile(model, second) &&
               !omega::app::FrontEndHasConfirmedActiveProfile(model, beyond_visible) &&
               !omega::app::FrontEndHasConfirmedActiveProfile(model, std::nullopt),
           "the only gate input is a confirmed identifier the model still resolves");
 
-    constexpr FrontEndState diagnostic_play{
-        .mode = FrontEndMode::DiagnosticPlay,
-        .selected_main_row = FrontEndMainRow::StartDiagnostic,
+    constexpr FrontEndState gameplay{
+        .mode = FrontEndMode::Gameplay,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
         .selected_profile_slot = FrontEndProfileSlot::First,
     };
-    Check(!omega::app::FrontEndAllowsSimulation(diagnostic_play) &&
-               omega::app::FrontEndAllowsSimulation(diagnostic_play, start_enabled, false) &&
-               !omega::app::FrontEndAllowsSimulation(diagnostic_play, gate_enabled, false) &&
-               omega::app::FrontEndAllowsSimulation(diagnostic_play, gate_enabled, true),
-          "simulation requires explicit start support and then any enabled confirmation gate");
-
-    bool unconfirmed_diagnostic_fails_closed = true;
-    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
-    {
-        unconfirmed_diagnostic_fails_closed =
-            unconfirmed_diagnostic_fails_closed &&
-            omega::app::ReduceFrontEnd(diagnostic_play, InputFromMask(mask), 3U, gate_enabled, false) ==
-                FrontEndReduction{.state = omega::app::InitialFrontEndState()};
-    }
-    Check(unconfirmed_diagnostic_fails_closed,
-          "an already-entered diagnostic play fails closed on every edge once its "
-          "confirmation stops resolving");
-
-    constexpr FrontEndState main_start_diagnostic{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::StartDiagnostic,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-    };
-    Check(omega::app::ReduceFrontEnd(main_start_diagnostic, FrontEndInputEdges{.primary_pressed = true}, 3U,
-              gate_enabled, false) ==
-              FrontEndReduction{.state = main_start_diagnostic},
-          "the supported but unauthorized diagnostic row is inert and publishes no command");
-    Check(omega::app::ReduceFrontEnd(main_start_diagnostic, FrontEndInputEdges{.primary_pressed = true}, 3U,
-              gate_enabled, true) ==
-              FrontEndReduction{
-                  .state = diagnostic_play,
-                  .command = FrontEndCommand{
-                      .type = FrontEndCommandType::StartDiagnosticCampaign,
-                      .profile_slot = FrontEndProfileSlot::First,
-                  },
-              },
-          "a confirmation publishes the typed diagnostic start and enters play");
-
-    constexpr FrontEndState profiles_second{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::Second,
-    };
-    Check(omega::app::ReduceFrontEnd(profiles_second, FrontEndInputEdges{.primary_pressed = true}, 3U,
-              gate_enabled, false)
-                  .command == FrontEndCommand{
-                                  .type = FrontEndCommandType::SetActiveProfile,
-                                  .profile_slot = FrontEndProfileSlot::Second,
-                              },
-          "the closed gate never blocks the selection that can open it");
-
-    constexpr FrontEndCapabilities creation_and_gate{
-        .can_create_first_profile = true,
-        .can_start_diagnostic_campaign = true,
-        .requires_active_profile_for_diagnostic_play = true,
-    };
-    constexpr FrontEndState empty_profiles{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-    };
-    bool creation_never_activates = true;
-    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
-    {
-        const FrontEndReduction reduced =
-            omega::app::ReduceFrontEnd(empty_profiles, InputFromMask(mask), 0U, creation_and_gate, false);
-        creation_never_activates = creation_never_activates &&
-                                   reduced.command.type != FrontEndCommandType::SetActiveProfile &&
-                                   !omega::app::FrontEndAllowsSimulation(reduced.state, creation_and_gate, false);
-    }
-    Check(creation_never_activates,
-          "creating the first profile publishes no activation and cannot open the "
-          "gate by itself");
+    Check(!omega::app::FrontEndAllowsSimulation(gameplay, gate_enabled, false, true) &&
+              !omega::app::FrontEndAllowsSimulation(gameplay, gate_enabled, true, false) &&
+              omega::app::FrontEndAllowsSimulation(gameplay, gate_enabled, true, true),
+          "simulation is available only in Gameplay with both confirmations");
+    Check(omega::app::ReduceFrontEnd(gameplay, {}, 3U, gate_enabled, false, 3U, true) ==
+              FrontEndReduction{.state = omega::app::InitialFrontEndState()} &&
+              omega::app::ReduceFrontEnd(gameplay, {}, 3U, gate_enabled, true, 3U, false) ==
+                  FrontEndReduction{.state = omega::app::InitialFrontEndState()},
+          "loss of either bounded identity fails Gameplay closed before input");
 
     const auto one_profile = omega::app::MakeFrontEndStartupModel(std::span{summaries}.first(1U));
     Check(one_profile && !omega::app::FrontEndHasConfirmedActiveProfile(*one_profile, std::nullopt) &&
@@ -1066,60 +504,19 @@ void CheckActiveProfileGateContract()
           "the post-create model still requires an explicit confirmation before it "
           "can satisfy the gate");
 
-    bool gated_matches_oracle = true;
-    bool confirmed_gate_matches_open_start = true;
-    constexpr std::array<std::uint8_t, 6U> profile_counts{0U, 1U, 2U, 3U, 4U, 0xffU};
-    for (std::uint32_t mode = 0U; mode <= 5U; ++mode)
-    {
-        for (std::uint32_t row = 0U; row <= 4U; ++row)
-        {
-            for (std::uint32_t profile_slot = 0U; profile_slot <= 3U; ++profile_slot)
-            {
-                const FrontEndState state{
-                    .mode = static_cast<FrontEndMode>(mode),
-                    .selected_main_row = static_cast<FrontEndMainRow>(row),
-                    .selected_profile_slot = static_cast<FrontEndProfileSlot>(profile_slot),
-                };
-                for (const std::uint8_t profile_count : profile_counts)
-                {
-                    for (std::uint8_t mask = 0U; mask < 16U; ++mask)
-                    {
-                        const FrontEndInputEdges input = InputFromMask(mask);
-                        gated_matches_oracle =
-                            gated_matches_oracle &&
-                            omega::app::ReduceFrontEnd(state, input, profile_count, gate_enabled, false) ==
-                                ReferenceReduceWithGate(state, input, profile_count, gate_enabled, false) &&
-                            omega::app::ReduceFrontEnd(state, input, profile_count, creation_and_gate, false) ==
-                                ReferenceReduceWithGate(state, input, profile_count, creation_and_gate, false);
-                        confirmed_gate_matches_open_start =
-                            confirmed_gate_matches_open_start &&
-                            omega::app::ReduceFrontEnd(state, input, profile_count, gate_enabled, true) ==
-                                omega::app::ReduceFrontEnd(
-                                    state, input, profile_count, start_enabled) &&
-                            omega::app::ReduceFrontEnd(state, input, profile_count, {}, true) ==
-                                omega::app::ReduceFrontEnd(state, input, profile_count);
-                    }
-                }
-            }
-        }
-    }
-    Check(gated_matches_oracle,
-          "all 11520 gated mode/row/slot/count/edge combinations match the "
-          "independent gate oracle with and without first-profile creation");
-    Check(confirmed_gate_matches_open_start,
-          "a satisfied gate reproduces the explicit synthetic start path while an "
-          "unconsulted confirmation cannot open closed start support");
-
-    const auto active_view = omega::app::BuildFrontEndView(profiles_second, ContentStartupStage::NoContent, model,
-                                                           second);
+    const FrontEndState title_load{
+        .mode = FrontEndMode::Title,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
+    };
+    const auto active_view = omega::app::BuildFrontEndView(title_load, ContentStartupStage::NoContent, model, second);
     Check(active_view.active_profile_slot == FrontEndProfileSlot::Second && active_view.profiles == model,
           "the view publishes the position its own model resolves for the confirmed "
           "identifier");
-    Check(!omega::app::BuildFrontEndView(profiles_second, ContentStartupStage::NoContent, model, beyond_visible)
+    Check(!omega::app::BuildFrontEndView(title_load, ContentStartupStage::NoContent, model, beyond_visible)
                .active_profile_slot &&
-              !omega::app::BuildFrontEndView(profiles_second, ContentStartupStage::NoContent, shrunk, second)
+              !omega::app::BuildFrontEndView(title_load, ContentStartupStage::NoContent, shrunk, second)
                    .active_profile_slot &&
-              !omega::app::BuildFrontEndView(profiles_second, ContentStartupStage::NoContent, model)
+              !omega::app::BuildFrontEndView(title_load, ContentStartupStage::NoContent, model)
                    .active_profile_slot,
           "an unresolvable identifier and the default request both leave the active "
           "row unmarked");

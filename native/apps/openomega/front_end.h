@@ -30,6 +30,10 @@ inline constexpr std::size_t kFrontEndVisibleProfiles = 3U;
 inline constexpr std::size_t kFrontEndMaximumCharacters = 1'024U;
 inline constexpr std::size_t kFrontEndVisibleCharacters = 3U;
 inline constexpr std::size_t kFrontEndLabelCells = 24U;
+// The player-facing title surface has exactly these three actions. The legacy
+// main-card storage remains four-wide until the renderer migration lands; the
+// reducer never exposes its fourth diagnostic row from Title.
+inline constexpr std::size_t kFrontEndTitleRowCount = 3U;
 inline constexpr std::size_t kFrontEndMainRowCount = 4U;
 inline constexpr std::uint32_t kFrontEndImageWidth = 128U;
 inline constexpr std::uint32_t kFrontEndImageHeight = 72U;
@@ -44,20 +48,31 @@ inline constexpr std::string_view kFrontEndFirstCharacterDisplayName = "DIAGNOST
 
 enum class FrontEndMode : std::uint8_t
 {
-    Main = 0U,
-    Profiles = 1U,
-    DiagnosticPlay = 2U,
+    Title = 0U,
+    // Compatibility spellings retained while OmegaApp/replay integration is
+    // migrated. New player-facing code should use the names above/below.
+    Main = Title,
+    ProfileOwnerStaging = 1U,
+    Profiles = ProfileOwnerStaging,
+    Gameplay = 2U,
+    DiagnosticPlay = Gameplay,
     Controls = 3U,
     AssetTopology = 4U,
-    Characters = 5U,
+    AgentSelection = 5U,
+    Characters = AgentSelection,
     BriefingRoom = 6U,
+    AgentCreation = 7U,
 };
 
 enum class FrontEndMainRow : std::uint8_t
 {
-    StartDiagnostic = 0U,
-    Profiles = 1U,
-    Controls = 2U,
+    CreateAgent = 0U,
+    StartDiagnostic = CreateAgent,
+    LoadAgent = 1U,
+    Profiles = LoadAgent,
+    Quit = 2U,
+    Controls = Quit,
+    // Compatibility-only diagnostic row. It is never a valid Title selection.
     AssetTopology = 3U,
 };
 
@@ -245,12 +260,11 @@ enum class FrontEndModelError : std::uint8_t
 }
 
 // Small owned app-layer value. It has no service, platform, renderer, database,
-// or retail-data lifetime. The default remains the safe DiagnosticPlay state
-// used by legacy nonmodal replay.
+// or retail-data lifetime. The default is the inert player-facing Title state.
 struct FrontEndState
 {
-    FrontEndMode mode = FrontEndMode::DiagnosticPlay;
-    FrontEndMainRow selected_main_row = FrontEndMainRow::StartDiagnostic;
+    FrontEndMode mode = FrontEndMode::Title;
+    FrontEndMainRow selected_main_row = FrontEndMainRow::CreateAgent;
     FrontEndProfileSlot selected_profile_slot = FrontEndProfileSlot::First;
     FrontEndCharacterSlot selected_character_slot = FrontEndCharacterSlot::First;
 
@@ -279,7 +293,7 @@ struct FrontEndInputEdges
     const bool fire_pressed, const bool target_pressed) noexcept
 {
     const bool diagnostic_play_input_context =
-        input_context_mode == FrontEndMode::DiagnosticPlay;
+        input_context_mode == FrontEndMode::Gameplay;
     return FrontEndInputEdges{
         .primary_pressed =
             direct.primary_pressed ||
@@ -295,11 +309,17 @@ struct FrontEndInputEdges
 enum class FrontEndCommandType : std::uint8_t
 {
     None = 0U,
-    SetActiveProfile = 1U,
-    CreateFirstProfile = 2U,
-    StartDiagnosticCampaign = 3U,
-    CreateFirstCharacter = 4U,
-    SetActiveCharacter = 5U,
+    ConfirmProfileOwner = 1U,
+    SetActiveProfile = ConfirmProfileOwner,
+    CreateProfileOwner = 2U,
+    CreateFirstProfile = CreateProfileOwner,
+    StartCampaign = 3U,
+    StartDiagnosticCampaign = StartCampaign,
+    CreateAgent = 4U,
+    CreateFirstCharacter = CreateAgent,
+    ConfirmAgent = 5U,
+    SetActiveCharacter = ConfirmAgent,
+    RequestQuit = 6U,
 };
 
 // Independent capability inputs default closed. Persistence explicitly
@@ -328,7 +348,7 @@ struct FrontEndCapabilities
 // no identity of its own and therefore cannot be satisfied by a second,
 // separately mutable live selection. No allocation, I/O, or catalog access
 // occurs.
-[[nodiscard]] constexpr bool FrontEndSatisfiesDiagnosticPlayGate(
+[[nodiscard]] constexpr bool FrontEndSatisfiesGameplayGate(
     const FrontEndCapabilities capabilities, const bool active_profile_is_confirmed,
     const bool active_character_is_confirmed = false) noexcept
 {
@@ -342,13 +362,31 @@ struct FrontEndCapabilities
 // caller may explicitly enable a synthetic persistence-free start by opening
 // support without requiring confirmation. No allocation, I/O, catalog access,
 // or persistence mutation occurs.
+[[nodiscard]] constexpr bool FrontEndAllowsGameplay(const FrontEndCapabilities capabilities,
+                                                    const bool active_profile_is_confirmed,
+                                                    const bool active_character_is_confirmed = false) noexcept
+{
+    return capabilities.can_start_diagnostic_campaign &&
+           FrontEndSatisfiesGameplayGate(capabilities, active_profile_is_confirmed,
+                                         active_character_is_confirmed);
+}
+
+// Compatibility spellings for replay and integration code that has not yet
+// adopted the player-facing Gameplay terminology.
+[[nodiscard]] constexpr bool FrontEndSatisfiesDiagnosticPlayGate(
+    const FrontEndCapabilities capabilities, const bool active_profile_is_confirmed,
+    const bool active_character_is_confirmed = false) noexcept
+{
+    return FrontEndSatisfiesGameplayGate(capabilities, active_profile_is_confirmed,
+                                         active_character_is_confirmed);
+}
+
 [[nodiscard]] constexpr bool FrontEndAllowsDiagnosticPlay(const FrontEndCapabilities capabilities,
                                                           const bool active_profile_is_confirmed,
                                                           const bool active_character_is_confirmed = false) noexcept
 {
-    return capabilities.can_start_diagnostic_campaign &&
-           FrontEndSatisfiesDiagnosticPlayGate(capabilities, active_profile_is_confirmed,
-                                               active_character_is_confirmed);
+    return FrontEndAllowsGameplay(capabilities, active_profile_is_confirmed,
+                                  active_character_is_confirmed);
 }
 
 // Fully owned reducer publication. SetActiveProfile and SetActiveCharacter
@@ -375,8 +413,8 @@ struct FrontEndReduction
 
 struct FrontEndView
 {
-    FrontEndMode mode = FrontEndMode::Main;
-    FrontEndMainRow selected_main_row = FrontEndMainRow::StartDiagnostic;
+    FrontEndMode mode = FrontEndMode::Title;
+    FrontEndMainRow selected_main_row = FrontEndMainRow::CreateAgent;
     FrontEndProfileSlot selected_profile_slot = FrontEndProfileSlot::First;
     FrontEndCharacterSlot selected_character_slot = FrontEndCharacterSlot::First;
     runtime::ContentStartupStage content_stage = runtime::ContentStartupStage::NoContent;
@@ -392,92 +430,94 @@ struct FrontEndView
     friend constexpr bool operator==(const FrontEndView &, const FrontEndView &) noexcept = default;
 };
 
-// [any thread; reentrant] Explicit startup state for the project-owned static
-// front-end.
+// [any thread; reentrant] Canonical player-facing startup. Persistence state is
+// deliberately absent: catalog contents never select an agent or mutate a
+// session during boot.
 [[nodiscard]] constexpr FrontEndState InitialFrontEndState() noexcept
 {
     return FrontEndState{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::StartDiagnostic,
+        .mode = FrontEndMode::Title,
+        .selected_main_row = FrontEndMainRow::CreateAgent,
         .selected_profile_slot = FrontEndProfileSlot::First,
         .selected_character_slot = FrontEndCharacterSlot::First,
     };
 }
 
-// [any thread; reentrant] Selects the project-owned startup surface from an
-// already-captured profile-count snapshot and an explicit persistence
-// capability. Valid nonempty snapshots and explicitly creatable empty
-// snapshots open Profiles at its first slot. Every malformed, out-of-bounds,
-// or non-creatable empty snapshot fails closed to InitialFrontEndState. This
-// pure planner performs no command publication, allocation, I/O, persistence,
-// or identity work.
+// Compatibility signature retained for current composition roots. All bounded
+// and malformed catalog snapshots intentionally produce the same inert Title
+// state; the first explicit Create Agent or Load Agent confirmation owns any
+// subsequent persistence command.
 [[nodiscard]] constexpr FrontEndState PlanProjectFrontEndStartupState(
     const std::uint16_t total_profiles, const std::uint8_t visible_profiles,
     const FrontEndCapabilities capabilities = {}) noexcept
 {
-    const bool counts_are_bounded =
-        total_profiles <= kFrontEndMaximumProfiles && visible_profiles <= kFrontEndVisibleProfiles;
-    const bool visible_count_fits_total = visible_profiles <= total_profiles;
-    const bool both_counts_are_zero = total_profiles == 0U && visible_profiles == 0U;
-    const bool both_counts_are_nonzero = total_profiles != 0U && visible_profiles != 0U;
-    if (!counts_are_bounded || !visible_count_fits_total || (!both_counts_are_zero && !both_counts_are_nonzero) ||
-        (both_counts_are_zero && !capabilities.can_create_first_profile))
-    {
-        return InitialFrontEndState();
-    }
+    (void)total_profiles;
+    (void)visible_profiles;
+    (void)capabilities;
+    return InitialFrontEndState();
+}
 
-    return FrontEndState{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-        .selected_character_slot = FrontEndCharacterSlot::First,
-    };
+[[nodiscard]] constexpr bool IsFrontEndTitleRow(const FrontEndMainRow row) noexcept
+{
+    return row == FrontEndMainRow::CreateAgent || row == FrontEndMainRow::LoadAgent ||
+           row == FrontEndMainRow::Quit;
+}
+
+[[nodiscard]] constexpr bool IsFrontEndAgentRouteRow(const FrontEndMainRow row) noexcept
+{
+    return row == FrontEndMainRow::CreateAgent || row == FrontEndMainRow::LoadAgent;
 }
 
 [[nodiscard]] constexpr bool IsValidFrontEndState(const FrontEndState state) noexcept
 {
-    const bool valid_mode = state.mode == FrontEndMode::Main || state.mode == FrontEndMode::Profiles ||
-                            state.mode == FrontEndMode::DiagnosticPlay || state.mode == FrontEndMode::Controls ||
-                            state.mode == FrontEndMode::AssetTopology || state.mode == FrontEndMode::Characters ||
-                            state.mode == FrontEndMode::BriefingRoom;
-    const bool valid_row = state.selected_main_row == FrontEndMainRow::StartDiagnostic ||
-                           state.selected_main_row == FrontEndMainRow::Profiles ||
-                           state.selected_main_row == FrontEndMainRow::Controls ||
-                           state.selected_main_row == FrontEndMainRow::AssetTopology;
     const bool valid_profile_slot = state.selected_profile_slot == FrontEndProfileSlot::First ||
                                     state.selected_profile_slot == FrontEndProfileSlot::Second ||
                                     state.selected_profile_slot == FrontEndProfileSlot::Third;
     const bool valid_character_slot = state.selected_character_slot == FrontEndCharacterSlot::First ||
                                       state.selected_character_slot == FrontEndCharacterSlot::Second ||
                                       state.selected_character_slot == FrontEndCharacterSlot::Third;
-    return valid_mode && valid_row && valid_profile_slot && valid_character_slot;
+    if (!valid_profile_slot || !valid_character_slot)
+        return false;
+
+    switch (state.mode)
+    {
+    case FrontEndMode::Title:
+        return IsFrontEndTitleRow(state.selected_main_row);
+    case FrontEndMode::ProfileOwnerStaging:
+    case FrontEndMode::AgentSelection:
+    case FrontEndMode::BriefingRoom:
+    case FrontEndMode::Gameplay:
+        return IsFrontEndAgentRouteRow(state.selected_main_row);
+    case FrontEndMode::AgentCreation:
+        return state.selected_main_row == FrontEndMainRow::CreateAgent;
+    case FrontEndMode::Controls:
+        return state.selected_main_row == FrontEndMainRow::Quit;
+    case FrontEndMode::AssetTopology:
+        return state.selected_main_row == FrontEndMainRow::AssetTopology;
+    }
+    return false;
 }
 
-// [any thread; reentrant] Consumes already-routed logical press edges and
-// caller-owned bounded profile/character counts. Invalid state fails closed
-// before any edge is considered; BriefingRoom additionally requires its sole
-// canonical mission-selection row. Cancel has priority over primary and
-// navigation: Main is inert; Profiles, Controls, and AssetTopology return to
-// their matching Main rows; Characters returns to Main/Profiles; BriefingRoom
-// returns to Characters; and character-enabled DiagnosticPlay returns to
-// BriefingRoom. No cancel path publishes a command.
+// [any thread; reentrant] The single invalid-state recovery policy used by the
+// reducer and view projection. It is bounded, deterministic, and cannot publish
+// a command.
+[[nodiscard]] constexpr FrontEndState NormalizeFrontEndState(const FrontEndState state) noexcept
+{
+    return IsValidFrontEndState(state) ? state : InitialFrontEndState();
+}
+
+// [any thread; reentrant] Pure player-flow reducer. Title exposes exactly
+// Create Agent, Load Agent, and Quit. Profile identities remain an internal
+// owner boundary: an explicit title confirmation may publish CreateProfileOwner
+// or ConfirmProfileOwner, but ProfileOwnerStaging is never reached by a normal
+// title route. Agent creation and selection are distinct modes. Every projected
+// state that assumes a durable side effect carries the corresponding command;
+// OmegaApp applies that command before publishing the state.
 //
-// Primary has priority over navigation. Exact empty catalogs may publish their
-// explicit create commands and remain modal. Selectable profiles publish
-// SetActiveProfile and enter Characters when that capability is enabled;
-// selectable characters publish SetActiveCharacter and project BriefingRoom.
-// BriefingRoom publishes StartDiagnosticCampaign and projects DiagnosticPlay
-// only when start support and both required confirmation gates are open. The
-// legacy character-disabled Main/StartDiagnostic path retains its direct start
-// command. DiagnosticPlay primary returns to BriefingRoom for the
-// character-enabled route and to the initial state for the legacy route.
-//
-// Out-of-range selections fail closed or remain inert as specified by their
-// legacy paths. Empty navigation is inert, simultaneous navigation edges are
-// neutral, and bounded navigation clamps at both ends. Live callers derive
-// confirmation from identifiers resolved against their startup models; replay
-// uses private identity-free mirrors opened only by replayed selection
-// commands. No allocation, I/O, catalog access, or persistence mutation occurs.
+// Cancel has priority over primary, primary over navigation. Navigation clamps
+// to bounded visible positions, simultaneous navigation is neutral, and stale
+// positions reset without selecting a replacement. No allocation, I/O, catalog
+// access, implicit startup selection, or persistence mutation occurs here.
 [[nodiscard]] constexpr FrontEndReduction ReduceFrontEnd(FrontEndState state, const FrontEndInputEdges input,
                                                          const std::uint8_t visible_profile_slots,
                                                          const FrontEndCapabilities capabilities = {},
@@ -488,285 +528,291 @@ struct FrontEndView
     if (!IsValidFrontEndState(state))
         return FrontEndReduction{.state = InitialFrontEndState()};
 
-    const bool diagnostic_play_is_permitted =
-        FrontEndAllowsDiagnosticPlay(capabilities, active_profile_is_confirmed, active_character_is_confirmed);
-    if (!diagnostic_play_is_permitted && state.mode == FrontEndMode::DiagnosticPlay)
+    constexpr std::uint8_t kMaximumSelectableProfiles = static_cast<std::uint8_t>(kFrontEndVisibleProfiles);
+    constexpr std::uint8_t kMaximumSelectableCharacters = static_cast<std::uint8_t>(kFrontEndVisibleCharacters);
+    const std::uint8_t selectable_profiles =
+        visible_profile_slots < kMaximumSelectableProfiles ? visible_profile_slots : kMaximumSelectableProfiles;
+    const std::uint8_t selectable_characters = visible_character_slots < kMaximumSelectableCharacters
+                                                   ? visible_character_slots
+                                                   : kMaximumSelectableCharacters;
+
+    const bool profile_slot_is_selectable =
+        static_cast<std::uint8_t>(state.selected_profile_slot) < selectable_profiles;
+    const bool character_slot_is_selectable =
+        static_cast<std::uint8_t>(state.selected_character_slot) < selectable_characters;
+    if (!profile_slot_is_selectable)
+        state.selected_profile_slot = FrontEndProfileSlot::First;
+    if (!character_slot_is_selectable)
+        state.selected_character_slot = FrontEndCharacterSlot::First;
+
+    const bool profile_confirmation_is_usable = active_profile_is_confirmed && selectable_profiles != 0U;
+    const bool character_confirmation_is_usable = active_character_is_confirmed && selectable_characters != 0U;
+    const bool gameplay_is_permitted = FrontEndAllowsGameplay(
+        capabilities, profile_confirmation_is_usable, character_confirmation_is_usable);
+
+    if (state.mode == FrontEndMode::AgentCreation && !capabilities.supports_character_selection)
         return FrontEndReduction{.state = InitialFrontEndState()};
-    if (state.mode == FrontEndMode::Characters &&
-        (!capabilities.supports_character_selection || !active_profile_is_confirmed))
+    if (state.mode == FrontEndMode::AgentSelection &&
+        (!capabilities.supports_character_selection || !profile_confirmation_is_usable))
     {
         return FrontEndReduction{.state = InitialFrontEndState()};
     }
     if (state.mode == FrontEndMode::BriefingRoom &&
-        (state.selected_main_row != FrontEndMainRow::StartDiagnostic ||
-         !capabilities.supports_character_selection ||
-         !diagnostic_play_is_permitted))
+        (!capabilities.supports_character_selection || !gameplay_is_permitted))
     {
         return FrontEndReduction{.state = InitialFrontEndState()};
     }
+    if (state.mode == FrontEndMode::Gameplay && !gameplay_is_permitted)
+        return FrontEndReduction{.state = InitialFrontEndState()};
 
     if (input.cancel_pressed)
     {
         switch (state.mode)
         {
-        case FrontEndMode::Main:
+        case FrontEndMode::Title:
             return FrontEndReduction{.state = state};
-        case FrontEndMode::Profiles:
-            state.selected_main_row = FrontEndMainRow::Profiles;
-            break;
-        case FrontEndMode::Characters:
-            state.selected_main_row = FrontEndMainRow::Profiles;
-            break;
-        case FrontEndMode::BriefingRoom:
-            state.mode = FrontEndMode::Characters;
-            state.selected_main_row = FrontEndMainRow::Profiles;
-            return FrontEndReduction{.state = state};
-        case FrontEndMode::DiagnosticPlay:
-            if (capabilities.supports_character_selection &&
-                diagnostic_play_is_permitted)
-            {
-                state.mode = FrontEndMode::BriefingRoom;
-                state.selected_main_row = FrontEndMainRow::StartDiagnostic;
-                return FrontEndReduction{.state = state};
-            }
-            state.selected_main_row = FrontEndMainRow::StartDiagnostic;
-            break;
-        case FrontEndMode::Controls:
-            state.selected_main_row = FrontEndMainRow::Controls;
-            break;
-        case FrontEndMode::AssetTopology:
-            state.selected_main_row = FrontEndMainRow::AssetTopology;
-            break;
-        }
-        state.mode = FrontEndMode::Main;
-        state.selected_profile_slot = FrontEndProfileSlot::First;
-        state.selected_character_slot = FrontEndCharacterSlot::First;
-        return FrontEndReduction{.state = state};
-    }
-
-    constexpr std::uint8_t kMaximumSelectableProfiles = static_cast<std::uint8_t>(kFrontEndVisibleProfiles);
-    const std::uint8_t selectable_profiles =
-        visible_profile_slots < kMaximumSelectableProfiles ? visible_profile_slots : kMaximumSelectableProfiles;
-    const bool profile_slot_is_selectable =
-        state.mode != FrontEndMode::Profiles ||
-        static_cast<std::uint8_t>(state.selected_profile_slot) < selectable_profiles;
-    if (!profile_slot_is_selectable)
-    {
-        state.selected_profile_slot = FrontEndProfileSlot::First;
-    }
-    constexpr std::uint8_t kMaximumSelectableCharacters = static_cast<std::uint8_t>(kFrontEndVisibleCharacters);
-    const std::uint8_t selectable_characters =
-        visible_character_slots < kMaximumSelectableCharacters ? visible_character_slots : kMaximumSelectableCharacters;
-    const bool character_slot_is_selectable =
-        state.mode != FrontEndMode::Characters ||
-        static_cast<std::uint8_t>(state.selected_character_slot) < selectable_characters;
-    if (!character_slot_is_selectable)
-        state.selected_character_slot = FrontEndCharacterSlot::First;
-
-    if (input.primary_pressed)
-    {
-        switch (state.mode)
-        {
-        case FrontEndMode::Characters:
-            if (selectable_characters == 0U && capabilities.can_create_first_character)
-            {
-                return FrontEndReduction{
-                    .state = state,
-                    .command =
-                        FrontEndCommand{
-                            .type = FrontEndCommandType::CreateFirstCharacter,
-                            .profile_slot = FrontEndProfileSlot::First,
-                            .character_slot = FrontEndCharacterSlot::First,
-                        },
-                };
-            }
-            if (!character_slot_is_selectable)
-                return FrontEndReduction{.state = state};
-            return FrontEndReduction{
-                .state =
-                    FrontEndState{
-                        .mode = FrontEndMode::BriefingRoom,
-                        .selected_main_row = FrontEndMainRow::StartDiagnostic,
-                        .selected_profile_slot = FrontEndProfileSlot::First,
-                        .selected_character_slot = state.selected_character_slot,
-                    },
-                .command =
-                    FrontEndCommand{
-                        .type = FrontEndCommandType::SetActiveCharacter,
-                        .profile_slot = FrontEndProfileSlot::First,
-                        .character_slot = state.selected_character_slot,
-                    },
-            };
-        case FrontEndMode::Profiles:
-            if (selectable_profiles == 0U && capabilities.can_create_first_profile)
-            {
-                return FrontEndReduction{
-                    .state = state,
-                    .command =
-                        FrontEndCommand{
-                            .type = FrontEndCommandType::CreateFirstProfile,
-                            .profile_slot = FrontEndProfileSlot::First,
-                        },
-                };
-            }
-            if (!profile_slot_is_selectable)
-            {
-                return FrontEndReduction{.state = FrontEndState{
-                                             .mode = FrontEndMode::Main,
-                                             .selected_main_row = FrontEndMainRow::Profiles,
-                                             .selected_profile_slot = FrontEndProfileSlot::First,
-                                         }};
-            }
-            return FrontEndReduction{
-                .state =
-                    FrontEndState{
-                        .mode =
-                            capabilities.supports_character_selection ? FrontEndMode::Characters : FrontEndMode::Main,
-                        .selected_main_row = FrontEndMainRow::Profiles,
-                        .selected_profile_slot = FrontEndProfileSlot::First,
-                        .selected_character_slot = FrontEndCharacterSlot::First,
-                    },
-                .command =
-                    FrontEndCommand{
-                        .type = FrontEndCommandType::SetActiveProfile,
-                        .profile_slot = state.selected_profile_slot,
-                    },
-            };
-        case FrontEndMode::BriefingRoom:
-            if (!diagnostic_play_is_permitted)
-                return FrontEndReduction{.state = state};
-            state.mode = FrontEndMode::DiagnosticPlay;
-            return FrontEndReduction{
-                .state = state,
-                .command =
-                    FrontEndCommand{
-                        .type = FrontEndCommandType::StartDiagnosticCampaign,
-                    },
-            };
-        case FrontEndMode::DiagnosticPlay:
-            if (capabilities.supports_character_selection &&
-                diagnostic_play_is_permitted)
-            {
-                state.mode = FrontEndMode::BriefingRoom;
-                state.selected_main_row = FrontEndMainRow::StartDiagnostic;
-                return FrontEndReduction{.state = state};
-            }
+        case FrontEndMode::AgentCreation:
             return FrontEndReduction{.state = InitialFrontEndState()};
-        case FrontEndMode::Controls:
+        case FrontEndMode::ProfileOwnerStaging:
+        case FrontEndMode::AgentSelection:
             return FrontEndReduction{.state = FrontEndState{
-                                         .mode = FrontEndMode::Main,
-                                         .selected_main_row = FrontEndMainRow::Controls,
-                                         .selected_profile_slot = FrontEndProfileSlot::First,
+                                         .mode = FrontEndMode::Title,
+                                         .selected_main_row = state.selected_main_row,
                                      }};
-        case FrontEndMode::AssetTopology:
-            return FrontEndReduction{.state = FrontEndState{
-                                         .mode = FrontEndMode::Main,
-                                         .selected_main_row = FrontEndMainRow::AssetTopology,
-                                         .selected_profile_slot = FrontEndProfileSlot::First,
-                                     }};
-        case FrontEndMode::Main:
-            break;
-        }
-
-        if (state.selected_main_row == FrontEndMainRow::StartDiagnostic && !diagnostic_play_is_permitted)
-        {
+        case FrontEndMode::BriefingRoom:
+            state.mode = FrontEndMode::AgentSelection;
             return FrontEndReduction{.state = state};
-        }
-
-        state.selected_profile_slot = FrontEndProfileSlot::First;
-        state.selected_character_slot = FrontEndCharacterSlot::First;
-        switch (state.selected_main_row)
-        {
-        case FrontEndMainRow::StartDiagnostic:
+        case FrontEndMode::Gameplay:
             if (capabilities.supports_character_selection)
             {
                 state.mode = FrontEndMode::BriefingRoom;
                 return FrontEndReduction{.state = state};
             }
-            state.mode = FrontEndMode::DiagnosticPlay;
+            return FrontEndReduction{.state = InitialFrontEndState()};
+        case FrontEndMode::Controls:
+        case FrontEndMode::AssetTopology:
+            return FrontEndReduction{.state = InitialFrontEndState()};
+        }
+    }
+
+    if (input.primary_pressed)
+    {
+        switch (state.mode)
+        {
+        case FrontEndMode::Title:
+            if (state.selected_main_row == FrontEndMainRow::Quit)
+            {
+                return FrontEndReduction{
+                    .state = state,
+                    .command = FrontEndCommand{.type = FrontEndCommandType::RequestQuit},
+                };
+            }
+            if (!capabilities.supports_character_selection)
+                return FrontEndReduction{.state = state};
+
+            if (state.selected_main_row == FrontEndMainRow::LoadAgent)
+            {
+                if (selectable_profiles == 0U)
+                    return FrontEndReduction{.state = state};
+                const FrontEndState selection{
+                    .mode = FrontEndMode::AgentSelection,
+                    .selected_main_row = FrontEndMainRow::LoadAgent,
+                    .selected_profile_slot = state.selected_profile_slot,
+                    .selected_character_slot = FrontEndCharacterSlot::First,
+                };
+                if (profile_confirmation_is_usable)
+                    return FrontEndReduction{.state = selection};
+                return FrontEndReduction{
+                    .state = selection,
+                    .command = FrontEndCommand{
+                        .type = FrontEndCommandType::ConfirmProfileOwner,
+                        .profile_slot = state.selected_profile_slot,
+                    },
+                };
+            }
+
+            if (profile_confirmation_is_usable)
+            {
+                state.mode = FrontEndMode::AgentCreation;
+                state.selected_main_row = FrontEndMainRow::CreateAgent;
+                state.selected_character_slot = FrontEndCharacterSlot::First;
+                return FrontEndReduction{.state = state};
+            }
+            state.mode = FrontEndMode::AgentCreation;
+            state.selected_main_row = FrontEndMainRow::CreateAgent;
+            state.selected_character_slot = FrontEndCharacterSlot::First;
+            if (selectable_profiles != 0U)
+            {
+                return FrontEndReduction{
+                    .state = state,
+                    .command = FrontEndCommand{
+                        .type = FrontEndCommandType::ConfirmProfileOwner,
+                        .profile_slot = state.selected_profile_slot,
+                    },
+                };
+            }
+            if (capabilities.can_create_first_profile)
+            {
+                return FrontEndReduction{
+                    .state = state,
+                    .command = FrontEndCommand{
+                        .type = FrontEndCommandType::CreateProfileOwner,
+                        .profile_slot = FrontEndProfileSlot::First,
+                    },
+                };
+            }
+            return FrontEndReduction{.state = InitialFrontEndState()};
+
+        case FrontEndMode::AgentCreation:
+            if (!profile_confirmation_is_usable)
+            {
+                if (selectable_profiles != 0U)
+                {
+                    return FrontEndReduction{
+                        .state = state,
+                        .command = FrontEndCommand{
+                            .type = FrontEndCommandType::ConfirmProfileOwner,
+                            .profile_slot = state.selected_profile_slot,
+                        },
+                    };
+                }
+                if (capabilities.can_create_first_profile)
+                {
+                    return FrontEndReduction{
+                        .state = state,
+                        .command = FrontEndCommand{
+                            .type = FrontEndCommandType::CreateProfileOwner,
+                            .profile_slot = FrontEndProfileSlot::First,
+                        },
+                    };
+                }
+                return FrontEndReduction{.state = state};
+            }
+            if (selectable_characters == 0U && capabilities.can_create_first_character)
+            {
+                state.mode = FrontEndMode::AgentSelection;
+                state.selected_character_slot = FrontEndCharacterSlot::First;
+                return FrontEndReduction{
+                    .state = state,
+                    .command = FrontEndCommand{
+                        .type = FrontEndCommandType::CreateAgent,
+                        .profile_slot = state.selected_profile_slot,
+                        .character_slot = FrontEndCharacterSlot::First,
+                    },
+                };
+            }
+            return FrontEndReduction{.state = state};
+
+        case FrontEndMode::AgentSelection:
+            if (!character_slot_is_selectable)
+                return FrontEndReduction{.state = state};
+            state.mode = FrontEndMode::BriefingRoom;
             return FrontEndReduction{
                 .state = state,
-                .command =
-                    FrontEndCommand{
-                        .type = FrontEndCommandType::StartDiagnosticCampaign,
-                    },
+                .command = FrontEndCommand{
+                    .type = FrontEndCommandType::ConfirmAgent,
+                    .profile_slot = state.selected_profile_slot,
+                    .character_slot = state.selected_character_slot,
+                },
             };
-        case FrontEndMainRow::Profiles:
-            state.mode = FrontEndMode::Profiles;
-            state.selected_profile_slot = FrontEndProfileSlot::First;
-            break;
-        case FrontEndMainRow::Controls:
-            state.mode = FrontEndMode::Controls;
-            break;
-        case FrontEndMainRow::AssetTopology:
-            state.mode = FrontEndMode::AssetTopology;
-            break;
+
+        case FrontEndMode::ProfileOwnerStaging:
+            if (!profile_slot_is_selectable)
+            {
+                if (selectable_profiles == 0U && capabilities.can_create_first_profile)
+                {
+                    return FrontEndReduction{
+                        .state = state,
+                        .command = FrontEndCommand{
+                            .type = FrontEndCommandType::CreateProfileOwner,
+                            .profile_slot = FrontEndProfileSlot::First,
+                        },
+                    };
+                }
+                return FrontEndReduction{.state = state};
+            }
+            state.mode = state.selected_main_row == FrontEndMainRow::CreateAgent
+                             ? FrontEndMode::AgentCreation
+                             : FrontEndMode::AgentSelection;
+            state.selected_character_slot = FrontEndCharacterSlot::First;
+            return FrontEndReduction{
+                .state = state,
+                .command = FrontEndCommand{
+                    .type = FrontEndCommandType::ConfirmProfileOwner,
+                    .profile_slot = state.selected_profile_slot,
+                },
+            };
+
+        case FrontEndMode::BriefingRoom:
+            state.mode = FrontEndMode::Gameplay;
+            return FrontEndReduction{
+                .state = state,
+                .command = FrontEndCommand{.type = FrontEndCommandType::StartCampaign},
+            };
+
+        case FrontEndMode::Gameplay:
+            if (capabilities.supports_character_selection)
+            {
+                state.mode = FrontEndMode::BriefingRoom;
+                return FrontEndReduction{.state = state};
+            }
+            return FrontEndReduction{.state = InitialFrontEndState()};
+
+        case FrontEndMode::Controls:
+        case FrontEndMode::AssetTopology:
+            return FrontEndReduction{.state = InitialFrontEndState()};
         }
-        return FrontEndReduction{.state = state};
     }
 
     if (input.previous_pressed == input.next_pressed)
         return FrontEndReduction{.state = state};
 
-    if (state.mode == FrontEndMode::Profiles)
+    if (state.mode == FrontEndMode::Title)
+    {
+        const std::uint8_t row = static_cast<std::uint8_t>(state.selected_main_row);
+        if (input.previous_pressed && row > 0U)
+            state.selected_main_row = static_cast<FrontEndMainRow>(row - 1U);
+        else if (input.next_pressed && row + 1U < kFrontEndTitleRowCount)
+            state.selected_main_row = static_cast<FrontEndMainRow>(row + 1U);
+        return FrontEndReduction{.state = state};
+    }
+
+    if (state.mode == FrontEndMode::ProfileOwnerStaging)
     {
         if (selectable_profiles == 0U)
             return FrontEndReduction{.state = state};
-
         const std::uint8_t slot = static_cast<std::uint8_t>(state.selected_profile_slot);
         if (input.previous_pressed && slot > 0U)
-        {
             state.selected_profile_slot = static_cast<FrontEndProfileSlot>(slot - 1U);
-        }
         else if (input.next_pressed && slot + 1U < selectable_profiles)
-        {
             state.selected_profile_slot = static_cast<FrontEndProfileSlot>(slot + 1U);
-        }
         return FrontEndReduction{.state = state};
     }
 
-    if (state.mode == FrontEndMode::Characters)
+    if (state.mode == FrontEndMode::AgentSelection)
     {
         if (selectable_characters == 0U)
             return FrontEndReduction{.state = state};
-
         const std::uint8_t slot = static_cast<std::uint8_t>(state.selected_character_slot);
         if (input.previous_pressed && slot > 0U)
-        {
             state.selected_character_slot = static_cast<FrontEndCharacterSlot>(slot - 1U);
-        }
         else if (input.next_pressed && slot + 1U < selectable_characters)
-        {
             state.selected_character_slot = static_cast<FrontEndCharacterSlot>(slot + 1U);
-        }
         return FrontEndReduction{.state = state};
     }
 
-    if (state.mode != FrontEndMode::Main)
-        return FrontEndReduction{.state = state};
-
-    const std::uint8_t row = static_cast<std::uint8_t>(state.selected_main_row);
-    if (input.previous_pressed && row > 0U)
-    {
-        state.selected_main_row = static_cast<FrontEndMainRow>(row - 1U);
-    }
-    else if (input.next_pressed && row + 1U < kFrontEndMainRowCount)
-    {
-        state.selected_main_row = static_cast<FrontEndMainRow>(row + 1U);
-    }
     return FrontEndReduction{.state = state};
 }
 
-// [any thread; reentrant] Simulation is enabled only by a fully valid
-// DiagnosticPlay state with explicit start support and a satisfied optional
-// confirmation gate.
+// [any thread; reentrant] Simulation is enabled only by a fully valid Gameplay
+// state with explicit start support and a satisfied confirmation gate.
 [[nodiscard]] constexpr bool FrontEndAllowsSimulation(const FrontEndState state,
                                                       const FrontEndCapabilities capabilities = {},
                                                       const bool active_profile_is_confirmed = false,
                                                       const bool active_character_is_confirmed = false) noexcept
 {
-    return IsValidFrontEndState(state) && state.mode == FrontEndMode::DiagnosticPlay &&
-           FrontEndAllowsDiagnosticPlay(capabilities, active_profile_is_confirmed, active_character_is_confirmed);
+    return IsValidFrontEndState(state) && state.mode == FrontEndMode::Gameplay &&
+           FrontEndAllowsGameplay(capabilities, active_profile_is_confirmed, active_character_is_confirmed);
 }
 
 // [any thread; reentrant] Normalizes invalid state to InitialFrontEndState and
@@ -780,7 +826,7 @@ struct FrontEndView
     const std::optional<profiles::ProfileId> &confirmed_profile_id, const FrontEndCharacterStartupModel &characters,
     const std::optional<profiles::CharacterId> &confirmed_character_id) noexcept
 {
-    const FrontEndState normalized = IsValidFrontEndState(state) ? state : InitialFrontEndState();
+    const FrontEndState normalized = NormalizeFrontEndState(state);
     const runtime::ContentStartupStage normalized_stage =
         content_stage == runtime::ContentStartupStage::DataMounted ||
                 content_stage == runtime::ContentStartupStage::LevelContent
