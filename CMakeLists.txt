@@ -174,6 +174,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/scene_transform.cpp
     native/src/runtime/spatial_diagnostic_scene.cpp
     native/src/runtime/spatial_debug_image.cpp
+    native/src/runtime/tactical_menu_image.cpp
     native/src/runtime/tdx_indexed4_candidate_debug_image.cpp
     native/src/runtime/tdx_indexed8_candidate_debug_image.cpp
     native/src/runtime/texture_storage_topology_debug_image.cpp
@@ -655,6 +656,32 @@ if(BUILD_TESTING)
             "OPENOMEGA_DISABLE_STARTUP_DIALOG=1"
         )
     endfunction()
+
+    add_executable(omega_tactical_menu_image_tests
+        native/tests/tactical_menu_image_tests.cpp
+    )
+    target_link_libraries(omega_tactical_menu_image_tests PRIVATE omega_runtime)
+    if(MSVC)
+        target_compile_options(omega_tactical_menu_image_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_tactical_menu_image_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_tactical_menu_image_tests
+        COMMAND omega_tactical_menu_image_tests)
+    set_tests_properties(omega_tactical_menu_image_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_simulation_entry_break_host
         native/tests/debug_subsystem_entry_break_simulation_host.cpp
