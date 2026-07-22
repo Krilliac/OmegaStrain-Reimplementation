@@ -24,7 +24,6 @@ using omega::app::FrontEndLabel;
 using omega::app::FrontEndMainRow;
 using omega::app::FrontEndMode;
 using omega::app::FrontEndModelError;
-using omega::app::FrontEndProfileSlot;
 using omega::app::FrontEndReduction;
 using omega::app::FrontEndState;
 using omega::profiles::CharacterId;
@@ -148,350 +147,231 @@ void CheckCharacterModelProjection()
           "a character catalog above the fixed projection limit fails before materialization");
 }
 
-void CheckProfileToCharacterRouting()
+void CheckCreateAgentRoute()
 {
-    constexpr FrontEndState profiles_second{
-        .mode = FrontEndMode::Profiles,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::Second,
-        .selected_character_slot = FrontEndCharacterSlot::First,
-    };
     constexpr FrontEndInputEdges primary{.primary_pressed = true};
-
-    const FrontEndReduction without_character_support =
-        omega::app::ReduceFrontEnd(profiles_second, primary, 2U);
-    Check(without_character_support ==
-              FrontEndReduction{
-                  .state = FrontEndState{
-                      .mode = FrontEndMode::Main,
-                      .selected_main_row = FrontEndMainRow::Profiles,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
-                      .selected_character_slot = FrontEndCharacterSlot::First,
-                  },
-                  .command = FrontEndCommand{
-                      .type = FrontEndCommandType::SetActiveProfile,
-                      .profile_slot = FrontEndProfileSlot::Second,
-                  },
-              },
-          "profile selection returns to Main when character selection is unsupported");
-
-    constexpr FrontEndCapabilities character_support{
+    constexpr FrontEndCapabilities create_owner{
+        .can_create_first_profile = true,
         .supports_character_selection = true,
     };
-    const FrontEndReduction with_character_support =
-        omega::app::ReduceFrontEnd(profiles_second, primary, 2U,
-                                   character_support);
-    Check(with_character_support ==
-              FrontEndReduction{
-                  .state = FrontEndState{
-                      .mode = FrontEndMode::Characters,
-                      .selected_main_row = FrontEndMainRow::Profiles,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
-                      .selected_character_slot = FrontEndCharacterSlot::First,
-                  },
-                  .command = FrontEndCommand{
-                      .type = FrontEndCommandType::SetActiveProfile,
-                      .profile_slot = FrontEndProfileSlot::Second,
-                  },
-              },
-          "profile selection routes to Characters only with explicit support");
-}
+    const FrontEndReduction owner_created = omega::app::ReduceFrontEnd(
+        omega::app::InitialFrontEndState(), primary, 0U, create_owner);
+    Check(owner_created == FrontEndReduction{
+                              .state = FrontEndState{
+                                  .mode = FrontEndMode::AgentCreation,
+                                  .selected_main_row = FrontEndMainRow::CreateAgent,
+                              },
+                              .command = FrontEndCommand{
+                                  .type = FrontEndCommandType::CreateProfileOwner,
+                              },
+                          },
+          "the first Create Agent confirmation creates only its internal owner and enters creation");
 
-void CheckCharacterCreationAndSelection()
-{
-    constexpr FrontEndState characters{
-        .mode = FrontEndMode::Characters,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-        .selected_character_slot = FrontEndCharacterSlot::First,
-    };
-    constexpr FrontEndInputEdges primary{.primary_pressed = true};
-    constexpr FrontEndInputEdges previous{.previous_pressed = true};
-    constexpr FrontEndInputEdges next{.next_pressed = true};
-    constexpr FrontEndCapabilities character_creation{
+    constexpr FrontEndCapabilities agent_creation{
         .supports_character_selection = true,
         .can_create_first_character = true,
     };
+    const FrontEndReduction owner_confirmed = omega::app::ReduceFrontEnd(
+        owner_created.state, primary, 1U, agent_creation, false, 0U);
+    Check(owner_confirmed == FrontEndReduction{
+                                .state = owner_created.state,
+                                .command = FrontEndCommand{
+                                    .type = FrontEndCommandType::ConfirmProfileOwner,
+                                },
+                            },
+          "a second explicit confirmation activates the newly durable owner before agent creation");
 
-    const FrontEndReduction create = omega::app::ReduceFrontEnd(
-        characters, primary, 1U, character_creation, true, 0U);
-    Check(create ==
-              FrontEndReduction{
-                  .state = characters,
-                  .command = FrontEndCommand{
-                      .type = FrontEndCommandType::CreateFirstCharacter,
-                      .profile_slot = FrontEndProfileSlot::First,
-                      .character_slot = FrontEndCharacterSlot::First,
-                  },
-              },
-          "an empty supported Characters surface publishes creation and stays open");
-    Check(omega::app::ReduceFrontEnd(create.state, {}, 1U,
-                                     character_creation, true, 0U)
-                  .command == FrontEndCommand{},
-          "character creation is published only for a routed press edge");
+    const FrontEndReduction agent_created = omega::app::ReduceFrontEnd(
+        owner_confirmed.state, primary, 1U, agent_creation, true, 0U);
+    Check(agent_created == FrontEndReduction{
+                                .state = FrontEndState{
+                                    .mode = FrontEndMode::AgentSelection,
+                                    .selected_main_row = FrontEndMainRow::CreateAgent,
+                                },
+                                .command = FrontEndCommand{
+                                    .type = FrontEndCommandType::CreateAgent,
+                                },
+                            },
+          "creation confirmation publishes CreateAgent before the created-agent selection state");
 
-    constexpr FrontEndCapabilities character_unavailable{
+    constexpr FrontEndCapabilities select_agent{
         .supports_character_selection = true,
     };
-    Check(omega::app::ReduceFrontEnd(characters, primary, 1U,
-                                     character_unavailable, true, 0U) ==
-              FrontEndReduction{.state = characters},
-          "an empty non-creatable Characters surface leaves Primary inert and relies on Cancel to return");
-
-    constexpr FrontEndCapabilities character_selection{
-        .supports_character_selection = true,
-    };
-    const FrontEndReduction second = omega::app::ReduceFrontEnd(
-        characters, next, 1U, character_selection, true, 3U);
-    const FrontEndReduction third = omega::app::ReduceFrontEnd(
-        second.state, next, 1U, character_selection, true, 3U);
-    const FrontEndReduction clamped = omega::app::ReduceFrontEnd(
-        third.state, next, 1U, character_selection, true, 3U);
-    const FrontEndReduction back_to_second = omega::app::ReduceFrontEnd(
-        third.state, previous, 1U, character_selection, true, 3U);
-    Check(second.state.selected_character_slot ==
-                  FrontEndCharacterSlot::Second &&
-              third.state.selected_character_slot ==
-                  FrontEndCharacterSlot::Third &&
-              clamped.state.selected_character_slot ==
-                  FrontEndCharacterSlot::Third &&
-              back_to_second.state.selected_character_slot ==
-                  FrontEndCharacterSlot::Second,
-          "populated character navigation advances, retreats, and clamps to visible rows");
-
-    const FrontEndReduction selected = omega::app::ReduceFrontEnd(
-        second.state, primary, 1U, character_selection, true, 3U);
-    Check(selected ==
-              FrontEndReduction{
-                  .state = FrontEndState{
-                      .mode = FrontEndMode::BriefingRoom,
-                      .selected_main_row = FrontEndMainRow::StartDiagnostic,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
-                      .selected_character_slot = FrontEndCharacterSlot::Second,
-                  },
-                  .command = FrontEndCommand{
-                      .type = FrontEndCommandType::SetActiveCharacter,
-                      .profile_slot = FrontEndProfileSlot::First,
-                      .character_slot = FrontEndCharacterSlot::Second,
-                  },
-              },
-          "selecting a populated character publishes its slot and enters the Briefing Room mission row");
+    const FrontEndReduction agent_confirmed = omega::app::ReduceFrontEnd(
+        agent_created.state, primary, 1U, select_agent, true, 1U, false);
+    Check(agent_confirmed == FrontEndReduction{
+                                  .state = FrontEndState{
+                                      .mode = FrontEndMode::BriefingRoom,
+                                      .selected_main_row = FrontEndMainRow::CreateAgent,
+                                  },
+                                  .command = FrontEndCommand{
+                                      .type = FrontEndCommandType::ConfirmAgent,
+                                  },
+                              },
+          "the created agent reaches Briefing Room only with a durable confirmation command");
 }
 
-void CheckBriefingMissionGate()
+void CheckLoadAgentRoute()
 {
+    constexpr FrontEndInputEdges primary{.primary_pressed = true};
+    constexpr FrontEndInputEdges previous{.previous_pressed = true};
+    constexpr FrontEndInputEdges next{.next_pressed = true};
+    constexpr FrontEndCapabilities support{
+        .supports_character_selection = true,
+    };
+    constexpr FrontEndState title_load{
+        .mode = FrontEndMode::Title,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
+    };
+    const FrontEndReduction entered = omega::app::ReduceFrontEnd(
+        title_load, primary, 1U, support, false, 0U);
+    Check(entered == FrontEndReduction{
+                         .state = FrontEndState{
+                             .mode = FrontEndMode::AgentSelection,
+                             .selected_main_row = FrontEndMainRow::LoadAgent,
+                         },
+                         .command = FrontEndCommand{
+                             .type = FrontEndCommandType::ConfirmProfileOwner,
+                         },
+                     },
+          "Load Agent confirms its internal owner while projecting existing-agent selection");
+
+    const FrontEndReduction second = omega::app::ReduceFrontEnd(
+        entered.state, next, 1U, support, true, 3U);
+    const FrontEndReduction third = omega::app::ReduceFrontEnd(
+        second.state, next, 1U, support, true, 3U);
+    const FrontEndReduction clamped = omega::app::ReduceFrontEnd(
+        third.state, next, 1U, support, true, 3U);
+    const FrontEndReduction back_to_second = omega::app::ReduceFrontEnd(
+        third.state, previous, 1U, support, true, 3U);
+    Check(second.state.selected_character_slot == FrontEndCharacterSlot::Second &&
+              third.state.selected_character_slot == FrontEndCharacterSlot::Third &&
+              clamped.state.selected_character_slot == FrontEndCharacterSlot::Third &&
+              back_to_second.state.selected_character_slot == FrontEndCharacterSlot::Second,
+          "existing-agent navigation advances, retreats, and clamps to bounded visible rows");
+
+    const FrontEndReduction selected = omega::app::ReduceFrontEnd(
+        second.state, primary, 1U, support, true, 3U);
+    Check(selected == FrontEndReduction{
+                          .state = FrontEndState{
+                              .mode = FrontEndMode::BriefingRoom,
+                              .selected_main_row = FrontEndMainRow::LoadAgent,
+                              .selected_character_slot = FrontEndCharacterSlot::Second,
+                          },
+                          .command = FrontEndCommand{
+                              .type = FrontEndCommandType::ConfirmAgent,
+                              .character_slot = FrontEndCharacterSlot::Second,
+                          },
+                      },
+          "confirming an existing agent publishes its bounded slot before Briefing Room");
+
+    Check(omega::app::ReduceFrontEnd(title_load, primary, 0U, support) ==
+              FrontEndReduction{.state = title_load},
+          "Load Agent is inert without an owner catalog");
+    Check(omega::app::ReduceFrontEnd(entered.state, primary, 1U, support, true, 0U) ==
+              FrontEndReduction{.state = entered.state},
+          "existing-agent selection is inert when the active owner has no agents");
+}
+
+void CheckBriefingAndGameplayRoute()
+{
+    constexpr FrontEndInputEdges primary{.primary_pressed = true};
     constexpr FrontEndCapabilities gated_start{
         .can_start_diagnostic_campaign = true,
         .requires_active_profile_for_diagnostic_play = true,
         .supports_character_selection = true,
         .requires_active_character_for_diagnostic_play = true,
     };
-    constexpr FrontEndState main_start{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::StartDiagnostic,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-        .selected_character_slot = FrontEndCharacterSlot::First,
-    };
-    constexpr FrontEndInputEdges primary{.primary_pressed = true};
-    constexpr FrontEndInputEdges cancel{.cancel_pressed = true};
-
-    const std::array denied{
-        omega::app::ReduceFrontEnd(main_start, primary, 1U, gated_start,
-                                   false, 1U, false),
-        omega::app::ReduceFrontEnd(main_start, primary, 1U, gated_start,
-                                   true, 1U, false),
-        omega::app::ReduceFrontEnd(main_start, primary, 1U, gated_start,
-                                   false, 1U, true),
-    };
-    Check(denied[0] == FrontEndReduction{.state = main_start} &&
-              denied[1] == FrontEndReduction{.state = main_start} &&
-              denied[2] == FrontEndReduction{.state = main_start},
-          "the Main mission row remains inert until both confirmations are present");
-
     constexpr FrontEndState briefing{
         .mode = FrontEndMode::BriefingRoom,
-        .selected_main_row = FrontEndMainRow::StartDiagnostic,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-        .selected_character_slot = FrontEndCharacterSlot::First,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
     };
-    const FrontEndReduction entered_briefing = omega::app::ReduceFrontEnd(
-        main_start, primary, 1U, gated_start, true, 1U, true);
-    Check(entered_briefing == FrontEndReduction{.state = briefing},
-          "the confirmed character-enabled Main route enters Briefing Room without starting a session");
-
-    const FrontEndReduction allowed = omega::app::ReduceFrontEnd(
+    const FrontEndReduction started = omega::app::ReduceFrontEnd(
         briefing, primary, 1U, gated_start, true, 1U, true);
-    Check(allowed ==
-              FrontEndReduction{
-                  .state = FrontEndState{
-                      .mode = FrontEndMode::DiagnosticPlay,
-                      .selected_main_row = FrontEndMainRow::StartDiagnostic,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
-                      .selected_character_slot = FrontEndCharacterSlot::First,
-                  },
-                  .command = FrontEndCommand{
-                      .type = FrontEndCommandType::StartDiagnosticCampaign,
-                      .profile_slot = FrontEndProfileSlot::First,
-                      .character_slot = FrontEndCharacterSlot::First,
-                  },
-              } &&
-              omega::app::FrontEndAllowsSimulation(allowed.state, gated_start,
-                                                    true, true),
-          "mission confirmation in Briefing Room publishes the typed start and enables simulation");
-    Check(!omega::app::FrontEndAllowsSimulation(allowed.state, gated_start,
-                                                true, false) &&
-              !omega::app::FrontEndAllowsSimulation(allowed.state, gated_start,
-                                                    false, true),
-          "losing either confirmation closes an entered diagnostic state");
+    Check(started == FrontEndReduction{
+                         .state = FrontEndState{
+                             .mode = FrontEndMode::Gameplay,
+                             .selected_main_row = FrontEndMainRow::LoadAgent,
+                         },
+                         .command = FrontEndCommand{
+                             .type = FrontEndCommandType::StartCampaign,
+                         },
+                     } &&
+              omega::app::FrontEndAllowsSimulation(started.state, gated_start, true, true),
+          "Briefing confirmation publishes StartCampaign before entering Gameplay");
 
     const std::array gate_loss{
-        omega::app::ReduceFrontEnd(briefing, {}, 1U, gated_start, false, 1U,
-                                   true),
-        omega::app::ReduceFrontEnd(briefing, {}, 1U, gated_start, true, 1U,
-                                   false),
-        omega::app::ReduceFrontEnd(allowed.state, {}, 1U, gated_start, false,
-                                   1U, true),
-        omega::app::ReduceFrontEnd(allowed.state, {}, 1U, gated_start, true,
-                                   1U, false),
+        omega::app::ReduceFrontEnd(briefing, {}, 1U, gated_start, false, 1U, true),
+        omega::app::ReduceFrontEnd(briefing, {}, 1U, gated_start, true, 1U, false),
+        omega::app::ReduceFrontEnd(started.state, {}, 1U, gated_start, false, 1U, true),
+        omega::app::ReduceFrontEnd(started.state, {}, 1U, gated_start, true, 1U, false),
     };
     Check(std::ranges::all_of(gate_loss, [](const FrontEndReduction reduced) {
-              return reduced == FrontEndReduction{
-                                    .state = omega::app::InitialFrontEndState()};
+              return reduced == FrontEndReduction{.state = omega::app::InitialFrontEndState()};
           }),
-          "Briefing Room and DiagnosticPlay fail closed when either confirmed identity is lost");
-
-    constexpr FrontEndState incoherent_briefing{
-        .mode = FrontEndMode::BriefingRoom,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-        .selected_character_slot = FrontEndCharacterSlot::First,
-    };
-    Check(omega::app::ReduceFrontEnd(incoherent_briefing, primary, 1U,
-              gated_start, true, 1U, true) ==
-              FrontEndReduction{.state = omega::app::InitialFrontEndState()},
-          "a noncanonical Briefing Room row fails closed instead of displaying one action and starting another");
-
-    const FrontEndReduction briefing_cancel = omega::app::ReduceFrontEnd(
-        briefing, cancel, 1U, gated_start, true, 1U, true);
-    Check(briefing_cancel ==
-              FrontEndReduction{.state = FrontEndState{
-                                    .mode = FrontEndMode::Characters,
-                                    .selected_main_row = FrontEndMainRow::Profiles,
-                                    .selected_profile_slot = FrontEndProfileSlot::First,
-                                    .selected_character_slot = FrontEndCharacterSlot::First,
-                                }},
-          "Briefing Room cancel returns to Characters without publishing a command");
-
-    const FrontEndReduction play_primary = omega::app::ReduceFrontEnd(
-        allowed.state, primary, 1U, gated_start, true, 1U, true);
-    const FrontEndReduction play_cancel = omega::app::ReduceFrontEnd(
-        allowed.state, cancel, 1U, gated_start, true, 1U, true);
-    Check(play_primary == FrontEndReduction{.state = briefing} &&
-              play_cancel == FrontEndReduction{.state = briefing},
-          "DiagnosticPlay primary and cancel both return a confirmed character session to Briefing Room");
-
-    constexpr FrontEndCapabilities legacy_start{
-        .can_start_diagnostic_campaign = true,
-    };
-    Check(omega::app::ReduceFrontEnd(main_start, primary, 1U, legacy_start) ==
-              FrontEndReduction{
-                  .state = FrontEndState{
-                      .mode = FrontEndMode::DiagnosticPlay,
-                      .selected_main_row = FrontEndMainRow::StartDiagnostic,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
-                      .selected_character_slot = FrontEndCharacterSlot::First,
-                  },
-                  .command = FrontEndCommand{
-                      .type = FrontEndCommandType::StartDiagnosticCampaign,
-                      .profile_slot = FrontEndProfileSlot::First,
-                  },
-              },
-          "the character-disabled synthetic Main route retains its direct diagnostic start");
+          "Briefing Room and Gameplay fail closed when either confirmed identity is lost");
 }
 
 void CheckCancelAndInvalidStateContainment()
 {
-    constexpr FrontEndCapabilities character_support{
+    constexpr FrontEndCapabilities support{
+        .can_start_diagnostic_campaign = true,
+        .requires_active_profile_for_diagnostic_play = true,
         .supports_character_selection = true,
-        .can_create_first_character = true,
-    };
-    constexpr FrontEndState characters_second{
-        .mode = FrontEndMode::Characters,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::Second,
-        .selected_character_slot = FrontEndCharacterSlot::Second,
+        .requires_active_character_for_diagnostic_play = true,
     };
     constexpr FrontEndInputEdges cancel_and_primary{
         .primary_pressed = true,
         .cancel_pressed = true,
     };
-    Check(omega::app::ReduceFrontEnd(characters_second, cancel_and_primary, 2U,
-                                     character_support, true, 2U) ==
-              FrontEndReduction{
-                  .state = FrontEndState{
-                      .mode = FrontEndMode::Main,
-                      .selected_main_row = FrontEndMainRow::Profiles,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
-                      .selected_character_slot = FrontEndCharacterSlot::First,
-                  },
-              },
-          "cancel outranks character selection and returns to the Profiles row without a command");
+    constexpr FrontEndState selection{
+        .mode = FrontEndMode::AgentSelection,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
+        .selected_character_slot = FrontEndCharacterSlot::Second,
+    };
+    Check(omega::app::ReduceFrontEnd(selection, cancel_and_primary, 1U, support, true, 2U) ==
+              FrontEndReduction{.state = FrontEndState{
+                                    .mode = FrontEndMode::Title,
+                                    .selected_main_row = FrontEndMainRow::LoadAgent,
+                                }},
+          "cancel outranks agent confirmation and returns to the matching Title route");
 
-    constexpr FrontEndState main_profiles{
-        .mode = FrontEndMode::Main,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-        .selected_character_slot = FrontEndCharacterSlot::First,
+    constexpr FrontEndState briefing{
+        .mode = FrontEndMode::BriefingRoom,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
     };
     Check(omega::app::ReduceFrontEnd(
-              main_profiles, FrontEndInputEdges{.cancel_pressed = true}, 2U,
-              character_support, true, 2U) ==
-              FrontEndReduction{.state = main_profiles},
-          "cancel is inert on Main");
+              briefing, FrontEndInputEdges{.cancel_pressed = true}, 1U, support, true, 1U, true) ==
+              FrontEndReduction{.state = FrontEndState{
+                                    .mode = FrontEndMode::AgentSelection,
+                                    .selected_main_row = FrontEndMainRow::LoadAgent,
+                                }},
+          "Briefing Room cancel returns to the existing-agent selection route");
 
     const FrontEndState invalid_character_slot{
-        .mode = FrontEndMode::Characters,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
+        .mode = FrontEndMode::AgentSelection,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
         .selected_character_slot = static_cast<FrontEndCharacterSlot>(0xffU),
     };
     Check(omega::app::ReduceFrontEnd(
-              invalid_character_slot,
-              FrontEndInputEdges{.primary_pressed = true}, 1U,
-              character_support, true, 3U) ==
+              invalid_character_slot, FrontEndInputEdges{.primary_pressed = true},
+              1U, support, true, 3U) ==
               FrontEndReduction{.state = omega::app::InitialFrontEndState()},
-          "an invalid character-slot enum fails closed before command publication");
-
-    const FrontEndState invalid_mode{
-        .mode = static_cast<FrontEndMode>(0xffU),
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
-        .selected_character_slot = FrontEndCharacterSlot::First,
-    };
-    Check(omega::app::ReduceFrontEnd(
-              invalid_mode, FrontEndInputEdges{.primary_pressed = true}, 1U,
-              character_support, true, 3U) ==
-              FrontEndReduction{.state = omega::app::InitialFrontEndState()},
-          "an invalid front-end state fails closed before character routing");
+          "an invalid character slot fails closed before command publication");
 
     constexpr FrontEndState stale_third_slot{
-        .mode = FrontEndMode::Characters,
-        .selected_main_row = FrontEndMainRow::Profiles,
-        .selected_profile_slot = FrontEndProfileSlot::First,
+        .mode = FrontEndMode::AgentSelection,
+        .selected_main_row = FrontEndMainRow::LoadAgent,
         .selected_character_slot = FrontEndCharacterSlot::Third,
     };
     Check(omega::app::ReduceFrontEnd(
               stale_third_slot, FrontEndInputEdges{.primary_pressed = true},
-              1U, character_support, true, 1U) ==
-              FrontEndReduction{
-                  .state = FrontEndState{
-                      .mode = FrontEndMode::Characters,
-                      .selected_main_row = FrontEndMainRow::Profiles,
-                      .selected_profile_slot = FrontEndProfileSlot::First,
-                      .selected_character_slot = FrontEndCharacterSlot::First,
-                  },
-              },
-          "a stale character slot outside the visible count resets without selecting another row");
+              1U, support, true, 1U) ==
+              FrontEndReduction{.state = FrontEndState{
+                                    .mode = FrontEndMode::AgentSelection,
+                                    .selected_main_row = FrontEndMainRow::LoadAgent,
+                                }},
+          "a stale agent position resets without confirming a different agent");
 }
 
 void CheckCharacterImageContract()
@@ -537,9 +417,9 @@ void CheckCharacterImageContract()
 int main()
 {
     CheckCharacterModelProjection();
-    CheckProfileToCharacterRouting();
-    CheckCharacterCreationAndSelection();
-    CheckBriefingMissionGate();
+    CheckCreateAgentRoute();
+    CheckLoadAgentRoute();
+    CheckBriefingAndGameplayRoute();
     CheckCancelAndInvalidStateContainment();
     CheckCharacterImageContract();
 
