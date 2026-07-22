@@ -43,12 +43,16 @@ implements no time-based sampling or blending. `kMaximumSkeletonJoints = 256` an
 (`native/include/omega/asset/model_ir_validate.h`, `native/src/asset/model_ir_validate.cpp`) prove
 internal self-consistency only: finite transforms, in-range and strictly-precedes joint references,
 whole-triangle and in-range mesh indices, skin-influence joint indices in range with finite
-non-negative weights, `skin_influences` requiring an owned skeleton and matching `mesh.positions` in
-length, finite clip sample coordinates, clip/skeleton pose cardinality, and every owned component
-charged against aggregate caller item, output-byte, and string-byte budgets under checked
-(overflow-safe) arithmetic. Count/output preflights happen before full mesh or pose traversal.
+non-negative used weights and canonical-zero unused slots, `skin_influences` requiring an owned
+skeleton and matching `mesh.positions` in length, finite clip sample coordinates, clip/skeleton pose
+cardinality, and every owned component charged against aggregate caller item, output-byte, and
+string-byte budgets under checked (overflow-safe) arithmetic. Count/output preflights happen before
+full mesh or pose traversal.
 Failures use `ModelIrError::item_index`, not a source-byte offset that model IR does not possess.
 They assign no retail semantics; they only gate what is safe to evaluate.
+`ValidatePoseAgainstSkeleton` and `ValidateClipAgainstSkeleton` validate pose/clip cardinality and
+values against the supplied joint count, but do not revalidate that skeleton's hierarchy, names, or
+bind transforms; callers separately use `ValidateSkeletonIR` or validate the owning `ModelIR`.
 
 `omega::runtime::EvaluateBindPose` and `omega::runtime::EvaluatePose`
 (`native/include/omega/runtime/model_pose_evaluation.h`,

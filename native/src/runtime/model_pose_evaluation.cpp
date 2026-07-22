@@ -86,15 +86,15 @@ template <typename LocalTransformAt>
     LocalTransformAt&& local_transform_at, const asset::DecodeLimits& limits)
 {
     const std::size_t joint_count = skeleton.joints.size();
-    if (local_transform_count != joint_count)
-    {
-        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-            "pose joint-transform count does not match the skeleton joint count"));
-    }
     if (joint_count > asset::kMaximumSkeletonJoints)
     {
         return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
             "skeleton joint count exceeds the fixed evaluation ceiling"));
+    }
+    if (local_transform_count != joint_count)
+    {
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+            "pose joint-transform count does not match the skeleton joint count"));
     }
 
     std::uint64_t item_count = 0;

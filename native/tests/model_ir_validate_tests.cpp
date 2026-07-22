@@ -238,8 +238,12 @@ int ModelIrValidateFailureCount()
             influence.joint_indices[0] = 1;
             influence.weights[0] = 1.0F;
         }
-        Check(ValidateModelIR(full).has_value(),
+        const auto full_result = ValidateModelIR(full);
+        Check(full_result.has_value(),
             "model with matching skeleton and skin_influences is accepted");
+        const ModelIR full_copy = full;
+        Check(full_result.has_value() && full == full && full == full_copy,
+            "validated model equality is reflexive and stable with canonical unused slots");
 
         auto out_of_range = full;
         (*out_of_range.skin_influences)[0].joint_indices[0] = 5;
@@ -262,6 +266,27 @@ int ModelIrValidateFailureCount()
             static_cast<std::uint8_t>(kMaximumSkinInfluencesPerVertex + 1);
         CheckError(ValidateModelIR(too_many_influences), DecodeErrorCode::Malformed,
             "model rejects used_influences above the fixed per-vertex ceiling");
+
+        auto nonzero_unused_joint = full;
+        (*nonzero_unused_joint.skin_influences)[0].joint_indices[1] = 1;
+        CheckError(ValidateModelIR(nonzero_unused_joint), DecodeErrorCode::Malformed,
+            "model rejects a nonzero joint index in an unused influence slot");
+
+        auto nonzero_unused_weight = full;
+        (*nonzero_unused_weight.skin_influences)[0].weights[1] = 0.25F;
+        CheckError(ValidateModelIR(nonzero_unused_weight), DecodeErrorCode::Malformed,
+            "model rejects a nonzero weight in an unused influence slot");
+
+        auto non_finite_unused_weight = full;
+        (*non_finite_unused_weight.skin_influences)[0].weights[1] =
+            std::numeric_limits<float>::quiet_NaN();
+        CheckError(ValidateModelIR(non_finite_unused_weight), DecodeErrorCode::Malformed,
+            "model rejects a non-finite weight in an unused influence slot");
+
+        auto negative_zero_unused_weight = full;
+        (*negative_zero_unused_weight.skin_influences)[0].weights[1] = -0.0F;
+        CheckError(ValidateModelIR(negative_zero_unused_weight), DecodeErrorCode::Malformed,
+            "model rejects negative zero in an unused influence slot");
     }
 
     // PoseIR validation against a skeleton.

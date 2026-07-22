@@ -261,6 +261,17 @@ ModelIrResult<void> ValidateModelIR(const ModelIR& model, const DecodeLimits& li
                         "skin influence weight is not a finite non-negative value", vertex_index));
                 }
             }
+            for (std::size_t slot = influence.used_influences;
+                slot < kMaximumSkinInfluencesPerVertex; ++slot)
+            {
+                if (influence.joint_indices[slot] != 0 ||
+                    !std::isfinite(influence.weights[slot]) ||
+                    influence.weights[slot] != 0.0F || std::signbit(influence.weights[slot]))
+                {
+                    return std::unexpected(Error(DecodeErrorCode::Malformed,
+                        "unused skin influence slot is not canonical zero", vertex_index));
+                }
+            }
         }
     }
     return {};
