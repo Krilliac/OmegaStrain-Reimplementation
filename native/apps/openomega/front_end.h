@@ -41,10 +41,12 @@ inline constexpr std::uint32_t kFrontEndImageHeight = 72U;
 // retail save naming and is the only display name published by the bounded
 // first-profile command.
 inline constexpr std::string_view kFrontEndFirstProfileDisplayName = "PROFILE 1";
-// Project-owned bootstrap character. It supplies a deterministic native path
+// Project-owned bootstrap agent. It supplies a deterministic native path
 // through creation and selection without asserting a retail archetype, model,
-// loadout, appearance field, or save-slot meaning.
-inline constexpr std::string_view kFrontEndFirstCharacterDisplayName = "DIAGNOSTIC CHARACTER";
+// loadout, appearance field, or save-slot meaning. The 20-byte length also
+// preserves the established persistence fixture shape while removing the old
+// developer-facing diagnostic label from normal play.
+inline constexpr std::string_view kFrontEndFirstCharacterDisplayName = "AGENCY FIELD AGENT 1";
 
 enum class FrontEndMode : std::uint8_t
 {
