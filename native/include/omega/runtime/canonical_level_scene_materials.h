@@ -5,30 +5,55 @@
 #include "omega/asset/scene_ir.h"
 #include "omega/runtime/canonical_level_scene.h"
 
+#include <cstdint>
 #include <expected>
 #include <string>
 #include <vector>
 
 namespace omega::runtime
 {
-// A canonical level scene paired with the material/name catalog decoded from the same source cell
-// as each mesh instance. `material_catalogs[i]` corresponds to `scene.mesh_instances[i]` (and to
-// `scene.render_meshes[i]`, since `BuildCanonicalLevelScene` keeps that 1:1): both were decoded from
-// the same manifest terrain cell in the same GameDataService pass. This proves only coherent
-// per-cell ownership — the same property `LevelContentIR` itself documents. It asserts no
-// mesh-to-material, triangle, vertex, texture, or visibility binding; name roles remain unassigned
-// until the render/material binding grammar is independently proven.
-struct CanonicalLevelSceneWithMaterials
+struct CanonicalLevelSceneMaterialLimits
 {
-    asset::SceneIR scene;
-    std::vector<asset::MaterialCatalogIR> material_catalogs;
+    CanonicalLevelSceneLimits scene;
+    std::uint64_t maximum_catalogs = 4096U;
+    std::uint64_t maximum_names = 1ULL << 20U;
+    std::uint64_t maximum_materials = 1ULL << 20U;
+    std::uint64_t maximum_name_bytes = 64ULL * 1024ULL * 1024ULL;
+    std::uint64_t maximum_name_length = 4096U;
+    std::uint64_t maximum_output_bytes = 256ULL * 1024ULL * 1024ULL;
 };
 
-// [any worker thread; reentrant] Builds a canonical level scene from `content.spatial` and pairs it,
-// index for index, with `content.material_catalogs`. Fails closed if the two collections do not
-// share the cardinality `LevelContentIR` documents, and otherwise fails exactly as
-// `BuildCanonicalLevelScene` would for the spatial half.
+struct CanonicalLevelCellMaterialCatalog
+{
+    SourceCellOrdinal source_cell_ordinal;
+    asset::MaterialCatalogIR catalog;
+
+    bool operator==(const CanonicalLevelCellMaterialCatalog&) const = default;
+};
+
+// A canonical level scene paired with a material/name catalog carrying the same
+// explicit source ordinal as each canonical cell. This preserves only
+// LevelContentIR's documented positional relationship; it does not
+// independently prove how a caller constructed that aggregate and it asserts no
+// mesh-to-material, triangle, vertex, texture, or visibility binding.
+struct CanonicalLevelSceneWithMaterials
+{
+    CanonicalLevelScene scene;
+    std::vector<CanonicalLevelCellMaterialCatalog> material_catalogs;
+
+    bool operator==(const CanonicalLevelSceneWithMaterials&) const = default;
+};
+
+// [any worker thread; reentrant] Checks the output cardinality and exact
+// typed-ordinal pairing.
+[[nodiscard]] std::expected<void, std::string> ValidateCanonicalLevelSceneMaterialAssociation(
+    const CanonicalLevelSceneWithMaterials& content);
+
+// [any worker thread; reentrant] Builds and explicitly tags the positional
+// relationship documented by LevelContentIR. Limits are fixed safety maxima:
+// callers may tighten but never widen them.
 [[nodiscard]] std::expected<CanonicalLevelSceneWithMaterials, std::string>
-BuildCanonicalLevelSceneWithMaterials(const asset::LevelContentIR& content,
-    const CanonicalLevelSceneLimits& limits = CanonicalLevelSceneLimits{});
+BuildCanonicalLevelSceneWithMaterials(
+    const asset::LevelContentIR& content,
+    const CanonicalLevelSceneMaterialLimits& limits = CanonicalLevelSceneMaterialLimits{});
 } // namespace omega::runtime

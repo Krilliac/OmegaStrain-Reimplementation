@@ -14,8 +14,8 @@ namespace
 {
 constexpr std::uint64_t kIndicesPerTriangle = 3U;
 
-[[nodiscard]] bool Add(
-    const std::uint64_t left, const std::uint64_t right, std::uint64_t& output) noexcept
+[[nodiscard]] bool Add(const std::uint64_t left, const std::uint64_t right,
+                       std::uint64_t& output) noexcept
 {
     if (right > std::numeric_limits<std::uint64_t>::max() - left)
         return false;
@@ -23,8 +23,8 @@ constexpr std::uint64_t kIndicesPerTriangle = 3U;
     return true;
 }
 
-[[nodiscard]] bool Multiply(
-    const std::uint64_t left, const std::uint64_t right, std::uint64_t& output) noexcept
+[[nodiscard]] bool Multiply(const std::uint64_t left, const std::uint64_t right,
+                            std::uint64_t& output) noexcept
 {
     if (left != 0U && right > std::numeric_limits<std::uint64_t>::max() / left)
         return false;
@@ -46,25 +46,35 @@ struct ScenePlan
 {
     std::uint64_t output_positions = 0U;
     std::uint64_t output_triangle_indices = 0U;
-    std::uint64_t logical_output_bytes = sizeof(asset::SceneIR);
+    std::uint64_t logical_output_bytes = sizeof(CanonicalLevelScene);
 };
+
+[[nodiscard]] bool AreTightenedLimits(const CanonicalLevelSceneLimits& limits) noexcept
+{
+    const CanonicalLevelSceneLimits maxima;
+    return limits.maximum_cells <= maxima.maximum_cells &&
+           limits.maximum_positions <= maxima.maximum_positions &&
+           limits.maximum_triangle_indices <= maxima.maximum_triangle_indices &&
+           limits.maximum_output_bytes <= maxima.maximum_output_bytes;
+}
 
 [[nodiscard]] std::expected<ScenePlan, std::string> Preflight(
     const asset::LevelSpatialIR& spatial, const CanonicalLevelSceneLimits& limits)
 {
+    if (!AreTightenedLimits(limits))
+        return std::unexpected("canonical level scene limits may only tighten safety maxima");
+
     const std::uint64_t cell_count = static_cast<std::uint64_t>(spatial.terrain_cells.size());
     if (cell_count > limits.maximum_cells)
         return std::unexpected("canonical level scene exceeds the cell limit");
     if (cell_count > static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()))
-        return std::unexpected("canonical level scene cell count overflows the mesh-index type");
+        return std::unexpected(
+            "canonical level scene cell count overflows the source ordinal type");
 
     ScenePlan plan;
-    std::uint64_t mesh_object_bytes = 0U;
-    std::uint64_t instance_object_bytes = 0U;
-    if (!Multiply(cell_count, sizeof(asset::RenderMeshIR), mesh_object_bytes) ||
-        !Multiply(cell_count, sizeof(asset::SceneMeshInstanceIR), instance_object_bytes) ||
-        !Add(plan.logical_output_bytes, mesh_object_bytes, plan.logical_output_bytes) ||
-        !Add(plan.logical_output_bytes, instance_object_bytes, plan.logical_output_bytes))
+    std::uint64_t cell_object_bytes = 0U;
+    if (!Multiply(cell_count, sizeof(CanonicalLevelSceneCell), cell_object_bytes) ||
+        !Add(plan.logical_output_bytes, cell_object_bytes, plan.logical_output_bytes))
         return std::unexpected("canonical level scene output byte size overflows");
 
     for (const asset::SpatialMeshIR& mesh : spatial.terrain_cells)
@@ -85,9 +95,8 @@ struct ScenePlan
 
         std::uint64_t cell_triangle_indices = 0U;
         if (!Multiply(static_cast<std::uint64_t>(mesh.triangles.size()), kIndicesPerTriangle,
-                cell_triangle_indices) ||
-            !Add(plan.output_triangle_indices, cell_triangle_indices,
-                plan.output_triangle_indices))
+                      cell_triangle_indices) ||
+            !Add(plan.output_triangle_indices, cell_triangle_indices, plan.output_triangle_indices))
             return std::unexpected("canonical level scene triangle-index count overflows");
         if (plan.output_triangle_indices > limits.maximum_triangle_indices)
             return std::unexpected("canonical level scene exceeds the triangle-index limit");
@@ -122,14 +131,14 @@ struct ScenePlan
 }
 } // namespace
 
-std::expected<asset::SceneIR, std::string> BuildCanonicalLevelScene(
+std::expected<CanonicalLevelScene, std::string> BuildCanonicalLevelScene(
     const asset::LevelSpatialIR& spatial, const CanonicalLevelSceneLimits& limits)
 {
     auto planned = Preflight(spatial, limits);
     if (!planned)
         return std::unexpected(planned.error());
 
-    asset::SceneIR scene;
+    CanonicalLevelScene scene;
     if (!IsFiniteMatrix(scene.camera.world_to_view) || !IsFiniteMatrix(scene.camera.view_to_clip))
         return std::unexpected("canonical level scene camera is not finite");
     if (spatial.terrain_cells.empty())
@@ -137,10 +146,8 @@ std::expected<asset::SceneIR, std::string> BuildCanonicalLevelScene(
 
     try
     {
-        scene.render_meshes.reserve(spatial.terrain_cells.size());
-        scene.mesh_instances.reserve(spatial.terrain_cells.size());
-        for (std::size_t cell_index = 0U; cell_index < spatial.terrain_cells.size();
-             ++cell_index)
+        scene.cells.reserve(spatial.terrain_cells.size());
+        for (std::size_t cell_index = 0U; cell_index < spatial.terrain_cells.size(); ++cell_index)
         {
             const asset::SpatialMeshIR& mesh = spatial.terrain_cells[cell_index];
 
@@ -156,16 +163,15 @@ std::expected<asset::SceneIR, std::string> BuildCanonicalLevelScene(
                     render_mesh.triangle_indices.push_back(index);
             }
 
-            scene.render_meshes.push_back(std::move(render_mesh));
-
-            const auto render_mesh_index = static_cast<std::uint32_t>(cell_index);
-            asset::SceneMeshInstanceIR instance{
-                .render_mesh_index = render_mesh_index,
+            CanonicalLevelSceneCell cell{
+                .source_cell_ordinal =
+                    SourceCellOrdinal{.value = static_cast<std::uint32_t>(cell_index)},
+                .render_mesh = std::move(render_mesh),
                 .local_to_world = asset::kIdentityMatrix4x4IR,
             };
-            if (!IsFiniteMatrix(instance.local_to_world))
-                return std::unexpected("canonical level scene instance transform is not finite");
-            scene.mesh_instances.push_back(instance);
+            if (!IsFiniteMatrix(cell.local_to_world))
+                return std::unexpected("canonical level scene cell transform is not finite");
+            scene.cells.push_back(std::move(cell));
         }
     }
     catch (const std::bad_alloc&)
