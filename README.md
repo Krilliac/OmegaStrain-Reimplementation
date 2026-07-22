@@ -380,6 +380,17 @@ Studio's historical engine source or internal toolchain.
   synthetic 16 MiB-plus-palette source and 64 MiB output hard maxima. This utility is not wired to
   startup or the renderer and establishes no retail display, channel, alpha, row-origin, swizzle,
   palette, material, or menu semantics.
+- E-0121 documents a sibling diagnostic-only Indexed4 candidate projection over one strict direct
+  storage shape: one matching `Packed4` plane, exactly one block, exactly one 16-entry palette, and
+  a packed plane of exactly `(width * height + 1) / 2` bytes. Callers must explicitly choose all
+  five unresolved axes: low- versus high-nibble-first packing, source-order palette lookup only,
+  one of all six source-slot-zero-through-two mappings, opaque/slot-three/doubled-clamped alpha,
+  and linear top-down versus bottom-up rows. An odd texel count leaves one nibble of the final
+  packed byte unread, and its value cannot change the output. Caller budgets can tighten but cannot
+  raise the synthetic 8 MiB packed-source-plus-exact-64-byte-palette and 64 MiB output hard maxima.
+  This utility is stateless, reentrant, CPU-only, performs no I/O, and is not wired to startup, the
+  renderer, or any service; it establishes no retail nibble, palette, channel, alpha, row-origin,
+  swizzle, mip, material, menu, rendering, gameplay, corpus, or PCSX2 semantics.
 - A bounded common-archive containment scan accepts all 18 runtime levels, 5,351 manifest cell
   occurrences, and 5,413 scanned archive-directory occurrences with zero errors and finds zero
   normalized `.TDX`-suffixed members. This extension-bounded negative result does not exclude

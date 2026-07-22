@@ -1970,6 +1970,44 @@ health, timer, debrief, checkpoint, spawn, campaign, inventory, reward, owner-co
 PCSX2 parity. No proprietary input, captured value, private address, or private path is recorded by
 E-0120.
 
+## Indexed4 display-candidate projection (E-0121, 2026-07-22)
+
+- E-0121 records the strict Indexed4 TDX display-candidate projection without changing the canonical
+  decoder or wiring pixels into startup. `BuildTdxIndexed4CandidateDebugImage` accepts only a direct
+  Indexed4/Packed4 shape: one nonzero `Indexed4` texture rectangle, exactly one block, exactly one
+  nonzero `Packed4` plane whose rectangle exactly equals the texture rectangle, exactly one present
+  palette whose nonzero rectangle exactly covers its owned entries, exactly 16 four-source-slot
+  entries, and a packed plane of exactly `(width * height + 1) / 2` bytes.
+- The caller must supply all five unresolved policy axes through a non-default-constructible policy:
+  two nibble orders, source-order palette lookup only, one of the six mappings of source slots zero
+  through two, opaque versus unchanged versus doubled-clamped source-slot-three alpha, and linear
+  top-down versus bottom-up whole-row order, for 72 explicit combinations. The slot-zero-through-two
+  permutation never affects output slot three.
+- When the texel count is odd, exactly one nibble of the final packed byte is never read (the high
+  nibble under low-nibble-first and the low nibble under high-nibble-first) and cannot change any
+  output byte. Output is an independently owned `width * height * 4`-byte four-slot image that
+  survives source mutation and destruction; the borrowed storage is never mutated and repeated
+  calls are byte-identical yet separately allocated.
+- Twenty-five fixed typed diagnostics carry fixed category text without paths or input-derived
+  runtime values. Validation priority is fixed and asserted. Caller budgets may tighten but cannot
+  raise the synthetic 8 MiB packed-source-plus-exact-64-byte-palette and 64 MiB output hard maxima,
+  and `std::bad_alloc`/`std::length_error` are contained as `allocation-failed`. The utility is
+  stateless, reentrant, CPU-only, and performs no I/O, platform, GPU, service, or shared-state work.
+
+The original implementation head `101e2fc` passed the public-tree, Linux, Windows, and Windows
+portable-package hosted jobs; the conditional fresh-VM consumer was skipped. A pre-final-restack
+warning-free focused MSVC Debug build and direct/CTest execution also passed. On the exact final
+base, static validation passed 121 ledger records, 303 native-dependency files, 488 public-tree text
+blobs, Python compile-all, 383/383 tooling tests, diff checks, and DCO for both restacked commits. A
+fresh serialized MSVC Debug configure/build of the focused target passed with zero compiler warnings
+or errors, and both direct and CTest execution passed. Fresh hosted publication and exact-merged-main
+validation remain pending.
+
+The projection makes no retail nibble, palette, channel, alpha, row-origin, swizzle, mip, material,
+menu, rendering, gameplay, corpus-result, or PCSX2-equivalence claim. Only tracked clean-room source
+and project-generated fixtures were used; no private or owner file, proprietary input, D-drive
+content, disc image, executable, emulator, or PCSX2 runtime input was accessed.
+
 ## Private PCSX2 producer readiness (E-0099, 2026-07-20)
 
 - A separately maintained local branch based on official PCSX2
