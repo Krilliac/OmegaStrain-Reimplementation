@@ -13,7 +13,7 @@ namespace omega::runtime
 {
 namespace
 {
-constexpr std::array<std::string_view, 11> kKnownSettings{
+constexpr std::array<std::string_view, 12> kKnownSettings{
     "log.minimum_severity",
     "log.ring_capacity",
     "jobs.worker_count",
@@ -25,16 +25,21 @@ constexpr std::array<std::string_view, 11> kKnownSettings{
     "input.gamepad_enabled",
     "content.data_root",
     "content.level_code",
+    "content.opening_movie_member",
 };
 
 constexpr std::string_view kContentDataRootKey = "content.data_root";
 constexpr std::string_view kContentLevelCodeKey = "content.level_code";
+constexpr std::string_view kContentOpeningMovieMemberKey =
+    "content.opening_movie_member";
 constexpr std::string_view kMissingDataRootMessage =
     "content.data_root is required when content.level_code is set";
 constexpr std::string_view kInvalidDataRootMessage =
     "content.data_root must be a non-empty valid path";
 constexpr std::string_view kInvalidLevelCodeMessage =
     "content.level_code must contain 1 to 32 ASCII alphanumeric characters";
+constexpr std::string_view kInvalidOpeningMovieMemberMessage =
+    "content.opening_movie_member must be a non-empty bounded value";
 constexpr std::string_view kInvalidOptionsMessage =
     "direct content launch options are inconsistent";
 constexpr std::string_view kExplicitProfileErrorPrefix =
@@ -58,6 +63,9 @@ constexpr std::string_view kDefaultProfileResolutionError =
         break;
     case ContentLaunchProfileErrorCode::InvalidLevelCode:
         message = kInvalidLevelCodeMessage;
+        break;
+    case ContentLaunchProfileErrorCode::InvalidOpeningMovieMember:
+        message = kInvalidOpeningMovieMemberMessage;
         break;
     case ContentLaunchProfileErrorCode::InvalidOptions:
         message = kInvalidOptionsMessage;
@@ -120,7 +128,9 @@ ResolveConfiguredContentLaunchProfile(const ConfigStore& config)
 {
     const auto configured_root = config.GetString(kContentDataRootKey);
     const auto configured_level = config.GetString(kContentLevelCodeKey);
-    if (!configured_root && !configured_level)
+    const auto configured_opening_movie_member =
+        config.GetString(kContentOpeningMovieMemberKey);
+    if (!configured_root && !configured_level && !configured_opening_movie_member)
         return std::optional<ContentLaunchProfile>{};
     if (!configured_root)
     {
@@ -154,9 +164,21 @@ ResolveConfiguredContentLaunchProfile(const ConfigStore& config)
         }
         level_code = NormalizeContentLevelCode(*configured_level);
     }
+    std::optional<std::string> opening_movie_member;
+    if (configured_opening_movie_member)
+    {
+        if (configured_opening_movie_member->empty() ||
+            configured_opening_movie_member->size() > kMaxConfigValueBytes)
+        {
+            return std::unexpected(MakeContentLaunchProfileError(
+                ContentLaunchProfileErrorCode::InvalidOpeningMovieMember));
+        }
+        opening_movie_member = std::string(*configured_opening_movie_member);
+    }
     return std::optional<ContentLaunchProfile>{ContentLaunchProfile{
         .data_root = std::move(data_root),
         .level_code = std::move(level_code),
+        .opening_movie_member = std::move(opening_movie_member),
     }};
 }
 
@@ -348,7 +370,24 @@ ResolveContentLaunchProfile(const LaunchOptions& options, const ConfigStore& con
             MakeContentLaunchProfileError(ContentLaunchProfileErrorCode::InvalidOptions));
     }
     if (!options.data_root)
+    {
+        if (configured->has_value())
+        {
+            if (options.opening_movie_path || options.opening_movie_member)
+            {
+                // Direct movie selectors are already validated by the launch
+                // parser and atomically override the configured member.
+                (*configured)->opening_movie_member.reset();
+            }
+            else if ((*configured)->opening_movie_member &&
+                     (options.probe_only || options.capture_run))
+            {
+                return std::unexpected(MakeContentLaunchProfileError(
+                    ContentLaunchProfileErrorCode::InvalidOptions));
+            }
+        }
         return configured;
+    }
     if (options.data_root->empty() ||
         (options.level_code && !IsValidContentLevelCode(*options.level_code)))
     {
@@ -362,6 +401,7 @@ ResolveContentLaunchProfile(const LaunchOptions& options, const ConfigStore& con
     return std::optional<ContentLaunchProfile>{ContentLaunchProfile{
         .data_root = *options.data_root,
         .level_code = std::move(level_code),
+        .opening_movie_member = std::nullopt,
     }};
 }
 } // namespace omega::runtime

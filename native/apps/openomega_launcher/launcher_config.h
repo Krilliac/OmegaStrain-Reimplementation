@@ -12,6 +12,9 @@ namespace omega::launcher
 struct LauncherPreferences
 {
     std::optional<std::filesystem::path> data_source;
+    // Private owner-side selection for the fixed movie archive. It is never
+    // discovered, displayed, or included in launcher diagnostics.
+    std::optional<std::string> opening_movie_member;
     bool gamepad_enabled = false;
 };
 
@@ -22,7 +25,7 @@ struct LauncherPreferences
 [[nodiscard]] std::expected<LauncherPreferences, std::string> LoadLauncherPreferences(
     const std::filesystem::path& config_path);
 
-// [launcher UI thread] Preserves parsed entries other than the two
+// [launcher UI thread] Preserves parsed entries other than the three
 // launcher-owned settings, validates the canonical result with the runtime
 // parser, and atomically replaces the target using a same-directory temporary.
 // Selected paths are encoded as strict UTF-8. Diagnostics never include a

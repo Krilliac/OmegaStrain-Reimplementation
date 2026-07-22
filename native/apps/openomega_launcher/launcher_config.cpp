@@ -28,6 +28,8 @@ namespace omega::launcher
 namespace
 {
 constexpr std::string_view kDataSourceKey = "content.data_root";
+constexpr std::string_view kOpeningMovieMemberKey =
+    "content.opening_movie_member";
 constexpr std::string_view kGamepadEnabledKey = "input.gamepad_enabled";
 
 [[nodiscard]] bool IsContinuationByte(const unsigned char byte) noexcept
@@ -372,6 +374,16 @@ std::expected<LauncherPreferences, std::string> LoadLauncherPreferences(
         preferences.data_source = std::move(*decoded);
     }
 
+    if (const auto value = store.GetString(kOpeningMovieMemberKey))
+    {
+        if (value->empty() || !IsSafePathValue(*value))
+        {
+            return std::unexpected(
+                "launcher opening movie selection is not a valid UTF-8 config value");
+        }
+        preferences.opening_movie_member = std::string(*value);
+    }
+
     auto gamepad = store.GetBool(kGamepadEnabledKey);
     if (!gamepad)
         return std::unexpected("launcher gamepad setting: " + gamepad.error());
@@ -390,6 +402,13 @@ std::expected<void, std::string> SaveLauncherPreferencesAtomically(
             return std::unexpected(std::move(encoded).error());
         encoded_source = std::move(*encoded);
     }
+    if (preferences.opening_movie_member &&
+        (preferences.opening_movie_member->empty() ||
+         !IsSafePathValue(*preferences.opening_movie_member)))
+    {
+        return std::unexpected(
+            "launcher opening movie selection is not a valid UTF-8 config value");
+    }
 
     auto existing = LoadExistingStore(config_path);
     if (!existing)
@@ -397,6 +416,7 @@ std::expected<void, std::string> SaveLauncherPreferencesAtomically(
 
     std::string candidate;
     bool wrote_source = false;
+    bool wrote_opening_movie_member = false;
     bool wrote_gamepad = false;
     if (existing->has_value())
     {
@@ -418,11 +438,26 @@ std::expected<void, std::string> SaveLauncherPreferencesAtomically(
                 wrote_gamepad = true;
                 continue;
             }
+            if (entry.key == kOpeningMovieMemberKey)
+            {
+                if (preferences.opening_movie_member)
+                {
+                    AppendEntry(candidate, kOpeningMovieMemberKey,
+                                *preferences.opening_movie_member);
+                    wrote_opening_movie_member = true;
+                }
+                continue;
+            }
             AppendEntry(candidate, entry.key, entry.value);
         }
     }
     if (encoded_source && !wrote_source)
         AppendEntry(candidate, kDataSourceKey, *encoded_source);
+    if (preferences.opening_movie_member && !wrote_opening_movie_member)
+    {
+        AppendEntry(candidate, kOpeningMovieMemberKey,
+                    *preferences.opening_movie_member);
+    }
     if (!wrote_gamepad)
     {
         AppendEntry(candidate, kGamepadEnabledKey, preferences.gamepad_enabled ? "true" : "false");

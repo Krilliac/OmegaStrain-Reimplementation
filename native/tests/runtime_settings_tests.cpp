@@ -169,6 +169,9 @@ int RuntimeSettingsFailureCount()
               omega::runtime::ContentLaunchProfileErrorCodeName(
                   ContentLaunchProfileErrorCode::InvalidLevelCode) == "invalid-level-code" &&
               omega::runtime::ContentLaunchProfileErrorCodeName(
+                  ContentLaunchProfileErrorCode::InvalidOpeningMovieMember) ==
+                  "invalid-opening-movie-member" &&
+              omega::runtime::ContentLaunchProfileErrorCodeName(
                   ContentLaunchProfileErrorCode::InvalidOptions) == "invalid-options" &&
               omega::runtime::ContentLaunchProfileErrorCodeName(
                   static_cast<ContentLaunchProfileErrorCode>(255U)) == "unknown",
@@ -184,7 +187,8 @@ int RuntimeSettingsFailureCount()
 
     auto configured_content = omega::runtime::ParseConfigText(
         "content.data_root = configured/content\n"
-        "content.level_code = minsk2\n");
+        "content.level_code = minsk2\n"
+        "content.opening_movie_member = MOVIES/OPENING.BIN\n");
     Check(configured_content && omega::runtime::ResolveRuntimeSettings(*configured_content),
         "content launch keys are known strict runtime settings");
     if (configured_content)
@@ -194,8 +198,10 @@ int RuntimeSettingsFailureCount()
         Check(resolved_content && resolved_content->has_value() &&
                   (*resolved_content)->data_root ==
                       std::filesystem::path("configured/content") &&
-                  (*resolved_content)->level_code == std::optional<std::string>{"MINSK2"},
-            "configured content resolves a native path and uppercase level code");
+                  (*resolved_content)->level_code == std::optional<std::string>{"MINSK2"} &&
+                  (*resolved_content)->opening_movie_member ==
+                      std::optional<std::string>{"MOVIES/OPENING.BIN"},
+            "configured content resolves a native path, uppercase level code, and exact owner movie selection");
 
         omega::runtime::LaunchOptions direct_content;
         direct_content.data_root = std::filesystem::path("direct/content");
@@ -204,7 +210,8 @@ int RuntimeSettingsFailureCount()
             direct_content, *configured_content);
         Check(direct_resolved && direct_resolved->has_value() &&
                   (*direct_resolved)->data_root == std::filesystem::path("direct/content") &&
-                  (*direct_resolved)->level_code == std::optional<std::string>{"LEVEL7"},
+                  (*direct_resolved)->level_code == std::optional<std::string>{"LEVEL7"} &&
+                  !(*direct_resolved)->opening_movie_member,
             "a valid direct root and level atomically override configured content");
 
         direct_content.level_code.reset();
@@ -212,8 +219,25 @@ int RuntimeSettingsFailureCount()
             direct_content, *configured_content);
         Check(root_only && root_only->has_value() &&
                   (*root_only)->data_root == std::filesystem::path("direct/content") &&
-                  !(*root_only)->level_code,
-            "a direct root never inherits the configured level code");
+                  !(*root_only)->level_code &&
+                  !(*root_only)->opening_movie_member,
+            "a direct root never inherits configured level or opening-movie selection");
+
+        omega::runtime::LaunchOptions direct_movie;
+        direct_movie.opening_movie_path = std::filesystem::path("owned/opening.bin");
+        auto direct_movie_resolved = omega::runtime::ResolveContentLaunchProfile(
+            direct_movie, *configured_content);
+        Check(direct_movie_resolved && direct_movie_resolved->has_value() &&
+                  !(*direct_movie_resolved)->opening_movie_member,
+            "a direct movie path atomically overrides the configured archive member");
+
+        omega::runtime::LaunchOptions probe_with_configured_movie;
+        probe_with_configured_movie.probe_only = true;
+        auto probe_result = omega::runtime::ResolveContentLaunchProfile(
+            probe_with_configured_movie, *configured_content);
+        CheckProfileError(probe_result, ContentLaunchProfileErrorCode::InvalidOptions,
+            "direct content launch options are inconsistent",
+            "probe mode rejects an effective configured opening movie member");
     }
 
     const std::string unicode_root_bytes = "configured/\xCE\xA9-data";
@@ -250,6 +274,33 @@ int RuntimeSettingsFailureCount()
         CheckProfileError(result, ContentLaunchProfileErrorCode::MissingDataRoot,
             "content.data_root is required when content.level_code is set",
             "malformed effective configuration remains fatal when direct CLI would win");
+    }
+
+    auto movie_without_content_root = omega::runtime::ParseConfigText(
+        "content.opening_movie_member = MOVIES/OPENING.BIN\n");
+    Check(movie_without_content_root.has_value(),
+          "the configured movie-without-root fixture parses");
+    if (movie_without_content_root)
+    {
+        auto result = omega::runtime::ResolveContentLaunchProfile(
+            no_content_options, *movie_without_content_root);
+        CheckProfileError(result, ContentLaunchProfileErrorCode::MissingDataRoot,
+            "content.data_root is required when content.level_code is set",
+            "a configured opening movie member without a data root fails closed");
+    }
+
+    auto empty_movie_member = omega::runtime::ParseConfigText(
+        "content.data_root = configured/content\n"
+        "content.opening_movie_member =\n");
+    Check(empty_movie_member.has_value(), "the empty movie-member fixture parses");
+    if (empty_movie_member)
+    {
+        auto result = omega::runtime::ResolveContentLaunchProfile(
+            no_content_options, *empty_movie_member);
+        CheckProfileError(result,
+            ContentLaunchProfileErrorCode::InvalidOpeningMovieMember,
+            "content.opening_movie_member must be a non-empty bounded value",
+            "an empty configured opening movie member is rejected");
     }
 
     auto empty_content_root = omega::runtime::ParseConfigText(

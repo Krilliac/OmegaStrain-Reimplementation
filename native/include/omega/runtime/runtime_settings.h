@@ -51,6 +51,9 @@ struct ContentLaunchProfile
 {
     std::filesystem::path data_root;
     std::optional<std::string> level_code;
+    // Exact owner-supplied member within the fixed opening-movie archive. The
+    // runtime never discovers, guesses, or logs this value.
+    std::optional<std::string> opening_movie_member;
 };
 
 enum class ContentLaunchProfileErrorCode : std::uint8_t
@@ -58,6 +61,7 @@ enum class ContentLaunchProfileErrorCode : std::uint8_t
     MissingDataRoot = 0U,
     InvalidDataRoot,
     InvalidLevelCode,
+    InvalidOpeningMovieMember,
     InvalidOptions,
 };
 
@@ -72,6 +76,8 @@ enum class ContentLaunchProfileErrorCode : std::uint8_t
         return "invalid-data-root";
     case ContentLaunchProfileErrorCode::InvalidLevelCode:
         return "invalid-level-code";
+    case ContentLaunchProfileErrorCode::InvalidOpeningMovieMember:
+        return "invalid-opening-movie-member";
     case ContentLaunchProfileErrorCode::InvalidOptions:
         return "invalid-options";
     }
