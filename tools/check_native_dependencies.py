@@ -208,6 +208,7 @@ class ModuleRule:
 _EXACT_EXTERNAL_HEADER_ALLOWLIST = {
     "native/include/omega/debug/subsystem_entry_break.h": frozenset(
         {
+            "windows.h",
             "debugapi.h",
             "intrin.h",
             "processenv.h",

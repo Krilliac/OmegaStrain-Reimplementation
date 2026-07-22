@@ -25,12 +25,12 @@ The current Visual Studio integration provides:
   executable host.
 
 The library projects also set a Debug-only
-`OPENOMEGA_DEBUG_BREAK_SUBSYSTEM=<name>` environment variable. That variable is
-deliberately **inert in this slice**: no native code consumes it yet, so selecting
-a library as the startup project launches its host but does not automatically
-break at the subsystem's first entry. The eventual hook must break only on a
-real call into that subsystem, exactly once, and remain absent from non-Debug
-builds.
+`OPENOMEGA_DEBUG_BREAK_SUBSYSTEM=<name>` environment variable. Instrumented
+project libraries consume the exact, case-sensitive name at their first genuine
+entry. When a debugger is attached, that entry raises one process-wide break and
+then execution can be resumed or stepped normally. The hook is compiled out of
+non-Debug, non-Windows, and non-MSVC builds; an absent, empty, malformed, or
+unknown value is a no-op.
 
 The following are useful workflows, but are **not yet project-integrated
 features**: wait-for-debugger startup, persistent capture files and automatic
@@ -131,10 +131,28 @@ does not create a reverse build dependency, and adding one would form a cycle
 because the host already links the library.
 
 Game-hosted library projects run a one-frame capture/replay scenario. Test-hosted
-libraries run their representative test with no arguments. Today this is useful
-for setting ordinary source breakpoints in that library. The generated
-`OPENOMEGA_DEBUG_BREAK_SUBSYSTEM` value is reserved for the forthcoming one-shot
-entry hook and has no behavior yet.
+libraries run their representative test with no arguments. In the Debug solution,
+pressing F5 on an instrumented project stops once at that library's mapped entry
+while the representative host is executing it. Resume or step from there as
+usual. RelWithDebInfo and Release still launch the representative host, but do
+not install the automatic entry break.
+
+| Startup library project | First mapped project entry |
+| --- | --- |
+| `omega_core` | `HogIndex::Open` |
+| `omega_persistence` | `SaveDatabaseErrorCodeName` |
+| `omega_profiles` | `ProfileId::Parse` |
+| `omega_ps2_compat` | `InspectPs2MemoryCardImage` |
+| `omega_media` | `InspectMpegProgramStream` |
+| `omega_simulation` | `SimulationWorld::Create` |
+| `omega_gameplay` | `PlanDebugLocomotionStep` |
+| `omega_retail_formats` | `DecodeVagAdpcm` |
+| `omega_content` | `GameDataService::Open` |
+| `omega_runtime` | `InputTraceRecorder::Create` |
+| `omega_app_core` | `MakeFrontEndStartupModel` |
+| `omega_native_persistence` | `NativePersistence::Bootstrap` |
+| `omega_app_host` | `OmegaApp::Create` |
+| `omega_sdl_backend` | `SdlPlatformService::Create` |
 
 Header-only interface targets, including `omega_assets`, have neither object code
 nor a runnable Visual Studio project and therefore cannot provide an entry
