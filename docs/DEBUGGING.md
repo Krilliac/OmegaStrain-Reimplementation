@@ -153,6 +153,7 @@ not install the automatic entry break.
 | `omega_persistence` | `SaveDatabaseErrorCodeName` |
 | `omega_profiles` | `ProfileId::Parse` |
 | `omega_ps2_compat` | `InspectPs2MemoryCardImage` |
+| `omega_frontend` | `GuiToCanonicalRaster` |
 | `omega_media` | `InspectMpegProgramStream` |
 | `omega_simulation` | `SimulationWorld::Create` |
 | `omega_gameplay` | `PlanDebugLocomotionStep` |

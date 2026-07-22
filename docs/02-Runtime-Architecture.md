@@ -291,6 +291,7 @@ The detailed maturity gates and staged exits live in
 ```text
 omega_profiles -> omega_persistence
 omega_media -> omega_assets                         (+ Windows OS libraries privately)
+omega_frontend -> omega_assets
 omega_gameplay -> omega_simulation
 omega_retail_formats -> omega_assets + omega_core
 omega_content -> omega_assets                       (public)
@@ -331,6 +332,8 @@ The current native build targets express the same direction:
 - `omega_ps2_compat`: stateless bounded standard PS2 memory-card image/filesystem codecs over owned
   bytes, with no dependency on persistence, retail payloads, PCSX2, or emulator state;
 - `omega_assets`: canonical owned IR values and decode contracts;
+- `omega_frontend`: stateless, platform-neutral front-end composition math over owned
+  `omega_assets` values, with no renderer, filesystem, service, or host dependency;
 - `omega_media`: bounded MPEG/program-stream and owned decoded-media values. Its current
   Media-Foundation-named public header and `platform_code` error field are transitional internal
   contracts, not promoted SDK APIs, even though Windows SDK types remain hidden;

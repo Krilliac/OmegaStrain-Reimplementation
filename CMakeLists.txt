@@ -77,6 +77,13 @@ add_library(omega_assets INTERFACE)
 target_include_directories(omega_assets INTERFACE native/include)
 target_compile_features(omega_assets INTERFACE cxx_std_23)
 
+add_library(omega_frontend STATIC
+    native/src/frontend/compositor_math.cpp
+)
+target_include_directories(omega_frontend PUBLIC native/include)
+target_link_libraries(omega_frontend PUBLIC omega_assets)
+target_compile_features(omega_frontend PUBLIC cxx_std_23)
+
 add_library(omega_media STATIC
     native/src/media/media_foundation_h262_decoder.cpp
     native/src/media/mpeg_program_stream_descriptor.cpp
@@ -610,6 +617,7 @@ set(OMEGA_SUBSYSTEM_ENTRY_BREAK_TARGETS
     omega_persistence
     omega_profiles
     omega_ps2_compat
+    omega_frontend
     omega_media
     omega_simulation
     omega_gameplay
@@ -1292,6 +1300,32 @@ if(BUILD_TESTING)
     add_test(NAME omega_frontend_document_decoder_tests
         COMMAND omega_frontend_document_decoder_tests)
     set_tests_properties(omega_frontend_document_decoder_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_frontend_compositor_math_tests
+        native/tests/frontend_compositor_math_tests.cpp
+    )
+    target_link_libraries(omega_frontend_compositor_math_tests PRIVATE omega_frontend)
+    if(MSVC)
+        target_compile_options(omega_frontend_compositor_math_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_frontend_compositor_math_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_frontend_compositor_math_tests
+        COMMAND omega_frontend_compositor_math_tests)
+    set_tests_properties(omega_frontend_compositor_math_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_tbl_envelope_descriptor_tests
         native/tests/tbl_envelope_descriptor_tests.cpp
