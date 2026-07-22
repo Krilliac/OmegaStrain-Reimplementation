@@ -1779,7 +1779,7 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                     texture_limits.error()));
             }
             const auto bytes = scope_archive->payload(**entry);
-            auto decoded = retail::DecodeFrontEndTdx(bytes, *texture_limits);
+            auto decoded = retail::DecodeScopedFrontEndTdx(bytes, *texture_limits);
             if (!decoded)
             {
                 return std::unexpected(DecodeFailure(

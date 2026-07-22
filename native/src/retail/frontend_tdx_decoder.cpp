@@ -455,8 +455,17 @@ std::optional<std::uint32_t> GsPsmt4NibbleAddress(const std::uint16_t base_point
     return static_cast<std::uint32_t>(address & (kGsLocalMemoryNibbles - 1U));
 }
 
-asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdx(const std::span<const std::byte> bytes,
-                                                          const asset::DecodeLimits limits)
+namespace
+{
+enum class FrontEndTdxDependencyScope
+{
+    Direct,
+    BoundExternalVisual,
+};
+
+[[nodiscard]] asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdxImpl(
+    const std::span<const std::byte> bytes, const asset::DecodeLimits limits,
+    const FrontEndTdxDependencyScope dependency_scope)
 {
     auto descriptor = InspectTdxContainer(bytes, limits);
     if (!descriptor)
@@ -471,7 +480,12 @@ asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdx(const std::span<const 
     if (!indexed8 && !indexed4)
         return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
                                      "frontend TDX is not an indexed-8 or indexed-4 texture", 8));
-    if (descriptor->observed_flags != 5U && descriptor->observed_flags != 7U)
+    const bool alpha_family =
+        descriptor->observed_flags == 5U || descriptor->observed_flags == 7U;
+    const bool bound_indexed8_family =
+        dependency_scope == FrontEndTdxDependencyScope::BoundExternalVisual && indexed8 &&
+        descriptor->observed_flags == 1U;
+    if (!alpha_family && !bound_indexed8_family)
         return std::unexpected(
             Error(asset::DecodeErrorCode::UnsupportedVariant,
                   "frontend TDX header flags are outside the canonical frontend family", 2));
@@ -618,7 +632,7 @@ asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdx(const std::span<const 
         .palette_storage_format = TdxGsPixelStorageFormat::Psmct32,
         .palette_storage_mode = 0,
         .palette_start = 0,
-        .texture_alpha_enabled = true,
+        .texture_alpha_enabled = (descriptor->observed_flags & 4U) != 0U,
         .palette_load_enabled = ReadU16(bytes, 0x10) != 0,
         .primary_upload = primary_packet->rectangle,
         .palette_upload = palette_packet->rectangle,
@@ -658,5 +672,19 @@ asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdx(const std::span<const 
         .logical_output_bytes = logical_output_bytes,
         .peak_scratch_bytes = kGsLocalMemoryBytes,
     };
+}
+} // namespace
+
+asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdx(const std::span<const std::byte> bytes,
+                                                          const asset::DecodeLimits limits)
+{
+    return DecodeFrontEndTdxImpl(bytes, limits, FrontEndTdxDependencyScope::Direct);
+}
+
+asset::DecodeResult<DecodedFrontEndTdx> DecodeScopedFrontEndTdx(
+    const std::span<const std::byte> bytes, const asset::DecodeLimits limits)
+{
+    return DecodeFrontEndTdxImpl(
+        bytes, limits, FrontEndTdxDependencyScope::BoundExternalVisual);
 }
 } // namespace omega::retail
