@@ -180,6 +180,8 @@ function(omega_configure_visual_studio)
         omega_simulation)
     _omega_vs_assign_folder("Engine/Gameplay"
         omega_gameplay)
+    _omega_vs_assign_folder("Engine/Frontend Text"
+        omega_frontend_text)
     _omega_vs_assign_folder("Engine/Content"
         omega_content)
     _omega_vs_assign_folder("Engine/Runtime"
@@ -261,6 +263,8 @@ function(omega_configure_visual_studio)
         omega_diagnostic_proximity_trigger_tests
         omega_diagnostic_target_fire_tests
         omega_diagnostic_mission_lifecycle_tests)
+    _omega_vs_assign_folder("Tests/Engine/Frontend Text"
+        omega_frontend_text_layout_tests)
     _omega_vs_assign_folder("Tests/Compatibility/PS2"
         omega_ps2_memory_card_image_tests
         omega_ps2_memory_card_filesystem_tests
@@ -348,6 +352,8 @@ function(omega_configure_visual_studio)
         omega_frontend omega_frontend_compositor_math_tests omega_frontend)
     _omega_vs_map_library_to_host(
         omega_retail_formats omega_vag_adpcm_decoder_tests omega_retail_formats)
+    _omega_vs_map_library_to_host(
+        omega_frontend_text omega_frontend_text_layout_tests omega_frontend_text)
     _omega_vs_map_library_to_host(
         omega_content omega_front_end_screen_bundle_tests omega_content)
     _omega_vs_map_library_to_host(
