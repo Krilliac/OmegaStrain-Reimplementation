@@ -259,6 +259,24 @@ Studio's historical engine source or internal toolchain.
   identity, so the renderer command and pixel contracts remain unchanged. These are OpenOmega matrix
   conventions only; no retail coordinate, storage, axis, handedness, camera, projection, or parity
   claim is made.
+- E-0116 supersedes E-0114's actor-texture-overlay wording only for a nonempty indexed diagnostic
+  scene. A project-owned factory builds one independently owned 3-position, 3-index, 48-byte
+  triangle; `OmegaApp` uploads it after at most 63 environment meshes and appends its magenta draw
+  after at most 63 immutable environment commands. After each frame's fixed simulation steps, the
+  app maps the final synthetic X/Z position into a bounded local transform, composes it through the
+  retained scene camera, and atomically republishes the environment prefix plus actor without a GPU
+  upload or release. Target and fire cues remain texture overlays, while an empty scene keeps the
+  complete E-0107 texture fallback. Startup failures attempt to release the uploaded prefix in
+  reverse order, with the host retaining final-cleanup authority; tested budget failures leave zero
+  residency. Teardown releases actor first, then environment resources in reverse order.
+  Keyboard/mouse defaults and opt-in-only gamepad behavior are unchanged. Generated tests cover the
+  exact 64-command/resource
+  boundary, actor-stage slot/position/index/byte failures, camera composition, multi-command prefix
+  preservation, atomic retained-state rejection, movement without mesh upload/release or residency
+  change, and zero-residual release. This is synthetic OpenOmega presentation policy only; it
+  establishes no retail actor,
+  geometry, placement, camera, materials, animation, owner-corpus result, emulator equivalence, or
+  visual parity.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public

@@ -1803,6 +1803,37 @@ draw order, owner-corpus geometry publication, or PCSX2/native visual parity.
 Still unclaimed: retail matrix storage or direction, coordinate axes or handedness, view or projection
 parameters, camera controls, captured transform import, owner-corpus values, or PCSX2/native parity.
 
+## Simulation-driven indexed diagnostic actor (E-0116, 2026-07-21)
+
+- E-0116 supersedes only the E-0114 wording that kept the actor marker as a texture overlay when a
+  nonempty indexed diagnostic scene is resident. Empty scenes retain the full E-0107 texture
+  fallback; target and fire cues remain ordered texture overlays in either path.
+- `BuildProjectDiagnosticActorMesh` returns one independently owned synthetic triangle with three
+  finite positions, three indices, and 48 logical bytes through a non-allocating fixed error channel.
+  It publishes no retail geometry, scale, coordinate, material, animation, or asset claim.
+- A nonempty scene may own at most 63 environment mesh resources and 63 environment commands because
+  the actor reserves the final slot in each 64-entry boundary. Startup composes every transform before
+  mutation, uploads environment meshes then actor, retains the scene camera and immutable environment
+  draw list, and attempts to release an uploaded prefix in reverse order on any later failure while
+  the host remains the final cleanup authority. Tested actor budget failures leave zero residency.
+- After all scheduled fixed steps, `OmegaApp` maps the final synthetic X/Z position to a bounded
+  project transform, composes it through the retained camera, copies the complete environment command
+  prefix byte-for-byte, and appends the actor last in opaque magenta. Publication of the texture
+  fallback, scene overlay, and combined mesh list is atomic; movement performs no mesh upload,
+  release, asset mutation, or gamepad work.
+- Generated tests cover exact 63-plus-actor capacity, actor-stage slot/position/index/logical-byte
+  failures with complete rollback, nonidentity camera composition, multi-command prefix stability,
+  invalid retained handle/count/camera rejection before rendering, zero-step stability, keyboard and
+  mouse movement/target/fire behavior, production actor-first reverse teardown, and zero residual
+  residency. The serialized full MSVC Debug build is warning-free; CTest passes 74/74; direct app
+  capture and Direct3D12 mesh smoke pass; tooling passes 361/361; Python compile-all, the 290-file
+  native dependency gate, both 116-record ledger gates, and the staged 471-blob public-tree gate
+  pass. Hosted validation remains pending.
+
+Still unclaimed: retail actor geometry or identity, placement, coordinate axes or units, camera or
+projection parameters, materials, animation, collision, owner-corpus results, PCSX2 equivalence, or
+visual parity.
+
 ## Private PCSX2 producer readiness (E-0099, 2026-07-20)
 
 - A separately maintained local branch based on official PCSX2

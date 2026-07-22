@@ -50,6 +50,14 @@ uniformly fits that one projection into the project clip volume. Consequently, r
 scale along the selected axes survive normalization. Triangle-free cells remain fully validated and
 consume inspection budgets, but do not distort a projection for geometry they do not publish.
 
+The application may add a separate project-owned diagnostic actor presentation without mutating or
+extending the decoded `SceneIR`. `BuildProjectDiagnosticActorMesh` creates one fixed 3-position,
+3-index, 48-byte triangle with independently owned storage. For a nonempty diagnostic scene,
+`OmegaApp` retains the scene camera and immutable environment command list, maps the final synthetic
+simulation X/Z position to a bounded local transform, composes it through that camera, and appends
+the actor command after the unchanged environment prefix. This app-layer adapter is not a scene
+decoder, source asset, retail entity, or assertion about world coordinates.
+
 "Global" means only that the diagnostic uses one shared decoded coordinate domain. It does not
 establish that cell coordinates are retail world placement, assign semantic names or handedness to
 the selected axes, or infer retail camera, visibility, winding, collision, material, or draw-order

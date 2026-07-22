@@ -34,11 +34,16 @@ the shader at the SDL boundary.
 When canonical `LevelContentIR` is present, `OmegaApp` now invokes
 `BuildGlobalSpatialDiagnosticScene` exactly once during startup. It preserves decoded inter-cell
 offsets and scale under one aggregate diagnostic projection, then validates scene instance indices
-and camera-times-instance matrices, transactionally uploads the complete mesh set, and owns one fixed
-validated draw list. Only `DiagnosticPlay` copies that list into a frame packet. Its texture list
-keeps the existing actor, targeting, and firing cues but omits the opaque full-screen diagnostic
-base so indexed geometry remains visible; every menu/card list is unchanged. Shutdown clears mesh
-commands and explicitly releases generations in reverse upload order before host teardown.
+and composed camera/instance matrices before GPU mutation. E-0116 reserves one of the 64 mesh slots
+and commands for a separate synthetic actor triangle, so a nonempty scene admits at most 63
+environment resources and commands. Startup transactionally uploads the environment set followed by
+the actor and retains the immutable environment prefix plus camera. After fixed simulation steps,
+`DiagnosticPlay` republishes that prefix followed by the camera-composed actor command without
+mesh upload, release, or residency change. Its texture list retains targeting and firing cues but
+omits both the actor marker and opaque full-screen base; an empty scene keeps the complete texture
+fallback. Every menu/card list is
+unchanged. Shutdown clears mesh commands and explicitly releases actor then environment generations
+in reverse upload order before host teardown.
 
 The shader is SDL's position/color `testgpu` shader in the DXIL, SPIR-V, and MSL forms shipped in the
 exact permissively licensed SDL revision already pinned by CMake. Those generated headers are
@@ -72,9 +77,11 @@ external shader payload. SDL objects and shader representations remain private t
   generation before submission, verifies generation-safe slot reuse, and ends with no resident mesh
   resources.
 - The app capture smoke uses only a generated triangle and proves Profiles, Characters, and
-  BriefingRoom submit no mesh; mission activation submits exactly one mesh plus the existing actor
-  overlay; return to BriefingRoom suppresses the mesh; and explicit teardown restores zero mesh
-  residency. A non-finite scene fails before SDL with a fixed path-free diagnostic.
+  BriefingRoom submit no mesh; mission activation submits one environment mesh followed by the
+  synthetic actor mesh; movement preserves the environment prefix and changes only the actor
+  transform; target/fire remain texture overlays; return to BriefingRoom suppresses both meshes; and
+  explicit teardown restores zero mesh residency. Capacity, resource-budget, retained-state, and
+  non-finite transform failures reject transactionally with fixed path-free diagnostics.
 
 ## Consequences
 

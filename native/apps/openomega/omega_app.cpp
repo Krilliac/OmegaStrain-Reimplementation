@@ -5,6 +5,7 @@
 #include "run_replay_session.h"
 
 #include "omega/gameplay/debug_locomotion.h"
+#include "omega/runtime/diagnostic_actor_scene.h"
 #include "omega/runtime/level_texture_topology_preview.h"
 #include "omega/runtime/scene_transform.h"
 #include "omega/runtime/spatial_diagnostic_scene.h"
@@ -44,6 +45,12 @@ constexpr profiles::CharacterId kFirstCharacterId =
                                       0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U});
 constexpr std::array<std::byte, 4U> kDiagnosticActorMarkerRgba8{
     std::byte{255U}, std::byte{64U}, std::byte{224U}, std::byte{255U}};
+constexpr runtime::RenderMeshColorRgba8 kDiagnosticActorMeshColor{
+    .red = 255U,
+    .green = 64U,
+    .blue = 224U,
+    .alpha = 255U,
+};
 
 class DiagnosticSceneRollbackGuard final
 {
@@ -99,8 +106,10 @@ OmegaApp::BuildDiagnosticScenePresentation(
         return std::unexpected(
             std::string{"diagnostic scene mesh and instance ownership is inconsistent"});
     }
-    if (scene.render_meshes.size() > runtime::kMaximumRenderMeshDrawsPerFrame ||
-        scene.mesh_instances.size() > runtime::kMaximumRenderMeshDrawsPerFrame)
+    constexpr std::size_t maximum_environment_meshes =
+        runtime::kMaximumRenderMeshDrawsPerFrame - 1U;
+    if (scene.render_meshes.size() > maximum_environment_meshes ||
+        scene.mesh_instances.size() > maximum_environment_meshes)
     {
         return std::unexpected(
             std::string{"diagnostic scene exceeds renderer command capacity"});
@@ -135,6 +144,28 @@ OmegaApp::BuildDiagnosticScenePresentation(
         return std::unexpected(
             std::string{"diagnostic scene presentation allocation failed"});
     }
+    if (scene.render_meshes.empty())
+    {
+        return std::expected<std::unique_ptr<DiagnosticScenePresentation>, std::string>{
+            std::in_place, std::move(presentation)};
+    }
+
+    auto actor_mesh = runtime::BuildProjectDiagnosticActorMesh();
+    if (!actor_mesh)
+    {
+        return std::unexpected("diagnostic actor mesh creation failed: " +
+                               std::string(actor_mesh.error()));
+    }
+    const auto actor_object_to_clip = runtime::ComposeObjectToClip(
+        scene.camera,
+        PlanProjectDiagnosticActorMeshTransform(simulation::Position3{}));
+    if (!actor_object_to_clip)
+    {
+        return std::unexpected(
+            std::string{"diagnostic scene transform is non-finite"});
+    }
+    presentation->camera = scene.camera;
+
     DiagnosticSceneRollbackGuard rollback(
         host, presentation->mesh_handles, presentation->mesh_count);
     for (const asset::RenderMeshIR& mesh : scene.render_meshes)
@@ -167,9 +198,36 @@ OmegaApp::BuildDiagnosticScenePresentation(
             .raster_mode = runtime::RenderMeshRasterMode::Fill,
         };
     }
-    auto created_draw_list = runtime::RenderMeshDrawList::Create(
+    auto created_environment_draw_list = runtime::RenderMeshDrawList::Create(
         std::span<const runtime::RenderMeshDrawCommand>{
             commands.data(), scene.mesh_instances.size()});
+    if (!created_environment_draw_list)
+    {
+        return std::unexpected("diagnostic scene draw-list creation failed: " +
+                               std::string(runtime::RenderMeshDrawListErrorCodeName(
+                                   created_environment_draw_list.error().code)));
+    }
+    presentation->environment_command_count = scene.mesh_instances.size();
+    presentation->environment_draw_list =
+        std::move(*created_environment_draw_list);
+
+    auto uploaded_actor = host.UploadRenderMesh(*actor_mesh);
+    if (!uploaded_actor)
+    {
+        return std::unexpected(
+            "diagnostic actor mesh upload failed: " + uploaded_actor.error());
+    }
+    presentation->actor_mesh_handle = *uploaded_actor;
+    presentation->mesh_handles[presentation->mesh_count++] = *uploaded_actor;
+    commands[scene.mesh_instances.size()] = runtime::RenderMeshDrawCommand{
+        .mesh = presentation->actor_mesh_handle,
+        .object_to_clip = *actor_object_to_clip,
+        .color = kDiagnosticActorMeshColor,
+        .raster_mode = runtime::RenderMeshRasterMode::Fill,
+    };
+    auto created_draw_list = runtime::RenderMeshDrawList::Create(
+        std::span<const runtime::RenderMeshDrawCommand>{
+            commands.data(), scene.mesh_instances.size() + 1U});
     if (!created_draw_list)
     {
         return std::unexpected("diagnostic scene draw-list creation failed: " +
@@ -1007,18 +1065,6 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         return std::unexpected(std::string(error));
     }
     diagnostic_actor_draw_list = std::move(*created_actor_draw_list);
-    auto created_scene_overlay_draw_list = runtime::RenderDrawList::Create(
-        std::span<const runtime::RenderTextureBlitCommand>{
-            diagnostic_actor_commands.data() + 1U, 1U});
-    if (!created_scene_overlay_draw_list)
-    {
-        constexpr std::string_view error =
-            "SDL/GPU diagnostic scene overlay draw-list creation failed";
-        log->Error("startup", error);
-        return std::unexpected(std::string(error));
-    }
-    diagnostic_scene_overlay_draw_list =
-        std::move(*created_scene_overlay_draw_list);
 
     diagnostic_commands[diagnostic_base_command_count] =
         runtime::RenderTextureBlitCommand{
@@ -1394,7 +1440,11 @@ void OmegaApp::ReleaseDiagnosticScenePresentation() noexcept
         return;
 
     diagnostic_scene_presentation_->draw_list = {};
+    diagnostic_scene_presentation_->environment_draw_list = {};
     diagnostic_scene_presentation_->overlay_draw_list = {};
+    diagnostic_scene_presentation_->environment_command_count = 0U;
+    diagnostic_scene_presentation_->actor_mesh_handle = {};
+    diagnostic_scene_presentation_->camera = {};
     while (diagnostic_scene_presentation_->mesh_count != 0U)
     {
         --diagnostic_scene_presentation_->mesh_count;
@@ -2852,7 +2902,6 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
     std::size_t command_count = 0U;
     if (!base_commands.empty())
         commands[command_count++] = base_commands.front();
-    const std::size_t overlay_command_offset = command_count;
     commands[command_count++] = runtime::RenderTextureBlitCommand{
         .texture = diagnostic_actor_marker_texture_,
         .source = full_source,
@@ -2861,6 +2910,7 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
         .fit_mode = runtime::RenderTextureFitMode::Stretch,
         .filter_mode = runtime::RenderTextureFilterMode::Nearest,
     };
+    const std::size_t overlay_command_offset = command_count;
     if (debug_target_held_)
     {
         constexpr std::array target_cue_destinations{
@@ -2921,11 +2971,67 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
         return std::unexpected(
             std::string{"diagnostic scene overlay draw-list creation failed"});
     }
+
+    runtime::RenderMeshDrawList next_scene_draw_list;
+    bool refresh_scene_draw_list = false;
+    if (diagnostic_scene_presentation_ &&
+        !diagnostic_scene_presentation_->draw_list.empty())
+    {
+        const std::span<const runtime::RenderMeshDrawCommand> environment_commands =
+            diagnostic_scene_presentation_->environment_draw_list.commands();
+        if (environment_commands.size() !=
+                diagnostic_scene_presentation_->environment_command_count ||
+            environment_commands.size() >=
+                runtime::kMaximumRenderMeshDrawsPerFrame ||
+            !diagnostic_scene_presentation_->actor_mesh_handle.valid())
+        {
+            return std::unexpected(
+                std::string{"diagnostic scene draw-list creation failed: invalid-state"});
+        }
+
+        const auto actor_object_to_clip = runtime::ComposeObjectToClip(
+            diagnostic_scene_presentation_->camera,
+            PlanProjectDiagnosticActorMeshTransform(*position));
+        if (!actor_object_to_clip)
+        {
+            return std::unexpected(
+                std::string{"diagnostic scene transform is non-finite"});
+        }
+
+        std::array<runtime::RenderMeshDrawCommand,
+            runtime::kMaximumRenderMeshDrawsPerFrame> mesh_commands{};
+        std::size_t mesh_command_count = 0U;
+        for (const runtime::RenderMeshDrawCommand& command : environment_commands)
+            mesh_commands[mesh_command_count++] = command;
+        mesh_commands[mesh_command_count++] = runtime::RenderMeshDrawCommand{
+            .mesh = diagnostic_scene_presentation_->actor_mesh_handle,
+            .object_to_clip = *actor_object_to_clip,
+            .color = kDiagnosticActorMeshColor,
+            .raster_mode = runtime::RenderMeshRasterMode::Fill,
+        };
+        auto created_scene_draw_list = runtime::RenderMeshDrawList::Create(
+            std::span<const runtime::RenderMeshDrawCommand>{
+                mesh_commands.data(), mesh_command_count});
+        if (!created_scene_draw_list)
+        {
+            return std::unexpected("diagnostic scene draw-list creation failed: " +
+                                   std::string(runtime::RenderMeshDrawListErrorCodeName(
+                                       created_scene_draw_list.error().code)));
+        }
+        next_scene_draw_list = std::move(*created_scene_draw_list);
+        refresh_scene_draw_list = true;
+    }
+
     diagnostic_actor_draw_list_ = std::move(*created);
     if (diagnostic_scene_presentation_)
     {
         diagnostic_scene_presentation_->overlay_draw_list =
             std::move(*created_scene_overlay);
+        if (refresh_scene_draw_list)
+        {
+            diagnostic_scene_presentation_->draw_list =
+                std::move(next_scene_draw_list);
+        }
     }
     return {};
 }

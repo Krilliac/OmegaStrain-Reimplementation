@@ -1,5 +1,6 @@
 #pragma once
 
+#include "omega/runtime/diagnostic_actor_scene.h"
 #include "omega/runtime/render_draw_list.h"
 #include "omega/simulation/simulation_world.h"
 
@@ -46,5 +47,24 @@ PlanProjectDiagnosticActorMarkerDestination(
         .right = static_cast<std::uint32_t>(center_x + half_extent),
         .bottom = static_cast<std::uint32_t>(center_y + half_extent),
     };
+}
+
+// [any thread; reentrant] Maps the same bounded synthetic X/Z presentation policy to an owned
+// project matrix for the indexed diagnostic actor. Positive X moves right, positive Z moves up,
+// and Y is ignored. This is not a retail world, camera, axis, or transform convention.
+[[nodiscard]] constexpr asset::Matrix4x4IR PlanProjectDiagnosticActorMeshTransform(
+    const simulation::Position3 position) noexcept
+{
+    constexpr std::int64_t maximum_coordinate = 31;
+    constexpr float coordinate_scale = 1.0F / 32.0F;
+    const std::int64_t x =
+        std::clamp(position.x, -maximum_coordinate, maximum_coordinate);
+    const std::int64_t z =
+        std::clamp(position.z, -maximum_coordinate, maximum_coordinate);
+
+    asset::Matrix4x4IR transform = asset::kIdentityMatrix4x4IR;
+    transform.row_major[3U] = static_cast<float>(x) * coordinate_scale;
+    transform.row_major[7U] = static_cast<float>(z) * coordinate_scale;
+    return transform;
 }
 } // namespace omega::app
