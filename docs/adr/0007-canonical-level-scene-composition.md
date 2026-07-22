@@ -34,11 +34,18 @@ Validation runs before output allocation: every coordinate must be finite, every
 range-checked against its own cell, and cell, position, triangle-index, and logical-output totals are
 overflow-checked against tighten-only safety limits.
 
+Output-byte limits in these APIs are conservative ABI-local logical host-footprint budgets. They
+sum owned value and element sizes with payload bytes, but they are not serialization sizes,
+cross-ABI fingerprints, or exact heap-allocation caps; allocator metadata and
+implementation-defined capacity are outside the accounting.
+
 `BuildCanonicalLevelSceneWithMaterials` preserves `LevelContentIR`'s documented positional
 relationship by assigning the same explicit ordinal to each scene cell and material catalog. The
 result revalidates cardinality and ordinal equality. This preservation is not independent provenance
 proof and establishes no triangle, texture, visibility, or draw binding. Nested catalog, name,
-material, string, scene, and combined-output budgets are checked before allocation.
+material, string, scene, and combined-output budgets are checked before allocation. The public
+association validator independently rechecks the canonical geometry, material references, and every
+passed tighten-only budget without allocating output.
 
 `BuildCanonicalLevelRenderPages` is the renderer-facing adapter. It validates canonical ordinals,
 omits cells without complete renderable triangles, records every omitted ordinal, and copies the

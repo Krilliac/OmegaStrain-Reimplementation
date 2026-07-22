@@ -16,6 +16,9 @@ struct CanonicalLevelSceneLimits
     std::uint64_t maximum_cells = 4096U;
     std::uint64_t maximum_positions = 1ULL << 20U;
     std::uint64_t maximum_triangle_indices = 6ULL << 20U;
+    // ABI-local logical host-footprint budget for owned values and payloads.
+    // This is neither a serialization size nor an exact heap-allocation cap;
+    // allocator metadata and implementation-defined capacity are excluded.
     std::uint64_t maximum_output_bytes = 128ULL * 1024ULL * 1024ULL;
 };
 

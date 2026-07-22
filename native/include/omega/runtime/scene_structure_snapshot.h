@@ -33,6 +33,8 @@ struct SceneStructureSnapshotLimits
     std::uint64_t maximum_mesh_instances = 4096U;
     std::uint64_t maximum_positions = 1ULL << 20U;
     std::uint64_t maximum_triangle_indices = 6ULL << 20U;
+    // ABI-local logical value footprint, not a serialization size or exact
+    // heap-allocation cap.
     std::uint64_t maximum_output_bytes = sizeof(SceneStructureSnapshot);
 };
 

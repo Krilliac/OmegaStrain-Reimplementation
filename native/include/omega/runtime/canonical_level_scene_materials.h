@@ -20,6 +20,9 @@ struct CanonicalLevelSceneMaterialLimits
     std::uint64_t maximum_materials = 1ULL << 20U;
     std::uint64_t maximum_name_bytes = 64ULL * 1024ULL * 1024ULL;
     std::uint64_t maximum_name_length = 4096U;
+    // ABI-local logical host-footprint budget for owned values and payloads.
+    // This is neither a serialization size nor an exact heap-allocation cap;
+    // allocator metadata and implementation-defined capacity are excluded.
     std::uint64_t maximum_output_bytes = 256ULL * 1024ULL * 1024ULL;
 };
 
@@ -44,8 +47,9 @@ struct CanonicalLevelSceneWithMaterials
     bool operator==(const CanonicalLevelSceneWithMaterials&) const = default;
 };
 
-// [any worker thread; reentrant] Checks the output cardinality and exact
-// typed-ordinal pairing.
+// [any worker thread; reentrant] Validates output cardinality, exact
+// typed-ordinal pairing, canonical scene geometry, material references, and
+// every tighten-only scene/material/output budget without allocating output.
 [[nodiscard]] std::expected<void, std::string> ValidateCanonicalLevelSceneMaterialAssociation(
     const CanonicalLevelSceneWithMaterials& content,
     const CanonicalLevelSceneMaterialLimits& limits = CanonicalLevelSceneMaterialLimits{});
