@@ -11,7 +11,6 @@
 #include "sdl_input_service.h"
 #include "sdl_platform_service.h"
 
-#include "omega/asset/scene_ir.h"
 #include "omega/runtime/asset_service.h"
 #include "omega/runtime/config_service.h"
 #include "omega/runtime/content_startup.h"
@@ -35,6 +34,11 @@
 #include <optional>
 #include <string>
 #include <string_view>
+
+namespace omega::asset
+{
+struct SceneIR;
+}
 
 namespace omega::app
 {
