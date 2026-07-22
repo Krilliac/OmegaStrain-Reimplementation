@@ -15,9 +15,10 @@ validation. Optional opening-movie playback requires Windows Media Foundation an
 synchronous MPEG-2 decoder MFT. `--opening-movie=PATH` selects one external file;
 `--opening-movie-member=NAME` selects only that exact case-insensitive member from fixed
 `ZMEDIA/ZMOVIES.HOG` under the effective game-data root. The selectors are mutually exclusive and
-the archive route performs no member discovery or fallback. If the archive, member, or decoder is
-unavailable or rejected, OpenOmega emits no source identity, skips the optional movie, and
-continues to Profiles. The package has exactly this layout:
+the archive route performs no member discovery or fallback. Archive or member unavailability is
+reported without source identity and remains fail-open for the optional movie. If that decoder
+capability is unavailable, OpenOmega skips the optional opening movie and continues to the native
+menu. The package has exactly this layout:
 
 ```text
 OpenOmega-0.1.0-windows-x86_64/
