@@ -306,13 +306,19 @@ struct OmegaAppTestAccess final
     [[nodiscard]] static const runtime::RenderDrawList&
     DiagnosticSceneOverlayDrawList(const OmegaApp& app) noexcept
     {
-        return app.diagnostic_scene_overlay_draw_list_;
+        static const runtime::RenderDrawList kEmptyDrawList;
+        return app.diagnostic_scene_presentation_
+            ? app.diagnostic_scene_presentation_->overlay_draw_list
+            : kEmptyDrawList;
     }
 
     [[nodiscard]] static const runtime::RenderMeshDrawList&
     DiagnosticSceneMeshDrawList(const OmegaApp& app) noexcept
     {
-        return app.diagnostic_scene_presentation_.draw_list;
+        static const runtime::RenderMeshDrawList kEmptyDrawList;
+        return app.diagnostic_scene_presentation_
+            ? app.diagnostic_scene_presentation_->draw_list
+            : kEmptyDrawList;
     }
 
     [[nodiscard]] static runtime::RenderMeshDrawList CurrentFrontEndMeshDrawList(
@@ -3564,6 +3570,11 @@ int main()
     settings.max_input_events_per_frame =
         omega::runtime::InputTracker::kMaxEventsPerFrameLimit;
 
+    // Keep the intentionally broad acceptance executable while giving each scenario group its own
+    // Debug stack frame. MSVC /Od otherwise reserves every OmegaApp/expected local in one main
+    // frame, leaving too little of the default Windows stack for nested SDL/D3D12 driver calls.
+    const auto check_startup_and_content = [&settings]() -> int
+    {
     auto invalid_config = omega::runtime::ParseConfigText("");
     Check(invalid_config.has_value(), "the invalid-content startup fixture parses config");
     if (!invalid_config)
@@ -4079,6 +4090,13 @@ int main()
             "the mandatory actor marker reports its exact startup upload failure after the five earlier textures");
     }
 
+    return EXIT_SUCCESS;
+    };
+    if (check_startup_and_content() != EXIT_SUCCESS)
+        return EXIT_FAILURE;
+
+    const auto check_runtime = [&]() -> int
+    {
     auto app = omega::app::detail::OmegaAppTestAccess::Create(
         std::move(*config), settings, omega::runtime::ContentStartupState{}, false);
     Check(app.has_value(), "the zero-file OmegaApp fixture starts");
@@ -6366,4 +6384,6 @@ int main()
     if (failures == 0)
         std::cout << "omega_app_capture_smoke: passed\n";
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    };
+    return check_runtime();
 }
