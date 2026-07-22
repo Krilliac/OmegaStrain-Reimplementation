@@ -332,6 +332,32 @@ PrepareOwnedVector(Reader &reader, const std::uint64_t count,
   return *value;
 }
 
+[[nodiscard]] asset::DecodeResult<bool> ReadGuiBoolean(Reader &reader,
+                                                       const char *field) {
+  const std::uint64_t value_offset = reader.offset();
+  auto value = reader.ReadU16();
+  if (!value)
+    return std::unexpected(value.error());
+  if (*value > 1U)
+    return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                 std::string(field) + " is not 0 or 1",
+                                 value_offset));
+  return *value != 0U;
+}
+
+[[nodiscard]] asset::DecodeResult<float>
+ReadGuiTextColorChannel(Reader &reader) {
+  const std::uint64_t value_offset = reader.offset();
+  auto value = ReadFiniteF32(reader, "GUI text color channel");
+  if (!value)
+    return std::unexpected(value.error());
+  if (*value < 0.0F || *value > 1.0F)
+    return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                 "GUI text color channel is outside [0,1]",
+                                 value_offset));
+  return *value;
+}
+
 [[nodiscard]] asset::DecodeResult<std::uint8_t>
 QuantizeColorChannel(const float value, const std::uint64_t value_offset) {
   if (!std::isfinite(value))
@@ -402,17 +428,30 @@ ParseGuiNode(Reader &reader, const std::uint64_t depth,
   auto aligned = reader.Align4();
   if (!aligned)
     return std::unexpected(aligned.error());
-  for (float &value : node.layout_values) {
-    auto decoded = reader.ReadF32();
-    if (!decoded)
-      return std::unexpected(decoded.error());
-    value = *decoded;
-  }
-  for (unsigned index = 0; index < 2; ++index) {
-    auto ignored = reader.ReadU16();
-    if (!ignored)
-      return std::unexpected(ignored.error());
-  }
+  auto left = ReadFiniteF32(reader, "GUI rectangle left");
+  if (!left)
+    return std::unexpected(left.error());
+  node.rectangle.left = *left;
+  auto top = ReadFiniteF32(reader, "GUI rectangle top");
+  if (!top)
+    return std::unexpected(top.error());
+  node.rectangle.top = *top;
+  auto width = ReadFiniteF32(reader, "GUI rectangle width");
+  if (!width)
+    return std::unexpected(width.error());
+  node.rectangle.width = *width;
+  auto height = ReadFiniteF32(reader, "GUI rectangle height");
+  if (!height)
+    return std::unexpected(height.error());
+  node.rectangle.height = *height;
+  auto visible = ReadGuiBoolean(reader, "GUI visible field");
+  if (!visible)
+    return std::unexpected(visible.error());
+  node.visible = *visible;
+  auto enabled = ReadGuiBoolean(reader, "GUI enabled field");
+  if (!enabled)
+    return std::unexpected(enabled.error());
+  node.enabled = *enabled;
 
   if (has_text_record) {
     auto text = reader.ReadOwnedString();
@@ -426,9 +465,44 @@ ParseGuiNode(Reader &reader, const std::uint64_t depth,
     aligned = reader.Align4();
     if (!aligned)
       return std::unexpected(aligned.error());
-    auto ignored_style = reader.Skip(16);
-    if (!ignored_style)
-      return std::unexpected(ignored_style.error());
+    asset::FrontendTextColorIR text_color;
+    auto red = ReadGuiTextColorChannel(reader);
+    if (!red)
+      return std::unexpected(red.error());
+    text_color.red = *red;
+    auto green = ReadGuiTextColorChannel(reader);
+    if (!green)
+      return std::unexpected(green.error());
+    text_color.green = *green;
+    auto blue = ReadGuiTextColorChannel(reader);
+    if (!blue)
+      return std::unexpected(blue.error());
+    text_color.blue = *blue;
+    node.text_color.emplace(text_color);
+
+    const std::uint64_t style_offset = reader.offset();
+    auto style = reader.ReadU32();
+    if (!style)
+      return std::unexpected(style.error());
+    if ((*style & 0xFFFFFF00U) != 0U)
+      return std::unexpected(
+          Error(asset::DecodeErrorCode::UnsupportedVariant,
+                "GUI text style contains unsupported high bits", style_offset));
+    switch (*style) {
+    case 0U:
+      node.text_alignment.emplace(asset::FrontendTextAlignment::Left);
+      break;
+    case 1U:
+      node.text_alignment.emplace(asset::FrontendTextAlignment::Right);
+      break;
+    case 2U:
+      node.text_alignment.emplace(asset::FrontendTextAlignment::Center);
+      break;
+    default:
+      return std::unexpected(Error(
+          asset::DecodeErrorCode::UnsupportedVariant,
+          "GUI text alignment is outside the supported family", style_offset));
+    }
   }
 
   if (!decorator->empty()) {
@@ -452,7 +526,7 @@ ParseGuiNode(Reader &reader, const std::uint64_t depth,
     if (!aligned)
       return std::unexpected(aligned.error());
     for (float &value : node.binding->transform_values) {
-      auto decoded = reader.ReadF32();
+      auto decoded = ReadFiniteF32(reader, "GUI decorator transform value");
       if (!decoded)
         return std::unexpected(decoded.error());
       value = *decoded;
