@@ -1,5 +1,7 @@
 #pragma once
 
+#include "omega/runtime/front_end_presentation_gate.h"
+
 #include <expected>
 #include <filesystem>
 #include <optional>
@@ -30,6 +32,8 @@ struct LaunchOptions
     bool capture_run = false;
     bool replay_capture = false;
     bool probe_only = false;
+    FrontEndPresentationMode front_end_presentation_mode =
+        FrontEndPresentationMode::RetailRequired;
     bool show_help = false;
 };
 

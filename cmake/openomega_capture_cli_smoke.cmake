@@ -8,7 +8,7 @@ if(NOT EXISTS "${OPENOMEGA_EXECUTABLE}")
 endif()
 
 execute_process(
-    COMMAND "${OPENOMEGA_EXECUTABLE}" --frames=2 --capture-run
+    COMMAND "${OPENOMEGA_EXECUTABLE}" --frames=2 --capture-run --developer-diagnostics
     RESULT_VARIABLE openomega_result
     OUTPUT_VARIABLE openomega_stdout
     ERROR_VARIABLE openomega_stderr
@@ -26,6 +26,7 @@ endif()
 
 string(CONCAT expected_stdout_pattern
     "^OpenOmega native persistence: profiles=0\n"
+    "OpenOmega mode: DEVELOPER DIAGNOSTICS [(]project-authored presentation/gameplay[)]\n"
     "OpenOmega native shell: GPU driver=[A-Za-z0-9_.-]+ audio_driver=dummy "
     "audio_format=f32/[0-9]+Hz/[0-9]+ch\n"
     "OpenOmega native shell: rendered_frames=2 "

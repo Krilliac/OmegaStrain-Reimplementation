@@ -355,7 +355,7 @@ function(omega_configure_visual_studio)
             omega_sdl_backend)
         _omega_vs_map_library_to_host(
             "${library_target}" openomega "${library_target}"
-            ARGUMENTS "--frames=1 --capture-run --replay-capture"
+            ARGUMENTS "--frames=1 --capture-run --replay-capture --developer-diagnostics"
             ENVIRONMENT
                 "LOCALAPPDATA=${CMAKE_BINARY_DIR}/visual-studio-profiles/${library_target}/$<CONFIG>"
                 "OPENOMEGA_DISABLE_STARTUP_DIALOG=1"

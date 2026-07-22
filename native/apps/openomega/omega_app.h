@@ -18,6 +18,7 @@
 #include "omega/runtime/config_service.h"
 #include "omega/runtime/content_startup.h"
 #include "omega/runtime/frame_scheduler.h"
+#include "omega/runtime/front_end_presentation_gate.h"
 #include "omega/runtime/input_tracker.h"
 #include "omega/runtime/job_service.h"
 #include "omega/runtime/log_service.h"
@@ -57,12 +58,13 @@ public:
     [[nodiscard]] static std::expected<OmegaApp, std::string> Create(
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
         runtime::ContentStartupState content, NativePersistence native_persistence,
-        bool debug_device,
+        bool debug_device, runtime::FrontEndPresentationMode presentation_mode,
         std::optional<std::filesystem::path> opening_movie_path = std::nullopt);
     [[nodiscard]] static std::expected<OmegaApp, std::string> Create(
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
         runtime::ContentStartupState content, NativePersistence native_persistence,
-        bool debug_device, asset::OpeningMovieSource opening_movie_source);
+        bool debug_device, runtime::FrontEndPresentationMode presentation_mode,
+        asset::OpeningMovieSource opening_movie_source);
 
     // [game/main thread, after all worker clients have stopped]
     ~OmegaApp() noexcept;
@@ -114,7 +116,9 @@ private:
         runtime::ContentStartupState content,
         std::unique_ptr<NativePersistence> native_persistence, bool debug_device,
         runtime::RenderTexturePoolConfig texture_config,
-        std::optional<std::filesystem::path> opening_movie_path = std::nullopt);
+        std::optional<std::filesystem::path> opening_movie_path = std::nullopt,
+        runtime::FrontEndPresentationMode presentation_mode =
+            runtime::FrontEndPresentationMode::DeveloperDiagnostics);
     [[nodiscard]] static std::expected<OmegaApp, std::string>
     CreateWithTextureConfigAndOpeningMoviePlayback(
         runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
@@ -123,7 +127,9 @@ private:
         runtime::RenderTexturePoolConfig texture_config,
         std::optional<std::filesystem::path> opening_movie_path,
         std::optional<asset::OpeningMovieSource> opening_movie_source,
-        std::unique_ptr<OpeningMoviePlayback> opening_movie_playback);
+        std::unique_ptr<OpeningMoviePlayback> opening_movie_playback,
+        runtime::FrontEndPresentationMode presentation_mode =
+            runtime::FrontEndPresentationMode::DeveloperDiagnostics);
 
     struct RunLoopResult
     {
@@ -166,6 +172,13 @@ private:
     // allocation, I/O, or persistence work occurs.
     [[nodiscard]] bool ActiveProfileIsConfirmed() const noexcept;
     [[nodiscard]] bool ActiveCharacterIsConfirmed() const noexcept;
+    // [game/main thread; no concurrent use] The current project-authored
+    // presentation owns only the explicit developer capability. Normal mode
+    // remains unavailable until a retail-data decoder supplies the distinct,
+    // GameDataService-minted capability with its owned presentation.
+    [[nodiscard]] std::expected<void,
+        runtime::FrontEndPresentationGateError>
+    AuthorizeCurrentFrontEndPresentation() const noexcept;
     // [game/main/render thread; no concurrent use] Atomically rebuilds fixed CPU
     // texture fallback/overlay commands and, when a scene is resident, the
     // environment-plus-actor mesh commands for the final post-step position.
@@ -184,6 +197,10 @@ private:
 
     struct FrontEndPresentation
     {
+        [[no_unique_address]]
+        runtime::DeveloperDiagnosticFrontEndPresentationCapability provenance =
+            runtime::DeveloperDiagnosticFrontEndPresentationCapability::
+                CreateForExplicitDeveloperMode();
         runtime::RenderTextureHandle main_texture;
         runtime::RenderTextureHandle profiles_texture;
         std::array<runtime::RenderDrawList, kFrontEndMainRowCount> main_draw_lists;
@@ -273,7 +290,8 @@ private:
         runtime::RenderDrawList diagnostic_controls_draw_list,
         runtime::RenderDrawList diagnostic_asset_topology_draw_list,
         runtime::ContentStartupStage content_stage,
-        FrontEndStartupModel front_end_startup_model) noexcept;
+        FrontEndStartupModel front_end_startup_model,
+        runtime::FrontEndPresentationMode presentation_mode) noexcept;
 
     // Declaration order is ownership order; destruction is the required reverse order.
     std::unique_ptr<NativePersistence> native_persistence_;
@@ -337,6 +355,11 @@ private:
     // model begins as the startup snapshot and may perform the one supported
     // zero-to-one transition after a durable first-profile create.
     runtime::ContentStartupStage content_stage_ = runtime::ContentStartupStage::NoContent;
+    // Normal launch is fail-closed until a retail-data presentation producer is
+    // integrated. Only the explicit developer CLI route authorizes the
+    // project-authored presentation owned below.
+    runtime::FrontEndPresentationMode presentation_mode_ =
+        runtime::FrontEndPresentationMode::RetailRequired;
     FrontEndStartupModel front_end_startup_model_{};
     FrontEndCharacterStartupModel front_end_character_startup_model_{};
     std::optional<CharacterPresentation> character_presentation_;

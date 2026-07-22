@@ -106,6 +106,7 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     bool saw_capture_run = false;
     bool saw_replay_capture = false;
     bool saw_probe_only = false;
+    bool saw_developer_diagnostics = false;
     bool saw_help = false;
 
     for (const std::string_view argument : arguments)
@@ -225,6 +226,18 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
             result.probe_only = true;
             continue;
         }
+        if (argument == "--developer-diagnostics")
+        {
+            if (saw_developer_diagnostics)
+            {
+                return std::unexpected(
+                    "--developer-diagnostics may be specified only once");
+            }
+            saw_developer_diagnostics = true;
+            result.front_end_presentation_mode =
+                FrontEndPresentationMode::DeveloperDiagnostics;
+            continue;
+        }
         if (argument == "--capture-run")
         {
             if (saw_capture_run)
@@ -261,6 +274,9 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     if (result.probe_only && result.opening_movie_member)
         return std::unexpected(
             "--probe-only cannot be combined with --opening-movie-member");
+    if (result.probe_only && saw_developer_diagnostics)
+        return std::unexpected(
+            "--probe-only cannot be combined with --developer-diagnostics");
     if (result.show_help && arguments.size() != 1U)
         return std::unexpected("--help cannot be combined with other options");
     if (result.opening_movie_path && result.opening_movie_member)
@@ -280,6 +296,9 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
             static_cast<std::size_t>(result.frame_limit) >
                 kMaximumRunCaptureSessionFrames))
         return std::unexpected(CaptureRunFrameRangeError());
+    if (result.capture_run && !saw_developer_diagnostics)
+        return std::unexpected(
+            "--capture-run requires --developer-diagnostics");
     return result;
 }
 
@@ -289,6 +308,7 @@ std::string_view LaunchUsage() noexcept
            "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
            "[--frames=N [--capture-run [--replay-capture]]] "
            "[--data-root=PATH [--level=CODE]] [--probe-only] "
-           "[--opening-movie=PATH | --opening-movie-member=NAME]\n";
+           "[--opening-movie=PATH | --opening-movie-member=NAME] "
+           "[--developer-diagnostics]\n";
 }
 } // namespace omega::runtime

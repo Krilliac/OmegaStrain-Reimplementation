@@ -1369,10 +1369,11 @@ cmake --build --preset vs2022-launcher-debug
 .\Play-OpenOmega.cmd
 ```
 
-The default path is keyboard and mouse only: W/A/S/D or the arrow keys navigate and move; Return,
-keypad Enter, or F1 selects; Space or left mouse selects/fires; Escape, Backspace, or right mouse
-goes back in menus; T or held right mouse targets in play; and F10 quits. Gamepad discovery remains
-off unless the player explicitly supplies `--set=input.gamepad_enabled=true`.
+The explicit developer-diagnostics path is keyboard and mouse only: W/A/S/D or the arrow keys
+navigate and move; Return, keypad Enter, or F1 selects; Space or left mouse selects/fires; Escape,
+Backspace, or right mouse goes back in menus; T or held right mouse targets in play; and F10 quits.
+Gamepad discovery remains off unless the developer explicitly supplies
+`--set=input.gamepad_enabled=true`.
 
 Supplying arguments to `Play-OpenOmega.cmd` retains the direct-game developer path.
 `scripts/run-openomega.ps1` accepts `-Config Debug|RelWithDebInfo|Release`,
@@ -1380,8 +1381,8 @@ Supplying arguments to `Play-OpenOmega.cmd` retains the direct-game developer pa
 It runs from the repository root and forwards the game's exit code:
 
 ```powershell
-.\Play-OpenOmega.cmd --frames=120 --capture-run --replay-capture
-powershell -NoProfile -File .\scripts\run-openomega.ps1 -ConfigFile .\openomega.cfg --frames=120
+.\Play-OpenOmega.cmd --frames=120 --capture-run --replay-capture --developer-diagnostics
+powershell -NoProfile -File .\scripts\run-openomega.ps1 -ConfigFile .\openomega.cfg --frames=120 --developer-diagnostics
 ```
 
 Double-click `Open-OpenOmega-VS.cmd` to generate and open the Visual Studio 2022 x64 solution. The
@@ -1443,19 +1444,23 @@ ctest --preset msvc-debug
 .\build\msvc\products\sdk\Debug\omega_tool.exe level-texture-store-verify-tree .\private\extracted-disc
 .\build\msvc\products\sdk\Debug\omega_tool.exe asset-metadata-verify-tree .\private\extracted-disc
 .\build\msvc\products\game\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --probe-only
-.\build\msvc\products\game\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120
+.\build\msvc\products\game\Debug\openomega.exe --data-root=.\private\extracted-disc --level=MINSK --frames=120 --developer-diagnostics
 .\build\msvc\products\game\Debug\openomega.exe --data-root=.\private\extracted-disc --opening-movie-member=NAME
 python -B .\tools\probe_native_levels.py .\build\msvc\products\game\Debug\openomega.exe .\private\extracted-disc --aggregate-only
-.\build\msvc\products\game\Debug\openomega.exe --frames=120
-.\build\msvc\products\game\Debug\openomega.exe --frames=120 --capture-run
-.\build\msvc\products\game\Debug\openomega.exe --frames=120 --capture-run --replay-capture
-.\build\msvc\products\game\Debug\openomega.exe --config=.\openomega.cfg --set=log.minimum_severity=debug --frames=120
+.\build\msvc\products\game\Debug\openomega.exe --frames=120 --developer-diagnostics
+.\build\msvc\products\game\Debug\openomega.exe --frames=120 --capture-run --developer-diagnostics
+.\build\msvc\products\game\Debug\openomega.exe --frames=120 --capture-run --replay-capture --developer-diagnostics
+.\build\msvc\products\game\Debug\openomega.exe --config=.\openomega.cfg --set=log.minimum_severity=debug --frames=120 --developer-diagnostics
 ```
 
-`openomega` is the pure-native SDL3/SDL_GPU host shell. `--frames=N` is an automated smoke mode
-that opens the modern GPU backend, renders exactly `N` frames, and exits without user input.
-Adding `--capture-run` explicitly selects bounded in-process capture for 1 through 65,536 frames
-and prints only aggregate trace metadata plus selected absolute scheduler counters; it creates no
+`openomega` is the pure-native SDL3/SDL_GPU host shell. Normal launch is fail-closed after the
+opening movie until an evidenced retail-data presentation is available; it never substitutes the
+project-authored diagnostic menus or gameplay. The exact `--developer-diagnostics` flag enables
+those visibly labelled project-authored surfaces for engineering tests only, and the launcher does
+not expose that flag. With diagnostics enabled, `--frames=N` opens the modern GPU backend, renders
+exactly `N` frames, and exits without user input. Adding `--capture-run` explicitly selects bounded
+in-process capture for 1 through 65,536 frames and requires `--developer-diagnostics`. It prints
+only aggregate trace metadata plus selected absolute scheduler counters; it creates no
 capture file and prints no per-frame input or elapsed records. Ordinary `--frames` behavior is
 unchanged when the flag is absent.
 Adding `--replay-capture` to that finite capture performs immediate main-thread replay into a fresh

@@ -155,6 +155,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/content_startup.cpp
     native/src/runtime/content_startup_diagnostic.cpp
     native/src/runtime/frame_scheduler.cpp
+    native/src/runtime/front_end_presentation_gate.cpp
     native/src/runtime/input_trace.cpp
     native/src/runtime/input_tracker.cpp
     native/src/runtime/job_service.cpp
@@ -2032,6 +2033,33 @@ if(BUILD_TESTING)
     add_test(NAME omega_front_end_tests COMMAND omega_front_end_tests)
     set_tests_properties(omega_front_end_tests PROPERTIES TIMEOUT 5)
 
+    add_executable(omega_front_end_presentation_gate_tests
+        native/tests/front_end_presentation_gate_tests.cpp
+    )
+    target_link_libraries(omega_front_end_presentation_gate_tests PRIVATE omega_runtime)
+    if(MSVC)
+        target_compile_options(omega_front_end_presentation_gate_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_front_end_presentation_gate_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_front_end_presentation_gate_tests
+        COMMAND omega_front_end_presentation_gate_tests)
+    set_tests_properties(omega_front_end_presentation_gate_tests
+        PROPERTIES TIMEOUT 5)
+
     add_executable(omega_character_front_end_flow_tests
         native/tests/character_front_end_flow_tests.cpp
     )
@@ -2636,6 +2664,29 @@ if(BUILD_TESTING)
             )
         endif()
 
+        add_executable(omega_app_retail_presentation_smoke
+            native/tests/omega_app_retail_presentation_smoke.cpp
+        )
+        target_link_libraries(omega_app_retail_presentation_smoke PRIVATE omega_app_host)
+        if(MSVC)
+            target_compile_options(omega_app_retail_presentation_smoke PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_app_retail_presentation_smoke PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+
         if(OMEGA_RUN_GPU_SMOKE_TEST)
             add_test(NAME omega_app_opening_movie_smoke
                 COMMAND omega_app_opening_movie_smoke)
@@ -2644,6 +2695,15 @@ if(BUILD_TESTING)
                 TIMEOUT 30
                 RUN_SERIAL TRUE
                 LABELS "gpu;integration;opening-movie"
+            )
+
+            add_test(NAME omega_app_retail_presentation_smoke
+                COMMAND omega_app_retail_presentation_smoke)
+            set_tests_properties(omega_app_retail_presentation_smoke PROPERTIES
+                ENVIRONMENT "SDL_AUDIO_DRIVER=dummy"
+                TIMEOUT 15
+                RUN_SERIAL TRUE
+                LABELS "gpu;integration;opening-movie;retail-boundary"
             )
 
             add_test(NAME omega_app_capture_smoke COMMAND omega_app_capture_smoke)

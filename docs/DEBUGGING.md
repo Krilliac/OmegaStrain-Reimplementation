@@ -114,7 +114,7 @@ does not require proprietary content:
 
 ```powershell
 .\build\vs2022-x64\products\game\Debug\openomega.exe `
-  --frames=120 --capture-run --replay-capture
+  --frames=120 --capture-run --replay-capture --developer-diagnostics
 ```
 
 This records a bounded in-memory run, creates a fresh replay session in the same
@@ -207,8 +207,8 @@ waiting rather than silently hanging.
 
 ## Capture/replay divergence
 
-The available `--capture-run --replay-capture` path compares a fresh in-process
-replay against the captured aggregate state and returns failure on mismatch.
+The available `--capture-run --replay-capture --developer-diagnostics` path compares a fresh
+in-process replay against the captured aggregate state and returns failure on mismatch.
 Set breakpoints on the replay comparison diagnostics in
 `native/apps/openomega/main.cpp` to inspect a current mismatch.
 
