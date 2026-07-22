@@ -108,10 +108,12 @@ private:
 };
 } // namespace
 
-std::expected<OmegaApp::DiagnosticScenePresentation, std::string>
+std::expected<std::unique_ptr<OmegaApp::DiagnosticScenePresentation>, std::string>
 OmegaApp::BuildDiagnosticScenePresentation(
     SdlGpuHost& host, const asset::SceneIR& scene)
 {
+    static_assert(sizeof(std::unique_ptr<DiagnosticScenePresentation>) <
+                  sizeof(DiagnosticScenePresentation));
     if (scene.render_meshes.empty() != scene.mesh_instances.empty())
     {
         return std::unexpected(
@@ -148,9 +150,15 @@ OmegaApp::BuildDiagnosticScenePresentation(
         }
     }
 
-    DiagnosticScenePresentation presentation;
+    std::unique_ptr<DiagnosticScenePresentation> presentation{
+        new (std::nothrow) DiagnosticScenePresentation{}};
+    if (!presentation)
+    {
+        return std::unexpected(
+            std::string{"diagnostic scene presentation allocation failed"});
+    }
     DiagnosticSceneRollbackGuard rollback(
-        host, presentation.mesh_handles, presentation.mesh_count);
+        host, presentation->mesh_handles, presentation->mesh_count);
     for (const asset::RenderMeshIR& mesh : scene.render_meshes)
     {
         auto uploaded = host.UploadRenderMesh(mesh);
@@ -159,7 +167,7 @@ OmegaApp::BuildDiagnosticScenePresentation(
             return std::unexpected(
                 "diagnostic scene mesh upload failed: " + uploaded.error());
         }
-        presentation.mesh_handles[presentation.mesh_count++] = *uploaded;
+        presentation->mesh_handles[presentation->mesh_count++] = *uploaded;
     }
 
     std::array<runtime::RenderMeshDrawCommand,
@@ -170,7 +178,7 @@ OmegaApp::BuildDiagnosticScenePresentation(
         const asset::SceneMeshInstanceIR& instance =
             scene.mesh_instances[instance_index];
         commands[instance_index] = runtime::RenderMeshDrawCommand{
-            .mesh = presentation.mesh_handles[instance.render_mesh_index],
+            .mesh = presentation->mesh_handles[instance.render_mesh_index],
             .object_to_clip = object_to_clip[instance_index],
             .color = runtime::RenderMeshColorRgba8{
                 .red = 112U,
@@ -190,9 +198,9 @@ OmegaApp::BuildDiagnosticScenePresentation(
                                std::string(runtime::RenderMeshDrawListErrorCodeName(
                                    created_draw_list.error().code)));
     }
-    presentation.draw_list = std::move(*created_draw_list);
+    presentation->draw_list = std::move(*created_draw_list);
     rollback.Dismiss();
-    return std::expected<DiagnosticScenePresentation, std::string>{
+    return std::expected<std::unique_ptr<DiagnosticScenePresentation>, std::string>{
         std::in_place, std::move(presentation)};
 }
 
@@ -687,7 +695,7 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     runtime::RenderTextureHandle diagnostic_actor_marker_texture;
     runtime::RenderDrawList diagnostic_actor_draw_list;
     runtime::RenderDrawList diagnostic_scene_overlay_draw_list;
-    DiagnosticScenePresentation diagnostic_scene_presentation;
+    std::unique_ptr<DiagnosticScenePresentation> diagnostic_scene_presentation;
     FrontEndPresentation front_end_presentation;
     std::optional<FrontEndPresentation> first_profile_presentation;
     runtime::RenderTextureHandle diagnostic_controls_texture;
@@ -1197,6 +1205,8 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         }
         diagnostic_scene_presentation =
             std::move(*created_scene_presentation);
+        diagnostic_scene_presentation->overlay_draw_list =
+            std::move(diagnostic_scene_overlay_draw_list);
     }
 
     log->Info("startup", "runtime services ready with " +
@@ -1211,7 +1221,6 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                      std::move(opening_movie_draw_list), boot_sequence_state, diagnostic_texture,
                      diagnostic_actor_marker_texture,
                      std::move(diagnostic_actor_draw_list),
-                     std::move(diagnostic_scene_overlay_draw_list),
                      std::move(diagnostic_scene_presentation),
                      std::move(front_end_presentation),
                     std::move(first_profile_presentation), diagnostic_controls_texture,
@@ -1237,8 +1246,7 @@ OmegaApp::OmegaApp(
     const runtime::RenderTextureHandle diagnostic_texture,
     const runtime::RenderTextureHandle diagnostic_actor_marker_texture,
     runtime::RenderDrawList diagnostic_actor_draw_list,
-    runtime::RenderDrawList diagnostic_scene_overlay_draw_list,
-    DiagnosticScenePresentation diagnostic_scene_presentation,
+    std::unique_ptr<DiagnosticScenePresentation> diagnostic_scene_presentation,
     FrontEndPresentation front_end_presentation,
     std::optional<FrontEndPresentation> first_profile_presentation,
     const runtime::RenderTextureHandle diagnostic_controls_texture,
@@ -1259,8 +1267,6 @@ OmegaApp::OmegaApp(
       boot_sequence_state_(boot_sequence_state), diagnostic_texture_(diagnostic_texture),
       diagnostic_actor_marker_texture_(diagnostic_actor_marker_texture),
       diagnostic_actor_draw_list_(std::move(diagnostic_actor_draw_list)),
-      diagnostic_scene_overlay_draw_list_(
-          std::move(diagnostic_scene_overlay_draw_list)),
       diagnostic_scene_presentation_(std::move(diagnostic_scene_presentation)),
       front_end_presentation_(std::move(front_end_presentation)),
       first_profile_presentation_(std::move(first_profile_presentation)),
@@ -1310,7 +1316,6 @@ OmegaApp::~OmegaApp() noexcept
     diagnostic_asset_topology_draw_list_ = {};
     diagnostic_controls_draw_list_ = {};
     diagnostic_actor_draw_list_ = {};
-    diagnostic_scene_overlay_draw_list_ = {};
     ReleaseDiagnosticScenePresentation();
     ReleaseCharacterPresentation(first_character_presentation_);
     ReleaseCharacterPresentation(character_presentation_);
@@ -1407,15 +1412,19 @@ OmegaApp::~OmegaApp() noexcept
 
 void OmegaApp::ReleaseDiagnosticScenePresentation() noexcept
 {
-    diagnostic_scene_presentation_.draw_list = {};
-    while (diagnostic_scene_presentation_.mesh_count != 0U)
+    if (!diagnostic_scene_presentation_)
+        return;
+
+    diagnostic_scene_presentation_->draw_list = {};
+    diagnostic_scene_presentation_->overlay_draw_list = {};
+    while (diagnostic_scene_presentation_->mesh_count != 0U)
     {
-        --diagnostic_scene_presentation_.mesh_count;
+        --diagnostic_scene_presentation_->mesh_count;
         const runtime::RenderMeshHandle handle =
-            diagnostic_scene_presentation_.mesh_handles
-                [diagnostic_scene_presentation_.mesh_count];
-        diagnostic_scene_presentation_.mesh_handles
-            [diagnostic_scene_presentation_.mesh_count] = {};
+            diagnostic_scene_presentation_->mesh_handles
+                [diagnostic_scene_presentation_->mesh_count];
+        diagnostic_scene_presentation_->mesh_handles
+            [diagnostic_scene_presentation_->mesh_count] = {};
         if (host_ == nullptr || !handle.valid())
             continue;
 
@@ -1440,6 +1449,7 @@ void OmegaApp::ReleaseDiagnosticScenePresentation() noexcept
             }
         }
     }
+    diagnostic_scene_presentation_.reset();
 }
 
 std::expected<OmegaApp::CharacterPresentation, std::string>
@@ -2934,7 +2944,11 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
             std::string{"diagnostic scene overlay draw-list creation failed"});
     }
     diagnostic_actor_draw_list_ = std::move(*created);
-    diagnostic_scene_overlay_draw_list_ = std::move(*created_scene_overlay);
+    if (diagnostic_scene_presentation_)
+    {
+        diagnostic_scene_presentation_->overlay_draw_list =
+            std::move(*created_scene_overlay);
+    }
     return {};
 }
 
@@ -2998,9 +3012,12 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
     case FrontEndMode::AssetTopology:
         return diagnostic_asset_topology_draw_list_;
     case FrontEndMode::DiagnosticPlay:
-        return diagnostic_scene_presentation_.draw_list.empty()
-            ? diagnostic_actor_draw_list_
-            : diagnostic_scene_overlay_draw_list_;
+        if (diagnostic_scene_presentation_ &&
+            !diagnostic_scene_presentation_->draw_list.empty())
+        {
+            return diagnostic_scene_presentation_->overlay_draw_list;
+        }
+        return diagnostic_actor_draw_list_;
     }
     return front_end_presentation_.main_draw_lists.front();
 }
@@ -3013,7 +3030,9 @@ runtime::RenderMeshDrawList OmegaApp::CurrentFrontEndMeshDrawList() const noexce
         active_character_id_);
     if (view.mode != FrontEndMode::DiagnosticPlay)
         return {};
-    return diagnostic_scene_presentation_.draw_list;
+    return diagnostic_scene_presentation_
+        ? diagnostic_scene_presentation_->draw_list
+        : runtime::RenderMeshDrawList{};
 }
 
 std::string_view OmegaApp::driver_name() const noexcept
