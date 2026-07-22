@@ -44,6 +44,13 @@ public:
     [[nodiscard]] std::expected<void, std::string> MountHog(
         std::string_view virtual_root, const std::filesystem::path& archive_path);
 
+    // [game thread, before mount freeze] Indexes one HOG already exposed by the current mount
+    // stack. The archive directory and later member payloads are fetched through bounded random
+    // access, so an ISO-backed HOG is never materialized as one value. Newer mounts override
+    // older mounts when resolving archive_game_path.
+    [[nodiscard]] std::expected<void, std::string> MountHogFromGameFile(
+        std::string_view virtual_root, std::string_view archive_game_path);
+
     // [game thread] Publishes the immutable mount table. Idempotent.
     void Freeze() noexcept;
     [[nodiscard]] bool frozen() const noexcept;
@@ -52,6 +59,11 @@ public:
     [[nodiscard]] std::expected<std::vector<std::byte>, std::string> Read(
         std::string_view game_path,
         std::uint64_t maximum_bytes = kDefaultMaximumReadBytes) const;
+
+    // [any thread after Freeze(); thread-safe] Returns immutable indexed size metadata while
+    // revalidating the backing source identity where the mount supports it.
+    [[nodiscard]] std::expected<std::uint64_t, std::string> FileSize(
+        std::string_view game_path) const;
 
     // [any thread after Freeze(); thread-safe]
     [[nodiscard]] bool Contains(std::string_view game_path) const;

@@ -46,11 +46,37 @@ constexpr std::size_t kMaximumDirectoryMountEntries = 1U << 20U;
     return bytes;
 }
 
+[[nodiscard]] std::expected<void, std::string> ReadRangeInto(
+    const std::filesystem::path& path, const std::uint64_t offset,
+    const std::span<std::byte> output)
+{
+    if (offset > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max()) ||
+        output.size() > static_cast<std::size_t>(std::numeric_limits<std::streamsize>::max()))
+        return std::unexpected("file range is too large for this process: " + path.string());
+
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream)
+        return std::unexpected("unable to open file: " + path.string());
+    stream.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    if (!stream)
+        return std::unexpected("unable to seek file: " + path.string());
+    if (!output.empty() &&
+        !stream.read(reinterpret_cast<char*>(output.data()),
+            static_cast<std::streamsize>(output.size())))
+        return std::unexpected("unable to read complete file range: " + path.string());
+    return {};
+}
+
 class Mount
 {
 public:
     virtual ~Mount() = default;
     [[nodiscard]] virtual bool Contains(std::string_view normalized_path) const = 0;
+    [[nodiscard]] virtual std::expected<std::uint64_t, std::string> FileSize(
+        std::string_view normalized_path) const = 0;
+    [[nodiscard]] virtual std::expected<void, std::string> ReadFileRange(
+        std::string_view normalized_path, std::uint64_t offset,
+        std::span<std::byte> output) const = 0;
     [[nodiscard]] virtual std::expected<std::vector<std::byte>, std::string> Read(
         std::string_view normalized_path, std::uint64_t maximum_bytes) const = 0;
 };
@@ -102,8 +128,40 @@ public:
         return files_.contains(std::string(normalized_path));
     }
 
+    std::expected<std::uint64_t, std::string> FileSize(
+        const std::string_view normalized_path) const override
+    {
+        auto resolved = Resolve(normalized_path);
+        if (!resolved)
+            return std::unexpected(resolved.error());
+        return resolved->second;
+    }
+
+    std::expected<void, std::string> ReadFileRange(const std::string_view normalized_path,
+        const std::uint64_t offset, const std::span<std::byte> output) const override
+    {
+        auto resolved = Resolve(normalized_path);
+        if (!resolved)
+            return std::unexpected(resolved.error());
+        if (offset > resolved->second || output.size() > resolved->second - offset)
+            return std::unexpected("requested range extends past the mounted file");
+        return ReadRangeInto(resolved->first, offset, output);
+    }
+
     std::expected<std::vector<std::byte>, std::string> Read(
         const std::string_view normalized_path, const std::uint64_t maximum_bytes) const override
+    {
+        auto resolved = Resolve(normalized_path);
+        if (!resolved)
+            return std::unexpected(resolved.error());
+        return ReadRange(resolved->first, 0, resolved->second, maximum_bytes);
+    }
+
+private:
+    explicit DirectoryMount(std::filesystem::path root) : root_(std::move(root)) {}
+
+    [[nodiscard]] std::expected<std::pair<std::filesystem::path, std::uint64_t>, std::string>
+    Resolve(const std::string_view normalized_path) const
     {
         const auto iterator = files_.find(std::string(normalized_path));
         if (iterator == files_.end())
@@ -117,11 +175,8 @@ public:
         const auto size = std::filesystem::file_size(canonical_path, error);
         if (error)
             return std::unexpected("unable to determine file size: " + canonical_path.string());
-        return ReadRange(canonical_path, 0, size, maximum_bytes);
+        return std::pair{canonical_path, size};
     }
-
-private:
-    explicit DirectoryMount(std::filesystem::path root) : root_(std::move(root)) {}
 
     [[nodiscard]] bool IsWithinRoot(const std::filesystem::path& path) const
     {
@@ -735,6 +790,50 @@ public:
         return entries_.contains(std::string(normalized_path));
     }
 
+    std::expected<std::uint64_t, std::string> FileSize(
+        const std::string_view normalized_path) const override
+    {
+        const auto iterator = entries_.find(std::string(normalized_path));
+        if (iterator == entries_.end())
+            return std::unexpected("path is not present in ISO9660 mount");
+        auto current = QueryIso9660ImageIdentity(image_path_);
+        if (!current || !SameIso9660ImageIdentity(identity_, *current))
+            return std::unexpected("ISO9660 image changed after it was mounted");
+        return iterator->second.size;
+    }
+
+    std::expected<void, std::string> ReadFileRange(const std::string_view normalized_path,
+        const std::uint64_t offset, const std::span<std::byte> output) const override
+    {
+        const auto iterator = entries_.find(std::string(normalized_path));
+        if (iterator == entries_.end())
+            return std::unexpected("path is not present in ISO9660 mount");
+        const Iso9660Entry& entry = iterator->second;
+        if (offset > entry.size || output.size() > entry.size - offset)
+            return std::unexpected("requested range extends past the ISO9660 file");
+
+        auto before = QueryIso9660ImageIdentity(image_path_);
+        if (!before || !SameIso9660ImageIdentity(identity_, *before))
+            return std::unexpected("ISO9660 image changed after it was mounted");
+        std::uint64_t absolute_offset = 0;
+        std::uint64_t absolute_end = 0;
+        if (!CheckedAdd(entry.offset, offset, absolute_offset) ||
+            !CheckedAdd(absolute_offset, output.size(), absolute_end) ||
+            absolute_end > volume_bytes_ || absolute_end > before->size)
+            return std::unexpected("ISO9660 file range is no longer valid");
+
+        std::ifstream stream(image_path_, std::ios::binary);
+        if (!stream)
+            return std::unexpected("unable to reopen ISO9660 image");
+        auto read = ReadIso9660Bytes(stream, absolute_offset, output);
+        if (!read)
+            return std::unexpected(read.error());
+        auto after = QueryIso9660ImageIdentity(image_path_);
+        if (!after || !SameIso9660ImageIdentity(identity_, *after))
+            return std::unexpected("ISO9660 image changed while a file was being read");
+        return {};
+    }
+
     std::expected<std::vector<std::byte>, std::string> Read(
         const std::string_view normalized_path, const std::uint64_t maximum_bytes) const override
     {
@@ -745,29 +844,15 @@ public:
         if (entry.size > maximum_bytes)
             return std::unexpected("ISO9660 file exceeds caller's read limit");
         if (entry.size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) ||
-            entry.offset > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max()) ||
             entry.size > static_cast<std::uint64_t>(std::numeric_limits<std::streamsize>::max()))
             return std::unexpected("ISO9660 file range is too large for this process");
 
-        auto before = QueryIso9660ImageIdentity(image_path_);
-        if (!before || !SameIso9660ImageIdentity(identity_, *before))
-            return std::unexpected("ISO9660 image changed after it was mounted");
-        std::uint64_t end = 0;
-        if (!CheckedAdd(entry.offset, entry.size, end) || end > volume_bytes_ || end > before->size)
-            return std::unexpected("ISO9660 file range is no longer valid");
-
         try
         {
-            std::ifstream stream(image_path_, std::ios::binary);
-            if (!stream)
-                return std::unexpected("unable to reopen ISO9660 image");
             std::vector<std::byte> bytes(static_cast<std::size_t>(entry.size));
-            auto read = ReadIso9660Bytes(stream, entry.offset, bytes);
+            auto read = ReadFileRange(normalized_path, 0, bytes);
             if (!read)
                 return std::unexpected(read.error());
-            auto after = QueryIso9660ImageIdentity(image_path_);
-            if (!after || !SameIso9660ImageIdentity(identity_, *after))
-                return std::unexpected("ISO9660 image changed while a file was being read");
             return bytes;
         }
         catch (const std::bad_alloc&)
@@ -809,7 +894,7 @@ public:
         if (!index)
             return std::unexpected(index.error());
 
-        auto mount = std::unique_ptr<HogMount>(new HogMount(archive_path));
+        auto mount = std::unique_ptr<HogMount>(new HogMount(archive_path, index->archive_size()));
         for (const auto& entry : index->entries())
         {
             auto entry_path = NormalizeGamePath(entry.name);
@@ -829,19 +914,222 @@ public:
         return entries_.contains(std::string(normalized_path));
     }
 
+    std::expected<std::uint64_t, std::string> FileSize(
+        const std::string_view normalized_path) const override
+    {
+        const auto iterator = entries_.find(std::string(normalized_path));
+        if (iterator == entries_.end())
+            return std::unexpected("path is not present in HOG mount");
+        std::error_code error;
+        const auto current_size = std::filesystem::file_size(archive_path_, error);
+        if (error || current_size != archive_size_)
+            return std::unexpected("HOG backing file changed after it was mounted");
+        return iterator->second.size;
+    }
+
+    std::expected<void, std::string> ReadFileRange(const std::string_view normalized_path,
+        const std::uint64_t offset, const std::span<std::byte> output) const override
+    {
+        const auto iterator = entries_.find(std::string(normalized_path));
+        if (iterator == entries_.end())
+            return std::unexpected("path is not present in HOG mount");
+        const auto& entry = iterator->second;
+        if (offset > entry.size || output.size() > entry.size - offset ||
+            offset > std::numeric_limits<std::uint64_t>::max() - entry.offset)
+            return std::unexpected("requested range extends past the HOG member");
+        std::error_code error;
+        const auto before_size = std::filesystem::file_size(archive_path_, error);
+        if (error || before_size != archive_size_)
+            return std::unexpected("HOG backing file changed after it was mounted");
+        auto read = ReadRangeInto(archive_path_, entry.offset + offset, output);
+        if (!read)
+            return read;
+        const auto after_size = std::filesystem::file_size(archive_path_, error);
+        if (error || after_size != archive_size_)
+            return std::unexpected("HOG backing file changed while a member was being read");
+        return {};
+    }
+
     std::expected<std::vector<std::byte>, std::string> Read(
         const std::string_view normalized_path, const std::uint64_t maximum_bytes) const override
     {
         const auto iterator = entries_.find(std::string(normalized_path));
         if (iterator == entries_.end())
             return std::unexpected("path is not present in HOG mount");
-        return ReadRange(archive_path_, iterator->second.offset, iterator->second.size, maximum_bytes);
+        if (iterator->second.size > maximum_bytes)
+            return std::unexpected("HOG member exceeds caller's read limit");
+        if (iterator->second.size >
+            static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
+            return std::unexpected("HOG member is too large for this process");
+        try
+        {
+            std::vector<std::byte> bytes(static_cast<std::size_t>(iterator->second.size));
+            auto read = ReadFileRange(normalized_path, 0, bytes);
+            if (!read)
+                return std::unexpected(read.error());
+            return bytes;
+        }
+        catch (const std::bad_alloc&)
+        {
+            return std::unexpected("HOG member allocation exceeded process capacity");
+        }
+        catch (const std::length_error&)
+        {
+            return std::unexpected("HOG member allocation exceeded container capacity");
+        }
     }
 
 private:
-    explicit HogMount(std::filesystem::path archive_path) : archive_path_(std::move(archive_path)) {}
+    HogMount(std::filesystem::path archive_path, const std::uint64_t archive_size)
+        : archive_path_(std::move(archive_path)), archive_size_(archive_size)
+    {
+    }
 
     std::filesystem::path archive_path_;
+    std::uint64_t archive_size_ = 0;
+    std::unordered_map<std::string, archive::HogEntry> entries_;
+};
+
+class MountedHogMount final : public Mount
+{
+public:
+    [[nodiscard]] static std::expected<std::unique_ptr<MountedHogMount>, std::string> Create(
+        const std::string_view virtual_root, const Mount& source,
+        std::string normalized_archive_path)
+    {
+        auto root = NormalizeGamePath(virtual_root);
+        if (!root)
+            return std::unexpected("invalid HOG virtual root: " + root.error());
+        auto archive_size = source.FileSize(normalized_archive_path);
+        if (!archive_size)
+            return std::unexpected(archive_size.error());
+
+        ReadContext context{
+            .source = &source,
+            .archive_path = normalized_archive_path,
+        };
+        auto index = archive::HogIndex::Open(archive::HogReadSource{
+            .size = *archive_size,
+            .context = &context,
+            .read_exact = &ReadSourceRange,
+        });
+        if (!index)
+            return std::unexpected(index.error());
+
+        try
+        {
+            auto mount = std::unique_ptr<MountedHogMount>(new MountedHogMount(
+                source, std::move(normalized_archive_path), *archive_size));
+            for (const auto& entry : index->entries())
+            {
+                auto entry_path = NormalizeGamePath(entry.name);
+                if (!entry_path)
+                    return std::unexpected("invalid HOG entry path: " + entry.name);
+                if (root->size() + 1U + entry_path->size() > kMaximumGamePathLength)
+                    return std::unexpected("combined HOG virtual path exceeds safety limit");
+                const std::string full_path = *root + "/" + *entry_path;
+                if (!mount->entries_.emplace(full_path, entry).second)
+                    return std::unexpected("duplicate normalized HOG entry: " + full_path);
+            }
+            return mount;
+        }
+        catch (const std::bad_alloc&)
+        {
+            return std::unexpected("HOG index allocation exceeded process capacity");
+        }
+        catch (const std::length_error&)
+        {
+            return std::unexpected("HOG index allocation exceeded container capacity");
+        }
+    }
+
+    bool Contains(const std::string_view normalized_path) const override
+    {
+        return entries_.contains(std::string(normalized_path));
+    }
+
+    std::expected<std::uint64_t, std::string> FileSize(
+        const std::string_view normalized_path) const override
+    {
+        const auto iterator = entries_.find(std::string(normalized_path));
+        if (iterator == entries_.end())
+            return std::unexpected("path is not present in mounted HOG");
+        auto current_size = source_->FileSize(archive_path_);
+        if (!current_size || *current_size != archive_size_)
+            return std::unexpected("mounted HOG source changed after it was indexed");
+        return iterator->second.size;
+    }
+
+    std::expected<void, std::string> ReadFileRange(const std::string_view normalized_path,
+        const std::uint64_t offset, const std::span<std::byte> output) const override
+    {
+        const auto iterator = entries_.find(std::string(normalized_path));
+        if (iterator == entries_.end())
+            return std::unexpected("path is not present in mounted HOG");
+        const auto& entry = iterator->second;
+        if (offset > entry.size || output.size() > entry.size - offset ||
+            offset > std::numeric_limits<std::uint64_t>::max() - entry.offset)
+            return std::unexpected("requested range extends past the mounted HOG member");
+        auto current_size = source_->FileSize(archive_path_);
+        if (!current_size || *current_size != archive_size_)
+            return std::unexpected("mounted HOG source changed after it was indexed");
+        return source_->ReadFileRange(archive_path_, entry.offset + offset, output);
+    }
+
+    std::expected<std::vector<std::byte>, std::string> Read(
+        const std::string_view normalized_path, const std::uint64_t maximum_bytes) const override
+    {
+        const auto iterator = entries_.find(std::string(normalized_path));
+        if (iterator == entries_.end())
+            return std::unexpected("path is not present in mounted HOG");
+        if (iterator->second.size > maximum_bytes)
+            return std::unexpected("mounted HOG member exceeds caller's read limit");
+        if (iterator->second.size >
+            static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
+            return std::unexpected("mounted HOG member is too large for this process");
+        try
+        {
+            std::vector<std::byte> bytes(static_cast<std::size_t>(iterator->second.size));
+            auto read = ReadFileRange(normalized_path, 0, bytes);
+            if (!read)
+                return std::unexpected(read.error());
+            return bytes;
+        }
+        catch (const std::bad_alloc&)
+        {
+            return std::unexpected("mounted HOG member allocation exceeded process capacity");
+        }
+        catch (const std::length_error&)
+        {
+            return std::unexpected("mounted HOG member allocation exceeded container capacity");
+        }
+    }
+
+private:
+    struct ReadContext
+    {
+        const Mount* source = nullptr;
+        std::string_view archive_path;
+    };
+
+    [[nodiscard]] static std::expected<void, std::string> ReadSourceRange(
+        void* raw_context, const std::uint64_t offset, const std::span<std::byte> output)
+    {
+        const auto* context = static_cast<const ReadContext*>(raw_context);
+        if (context == nullptr || context->source == nullptr)
+            return std::unexpected("mounted HOG read context is unavailable");
+        return context->source->ReadFileRange(context->archive_path, offset, output);
+    }
+
+    MountedHogMount(const Mount& source, std::string archive_path,
+        const std::uint64_t archive_size)
+        : source_(&source), archive_path_(std::move(archive_path)), archive_size_(archive_size)
+    {
+    }
+
+    const Mount* source_ = nullptr;
+    std::string archive_path_;
+    std::uint64_t archive_size_ = 0;
     std::unordered_map<std::string, archive::HogEntry> entries_;
 };
 } // namespace
@@ -942,6 +1230,35 @@ std::expected<void, std::string> VirtualFileSystem::MountHog(
     return {};
 }
 
+std::expected<void, std::string> VirtualFileSystem::MountHogFromGameFile(
+    const std::string_view virtual_root, const std::string_view archive_game_path)
+{
+    if (!impl_)
+        return std::unexpected("cannot use a moved-from VFS");
+    if (impl_->frozen)
+        return std::unexpected("cannot add a mount after the VFS is frozen");
+    auto normalized = NormalizeGamePath(archive_game_path);
+    if (!normalized)
+        return std::unexpected(normalized.error());
+
+    const Mount* source = nullptr;
+    for (auto iterator = impl_->mounts.rbegin(); iterator != impl_->mounts.rend(); ++iterator)
+    {
+        if ((*iterator)->Contains(*normalized))
+        {
+            source = iterator->get();
+            break;
+        }
+    }
+    if (source == nullptr)
+        return std::unexpected("HOG source game path was not found");
+    auto mount = MountedHogMount::Create(virtual_root, *source, std::move(*normalized));
+    if (!mount)
+        return std::unexpected(mount.error());
+    impl_->mounts.push_back(std::move(*mount));
+    return {};
+}
+
 void VirtualFileSystem::Freeze() noexcept
 {
     if (impl_)
@@ -968,6 +1285,25 @@ std::expected<std::vector<std::byte>, std::string> VirtualFileSystem::Read(
     {
         if ((*iterator)->Contains(*normalized))
             return (*iterator)->Read(*normalized, maximum_bytes);
+    }
+    return std::unexpected("game path was not found: " + *normalized);
+}
+
+std::expected<std::uint64_t, std::string> VirtualFileSystem::FileSize(
+    const std::string_view game_path) const
+{
+    if (!impl_)
+        return std::unexpected("cannot use a moved-from VFS");
+    if (!impl_->frozen)
+        return std::unexpected("VFS metadata reads require Freeze() after all mounts are configured");
+    auto normalized = NormalizeGamePath(game_path);
+    if (!normalized)
+        return std::unexpected(normalized.error());
+
+    for (auto iterator = impl_->mounts.rbegin(); iterator != impl_->mounts.rend(); ++iterator)
+    {
+        if ((*iterator)->Contains(*normalized))
+            return (*iterator)->FileSize(*normalized);
     }
     return std::unexpected("game path was not found: " + *normalized);
 }

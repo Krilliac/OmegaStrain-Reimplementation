@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -51,7 +52,7 @@ std::vector<std::byte> MakeArchive()
 }
 
 constexpr std::size_t kIsoSectorBytes = 2048;
-constexpr std::uint32_t kIsoVolumeSectors = 28;
+constexpr std::uint32_t kIsoVolumeSectors = 31;
 constexpr std::uint32_t kIsoRootSector = 20;
 constexpr std::uint32_t kIsoGameDataSector = 21;
 constexpr std::uint32_t kIsoMinskSector = 22;
@@ -59,6 +60,8 @@ constexpr std::uint32_t kIsoSystemSector = 23;
 constexpr std::uint32_t kIsoExecutableSector = 24;
 constexpr std::uint32_t kIsoLevelSector = 25;
 constexpr std::uint32_t kIsoVersionTwoSector = 26;
+constexpr std::uint32_t kIsoZMediaSector = 27;
+constexpr std::uint32_t kIsoMovieArchiveSector = 28;
 
 void WriteBothEndianU16(
     std::vector<std::byte>& bytes, const std::size_t offset, const std::uint16_t value)
@@ -109,11 +112,18 @@ std::size_t WriteIsoDirectoryRecord(std::vector<std::byte>& bytes, std::size_t& 
 }
 
 void WriteIsoPayload(std::vector<std::byte>& bytes, const std::uint32_t sector,
-    const std::string_view payload)
+    const std::span<const std::byte> payload)
 {
     const std::size_t offset = static_cast<std::size_t>(sector) * kIsoSectorBytes;
-    std::ranges::copy(std::as_bytes(std::span(payload.data(), payload.size())),
+    std::ranges::copy(payload,
         bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+}
+
+void WriteIsoPayload(std::vector<std::byte>& bytes, const std::uint32_t sector,
+    const std::string_view payload)
+{
+    WriteIsoPayload(bytes, sector,
+        std::as_bytes(std::span(payload.data(), payload.size())));
 }
 
 struct SyntheticIso9660
@@ -124,6 +134,8 @@ struct SyntheticIso9660
     std::size_t root_system_record = 0;
     std::size_t root_game_data_record = 0;
     std::size_t game_data_minsk_record = 0;
+    std::size_t zmedia_movie_record = 0;
+    std::size_t movie_archive_offset = 0;
 };
 
 SyntheticIso9660 MakeSyntheticIso9660(const bool duplicate_system_path = false)
@@ -133,6 +145,7 @@ SyntheticIso9660 MakeSyntheticIso9660(const bool duplicate_system_path = false)
     constexpr std::string_view executable = "synthetic executable placeholder";
     constexpr std::string_view level_payload = "MINSK-LEVEL";
     constexpr std::string_view version_two_payload = "VERSION-TWO";
+    const auto movie_archive = MakeArchive();
     SyntheticIso9660 image;
     image.bytes.resize(kIsoVolumeSectors * kIsoSectorBytes, std::byte{0});
 
@@ -169,6 +182,8 @@ SyntheticIso9660 MakeSyntheticIso9660(const bool duplicate_system_path = false)
         static_cast<std::uint32_t>(executable.size()), false, "SCUS_972.64;1");
     image.root_game_data_record = WriteIsoDirectoryRecord(image.bytes, cursor,
         kIsoGameDataSector, kIsoSectorBytes, true, "GAMEDATA");
+    WriteIsoDirectoryRecord(image.bytes, cursor,
+        kIsoZMediaSector, kIsoSectorBytes, true, "ZMEDIA");
     WriteIsoDirectoryRecord(image.bytes, cursor, kIsoVersionTwoSector,
         static_cast<std::uint32_t>(version_two_payload.size()), false, "PATCH.BIN;2");
     if (duplicate_system_path)
@@ -193,10 +208,22 @@ SyntheticIso9660 MakeSyntheticIso9660(const bool duplicate_system_path = false)
     WriteIsoDirectoryRecord(image.bytes, cursor, kIsoLevelSector,
         static_cast<std::uint32_t>(level_payload.size()), false, "DATA.POP;1");
 
+    cursor = kIsoZMediaSector * kIsoSectorBytes;
+    WriteIsoDirectoryRecord(image.bytes, cursor, kIsoZMediaSector,
+        kIsoSectorBytes, true, current_directory);
+    WriteIsoDirectoryRecord(image.bytes, cursor, kIsoRootSector,
+        kIsoSectorBytes, true, parent_directory);
+    image.zmedia_movie_record = WriteIsoDirectoryRecord(image.bytes, cursor,
+        kIsoMovieArchiveSector, static_cast<std::uint32_t>(movie_archive.size()),
+        false, "ZMOVIES.HOG;1");
+
     WriteIsoPayload(image.bytes, kIsoSystemSector, system_config);
     WriteIsoPayload(image.bytes, kIsoExecutableSector, executable);
     WriteIsoPayload(image.bytes, kIsoLevelSector, level_payload);
     WriteIsoPayload(image.bytes, kIsoVersionTwoSector, version_two_payload);
+    WriteIsoPayload(image.bytes, kIsoMovieArchiveSector, movie_archive);
+    image.movie_archive_offset =
+        static_cast<std::size_t>(kIsoMovieArchiveSector) * kIsoSectorBytes;
     return image;
 }
 
@@ -209,6 +236,74 @@ bool WriteFile(const std::filesystem::path& path, const std::span<const std::byt
         output.write(reinterpret_cast<const char*>(bytes.data()),
             static_cast<std::streamsize>(bytes.size()));
     return static_cast<bool>(output);
+}
+
+bool WriteSparseOversizedMovieIso(const std::filesystem::path& path)
+{
+    constexpr std::string_view selected_name = "Synthetic-Opening.PSS";
+    constexpr std::string_view oversized_name = "Synthetic-Oversized.PSS";
+    constexpr std::uint32_t selected_bytes = 4U;
+    constexpr std::uint64_t oversized_bytes =
+        omega::asset::kOpeningMovieMaximumSourceBytes + 1U;
+    static_assert(oversized_bytes <= std::numeric_limits<std::uint32_t>::max());
+
+    const std::size_t names_offset = 0x14U + 3U * sizeof(std::uint32_t);
+    const std::size_t names_end = names_offset + selected_name.size() + 1U +
+                                  oversized_name.size() + 1U;
+    const std::size_t data_offset = (names_end + 15U) & ~std::size_t{15U};
+    const std::uint64_t payload_bytes = selected_bytes + oversized_bytes;
+    const std::uint64_t archive_bytes = data_offset + payload_bytes;
+    if (archive_bytes > std::numeric_limits<std::uint32_t>::max())
+        return false;
+
+    std::vector<std::byte> prefix(data_offset + selected_bytes, std::byte{0});
+    const auto write_u32 = [&prefix](const std::size_t offset, const std::uint32_t value) {
+        for (unsigned shift = 0; shift < 32; shift += 8)
+            prefix[offset + shift / 8U] =
+                static_cast<std::byte>((value >> shift) & 0xFFU);
+    };
+    write_u32(0x00U, 0x4052673D);
+    write_u32(0x04U, 2U);
+    write_u32(0x08U, 0x14U);
+    write_u32(0x0CU, static_cast<std::uint32_t>(names_offset));
+    write_u32(0x10U, static_cast<std::uint32_t>(data_offset));
+    write_u32(0x14U, 0U);
+    write_u32(0x18U, selected_bytes);
+    write_u32(0x1CU, static_cast<std::uint32_t>(payload_bytes));
+    std::ranges::copy(std::as_bytes(std::span(selected_name.data(), selected_name.size())),
+        prefix.begin() + static_cast<std::ptrdiff_t>(names_offset));
+    const std::size_t oversized_name_offset = names_offset + selected_name.size() + 1U;
+    std::ranges::copy(std::as_bytes(std::span(oversized_name.data(), oversized_name.size())),
+        prefix.begin() + static_cast<std::ptrdiff_t>(oversized_name_offset));
+    constexpr std::array<std::byte, selected_bytes> selected_payload{
+        std::byte{'O'}, std::byte{'M'}, std::byte{'E'}, std::byte{'G'}};
+    std::ranges::copy(selected_payload,
+        prefix.begin() + static_cast<std::ptrdiff_t>(data_offset));
+
+    auto image = MakeSyntheticIso9660();
+    const std::uint64_t archive_offset =
+        static_cast<std::uint64_t>(kIsoMovieArchiveSector) * kIsoSectorBytes;
+    const std::uint64_t archive_end = archive_offset + archive_bytes;
+    const std::uint64_t volume_sectors =
+        (archive_end + kIsoSectorBytes - 1U) / kIsoSectorBytes;
+    if (volume_sectors > std::numeric_limits<std::uint32_t>::max())
+        return false;
+    const std::uint64_t volume_bytes = volume_sectors * kIsoSectorBytes;
+    WriteBothEndianU32(image.bytes, 16U * kIsoSectorBytes + 80U,
+        static_cast<std::uint32_t>(volume_sectors));
+    WriteBothEndianU32(image.bytes, image.zmedia_movie_record + 10U,
+        static_cast<std::uint32_t>(archive_bytes));
+    std::ranges::copy(prefix,
+        image.bytes.begin() + static_cast<std::ptrdiff_t>(image.movie_archive_offset));
+
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output)
+        return false;
+    output.write(reinterpret_cast<const char*>(image.bytes.data()),
+        static_cast<std::streamsize>(image.bytes.size()));
+    output.seekp(static_cast<std::streamoff>(volume_bytes - 1U), std::ios::beg);
+    output.put('\0');
+    return output.good();
 }
 
 int failures = 0;
@@ -238,6 +333,8 @@ void RunVirtualFileSystemTests()
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root / "physical", error);
     Check(!error, "temporary test directory is created");
+    std::filesystem::create_directories(root / "physical" / "ZMEDIA", error);
+    Check(!error, "directory-backed archive fixture directory is created");
     std::filesystem::create_directories(root / "override", error);
     Check(!error, "override test directory is created");
 
@@ -255,6 +352,8 @@ void RunVirtualFileSystemTests()
         std::ofstream output(archive_path, std::ios::binary);
         output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     }
+    Check(WriteFile(root / "physical" / "ZMEDIA" / "ZMOVIES.HOG", MakeArchive()),
+        "directory-backed HOG fixture is written");
     const auto unsafe_archive_path = root / "UNSAFE.HOG";
     {
         auto bytes = MakeArchive();
@@ -299,7 +398,12 @@ void RunVirtualFileSystemTests()
     Check(iso_vfs.MountDirectory(root / "physical").has_value(),
         "an older extracted directory mounts before the ISO fixture");
     Check(iso_vfs.MountIso9660(iso_path).has_value(), "synthetic ISO9660 image mounts");
+    Check(iso_vfs.MountHogFromGameFile(
+              "OPENING_MOVIE_ARCHIVE", "ZMEDIA/ZMOVIES.HOG").has_value(),
+        "an ISO-backed HOG is indexed through bounded mounted-file reads");
     Check(!iso_vfs.Read("SYSTEM.CNF"), "ISO reads are rejected before mount freeze");
+    Check(!iso_vfs.FileSize("OPENING_MOVIE_ARCHIVE/TEST.SO"),
+        "mounted-file size metadata is rejected before mount freeze");
     iso_vfs.Freeze();
     Check(iso_vfs.frozen(), "ISO mount table reports frozen state");
     Check(!iso_vfs.MountIso9660(iso_path), "ISO mounts are rejected after freeze");
@@ -307,6 +411,8 @@ void RunVirtualFileSystemTests()
         "canonical ;1 files are indexed without versions and looked up case-insensitively");
     Check(!iso_vfs.Contains("SYSTEM.CNF;1"),
         "the VFS exposes a version-free canonical path rather than a second ;1 alias");
+    Check(iso_vfs.Contains("opening_movie_archive/test.so"),
+        "ISO-backed HOG members join the immutable normalized mount table");
     Check(iso_vfs.Contains("gamedata/minsk/data.pop"),
         "nested ISO9660 directories are indexed as normalized game paths");
     Check(iso_vfs.Contains("PATCH.BIN;2") && !iso_vfs.Contains("PATCH.BIN"),
@@ -320,6 +426,25 @@ void RunVirtualFileSystemTests()
         "nested ISO9660 payload reads return owned bytes");
     Check(!iso_vfs.Read("GAMEDATA/MINSK/DATA.POP", 10),
         "ISO9660 payload size is checked before caller-bounded allocation");
+    const auto iso_movie_size = iso_vfs.FileSize("OPENING_MOVIE_ARCHIVE/TEST.SO");
+    const auto iso_movie = iso_vfs.Read("OPENING_MOVIE_ARCHIVE/TEST.SO", 4);
+    Check(iso_movie_size && *iso_movie_size == 4U && iso_movie &&
+              iso_movie->size() == 4U && (*iso_movie)[0] == std::byte{'O'} &&
+              (*iso_movie)[3] == std::byte{'G'},
+        "an ISO-backed HOG read returns only the selected member range");
+    Check(!iso_vfs.Read("OPENING_MOVIE_ARCHIVE/TEST.SO", 3),
+        "ISO-backed HOG members are rejected before an oversized allocation/read");
+
+    omega::vfs::VirtualFileSystem directory_hog_vfs;
+    Check(directory_hog_vfs.MountDirectory(root / "physical").has_value() &&
+              directory_hog_vfs.MountHogFromGameFile(
+                  "OPENING_MOVIE_ARCHIVE", "ZMEDIA/ZMOVIES.HOG").has_value(),
+        "the same mounted-file HOG path indexes an extracted directory source");
+    directory_hog_vfs.Freeze();
+    const auto directory_movie = directory_hog_vfs.Read(
+        "OPENING_MOVIE_ARCHIVE/TEST.SO", 4);
+    Check(directory_movie && iso_movie && *directory_movie == *iso_movie,
+        "directory and ISO mounted-file HOG paths publish identical selected bytes");
 
     std::atomic<bool> concurrent_reads_ok = true;
     std::vector<std::thread> readers;
@@ -354,6 +479,77 @@ void RunVirtualFileSystemTests()
               opened_iso->identity().build == omega::content::RetailBuild::NtscUScus97264 &&
               opened_iso->identity().boot_executable == "SCUS_972.64",
         "GameDataService accepts a regular .iso and publishes the validated NTSC-U identity");
+    if (opened_iso)
+    {
+        const auto opening_movie = opened_iso->LoadOpeningMovieSource("test.so");
+        Check(opening_movie && opening_movie->bytes().size() == 4U &&
+                  opening_movie->bytes()[0] == std::byte{'O'} &&
+                  opening_movie->bytes()[3] == std::byte{'G'},
+            "GameDataService resolves an exact opening-movie member from an ISO-backed HOG");
+    }
+    const auto malformed_movie_iso_path = root / "malformed-movie-archive.iso";
+    auto malformed_movie_iso = iso_fixture;
+    malformed_movie_iso.bytes[malformed_movie_iso.movie_archive_offset + 0x10U] = std::byte{0};
+    Check(WriteFile(malformed_movie_iso_path, malformed_movie_iso.bytes),
+        "malformed embedded HOG fixture is written");
+    const auto malformed_movie_service =
+        omega::content::GameDataService::Open({.root = malformed_movie_iso_path});
+    Check(malformed_movie_service.has_value(),
+        "a malformed optional ISO-backed movie archive does not block game-data startup");
+    if (malformed_movie_service)
+    {
+        const auto malformed_movie =
+            malformed_movie_service->LoadOpeningMovieSource("Synthetic-Secret.PSS");
+        Check(!malformed_movie && malformed_movie.error().code ==
+                  omega::content::GameDataErrorCode::MalformedArchive &&
+                  malformed_movie.error().message.find("Synthetic-Secret") == std::string::npos &&
+                  malformed_movie.error().message.find(malformed_movie_iso_path.string()) ==
+                      std::string::npos,
+            "malformed ISO-backed archive failures remain categorical and sanitized");
+    }
+
+    const auto short_movie_range_path = root / "short-movie-range.iso";
+    auto short_movie_range = iso_fixture;
+    WriteBothEndianU32(short_movie_range.bytes, short_movie_range.zmedia_movie_record + 10U,
+        static_cast<std::uint32_t>(MakeArchive().size() - 1U));
+    Check(WriteFile(short_movie_range_path, short_movie_range.bytes),
+        "short embedded HOG range fixture is written");
+    const auto short_movie_range_service =
+        omega::content::GameDataService::Open({.root = short_movie_range_path});
+    Check(short_movie_range_service.has_value(),
+        "an invalid optional ISO member range does not block game-data startup");
+    if (short_movie_range_service)
+    {
+        const auto short_movie =
+            short_movie_range_service->LoadOpeningMovieSource("TEST.SO");
+        Check(!short_movie && short_movie.error().code ==
+                  omega::content::GameDataErrorCode::MalformedArchive,
+            "an ISO file range shorter than the HOG terminal boundary is rejected");
+    }
+
+    const auto sparse_movie_iso_path = root / "sparse-oversized-movie.iso";
+    Check(WriteSparseOversizedMovieIso(sparse_movie_iso_path),
+        "sparse ISO fixture with a HOG above the terminal payload cap is written");
+    const auto sparse_movie_service =
+        omega::content::GameDataService::Open({.root = sparse_movie_iso_path});
+    Check(sparse_movie_service.has_value(),
+        "an ISO-backed HOG larger than 512 MiB is indexed without loading the container");
+    if (sparse_movie_service)
+    {
+        const auto selected_movie =
+            sparse_movie_service->LoadOpeningMovieSource("synthetic-opening.pss");
+        Check(selected_movie && selected_movie->bytes().size() == 4U &&
+                  selected_movie->bytes()[0] == std::byte{'O'},
+            "a bounded member is read from a larger sparse ISO-backed HOG");
+        const auto oversized_movie =
+            sparse_movie_service->LoadOpeningMovieSource("synthetic-oversized.pss");
+        Check(!oversized_movie && oversized_movie.error().decode_error &&
+                  oversized_movie.error().decode_error->code ==
+                      omega::asset::DecodeErrorCode::LimitExceeded &&
+                  oversized_movie.error().message.find("synthetic-oversized") ==
+                      std::string::npos,
+            "an ISO-backed member above 512 MiB is rejected before payload allocation");
+    }
 
     const auto bad_descriptor_path = root / "private-owner-descriptor.iso";
     auto bad_descriptor = iso_fixture;
@@ -468,6 +664,9 @@ void RunVirtualFileSystemTests()
     omega::vfs::VirtualFileSystem mutation_vfs;
     Check(mutation_vfs.MountIso9660(mutation_path).has_value(),
         "mutation fixture mounts before it changes");
+    Check(mutation_vfs.MountHogFromGameFile(
+              "OPENING_MOVIE_ARCHIVE", "ZMEDIA/ZMOVIES.HOG").has_value(),
+        "mutation fixture indexes its ISO-backed HOG before publication");
     mutation_vfs.Freeze();
     const auto original_write_time = std::filesystem::last_write_time(mutation_path, error);
     Check(!error, "mutation fixture timestamp is read");
@@ -482,6 +681,8 @@ void RunVirtualFileSystemTests()
     Check(!error, "mutation fixture receives a deterministic changed identity");
     Check(!mutation_vfs.Read("GAMEDATA/MINSK/DATA.POP"),
         "payload mutation after mount is rejected before bytes are published");
+    Check(!mutation_vfs.Read("OPENING_MOVIE_ARCHIVE/TEST.SO"),
+        "ISO identity changes also invalidate previously indexed HOG member ranges");
 
     const auto truncation_path = root / "truncation.iso";
     Check(WriteFile(truncation_path, iso_fixture.bytes), "truncation fixture is written");
