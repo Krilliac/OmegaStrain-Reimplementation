@@ -44,6 +44,7 @@ class NativeDependencyGateTests(unittest.TestCase):
     def test_explicit_allowed_module_edges(self) -> None:
         cases = (
             ("native/src/archive/example.cpp", "omega/asset/decode.h"),
+            ("native/src/frontend/example.cpp", "omega/asset/frontend_ir.h"),
             ("native/src/profiles/example.cpp", "omega/persistence/save_database.h"),
             ("native/src/simulation/example.cpp", "omega/asset/decode.h"),
             ("native/src/media/example.cpp", "omega/asset/decode.h"),
@@ -85,6 +86,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             "native/src/archive/hog_archive.cpp",
             "native/src/compat/ps2_memory_card_image.cpp",
             "native/src/content/game_data_service.cpp",
+            "native/src/frontend/compositor_math.cpp",
             "native/src/gameplay/debug_locomotion.cpp",
             "native/src/media/mpeg_program_stream_descriptor.cpp",
             "native/src/persistence/save_database.cpp",
@@ -160,6 +162,7 @@ class NativeDependencyGateTests(unittest.TestCase):
     def test_explicit_forbidden_module_edges(self) -> None:
         cases = (
             ("native/src/archive/example.cpp", "omega/runtime/frame_scheduler.h"),
+            ("native/src/frontend/example.cpp", "omega/runtime/frame_scheduler.h"),
             ("native/src/persistence/example.cpp", "omega/profiles/profile_catalog.h"),
             ("native/src/profiles/example.cpp", "omega/runtime/frame_scheduler.h"),
             ("native/src/simulation/example.cpp", "omega/runtime/frame_scheduler.h"),
@@ -513,6 +516,61 @@ class NativeDependencyGateTests(unittest.TestCase):
         )
         self.assertTrue(header_rule.platform_neutral)
         self.assertTrue(source_rule.platform_neutral)
+
+    def test_frontend_is_platform_neutral_and_depends_only_on_owned_asset_ir(
+        self,
+    ) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/include/omega/frontend/math.h": (
+                    "#pragma once\n"
+                    "#include <expected>\n"
+                    '#include "omega/asset/frontend_ir.h"\n'
+                ),
+                "native/src/frontend/math.cpp": (
+                    '#include "omega/frontend/math.h"\n'
+                    "#include <cmath>\n"
+                ),
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(errors, [])
+
+        header_rule = gate.module_rule(
+            Path("native/include/omega/frontend/math.h")
+        )
+        source_rule = gate.module_rule(Path("native/src/frontend/math.cpp"))
+        self.assertIsNotNone(header_rule)
+        self.assertIsNotNone(source_rule)
+        self.assertEqual(header_rule.name, "omega_frontend")
+        self.assertEqual(source_rule.name, "omega_frontend")
+        self.assertEqual(
+            header_rule.allowed_omega_modules,
+            frozenset({"omega_frontend", "omega_assets"}),
+        )
+        self.assertEqual(
+            source_rule.allowed_omega_modules,
+            frozenset({"omega_frontend", "omega_assets"}),
+        )
+        self.assertTrue(header_rule.platform_neutral)
+        self.assertTrue(source_rule.platform_neutral)
+
+        for include, message in (
+            ("omega/runtime/render_frame_packet.h", "forbidden dependency"),
+            ("omega/content/game_data_service.h", "forbidden dependency"),
+            ("pcsx2/GS/GS.h", "forbidden PCSX2 header"),
+        ):
+            with self.subTest(include=include):
+                self.assert_rejected(
+                    "native/src/frontend/example.cpp",
+                    f'#include "{include}"\n',
+                    message,
+                )
+        self.assert_rejected(
+            "native/src/frontend/example.cpp",
+            "#include <windows.h>\n",
+            "unapproved external header",
+        )
 
     def test_profiles_reject_cross_layer_and_pcsx2_dependencies(self) -> None:
         cases = (

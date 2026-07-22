@@ -66,8 +66,9 @@ struct FrontendWidgetActionIR {
 };
 
 // Canonical, fully owned references used by a widget's interface binding. The
-// ordered values are intentionally neutral until their individual coordinate
-// and matrix roles are independently established.
+// twelve transform coefficients are four affine column vectors:
+// C0=[f0,f1,f2,0], C1=[f3,f4,f5,0], C2=[f6,f7,f8,0], and
+// C3=[f9,f10,f11,1]. Hierarchical composition is parent * local.
 struct FrontendWidgetBindingIR {
   std::string scope_reference;
   std::string resource_reference;
@@ -181,8 +182,8 @@ using FrontendAnimationTrackIR =
 
 // Canonical visual-resource hierarchy paired with a widget document. Nonempty
 // texture members include the proven .TDX suffix. transform_values preserves
-// the twelve source coefficients of a proven affine transform; whether the
-// retail bridge treats those coefficients as rows or columns remains unknown.
+// the twelve source coefficients of the proven four-column affine transform
+// documented by FrontendWidgetBindingIR; hierarchy uses parent * local.
 // Animation tracks retain source order. Key times are finite and strictly
 // increasing, so runtime interpolation has deterministic neighboring keys.
 struct FrontendVisualNodeIR {

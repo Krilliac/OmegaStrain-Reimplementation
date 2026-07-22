@@ -35,6 +35,12 @@ MAPPINGS = (
         "const auto layout",
     ),
     (
+        "native/src/frontend/compositor_math.cpp",
+        "omega_frontend",
+        "GuiToCanonicalRaster(\n    const Point2F gui_position) noexcept",
+        "if (!IsFinite(gui_position))",
+    ),
+    (
         "native/src/media/mpeg_program_stream_descriptor.cpp",
         "omega_media",
         "InspectMpegProgramStream(",
@@ -108,6 +114,25 @@ MAPPINGS = (
     ),
 )
 
+# These exact decoder entries share the retail-format subsystem identifier but
+# are not separate Visual Studio library hosts. The process-wide one-shot still
+# guarantees at most one break, while focused decoder hosts can stop at the
+# first genuine retail entry they exercise.
+SUPPLEMENTAL_HOOKS = (
+    (
+        "native/src/retail/fnt_v3_decoder.cpp",
+        "omega_retail_formats",
+        "DecodeFntV3(const std::span<const std::byte> bytes,",
+        "auto layout = Preflight(bytes, limits)",
+    ),
+    (
+        "native/src/retail/retail_string_table_decoder.cpp",
+        "omega_retail_formats",
+        "DecodeRetailStringTable(const std::span<const std::byte> bytes,",
+        "auto layout = Preflight(bytes, limits)",
+    ),
+)
+
 
 def read(relative_path: str | Path) -> str:
     path = relative_path if isinstance(relative_path, Path) else ROOT / relative_path
@@ -153,7 +178,8 @@ class SubsystemEntryBreakPolicyTests(unittest.TestCase):
         self.assertNotIn("atomic", disabled_branch)
 
     def test_every_concrete_library_has_one_genuine_first_entry_hook(self) -> None:
-        expected_pairs = {(path, target) for path, target, _, _ in MAPPINGS}
+        entry_hooks = MAPPINGS + SUPPLEMENTAL_HOOKS
+        expected_pairs = {(path, target) for path, target, _, _ in entry_hooks}
         observed_pairs: set[tuple[str, str]] = set()
         call_pattern = re.compile(
             r'OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY\("([a-z0-9_]+)"\);'
@@ -171,7 +197,7 @@ class SubsystemEntryBreakPolicyTests(unittest.TestCase):
                     observed_pairs.add((path.relative_to(ROOT).as_posix(), target))
 
         self.assertEqual(observed_pairs, expected_pairs)
-        for relative_path, target, signature, first_statement in MAPPINGS:
+        for relative_path, target, signature, first_statement in entry_hooks:
             with self.subTest(target=target):
                 source = read(relative_path)
                 self.assertEqual(

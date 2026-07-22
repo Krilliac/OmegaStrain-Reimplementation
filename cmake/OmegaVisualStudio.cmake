@@ -166,6 +166,8 @@ function(omega_configure_visual_studio)
 
     _omega_vs_assign_folder("Engine/Assets"
         omega_assets)
+    _omega_vs_assign_folder("Engine/Frontend"
+        omega_frontend)
     _omega_vs_assign_folder("Engine/Core"
         omega_core)
     _omega_vs_assign_folder("Engine/Persistence"
@@ -236,6 +238,8 @@ function(omega_configure_visual_studio)
         omega_level_texture_store_tests
         omega_asset_service_tests
         omega_front_end_screen_bundle_tests)
+    _omega_vs_assign_folder("Tests/Engine/Frontend"
+        omega_frontend_compositor_math_tests)
     _omega_vs_assign_folder("Tests/Engine/Runtime"
         omega_input_trace_tests
         omega_scheduler_elapsed_trace_tests
@@ -340,6 +344,8 @@ function(omega_configure_visual_studio)
         omega_simulation omega_simulation_entry_break_host omega_simulation)
     _omega_vs_map_library_to_host(
         omega_gameplay omega_gameplay_tests omega_gameplay)
+    _omega_vs_map_library_to_host(
+        omega_frontend omega_frontend_compositor_math_tests omega_frontend)
     _omega_vs_map_library_to_host(
         omega_retail_formats omega_vag_adpcm_decoder_tests omega_retail_formats)
     _omega_vs_map_library_to_host(

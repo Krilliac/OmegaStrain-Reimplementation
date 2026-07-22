@@ -238,6 +238,7 @@ _DEBUG_SUBSYSTEM_ENTRY_BREAK_SOURCES = frozenset(
         "native/src/archive/hog_archive.cpp",
         "native/src/compat/ps2_memory_card_image.cpp",
         "native/src/content/game_data_service.cpp",
+        "native/src/frontend/compositor_math.cpp",
         "native/src/gameplay/debug_locomotion.cpp",
         "native/src/media/mpeg_program_stream_descriptor.cpp",
         "native/src/persistence/save_database.cpp",
@@ -254,6 +255,7 @@ _DEBUG_SUBSYSTEM_ENTRY_BREAK_SOURCES = frozenset(
 
 _CORE_EDGES = frozenset({"omega_core", "omega_assets"})
 _ASSET_EDGES = frozenset({"omega_assets"})
+_FRONTEND_EDGES = frozenset({"omega_frontend", "omega_assets"})
 _MEDIA_EDGES = frozenset({"omega_media", "omega_assets"})
 _SIMULATION_EDGES = frozenset({"omega_simulation", "omega_assets", "omega_core"})
 _GAMEPLAY_EDGES = frozenset({"omega_gameplay", "omega_simulation"})
@@ -293,6 +295,18 @@ _APP_EDGES = frozenset(
 MODULE_RULES = (
     ModuleRule("native/apps/openomega/sdl_", "omega_sdl_backend", _SDL_EDGES),
     ModuleRule("native/apps/openomega/", "openomega", _APP_EDGES),
+    ModuleRule(
+        "native/include/omega/frontend/",
+        "omega_frontend",
+        _FRONTEND_EDGES,
+        platform_neutral=True,
+    ),
+    ModuleRule(
+        "native/src/frontend/",
+        "omega_frontend",
+        _FRONTEND_EDGES,
+        platform_neutral=True,
+    ),
     ModuleRule(
         "native/include/omega/gameplay/",
         "omega_gameplay",
@@ -470,6 +484,7 @@ EXACT_MODULE_RULES = {
 }
 
 PROJECT_HEADER_MODULES = (
+    ("omega/frontend/", "omega_frontend"),
     ("omega/gameplay/", "omega_gameplay"),
     ("omega/profiles/", "omega_profiles"),
     ("omega/persistence/", "omega_persistence"),
