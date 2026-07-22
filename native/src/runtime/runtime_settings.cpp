@@ -98,6 +98,23 @@ constexpr std::string_view kDefaultProfileResolutionError =
     return normalized;
 }
 
+[[nodiscard]] std::filesystem::path ContentPathFromUtf8(const std::string_view value)
+{
+#if defined(_WIN32)
+    // Runtime configuration is a byte-oriented UTF-8 contract. Constructing a Windows path
+    // directly from char bytes would instead use the active ANSI code page and make a path
+    // selected by the native launcher fail as soon as it contains a non-ASCII character.
+    std::u8string utf8(value.size(), u8'\0');
+    std::transform(value.begin(), value.end(), utf8.begin(), [](const char byte)
+    {
+        return static_cast<char8_t>(static_cast<unsigned char>(byte));
+    });
+    return std::filesystem::path(utf8);
+#else
+    return std::filesystem::path(value);
+#endif
+}
+
 [[nodiscard]] std::expected<std::optional<ContentLaunchProfile>, ContentLaunchProfileError>
 ResolveConfiguredContentLaunchProfile(const ConfigStore& config)
 {
@@ -114,7 +131,7 @@ ResolveConfiguredContentLaunchProfile(const ConfigStore& config)
     std::filesystem::path data_root;
     try
     {
-        data_root = std::filesystem::path(*configured_root);
+        data_root = ContentPathFromUtf8(*configured_root);
     }
     catch (...)
     {

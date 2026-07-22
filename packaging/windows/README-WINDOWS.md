@@ -18,6 +18,7 @@ optional opening movie and continues to the native menu. The package has exactly
 ```text
 OpenOmega-0.1.0-windows-x86_64/
   openomega.exe
+  openomega_launcher.exe
   launch-openomega.cmd
   README-WINDOWS.md
   LICENSE
@@ -28,21 +29,29 @@ OpenOmega-0.1.0-windows-x86_64/
     SDL3.txt
 ```
 
-Double-click `launch-openomega.cmd`, or run it from a terminal with the same command-line options
-accepted by `openomega.exe`. The launcher changes to the extracted directory, forwards every
-argument unchanged, and returns the executable's exit code. A shortcut may target the launcher;
-keep its **Start in** field empty because the launcher selects its own directory.
+For normal play, double-click `openomega_launcher.exe`. The native prelaunch window lets you choose
+an extracted NTSC-U game-data folder or a legally owned ISO, keeps keyboard and mouse enabled by
+default, and offers gamepad support only as an explicit opt-in. After validating the selected game
+data, **Play OpenOmega** saves the per-user settings, starts the adjacent `openomega.exe`, and closes
+the prelaunch window.
+
+`launch-openomega.cmd` remains the direct developer and command-line entry point. Run it from a
+terminal with the same command-line options accepted by `openomega.exe`; the wrapper changes to the
+extracted directory, forwards every argument unchanged, and returns the game's exit code. A
+developer shortcut may target this wrapper; keep its **Start in** field empty because the wrapper
+selects its own directory.
 
 No installation, administrator access, registry entry, bundled profile, or bundled game data is
 required. An optional per-user configuration file is read from
-`%LOCALAPPDATA%\OpenOmega\openomega.cfg`. Every non-probe launch opens project-owned native
+`%LOCALAPPDATA%\OpenOmega\openomega.cfg`. The prelaunch window writes only its supported game-data
+and input settings there. Every non-probe game launch opens project-owned native
 persistence at `%LOCALAPPDATA%\OpenOmega\native-save`; a fresh launch creates two checksummed
 database snapshots and an empty process-lock file, but no default game profile. `--probe-only`
 validates content and returns without touching native persistence. Owner-supplied data remains
-outside this archive and can be selected with the documented `--data-root` and optional `--level`
-arguments or configuration.
+outside this archive and can be selected through `openomega_launcher.exe`, with the documented
+`--data-root` and optional `--level` arguments, or through configuration.
 
-Interactive startup opens the project-generated Profiles screen. Durable profile confirmation
+Interactive game startup opens the project-generated Profiles screen. Durable profile confirmation
 opens Characters, durable character confirmation opens BriefingRoom, and its mission row enters
 DiagnosticPlay. The native Main screen remains available through cancel navigation with Start
 Diagnostic, Profiles, Controls, and Asset Topology rows. Keyboard and mouse provide the complete

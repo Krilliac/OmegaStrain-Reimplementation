@@ -528,8 +528,56 @@ if(OMEGA_BUILD_RUNTIME)
         target_compile_options(openomega PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
     endif()
 
+    if(WIN32 AND MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        add_library(omega_launcher_core STATIC
+            native/apps/openomega_launcher/launcher_config.cpp
+        )
+        target_include_directories(omega_launcher_core
+            PUBLIC native/apps/openomega_launcher
+        )
+        target_link_libraries(omega_launcher_core PUBLIC omega_runtime)
+        target_compile_features(omega_launcher_core PUBLIC cxx_std_23)
+        target_compile_options(omega_launcher_core PRIVATE
+            /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+        target_compile_definitions(omega_launcher_core PRIVATE
+            NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+
+        add_library(omega_launcher_host STATIC
+            native/apps/openomega_launcher/launcher_window.cpp
+        )
+        target_include_directories(omega_launcher_host
+            PUBLIC native/apps/openomega_launcher
+        )
+        target_link_libraries(omega_launcher_host
+            PUBLIC omega_launcher_core
+            PRIVATE
+                omega_content
+                d2d1
+                dwrite
+                ole32
+                shell32
+                uuid
+        )
+        target_compile_features(omega_launcher_host PUBLIC cxx_std_23)
+        target_compile_options(omega_launcher_host PRIVATE
+            /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+        target_compile_definitions(omega_launcher_host PRIVATE
+            NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+
+        add_executable(openomega_launcher WIN32
+            native/apps/openomega_launcher/main.cpp
+        )
+        target_link_libraries(openomega_launcher PRIVATE omega_launcher_host)
+        target_compile_features(openomega_launcher PRIVATE cxx_std_23)
+        target_compile_options(openomega_launcher PRIVATE
+            /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+        target_compile_definitions(openomega_launcher PRIVATE
+            NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+        add_dependencies(openomega_launcher openomega)
+    endif()
+
     if(OMEGA_WINDOWS_PORTABLE_PACKAGE_ENABLED)
-        install(TARGETS openomega
+        install(TARGETS openomega openomega_launcher
             RUNTIME DESTINATION "${OMEGA_WINDOWS_PORTABLE_PACKAGE_ROOT}"
         )
         install(FILES
@@ -562,6 +610,8 @@ set(OMEGA_SUBSYSTEM_ENTRY_BREAK_TARGETS
     omega_retail_formats
     omega_content
     omega_runtime
+    omega_launcher_core
+    omega_launcher_host
     omega_app_core
     omega_native_persistence
     omega_app_host
@@ -2635,6 +2685,20 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME omega_sdl_input_tests COMMAND omega_sdl_input_tests)
         set_tests_properties(omega_sdl_input_tests PROPERTIES TIMEOUT 15)
+    endif()
+
+    if(TARGET omega_launcher_core)
+        add_executable(omega_launcher_config_tests
+            native/tests/launcher_config_tests.cpp
+        )
+        target_link_libraries(omega_launcher_config_tests PRIVATE omega_launcher_core)
+        target_compile_features(omega_launcher_config_tests PRIVATE cxx_std_23)
+        target_compile_options(omega_launcher_config_tests PRIVATE
+            /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+        target_compile_definitions(omega_launcher_config_tests PRIVATE
+            NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+        add_test(NAME omega_launcher_config_tests COMMAND omega_launcher_config_tests)
+        set_tests_properties(omega_launcher_config_tests PROPERTIES TIMEOUT 10)
     endif()
 
     add_executable(omega_core_tests

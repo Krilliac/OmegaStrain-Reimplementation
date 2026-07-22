@@ -290,6 +290,9 @@ omega_sdl_backend -> SDL3                           (public)
 omega_native_persistence -> omega_profiles
 omega_app_host -> omega_app_core + omega_media + omega_native_persistence
                + omega_runtime + omega_simulation + omega_sdl_backend
+omega_launcher_core -> omega_runtime
+omega_launcher_host -> omega_launcher_core + omega_content + Windows UI libraries
+openomega_launcher -> omega_launcher_host
 omega_tool -> omega_core + omega_retail_formats + omega_content + omega_runtime  (private)
 openomega -> omega_app_host
 ```
@@ -334,6 +337,13 @@ The current native build targets express the same direction:
   and
 - `omega_app_host`: the runtime composition leaf joining app core, media, persistence, simulation,
   runtime, and SDL before the `openomega` executable.
+
+The Windows prelaunch process is deliberately outside the game composition graph.
+`openomega_launcher.exe` owns only owner-data selection, validation, the default-off gamepad
+preference, and starting its adjacent `openomega.exe`. It does not link profiles, gameplay,
+simulation, `omega_app_core`, or `omega_app_host`; profiles, characters, briefing, mission
+selection, rendering, audio, input, saves, and play all remain game responsibilities. Direct2D,
+DirectWrite, and `IFileOpenDialog` are launcher-only platform dependencies.
 
 E-0083 implements the standalone `omega_persistence` foundation described in
 `docs/04-Native-Persistence.md`. `SaveDatabase` is movable but noncopyable and holds one exclusive

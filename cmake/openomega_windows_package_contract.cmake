@@ -418,20 +418,23 @@ function(read_uint32_le hex_value byte_offset output_variable)
     set(${output_variable} "${value}" PARENT_SCOPE)
 endfunction()
 
-function(validate_pe_contract executable)
+function(validate_pe_contract executable executable_name expected_subsystem
+         subsystem_description)
     file(SIZE "${executable}" executable_size)
     if(executable_size LESS 158)
-        message(FATAL_ERROR "packaged openomega.exe is too small to be a valid PE image")
+        message(FATAL_ERROR
+            "packaged ${executable_name} is too small to be a valid PE image")
     endif()
     file(READ "${executable}" dos_header OFFSET 0 LIMIT 64 HEX)
     read_uint16_le("${dos_header}" 0 dos_magic)
     if(NOT dos_magic EQUAL 0x5a4d)
-        message(FATAL_ERROR "packaged openomega.exe is missing the MZ signature")
+        message(FATAL_ERROR "packaged ${executable_name} is missing the MZ signature")
     endif()
     read_uint32_le("${dos_header}" 60 pe_offset)
     math(EXPR required_pe_size "${pe_offset} + 94")
     if(required_pe_size GREATER executable_size)
-        message(FATAL_ERROR "packaged openomega.exe has an out-of-range PE header")
+        message(FATAL_ERROR
+            "packaged ${executable_name} has an out-of-range PE header")
     endif()
     file(READ "${executable}" pe_header OFFSET ${pe_offset} LIMIT 120 HEX)
     read_uint32_le("${pe_header}" 0 pe_signature)
@@ -439,16 +442,17 @@ function(validate_pe_contract executable)
     read_uint16_le("${pe_header}" 24 optional_magic)
     read_uint16_le("${pe_header}" 92 subsystem)
     if(NOT pe_signature EQUAL 0x00004550)
-        message(FATAL_ERROR "packaged openomega.exe is missing the PE signature")
+        message(FATAL_ERROR "packaged ${executable_name} is missing the PE signature")
     endif()
     if(NOT pe_machine EQUAL 0x8664)
-        message(FATAL_ERROR "packaged openomega.exe is not an x86-64 PE image")
+        message(FATAL_ERROR "packaged ${executable_name} is not an x86-64 PE image")
     endif()
     if(NOT optional_magic EQUAL 0x020b)
-        message(FATAL_ERROR "packaged openomega.exe is not PE32+")
+        message(FATAL_ERROR "packaged ${executable_name} is not PE32+")
     endif()
-    if(NOT subsystem EQUAL 3)
-        message(FATAL_ERROR "packaged openomega.exe is not a Windows console application")
+    if(NOT subsystem EQUAL expected_subsystem)
+        message(FATAL_ERROR
+            "packaged ${executable_name} is not ${subsystem_description}")
     endif()
 endfunction()
 
@@ -467,6 +471,7 @@ function(ascii_to_utf16le_hex input_value output_variable)
 endfunction()
 
 function(require_no_private_workspace_paths executable)
+    get_filename_component(executable_name "${executable}" NAME)
     file(READ "${executable}" executable_hex HEX)
     string(TOLOWER "${executable_hex}" executable_hex)
     foreach(workspace_path IN ITEMS
@@ -491,7 +496,7 @@ function(require_no_private_workspace_paths executable)
             string(FIND "${executable_hex}" "${path_hex}" narrow_path_offset)
             if(NOT narrow_path_offset EQUAL -1)
                 message(FATAL_ERROR
-                    "packaged openomega.exe contains a private source/build path"
+                    "packaged ${executable_name} contains a private source/build path"
                 )
             endif()
             ascii_to_utf16le_hex("${path_variant}" wide_path_hex)
@@ -499,7 +504,7 @@ function(require_no_private_workspace_paths executable)
             string(FIND "${executable_hex}" "${wide_path_hex}" wide_path_offset)
             if(NOT wide_path_offset EQUAL -1)
                 message(FATAL_ERROR
-                    "packaged openomega.exe contains a wide private source/build path"
+                    "packaged ${executable_name} contains a wide private source/build path"
                 )
             endif()
         endforeach()
@@ -582,6 +587,79 @@ function(validate_dependencies executable)
     endforeach()
 endfunction()
 
+function(validate_launcher_dependencies executable)
+    if(OPENOMEGA_DUMP_TOOL_MODE STREQUAL "DUMPBIN")
+        set(dump_arguments /nologo /dependents "${executable}")
+    else()
+        set(dump_arguments /dump /dependents "${executable}")
+    endif()
+    execute_process(
+        COMMAND "${OPENOMEGA_DUMP_TOOL}" ${dump_arguments}
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+        TIMEOUT ${openomega_dependency_dump_timeout_seconds}
+        ENCODING AUTO
+    )
+    if(NOT result STREQUAL "0")
+        message(FATAL_ERROR
+            "openomega_launcher.exe PE dependency dump failed with '${result}'\n"
+            "stdout=[${stdout}]\nstderr=[${stderr}]"
+        )
+    endif()
+
+    string(CONCAT dump_output "${stdout}\n${stderr}")
+    string(REGEX MATCHALL "[A-Za-z0-9_.-]+\\.[dD][lL][lL]" imports "${dump_output}")
+    if(imports STREQUAL "")
+        message(FATAL_ERROR
+            "openomega_launcher.exe PE dependency dump reported no imports")
+    endif()
+
+    set(allowed_api_set_imports
+        API-MS-WIN-CORE-SYNCH-L1-2-0
+    )
+    set(allowed_imports
+        # Static Win32 launcher baseline plus the explicit Direct2D,
+        # DirectWrite, COM, and shell-dialog implementation dependencies.
+        KERNEL32 USER32 D2D1 DWRITE OLE32 SHELL32
+        ${allowed_api_set_imports}
+    )
+    set(normalized_imports "")
+    foreach(import_name IN LISTS imports)
+        string(REGEX REPLACE "\\.[dD][lL][lL]$" "" import_name "${import_name}")
+        string(TOUPPER "${import_name}" import_name)
+        list(APPEND normalized_imports "${import_name}")
+    endforeach()
+    list(REMOVE_DUPLICATES normalized_imports)
+    list(SORT normalized_imports)
+    if(normalized_imports STREQUAL "")
+        message(FATAL_ERROR
+            "openomega_launcher.exe PE dependency import set is empty after normalization")
+    endif()
+    foreach(import_name IN LISTS normalized_imports)
+        set(forbidden_api_set FALSE)
+        if(import_name MATCHES "^API-MS-" AND
+           NOT import_name IN_LIST allowed_api_set_imports)
+            set(forbidden_api_set TRUE)
+        endif()
+        if(import_name MATCHES "^SDL3" OR
+           import_name MATCHES "^MSVCP" OR
+           import_name MATCHES "^VCRUNTIME" OR
+           import_name MATCHES "^UCRT" OR
+           forbidden_api_set OR
+           import_name MATCHES "D$")
+            message(FATAL_ERROR
+                "packaged openomega_launcher.exe has a forbidden runtime import: ${import_name}"
+            )
+        endif()
+        if(NOT import_name IN_LIST allowed_imports)
+            message(FATAL_ERROR
+                "packaged openomega_launcher.exe has an unapproved import: ${import_name}"
+            )
+        endif()
+    endforeach()
+endfunction()
+
 function(require_no_reparse_points root)
     string(REPLACE "'" "''" powershell_root "${root}")
     set(reparse_inspector [=[
@@ -654,6 +732,7 @@ function(validate_payload_tree container output_root)
         "${root}/TRADEMARKS.md"
         "${root}/launch-openomega.cmd"
         "${root}/openomega.exe"
+        "${root}/openomega_launcher.exe"
     )
     list(SORT expected_payload_entries)
     if(NOT normalized_payload_entries STREQUAL expected_payload_entries)
@@ -670,6 +749,7 @@ function(validate_payload_tree container output_root)
     endforeach()
     foreach(expected_file IN ITEMS
             "${root}/openomega.exe"
+            "${root}/openomega_launcher.exe"
             "${root}/launch-openomega.cmd"
             "${root}/README-WINDOWS.md"
             "${root}/LICENSE"
@@ -857,13 +937,19 @@ if(NOT release_install_result STREQUAL "0")
 endif()
 validate_payload_tree("${release_install_prefix}" installed_package_root)
 set(installed_executable "${installed_package_root}/openomega.exe")
+set(installed_gui_launcher "${installed_package_root}/openomega_launcher.exe")
 set(installed_launcher "${installed_package_root}/launch-openomega.cmd")
 validate_readme_media_capability_contract(
     "${installed_package_root}/README-WINDOWS.md")
 validate_launcher_bytes("${installed_launcher}")
-validate_pe_contract("${installed_executable}")
+validate_pe_contract("${installed_executable}" "openomega.exe" 3
+    "a Windows console application")
+validate_pe_contract("${installed_gui_launcher}" "openomega_launcher.exe" 2
+    "a Windows GUI application")
 require_no_private_workspace_paths("${installed_executable}")
+require_no_private_workspace_paths("${installed_gui_launcher}")
 validate_dependencies("${installed_executable}")
+validate_launcher_dependencies("${installed_gui_launcher}")
 directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" install_package_after)
 directory_manifest("${OPENOMEGA_PACKAGE_UNRELATED_DIRECTORY}" install_unrelated_after)
 directory_manifest("${OPENOMEGA_PACKAGE_PROFILE_DIRECTORY}" install_profile_after)
@@ -1010,6 +1096,7 @@ set(expected_archive_members
     "${OPENOMEGA_PACKAGE_BASENAME}/TRADEMARKS.md"
     "${OPENOMEGA_PACKAGE_BASENAME}/launch-openomega.cmd"
     "${OPENOMEGA_PACKAGE_BASENAME}/openomega.exe"
+    "${OPENOMEGA_PACKAGE_BASENAME}/openomega_launcher.exe"
 )
 list(SORT unique_archive_members)
 list(SORT expected_archive_members)
@@ -1030,13 +1117,19 @@ file(ARCHIVE_EXTRACT
 
 validate_payload_tree("${OPENOMEGA_PACKAGE_EXTRACT_DIRECTORY}" package_root)
 set(package_executable "${package_root}/openomega.exe")
+set(package_gui_launcher "${package_root}/openomega_launcher.exe")
 set(package_launcher "${package_root}/launch-openomega.cmd")
 validate_readme_media_capability_contract("${package_root}/README-WINDOWS.md")
 validate_launcher_bytes("${package_launcher}")
 
-validate_pe_contract("${package_executable}")
+validate_pe_contract("${package_executable}" "openomega.exe" 3
+    "a Windows console application")
+validate_pe_contract("${package_gui_launcher}" "openomega_launcher.exe" 2
+    "a Windows GUI application")
 require_no_private_workspace_paths("${package_executable}")
+require_no_private_workspace_paths("${package_gui_launcher}")
 validate_dependencies("${package_executable}")
+validate_launcher_dependencies("${package_gui_launcher}")
 directory_manifest("${package_root}" package_root_before_launch)
 directory_manifest("${OPENOMEGA_PACKAGE_DIRECTORY}" package_directory_before_launch)
 directory_manifest("${OPENOMEGA_PACKAGE_EXTRACT_DIRECTORY}"

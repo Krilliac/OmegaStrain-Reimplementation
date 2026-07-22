@@ -1,6 +1,10 @@
 @echo off
 setlocal
-set "OPENOMEGA_LAUNCHER=%~dp0scripts\run-openomega.ps1"
+if "%~1"=="" (
+    set "OPENOMEGA_LAUNCHER=%~dp0scripts\run-openomega-launcher.ps1"
+) else (
+    set "OPENOMEGA_LAUNCHER=%~dp0scripts\run-openomega.ps1"
+)
 
 if not exist "%OPENOMEGA_LAUNCHER%" (
     echo OpenOmega native launcher is missing: "%OPENOMEGA_LAUNCHER%" 1>&2

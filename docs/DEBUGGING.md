@@ -14,10 +14,11 @@ The current Visual Studio integration provides:
 - one Visual Studio project for every buildable CMake target, organized into
   Products, Engine, Compatibility, Platform, Tests, and Developer Utilities
   solution folders;
-- `openomega` as the default startup project when the native runtime is enabled,
-  with `omega_tool` as the runtime-disabled fallback;
+- `openomega_launcher` as the default startup project on supported Windows builds,
+  with `openomega` and then `omega_tool` as fallbacks;
 - stable product locations at
-  `build/<preset>/products/game/<Config>/openomega.exe` and
+  `build/<preset>/products/game/<Config>/openomega_launcher.exe`,
+  `build/<preset>/products/game/<Config>/openomega.exe`, and
   `build/<preset>/products/sdk/<Config>/omega_tool.exe`, with linker PDBs beside
   the executables when the selected configuration emits them;
 - checked-in normal-play and Visual Studio launchers; and
@@ -45,7 +46,7 @@ From a normal PowerShell prompt at the repository root:
 
 ```powershell
 cmake --preset vs2022-x64
-cmake --build --preset vs2022-game-debug
+cmake --build --preset vs2022-launcher-debug
 cmake --open build/vs2022-x64
 ```
 
@@ -73,23 +74,32 @@ After building, double-click `Play-OpenOmega.cmd` or run it from PowerShell:
 .\Play-OpenOmega.cmd
 ```
 
-The launcher never builds implicitly. If the requested binary is absent, it
-prints the exact build commands and expected locations. It starts the game with
-the repository root as the working directory and preserves the game's exit
-code. Keyboard and mouse are the normal input path; a gamepad is not required.
+The shortcut never builds implicitly. If the requested binary is absent, it
+prints the exact build commands and expected locations. The native prelauncher
+selects and validates owner data, atomically records its project-owned settings,
+and starts the adjacent game. Keyboard and mouse are always enabled; gamepad
+discovery is an explicit default-off choice.
 
 The Debug Visual Studio product is directly available at:
 
 ```text
 build/vs2022-x64/products/game/Debug/openomega.exe
+build/vs2022-x64/products/game/Debug/openomega_launcher.exe
 ```
+
+## Debug the launcher
+
+Use `openomega_launcher` as the startup project to debug prelaunch rendering,
+native dialogs, configuration persistence, or child creation. Visual Studio does
+not automatically follow the spawned game process. Set `openomega` as startup or
+attach to `openomega.exe` when the desired breakpoint is inside the game.
 
 ## Debug the game
 
 1. Open `build/vs2022-x64/OmegaStrainReimplementation.sln` or run
    `Open-OpenOmega-VS.cmd`.
 2. Select the `Debug` solution configuration.
-3. Set `openomega` as the startup project if it is not already selected.
+3. Set `openomega` as the startup project.
 4. Set breakpoints and press F5.
 
 The generated project uses the repository root as its working directory. It
