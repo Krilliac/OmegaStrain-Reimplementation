@@ -146,6 +146,7 @@ SyntheticIso9660 MakeSyntheticIso9660(const bool duplicate_system_path = false)
     WriteBothEndianU16(image.bytes, primary + 120, 1);
     WriteBothEndianU16(image.bytes, primary + 124, 1);
     WriteBothEndianU16(image.bytes, primary + 128, kIsoSectorBytes);
+    image.bytes[primary + 881] = std::byte{1};
     std::size_t root_descriptor = primary + 156;
     constexpr std::array<std::byte, 1> current_directory{std::byte{0}};
     WriteIsoDirectoryRecord(image.bytes, root_descriptor, kIsoRootSector,
@@ -370,6 +371,41 @@ void RunVirtualFileSystemTests()
               bad_service.error().message.find(bad_descriptor_path.string()) == std::string::npos,
         "GameDataService suppresses lower-level ISO and owner-path diagnostics");
 
+    const auto unsupported_regular_source =
+        omega::content::GameDataService::Open({.root = archive_path});
+    Check(!unsupported_regular_source &&
+              unsupported_regular_source.error().code ==
+                  omega::content::GameDataErrorCode::MountFailed &&
+              unsupported_regular_source.error().message == "unable to mount game-data root",
+        "a regular non-ISO source preserves the established categorical mount diagnostic");
+
+    const auto bad_structure_version_path = root / "bad-structure-version.iso";
+    auto bad_structure_version = iso_fixture;
+    bad_structure_version.bytes[16 * kIsoSectorBytes + 881] = std::byte{0};
+    Check(WriteFile(bad_structure_version_path, bad_structure_version.bytes),
+        "bad file-structure-version fixture is written");
+    omega::vfs::VirtualFileSystem bad_structure_version_vfs;
+    Check(!bad_structure_version_vfs.MountIso9660(bad_structure_version_path),
+        "a nonconforming ISO9660 file structure version is rejected");
+
+    const auto bad_root_length_path = root / "bad-root-length.iso";
+    auto bad_root_length = iso_fixture;
+    bad_root_length.bytes[16 * kIsoSectorBytes + 156] = std::byte{35};
+    Check(WriteFile(bad_root_length_path, bad_root_length.bytes),
+        "oversized PVD root-record fixture is written");
+    omega::vfs::VirtualFileSystem bad_root_length_vfs;
+    Check(!bad_root_length_vfs.MountIso9660(bad_root_length_path),
+        "the PVD root directory record must occupy its fixed 34-byte field");
+
+    const auto bad_endian_path = root / "bad-endian.iso";
+    auto bad_endian = iso_fixture;
+    bad_endian.bytes[16 * kIsoSectorBytes + 84] = std::byte{1};
+    Check(WriteFile(bad_endian_path, bad_endian.bytes),
+        "disagreeing dual-endian field fixture is written");
+    omega::vfs::VirtualFileSystem bad_endian_vfs;
+    Check(!bad_endian_vfs.MountIso9660(bad_endian_path),
+        "disagreeing ISO9660 dual-endian scalar copies are rejected");
+
     const auto bad_record_path = root / "bad-record.iso";
     auto bad_record = iso_fixture;
     bad_record.bytes[bad_record.root_system_record] = std::byte{10};
@@ -394,6 +430,16 @@ void RunVirtualFileSystemTests()
     omega::vfs::VirtualFileSystem cycle_vfs;
     Check(!cycle_vfs.MountIso9660(cycle_path),
         "ISO9660 directory cycles and extent aliases are rejected");
+
+    const auto bad_hierarchy_path = root / "bad-hierarchy.iso";
+    auto bad_hierarchy = iso_fixture;
+    WriteBothEndianU32(bad_hierarchy.bytes, bad_hierarchy.root_parent_record + 2,
+        kIsoGameDataSector);
+    Check(WriteFile(bad_hierarchy_path, bad_hierarchy.bytes),
+        "malformed dot-dot hierarchy fixture is written");
+    omega::vfs::VirtualFileSystem bad_hierarchy_vfs;
+    Check(!bad_hierarchy_vfs.MountIso9660(bad_hierarchy_path),
+        "ISO9660 dot and dot-dot records must match their directory hierarchy");
 
     const auto duplicate_path = root / "duplicate.iso";
     const auto duplicate = MakeSyntheticIso9660(true);

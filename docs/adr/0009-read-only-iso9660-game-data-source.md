@@ -18,9 +18,10 @@ override policy.
 
 Descriptor, record, extent, arithmetic, record-count, directory-count, depth, identifier-byte,
 directory-byte, and estimated-index-memory bounds are enforced before publication. Directory
-cycles, extent aliases, interleaving, multi-extent files, and duplicate normalized paths fail the
-whole mount. Payload size is checked against the caller's limit before allocating its independently
-owned result.
+cycles, directory-start-sector aliases, malformed `.`/`..` hierarchy records, interleaving,
+multi-extent files, and duplicate normalized paths fail the whole mount. File payload extents may
+legitimately overlap and are not treated as aliases. Payload size is checked against the caller's
+limit before allocating its independently owned result.
 
 All diagnostics at the `GameDataService` boundary remain categorical and omit the owner-supplied
 host path. The adapter never writes to the image and never interprets or recompiles executable code.

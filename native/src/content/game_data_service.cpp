@@ -722,7 +722,7 @@ std::expected<GameDataService, GameDataError> GameDataService::Open(
     const auto source_status = std::filesystem::status(impl->config.root, source_error);
     if (source_error)
         return std::unexpected(Error(GameDataErrorCode::MountFailed,
-            "unable to inspect game-data source"));
+            "unable to mount game-data root"));
 
     std::expected<void, std::string> mounted = std::unexpected("unsupported game-data source");
     if (std::filesystem::is_directory(source_status))
@@ -731,7 +731,7 @@ std::expected<GameDataService, GameDataError> GameDataService::Open(
         mounted = impl->files.MountIso9660(impl->config.root);
     if (!mounted)
         return std::unexpected(Error(GameDataErrorCode::MountFailed,
-            "unable to mount game-data source"));
+            "unable to mount game-data root"));
     impl->files.Freeze();
 
     if (!impl->files.Contains("SYSTEM.CNF"))
