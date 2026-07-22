@@ -49,7 +49,7 @@ audio/video parity.
 | `.col` | canonical decoder (mixed — see §3) | `DecodeColSpatialMesh` → `asset::SpatialMeshIR` (`native/include/omega/retail/col_spatial_mesh_decoder.h`, `native/src/retail/col_spatial_mesh_decoder.cpp`, IR at `native/include/omega/asset/spatial_mesh_ir.h`); independent passive `InspectColContainer` (`native/include/omega/retail/container_descriptors.h`, `native/src/retail/container_descriptors.cpp`) | `native/tests/col_spatial_mesh_decoder_tests.cpp`, `native/tests/container_descriptor_tests.cpp` (both built into `omega_core_tests`) |
 | `.hog` | canonical decoder | `HogArchive`/`HogIndex::Open`/`OpenRange`/`FromBytes`/`FromSpan`/`FromOwnedBytes` (`native/include/omega/archive/hog_archive.h`, `native/src/archive/hog_archive.cpp`) | `native/tests/hog_archive_tests.cpp` (`omega_core_tests`) |
 | `.pop` | canonical decoder (mixed — see §3) | `DecodePopLevelManifest` → `asset::LevelManifestIR` (`native/include/omega/retail/pop_level_manifest_decoder.h`, `native/src/retail/pop_level_manifest_decoder.cpp`), built atop `asset::PopTerrainIndex::Parse` (`native/include/omega/asset/pop_terrain_index.h`, `native/src/asset/pop_terrain_index.cpp`) for the `TER:` prefix only; passive `InspectPopPostTerrainHypotheses` checks the published marker/extent hypotheses without assigning section semantics (`native/include/omega/retail/pop_post_terrain_hypothesis_descriptor.h`, `native/src/retail/pop_post_terrain_hypothesis_descriptor.cpp`) | `native/tests/pop_level_manifest_decoder_tests.cpp`, `native/tests/pop_terrain_index_tests.cpp`, `native/tests/pop_post_terrain_hypothesis_descriptor_tests.cpp` (all built into `omega_core_tests`) |
-| `.tdx` | canonical decoder (mixed — see §3) | `DecodeTdxTextureStorage`/`DecodeTdxTextureStorageMeasured` → `asset::TextureStorageIR` (`native/include/omega/retail/tdx_texture_storage_decoder.h`, `native/src/retail/tdx_texture_storage_decoder.cpp`), built atop passive `InspectTdxContainer` (`native/include/omega/retail/container_descriptors.h`, `native/src/retail/container_descriptors.cpp`) | `native/tests/tdx_texture_storage_decoder_tests.cpp`, `native/tests/container_descriptor_tests.cpp` (both built into `omega_core_tests`) |
+| `.tdx` | canonical decoder (mixed — see §3) | `DecodeTdxTextureStorage`/`DecodeTdxTextureStorageMeasured` → `asset::TextureStorageIR` (`native/include/omega/retail/tdx_texture_storage_decoder.h`, `native/src/retail/tdx_texture_storage_decoder.cpp`), bounded front-end `DecodeTdxFrontEnd`/`DecodeTdxScopedFrontEnd` → owned indexed-image IR (`native/include/omega/retail/frontend_tdx_decoder.h`, `native/src/retail/frontend_tdx_decoder.cpp`), built alongside passive `InspectTdxContainer` (`native/include/omega/retail/container_descriptors.h`, `native/src/retail/container_descriptors.cpp`) | `native/tests/tdx_texture_storage_decoder_tests.cpp`, `native/tests/frontend_tdx_decoder_tests.cpp`, `native/tests/container_descriptor_tests.cpp` |
 | `.vag` | canonical decoder | `DecodeVagAdpcm` → `asset::MonoPcm16IR` (`native/include/omega/retail/vag_adpcm_decoder.h`, `native/src/retail/vag_adpcm_decoder.cpp`, IR at `native/include/omega/asset/audio_ir.h`) | `native/tests/vag_adpcm_decoder_tests.cpp` (own executable `omega_vag_adpcm_decoder_tests`) |
 | `.vum` | canonical decoder (mixed — see §3) | `DecodeVumMaterialCatalog`/`…Measured` → `asset::MaterialCatalogIR` (`native/include/omega/retail/vum_material_catalog_decoder.h`, `native/src/retail/vum_material_catalog_decoder.cpp`, IR at `native/include/omega/asset/material_catalog_ir.h`); passive `InspectVumRenderPayload` (`native/include/omega/retail/vum_render_payload_descriptor.h`, `native/src/retail/vum_render_payload_descriptor.cpp`) and independent `InspectVumContainer` (`native/include/omega/retail/container_descriptors.h`, `native/src/retail/container_descriptors.cpp`) | `native/tests/vum_material_catalog_decoder_tests.cpp`, `native/tests/vum_render_payload_descriptor_tests.cpp`, `native/tests/container_descriptor_tests.cpp` (all built into `omega_core_tests`) |
 | `.lpd` | structural envelope only | `DecodeLpdEnvelope` → `asset::LpdEnvelopeIR`, doc comment: "No meaning is assigned to tracks or four-byte entries" (`native/include/omega/retail/lpd_envelope_decoder.h`, `native/src/retail/lpd_envelope_decoder.cpp`) | `native/tests/lpd_envelope_decoder_tests.cpp` (own executable `omega_lpd_envelope_decoder_tests`) |
@@ -61,9 +61,9 @@ audio/video parity.
 | `.skm` | passive descriptor only | `InspectSkmContainer` → `SkmContainerDescriptor` (`native/include/omega/retail/skm_container_descriptor.h`, `native/src/retail/skm_container_descriptor.cpp`) | `native/tests/skm_container_descriptor_tests.cpp` (`omega_core_tests`) |
 | `.so` | passive descriptor only | `InspectSoModule` -> `SoModuleDescriptor` validates the tracked little-endian structural grammar through exact EOF while retaining bounded section ranges, counts, and neutral record summaries but no code cells, strings, or payload bytes (`native/include/omega/retail/so_module_descriptor.h`, `native/src/retail/so_module_descriptor.cpp`) | `native/tests/so_module_descriptor_tests.cpp` (own executable `omega_so_module_descriptor_tests`, registered in `CMakeLists.txt`) |
 | `.tbl` | passive descriptor only | `InspectTblEnvelope` -> `TblEnvelopeDescriptor` performs the bounded fixed-stride zero-sentinel observation while retaining only payload size, sentinel offset, preceding nonzero-probe count, and opaque trailing-byte count; inter-probe and trailing bytes remain opaque and no lane, integer, endianness, record, lookup, or front-end semantics are assigned (`native/include/omega/retail/tbl_envelope_descriptor.h`, `native/src/retail/tbl_envelope_descriptor.cpp`) | `native/tests/tbl_envelope_descriptor_tests.cpp` (own executable `omega_tbl_envelope_descriptor_tests`, registered in `CMakeLists.txt`; project-generated fixtures only) |
-| `.gui` | passive descriptor only | `InspectGuiEnvelope` implements one project-defined three-byte-tag/prefix hypothesis, reads one neutral little-endian word after an opaque byte, and reports the fixed boundary of an otherwise opaque root region. It does not traverse the root or assign version, count, flag, layout, widget, node, lookup, render, or menu semantics. No tracked evidence records the retail provenance of its constants (`native/include/omega/retail/gui_envelope_descriptor.h`, `native/src/retail/gui_envelope_descriptor.cpp`) | `native/tests/gui_envelope_descriptor_tests.cpp` (own executable `omega_gui_envelope_descriptor_tests`; project-generated fixtures only) |
-| `.fnt` | passive descriptor only | `InspectFntEnvelope` implements one small project-defined prefix hypothesis and reports a printable region, its terminator, and the remaining opaque payload as byte ranges without retaining source bytes. It assigns no version, resource binding, glyph, metric, texture, render, or font semantics. No tracked evidence records the retail provenance of its constants (`native/include/omega/retail/fnt_envelope_descriptor.h`, `native/src/retail/fnt_envelope_descriptor.cpp`) | `native/tests/fnt_envelope_descriptor_tests.cpp` (own executable `omega_fnt_envelope_descriptor_tests`; project-generated fixtures only) |
-| `.ie` | passive descriptor only | `InspectIeEnvelope` implements one project-defined prefix-layout hypothesis, skips an opaque two-byte prefix, reads one neutral little-endian word, and reports the fixed boundary of an otherwise opaque root region. It does not traverse the root or assign tag, version, count, flag, string, node, layout, lookup, or menu semantics. No tracked evidence records the retail provenance of its offsets (`native/include/omega/retail/ie_envelope_descriptor.h`, `native/src/retail/ie_envelope_descriptor.cpp`) | `native/tests/ie_envelope_descriptor_tests.cpp` (own executable `omega_ie_envelope_descriptor_tests`; project-generated fixtures only) |
+| `.gui` | canonical decoder (mixed — see §3) | `DecodeGuiFrontend`/`DecodeGuiFrontendMeasured` → owned `asset::FrontendWidgetDocumentIR` for the bounded title/create/open-agent family (`native/include/omega/retail/frontend_document_decoder.h`, `native/src/retail/frontend_document_decoder.cpp`); independent passive `InspectGuiEnvelope` retains only the older opaque root boundary (`native/include/omega/retail/gui_envelope_descriptor.h`, `native/src/retail/gui_envelope_descriptor.cpp`) | `native/tests/frontend_document_decoder_tests.cpp`, `native/tests/gui_envelope_descriptor_tests.cpp` |
+| `.fnt` | canonical decoder (mixed — see §3) | `DecodeFntV3` → owned `FntV3IR` for the documented version-3 family while rejecting unproven pair tables (`native/include/omega/retail/fnt_v3_decoder.h`, `native/src/retail/fnt_v3_decoder.cpp`); independent passive `InspectFntEnvelope` retains only prefix/range facts (`native/include/omega/retail/fnt_envelope_descriptor.h`, `native/src/retail/fnt_envelope_descriptor.cpp`) | `native/tests/fnt_v3_decoder_tests.cpp`, `native/tests/fnt_envelope_descriptor_tests.cpp` |
+| `.ie` | canonical decoder (mixed — see §3) | `DecodeIeFrontend`/`DecodeIeFrontendMeasured` → owned `asset::FrontendVisualDocumentIR` for the bounded title/create/open-agent family (`native/include/omega/retail/frontend_document_decoder.h`, `native/src/retail/frontend_document_decoder.cpp`); independent passive `InspectIeEnvelope` retains only the older opaque root boundary (`native/include/omega/retail/ie_envelope_descriptor.h`, `native/src/retail/ie_envelope_descriptor.cpp`) | `native/tests/frontend_document_decoder_tests.cpp`, `native/tests/ie_envelope_descriptor_tests.cpp` |
 | `.bin` | aggregate scanner only | Raw suffix count in `asset-fingerprints.json`/`hog-validation.json`; also present in `tools/check_public_tree.py`'s commit-blocklist (existence signal only, not structural evidence) | none |
 | `.bnk` | aggregate scanner only | Raw suffix count only (`asset-fingerprints.json`, `hog-validation.json`) | none |
 | `.bon` | aggregate scanner only | Raw suffix count only | none |
@@ -78,7 +78,7 @@ audio/video parity.
 | `.PF` (`.pf`) | unknown (hard-rule mandated) | Zero occurrences in either in-archive inventory; exactly 3 whole-disc occurrences in `analysis/manifests/disc-summary.json`, outside any HOG archive | none |
 | `.TM2` (`.tm2`) | unknown (hard-rule mandated) | Zero occurrences in either in-archive inventory; exactly 16 whole-disc occurrences in `analysis/manifests/disc-summary.json`, outside any HOG archive | none |
 
-Totals observed in this pass: **6 canonical decoder**, **4 structural envelope only**, **8 passive
+Totals observed in this pass: **9 canonical decoder**, **4 structural envelope only**, **5 passive
 descriptor only**, **11 aggregate scanner only**, **2 unknown** — 31 families.
 
 ## 2. CMake / test registration cross-check
@@ -86,14 +86,16 @@ descriptor only**, **11 aggregate scanner only**, **2 unknown** — 31 families.
 Every matrix-listed native canonical/envelope/descriptor boundary has a matching implementation in
 `native/src/retail/` (or `native/src/archive/`/`native/src/asset/`) registered in `CMakeLists.txt`,
 plus focused coverage through its own executable/CTest pair or `omega_core_tests`. The FNT, GUI,
-and IE passive descriptors each have an independently registered focused test. **No missing CMake
+and IE canonical decoders and their independent passive descriptors each have registered focused tests. **No missing CMake
 registration was found** for a matrix-listed native format boundary.
 
 E-0113 adds a separate project-passive coverage consumer for those three descriptors. The
 `frontend-envelope-coverage-verify-tree` command emits only deterministic aggregate acceptance and
 typed-rejection counts from HOG members. Its schema version 1 is distinct from E-0110 topology
 schema version 3, where `.fnt` remains `other`. No owner-corpus result is tracked, and this consumer
-does not promote any family beyond `passive descriptor only` or supply UI/menu semantics.
+did not itself promote any family beyond `passive descriptor only` or supply UI/menu semantics.
+The later bounded FNT/GUI/IE canonical decoders are separately tested implementations and remain
+limited to their documented front-end families.
 
 The separate `omega_media` target registers the generic MPEG-2 Program Stream inspector, video
 range planning/H.262 inspection, Windows Media Foundation video adapter, and narrow PSS PCM stream
@@ -104,8 +106,7 @@ stream that passes that hypothesis is not a suffix-wide canonical asset decoder.
 
 ## 3. Mixed-layer families and mechanical inconsistencies (not fixed)
 
-Four suffixes have *more than one* native code path, and the four take four different
-composition shapes:
+Seven suffixes have *more than one* native code path, with several distinct composition shapes:
 
 - **`.tdx`** — `DecodeTdxTextureStorage` calls `InspectTdxContainer`
   (`native/include/omega/retail/container_descriptors.h`) internally as its first step
@@ -123,8 +124,13 @@ composition shapes:
   while `InspectPopPostTerrainHypotheses` independently checks the already-published aligned-marker
   order and five neutral marker-relative extent formulas after that prefix. It assigns no section,
   count, record, placement, or gameplay semantics.
+- **`.fnt`** — `DecodeFntV3` and `InspectFntEnvelope` are independent. The former owns the bounded
+  version-3 glyph/atlas IR; the latter retains only the older prefix/range hypothesis.
+- **`.gui`** and **`.ie`** — the paired canonical front-end document decoders share one
+  implementation and produce owned widget/visual IR for the documented screen family. Their
+  suffix-specific passive inspectors remain independent opaque-root observations.
 
-Four different "decoder built on / next to / sharing internals with descriptor" shapes exist for
+Several "decoder built on / next to / sharing internals with descriptor" shapes exist for
 what looks like the same layering problem. This is a mechanical inconsistency, not a defect —
 noted, not fixed.
 
@@ -235,7 +241,7 @@ collection that would produce it.
 
 Consistent with the campaign's evidence bar: no row above proves retail menu role, lookup behavior,
 field semantics, layout, render state, owner-corpus coverage, or PCSX2 behavioral equivalence for
-any suffix, including the six classified as "canonical decoder." Canonical-decoder status means a
+any suffix, including the nine classified as "canonical decoder." Canonical-decoder status means a
 native, tested, bounded parser owns a typed result for that suffix — nothing more. The opening-movie
 composition additionally proves a project-owned presentation path for one accepted external
 MPEG-PS/H.262/PCM shape; it does not prove general `.pss` compatibility, exact retail A/V timing,

@@ -1597,7 +1597,7 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                 "unable to decode front-end texture", texture_limits.error()));
         }
         const auto bytes = screen_archive->payload(**entry);
-        auto decoded = retail::DecodeFrontEndTdx(bytes, *texture_limits);
+        auto decoded = retail::DecodeTdxFrontEnd(bytes, *texture_limits);
         if (!decoded)
         {
             return std::unexpected(DecodeFailure(
@@ -1787,7 +1787,7 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                     texture_limits.error()));
             }
             const auto bytes = scope_archive->payload(**entry);
-            auto decoded = retail::DecodeScopedFrontEndTdx(bytes, *texture_limits);
+            auto decoded = retail::DecodeTdxScopedFrontEnd(bytes, *texture_limits);
             if (!decoded)
             {
                 return std::unexpected(DecodeFailure(
@@ -1955,7 +1955,7 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                     "unable to decode front-end font atlas", decoder_limits.error()));
             }
             const auto bytes = font_archive->payload(**entry);
-            auto decoded = retail::DecodeFrontEndTdx(bytes, *decoder_limits);
+            auto decoded = retail::DecodeTdxFrontEnd(bytes, *decoder_limits);
             if (!decoded)
             {
                 return std::unexpected(DecodeFailure(
@@ -1997,7 +1997,7 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
         return std::unexpected(DecodeFailure(
             "unable to decode front-end string table", string_limits.error()));
     }
-    auto strings = retail::DecodeRetailStringTable(*string_bytes, *string_limits);
+    auto strings = retail::ParseRetailStringTable(*string_bytes, *string_limits);
     if (!strings)
     {
         return std::unexpected(DecodeFailure(

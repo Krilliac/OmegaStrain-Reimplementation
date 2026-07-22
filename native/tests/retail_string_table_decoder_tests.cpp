@@ -102,7 +102,7 @@ int main() {
       {.key = "BETA", .value = encoded_value},
   };
   const auto bytes = MakeTable(specs);
-  const auto decoded = omega::retail::DecodeRetailStringTable(bytes);
+  const auto decoded = omega::retail::ParseRetailStringTable(bytes);
   Check(decoded.has_value(),
         "string table accepts a generated counted fixture");
   if (decoded) {
@@ -122,13 +122,13 @@ int main() {
           "string table performs ASCII-case-insensitive key lookup");
   }
 
-  const auto repeated = omega::retail::DecodeRetailStringTable(bytes);
+  const auto repeated = omega::retail::ParseRetailStringTable(bytes);
   Check(decoded && repeated && *decoded == *repeated,
         "string-table decoding is deterministic and stateless");
 
   std::vector<std::byte> unaligned_storage(bytes.size() + 1U, std::byte{0x7C});
   std::ranges::copy(bytes, unaligned_storage.begin() + 1);
-  const auto unaligned = omega::retail::DecodeRetailStringTable(
+  const auto unaligned = omega::retail::ParseRetailStringTable(
       std::span<const std::byte>(unaligned_storage.data() + 1, bytes.size()));
   Check(decoded && unaligned && *decoded == *unaligned,
         "string table supports an unaligned borrowed input span");
@@ -136,7 +136,7 @@ int main() {
   omega::retail::RetailStringTableIR owned;
   {
     auto transient = MakeTable({{.key = "OwnedKey", .value = "OwnedValue"}});
-    auto transient_result = omega::retail::DecodeRetailStringTable(transient);
+    auto transient_result = omega::retail::ParseRetailStringTable(transient);
     Check(transient_result.has_value(),
           "string-table ownership fixture decodes");
     if (transient_result)
@@ -149,7 +149,7 @@ int main() {
 
   bool truncations_rejected = true;
   for (std::size_t size = 0; size < bytes.size(); ++size) {
-    const auto result = omega::retail::DecodeRetailStringTable(
+    const auto result = omega::retail::ParseRetailStringTable(
         std::span<const std::byte>(bytes.data(), size));
     truncations_rejected =
         truncations_rejected && !result &&
@@ -160,83 +160,83 @@ int main() {
 
   auto bad = bytes;
   std::fill_n(bad.begin() + 4, 16, std::byte{'Q'});
-  CheckError(omega::retail::DecodeRetailStringTable(bad),
+  CheckError(omega::retail::ParseRetailStringTable(bad),
              omega::asset::DecodeErrorCode::Malformed,
              "string table rejects a key without a fixed-field NUL");
 
   bad = bytes;
   bad[4] = std::byte{0};
-  CheckError(omega::retail::DecodeRetailStringTable(bad),
+  CheckError(omega::retail::ParseRetailStringTable(bad),
              omega::asset::DecodeErrorCode::Malformed,
              "string table rejects an empty key");
 
   bad = bytes;
   bad[4] = std::byte{0x1F};
-  CheckError(omega::retail::DecodeRetailStringTable(bad),
+  CheckError(omega::retail::ParseRetailStringTable(bad),
              omega::asset::DecodeErrorCode::Malformed,
              "string table rejects a non-printable key byte");
 
   bad = bytes;
   bad[4U + specs[0].key.size() + 1U] = std::byte{'X'};
-  CheckError(omega::retail::DecodeRetailStringTable(bad),
+  CheckError(omega::retail::ParseRetailStringTable(bad),
              omega::asset::DecodeErrorCode::Malformed,
              "string table rejects nonzero bytes after the fixed-key NUL");
 
   constexpr std::size_t first_value_offset = 24U;
   bad = bytes;
   bad[first_value_offset] = std::byte{0};
-  CheckError(omega::retail::DecodeRetailStringTable(bad),
+  CheckError(omega::retail::ParseRetailStringTable(bad),
              omega::asset::DecodeErrorCode::Malformed,
              "string table rejects an early value NUL");
 
   bad = bytes;
   bad[first_value_offset + specs[0].value.size()] = std::byte{'X'};
-  CheckError(omega::retail::DecodeRetailStringTable(bad),
+  CheckError(omega::retail::ParseRetailStringTable(bad),
              omega::asset::DecodeErrorCode::Malformed,
              "string table rejects a value span without a terminal NUL");
 
   const auto duplicate = MakeTable(
       {{.key = "CaseKey", .value = "one"}, {.key = "casekey", .value = "two"}});
-  CheckError(omega::retail::DecodeRetailStringTable(duplicate),
+  CheckError(omega::retail::ParseRetailStringTable(duplicate),
              omega::asset::DecodeErrorCode::DuplicateReference,
              "string table rejects duplicate ASCII-normalized keys");
 
   bad = bytes;
   bad.push_back(std::byte{0});
-  CheckError(omega::retail::DecodeRetailStringTable(bad),
+  CheckError(omega::retail::ParseRetailStringTable(bad),
              omega::asset::DecodeErrorCode::Malformed,
              "string table rejects bytes after the final aligned entry");
 
   std::vector<std::byte> hostile_count(4U, std::byte{0});
   WriteU32(hostile_count, 0, std::numeric_limits<std::uint32_t>::max());
-  CheckError(omega::retail::DecodeRetailStringTable(hostile_count),
+  CheckError(omega::retail::ParseRetailStringTable(hostile_count),
              omega::asset::DecodeErrorCode::LimitExceeded,
              "string table rejects a hostile entry count before allocation");
 
   auto empty_table = MakeTable(std::span<const SyntheticEntry>{});
-  const auto empty = omega::retail::DecodeRetailStringTable(empty_table);
+  const auto empty = omega::retail::ParseRetailStringTable(empty_table);
   Check(empty && empty->entries.empty(),
         "string table accepts an exact zero-entry table");
   empty_table.push_back(std::byte{0});
-  CheckError(omega::retail::DecodeRetailStringTable(empty_table),
+  CheckError(omega::retail::ParseRetailStringTable(empty_table),
              omega::asset::DecodeErrorCode::Malformed,
              "zero-entry string table still rejects trailing bytes");
 
   auto limits = omega::asset::DecodeLimits{};
   limits.maximum_input_bytes = bytes.size();
-  Check(omega::retail::DecodeRetailStringTable(bytes, limits).has_value(),
+  Check(omega::retail::ParseRetailStringTable(bytes, limits).has_value(),
         "string table accepts the exact caller input-byte budget");
   limits.maximum_input_bytes = bytes.size() - 1U;
-  CheckError(omega::retail::DecodeRetailStringTable(bytes, limits),
+  CheckError(omega::retail::ParseRetailStringTable(bytes, limits),
              omega::asset::DecodeErrorCode::LimitExceeded,
              "string table rejects one below the caller input-byte budget");
 
   limits = omega::asset::DecodeLimits{};
   limits.maximum_items = 1U + specs.size();
-  Check(omega::retail::DecodeRetailStringTable(bytes, limits).has_value(),
+  Check(omega::retail::ParseRetailStringTable(bytes, limits).has_value(),
         "string table accepts the exact caller item budget");
   --limits.maximum_items;
-  CheckError(omega::retail::DecodeRetailStringTable(bytes, limits),
+  CheckError(omega::retail::ParseRetailStringTable(bytes, limits),
              omega::asset::DecodeErrorCode::LimitExceeded,
              "string table rejects one below the caller item budget");
 
@@ -247,19 +247,19 @@ int main() {
       specs[1].value.size();
   limits = omega::asset::DecodeLimits{};
   limits.maximum_output_bytes = logical_output_bytes;
-  Check(omega::retail::DecodeRetailStringTable(bytes, limits).has_value(),
+  Check(omega::retail::ParseRetailStringTable(bytes, limits).has_value(),
         "string table accepts the exact caller logical-output budget");
   --limits.maximum_output_bytes;
-  CheckError(omega::retail::DecodeRetailStringTable(bytes, limits),
+  CheckError(omega::retail::ParseRetailStringTable(bytes, limits),
              omega::asset::DecodeErrorCode::LimitExceeded,
              "string table rejects one below the caller output budget");
 
   limits = omega::asset::DecodeLimits{};
   limits.maximum_string_bytes = 8U;
-  Check(omega::retail::DecodeRetailStringTable(bytes, limits).has_value(),
+  Check(omega::retail::ParseRetailStringTable(bytes, limits).has_value(),
         "string table accepts the exact largest owned-string budget");
   limits.maximum_string_bytes = 7U;
-  CheckError(omega::retail::DecodeRetailStringTable(bytes, limits),
+  CheckError(omega::retail::ParseRetailStringTable(bytes, limits),
              omega::asset::DecodeErrorCode::LimitExceeded,
              "string table rejects a key above the caller string budget");
 
@@ -267,20 +267,20 @@ int main() {
   limits = omega::asset::DecodeLimits{};
   limits.maximum_string_bytes = 5U;
   Check(
-      omega::retail::DecodeRetailStringTable(value_budget, limits).has_value(),
+      omega::retail::ParseRetailStringTable(value_budget, limits).has_value(),
       "string table accepts the exact value-string budget");
   limits.maximum_string_bytes = 4U;
-  CheckError(omega::retail::DecodeRetailStringTable(value_budget, limits),
+  CheckError(omega::retail::ParseRetailStringTable(value_budget, limits),
              omega::asset::DecodeErrorCode::LimitExceeded,
              "string table rejects a value above the caller string budget");
 
   limits = omega::asset::DecodeLimits{};
   limits.maximum_scratch_bytes = 0;
-  CheckError(omega::retail::DecodeRetailStringTable(bytes, limits),
+  CheckError(omega::retail::ParseRetailStringTable(bytes, limits),
              omega::asset::DecodeErrorCode::LimitExceeded,
              "nonempty string table accounts duplicate-check scratch storage");
   limits.maximum_nesting_depth = 0;
-  Check(omega::retail::DecodeRetailStringTable(
+  Check(omega::retail::ParseRetailStringTable(
             MakeTable(std::span<const SyntheticEntry>{}), limits)
             .has_value(),
         "empty flat string table needs no dynamic scratch or nesting edges");
@@ -294,7 +294,7 @@ int main() {
   permissive_limits.maximum_input_bytes =
       std::numeric_limits<std::uint64_t>::max();
   CheckError(
-      omega::retail::DecodeRetailStringTable(oversized, permissive_limits),
+      omega::retail::ParseRetailStringTable(oversized, permissive_limits),
       omega::asset::DecodeErrorCode::LimitExceeded,
       "caller limits cannot widen the fixed string-table input ceiling");
 

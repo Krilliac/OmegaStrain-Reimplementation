@@ -91,13 +91,13 @@ struct DecodedFrontEndTdx
 // [any worker thread; reentrant] Strictly decodes the observed one-block
 // frontend transfer-0 TDX family. Unsupported packet layouts fail closed. The
 // returned image and plan own all state.
-[[nodiscard]] asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdx(
+[[nodiscard]] asset::DecodeResult<DecodedFrontEndTdx> DecodeTdxFrontEnd(
     std::span<const std::byte> bytes, asset::DecodeLimits limits = {});
 
 // [any worker thread; reentrant] Decodes a TDX selected through an exact GUI
 // binding into an external visual scope. This keeps the ordinary decoder's
 // family closed while admitting the additional indexed-8/flag-1 record family
 // observed only at that resolved dependency boundary.
-[[nodiscard]] asset::DecodeResult<DecodedFrontEndTdx> DecodeScopedFrontEndTdx(
+[[nodiscard]] asset::DecodeResult<DecodedFrontEndTdx> DecodeTdxScopedFrontEnd(
     std::span<const std::byte> bytes, asset::DecodeLimits limits = {});
 } // namespace omega::retail

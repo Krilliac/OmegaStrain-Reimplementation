@@ -42,6 +42,7 @@ class WindowsCiTimeoutContractTests(unittest.TestCase):
                 "openomega_install_negative_timeout_seconds": 30,
                 "openomega_release_install_timeout_seconds": 30,
                 "openomega_dependency_dump_timeout_seconds": 20,
+                "openomega_launcher_dependency_dump_timeout_seconds": 20,
                 "openomega_reparse_inspection_timeout_seconds": 10,
                 "openomega_positive_package_timeout_seconds": 60,
                 "openomega_archive_list_timeout_seconds": 20,
@@ -66,6 +67,9 @@ class WindowsCiTimeoutContractTests(unittest.TestCase):
             "openomega_dependency_dump_timeout_seconds": self._call_count(
                 "validate_dependencies"
             ),
+            "openomega_launcher_dependency_dump_timeout_seconds": self._call_count(
+                "validate_launcher_dependencies"
+            ),
             "openomega_reparse_inspection_timeout_seconds": self._call_count(
                 "validate_payload_tree"
             ),
@@ -79,13 +83,13 @@ class WindowsCiTimeoutContractTests(unittest.TestCase):
             ),
         }
         self.assertEqual(
-            tuple(multiplicities.values()), (4, 2, 1, 2, 2, 1, 1, 5, 1)
+            tuple(multiplicities.values()), (4, 2, 1, 2, 2, 2, 1, 1, 5, 1)
         )
         sequential_subprocess_maximum = sum(
             timeout_constants[name] * count
             for name, count in multiplicities.items()
         )
-        self.assertEqual(sequential_subprocess_maximum, 530)
+        self.assertEqual(sequential_subprocess_maximum, 570)
         self.assertEqual(package_contract_timeout, 600)
 
         workflow_timeout_seconds = (

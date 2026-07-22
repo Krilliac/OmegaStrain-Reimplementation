@@ -1,13 +1,14 @@
-# .fnt — passive prefix/envelope dossier
+# .fnt — bounded version-3 decoder and passive envelope dossier
 
 ## 1. Identity
 
-The suffix `.fnt` is observed as a HOG member and now has one bounded native passive descriptor for
-a small project-defined prefix hypothesis. `InspectFntEnvelope` reports neutral values and byte
-ranges, leaving the payload opaque and retaining no source bytes. The authoritative coverage matrix
-therefore classifies the implementation `passive_descriptor_only`. No tracked evidence records the
-retail provenance of its constants, and neither suffix spelling nor prefix shape establishes font,
-glyph, metric, texture, render, menu, or other asset semantics.
+The suffix `.fnt` is observed as a HOG member and has two deliberately separate native boundaries.
+`DecodeFntV3` owns the documented version-3 atlas reference and glyph-UV records while rejecting an
+unproven optional pair-table variant. `InspectFntEnvelope` remains a smaller project-passive prefix
+hypothesis that reports neutral byte ranges only. The authoritative coverage matrix classifies the
+suffix `canonical_decoder` because of the former; the passive observation does not gain semantics
+from that promotion. Raw source bytes 16 and 17 retain only the narrow behavior documented by the
+public IR, and complete typography or rendering behavior is not claimed.
 
 ## 2. Occurrence evidence
 
@@ -30,8 +31,11 @@ glyph, metric, texture, render, menu, or other asset semantics.
 - The descriptor has a dedicated generated-fixture test executable covering its accepted boundary,
   truncation/malformed inputs, resource limits, unaligned input, determinism, and typed path-free
   failures.
-- `analysis/formats/DECODER-COVERAGE.md` classifies `.fnt` as
-  `passive_descriptor_only`; no canonical or semantic decoder is claimed.
+- `DecodeFntV3` is a bounded stateless decoder that returns owned `FntV3IR`, including an atlas
+  reference, glyph UV rectangles, a signed space advance, and the independently documented byte-17
+  vertical-placement adapter. A nonzero optional pair-table marker fails closed.
+- `analysis/formats/DECODER-COVERAGE.md` classifies `.fnt` as `canonical_decoder`; this is limited
+  to the documented version-3 family and does not establish suffix-wide typography or rendering.
 - E-0113's `frontend-envelope-coverage-verify-tree` command can count project-passive descriptor
   acceptance for HOG-contained FNT candidates. Its generated fixtures are implementation evidence;
   no owner-corpus coverage result is recorded, and the tracked occurrence totals remain unchanged.
@@ -41,7 +45,9 @@ The aggregate inventories still carry occurrence totals and the derived nested c
 sanitized owner-corpus size or accepted-prefix coverage result is tracked. The hardened size-only
 member collector includes this suffix in its default set. Its implementation and synthetic tests do
 not become corpus evidence until a sanitized result is independently reviewed. The native
-descriptor's bounded checks establish only its implemented passive boundary.
+descriptor's bounded checks establish only its implemented passive boundary. The canonical decoder
+is implementation evidence for its exact accepted version-3 contract, not a tracked corpus-wide
+acceptance result.
 
 ## 5. Hypotheses
 
@@ -53,27 +59,25 @@ descriptor's bounded checks establish only its implemented passive boundary.
 ## 6. Missing observations
 
 - No sanitized owner-corpus size or accepted-prefix coverage result is tracked for this suffix.
-- Retail provenance and owner-corpus coverage for the project-defined prefix constants are not
-  recorded; the payload after that prefix remains opaque and unparsed.
-- No tracked consumer observation assigns font, glyph, metric, texture, lookup, menu, render,
-  audio, gameplay, or other semantics.
+- Retail provenance and owner-corpus coverage for the older project-passive prefix constants are not
+  recorded; those descriptor ranges remain neutral.
+- Optional pair-table structure, raw byte-16 meaning, general kerning/line metrics, text encoding,
+  sampling, and complete render behavior remain unproven.
 
 ## 7. Decoder/tooling status
 
-**Classification: `passive_descriptor_only`.**
+**Classification: `canonical_decoder` (bounded version-3 family, with an independent passive view).**
 
-`InspectFntEnvelope` is a stateless/reentrant, bounded passive hypothesis descriptor backed by
-generated fixtures. It reports neutral scalars and ranges only. It is not a font decoder, semantic
-IR, renderer binding, retail-prefix evidence, owner-corpus acceptance claim, or retail behavior
-claim.
+`DecodeFntV3` is stateless/reentrant, bounded, and returns owned typed data for its exact accepted
+family. `InspectFntEnvelope` remains a stateless/reentrant passive hypothesis descriptor and is not
+a semantic IR or evidence that its prefix constants are retail-authentic. Neither boundary is a
+renderer binding, owner-corpus acceptance claim, or complete retail behavior claim.
 
 ## 8. Codex work order
 
-1. Preserve the project-defined hypothesis and its opaque payload; do not rename neutral values as
-   observed retail facts or semantic fields.
-2. If run, review only the hardened collector's fixed-schema size aggregate and treat it as coverage
-   evidence rather than a decoder promotion.
-3. Preserve size GCD as a divisor of observed sizes, never an address-alignment claim.
+1. Preserve the independent passive hypothesis and do not transfer canonical decoder semantics into
+   its neutral ranges.
+2. Keep pair tables and raw metric meanings fail-closed until a separately reviewed grammar exists.
+3. Treat any private corpus run as bounded coverage evidence, not automatic semantic promotion.
 4. Add no raw magic-value histogram, member identity, per-file row, or payload excerpt.
-5. Require independent consumer evidence and a falsifiable deeper grammar before adding font,
-   glyph, metric, texture, render, or menu semantics.
+5. Require independent consumer evidence before extending text layout, sampling, or render behavior.

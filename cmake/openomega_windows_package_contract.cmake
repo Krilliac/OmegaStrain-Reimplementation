@@ -27,6 +27,7 @@ set(openomega_cpack_negative_timeout_seconds 60)
 set(openomega_install_negative_timeout_seconds 30)
 set(openomega_release_install_timeout_seconds 30)
 set(openomega_dependency_dump_timeout_seconds 20)
+set(openomega_launcher_dependency_dump_timeout_seconds 20)
 set(openomega_reparse_inspection_timeout_seconds 10)
 set(openomega_positive_package_timeout_seconds 60)
 set(openomega_archive_list_timeout_seconds 20)
@@ -598,7 +599,7 @@ function(validate_launcher_dependencies executable)
         RESULT_VARIABLE result
         OUTPUT_VARIABLE stdout
         ERROR_VARIABLE stderr
-        TIMEOUT ${openomega_dependency_dump_timeout_seconds}
+        TIMEOUT ${openomega_launcher_dependency_dump_timeout_seconds}
         ENCODING AUTO
     )
     if(NOT result STREQUAL "0")
