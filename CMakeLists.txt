@@ -138,6 +138,7 @@ target_compile_features(omega_retail_formats PUBLIC cxx_std_23)
 add_library(omega_content STATIC
     native/src/content/game_data_service.cpp
     native/src/content/level_texture_store.cpp
+    native/src/content/model_member_source.cpp
 )
 target_include_directories(omega_content PUBLIC native/include)
 target_link_libraries(omega_content PUBLIC omega_assets PRIVATE omega_core omega_retail_formats)
@@ -2651,6 +2652,7 @@ if(BUILD_TESTING)
         native/tests/launch_options_tests.cpp
         native/tests/log_service_tests.cpp
         native/tests/model_ir_validate_tests.cpp
+        native/tests/model_member_source_tests.cpp
         native/tests/model_pose_evaluation_tests.cpp
         native/tests/spatial_debug_image_tests.cpp
         native/tests/pop_level_manifest_decoder_tests.cpp

@@ -115,6 +115,7 @@ int GameDataServiceFailureCount();
 int LaunchOptionsFailureCount();
 int LogServiceFailureCount();
 int ModelIrValidateFailureCount();
+int ModelMemberSourceFailureCount();
 int ModelPoseEvaluationFailureCount();
 int ConfigServiceFailureCount();
 int JobServiceFailureCount();
@@ -390,6 +391,7 @@ int main()
     failures += LaunchOptionsFailureCount();
     failures += LogServiceFailureCount();
     failures += ModelIrValidateFailureCount();
+    failures += ModelMemberSourceFailureCount();
     failures += ModelPoseEvaluationFailureCount();
     failures += ConfigServiceFailureCount();
     failures += JobServiceFailureCount();
