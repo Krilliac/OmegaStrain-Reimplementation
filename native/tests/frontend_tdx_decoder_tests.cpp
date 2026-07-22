@@ -73,11 +73,13 @@ void WriteU64(std::vector<std::byte>& bytes, const std::size_t offset, const std
 }
 
 void WritePacket(std::vector<std::byte>& bytes, const std::size_t object,
-                 const std::uint16_t base_pointer, const std::uint16_t buffer_width,
-                 const std::uint16_t width, const std::uint16_t height,
-                 const std::uint32_t payload_bytes)
+                  const std::uint16_t base_pointer, const std::uint16_t buffer_width,
+                  const std::uint16_t width, const std::uint16_t height,
+                  const std::uint32_t payload_bytes,
+                  const std::uint32_t stored_transfer_count_scale = 1U)
 {
     const std::uint32_t qword_count = payload_bytes / 16U;
+    const std::uint32_t stored_transfer_count = qword_count * stored_transfer_count_scale;
     WriteU32(bytes, object + 0x00U, 0);
     WriteU32(bytes, object + 0x04U,
              base_pointer | (static_cast<std::uint32_t>(buffer_width) << 16U));
@@ -89,10 +91,10 @@ void WritePacket(std::vector<std::byte>& bytes, const std::size_t object,
     WriteU64(bytes, object + 0x28U, 0x52U);
     WriteU64(bytes, object + 0x30U, 0);
     WriteU64(bytes, object + 0x38U, 0x53U);
-    WriteU32(bytes, object + 0x40U, qword_count | 0x8000U);
+    WriteU32(bytes, object + 0x40U, stored_transfer_count);
     WriteU32(bytes, object + 0x44U, 0x08000000U);
     WriteU64(bytes, object + 0x48U, 0);
-    WriteU32(bytes, object + 0x50U, 0x30000000U | qword_count);
+    WriteU32(bytes, object + 0x50U, 0x30000000U | stored_transfer_count);
     WriteU32(bytes, object + 0x54U, 0);
     WriteU64(bytes, object + 0x58U, 0);
 }
@@ -160,7 +162,7 @@ void WriteTransferControlPrefix(std::vector<std::byte>& bytes, const std::size_t
     WriteTransferControlPrefix(bytes, kSecondaryControlPrefix);
     WriteTransferControlPrefix(bytes, kPrimaryControlPrefix);
     WritePacket(bytes, kPrimaryObject, base_pointer, texture_buffer_width / 2U, upload_width,
-                upload_height, primary_bytes);
+                upload_height, primary_bytes, indexed8 ? 1U : 2U);
     WritePacket(bytes, kPaletteObject, base_pointer, 1U, palette_width, palette_height,
                 palette_bytes);
 
@@ -578,6 +580,7 @@ void CheckBudgets()
 void CheckStrictRejections()
 {
     const auto fixture = MakeFixture(omega::asset::IndexedImageEncoding::Indexed8);
+    const auto indexed4_fixture = MakeFixture(omega::asset::IndexedImageEncoding::Indexed4);
 
     for (const std::size_t prefix : {kSecondaryControlPrefix, kPrimaryControlPrefix})
     {
@@ -615,43 +618,133 @@ void CheckStrictRejections()
                    "frontend TDX rejects every corrupted active pointer-layout word");
     }
 
-    for (const std::size_t packet : {kPrimaryObject, kPaletteObject})
+    for (const auto* packet_fixture : {&fixture, &indexed4_fixture})
     {
-        for (const std::size_t register_offset : {0x08U, 0x18U, 0x28U, 0x38U})
+        for (const std::size_t packet : {kPrimaryObject, kPaletteObject})
         {
-            auto corrupt = fixture;
-            corrupt[packet + register_offset] ^= std::byte{1};
+            for (const std::size_t register_offset : {0x08U, 0x18U, 0x28U, 0x38U})
+            {
+                auto corrupt = *packet_fixture;
+                corrupt[packet + register_offset] ^= std::byte{1};
+                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                           omega::asset::DecodeErrorCode::Malformed,
+                           "frontend TDX rejects every corrupted packet register identifier");
+            }
+
+            for (unsigned bit = 0; bit < 15U; ++bit)
+            {
+                auto corrupt = *packet_fixture;
+                corrupt[packet + 0x40U + bit / 8U] ^=
+                    static_cast<std::byte>(1U << (bit % 8U));
+                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                           omega::asset::DecodeErrorCode::Malformed,
+                           "frontend TDX rejects every corrupted stored IMAGE count bit");
+            }
+
+            auto corrupt = *packet_fixture;
+            corrupt[packet + 0x41U] ^= std::byte{0x80};
             CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
-                        omega::asset::DecodeErrorCode::Malformed,
-                        "frontend TDX rejects every corrupted packet register identifier");
+                       omega::asset::DecodeErrorCode::Malformed,
+                       "frontend TDX rejects a nonzero stored IMAGE EOP bit");
+
+            for (std::size_t byte = 0x42U; byte < 0x44U; ++byte)
+            {
+                corrupt = *packet_fixture;
+                corrupt[packet + byte] ^= std::byte{1};
+                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                           omega::asset::DecodeErrorCode::Malformed,
+                           "frontend TDX rejects every nonzero stored IMAGE reserved byte");
+            }
+            for (std::size_t byte = 0x44U; byte < 0x48U; ++byte)
+            {
+                corrupt = *packet_fixture;
+                corrupt[packet + byte] ^= std::byte{1};
+                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                           omega::asset::DecodeErrorCode::Malformed,
+                           "frontend TDX rejects every corrupted stored IMAGE mode byte");
+            }
+            for (std::size_t byte = 0x48U; byte < 0x50U; ++byte)
+            {
+                corrupt = *packet_fixture;
+                corrupt[packet + byte] ^= std::byte{1};
+                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                           omega::asset::DecodeErrorCode::Malformed,
+                           "frontend TDX rejects every nonzero stored IMAGE register byte");
+            }
+            for (std::size_t byte = 0x50U; byte < 0x54U; ++byte)
+            {
+                corrupt = *packet_fixture;
+                corrupt[packet + byte] ^= std::byte{1};
+                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                           omega::asset::DecodeErrorCode::Malformed,
+                           "frontend TDX rejects every corrupted DMA tag or count byte");
+            }
+            for (std::size_t byte = 0x54U; byte < 0x58U; ++byte)
+            {
+                corrupt = *packet_fixture;
+                corrupt[packet + byte] ^= std::byte{1};
+                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                           omega::asset::DecodeErrorCode::InvalidReference,
+                           "frontend TDX rejects every nonzero DMA data-reference byte");
+            }
+            for (std::size_t byte = 0x58U; byte < 0x60U; ++byte)
+            {
+                corrupt = *packet_fixture;
+                corrupt[packet + byte] ^= std::byte{1};
+                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                           omega::asset::DecodeErrorCode::Malformed,
+                           "frontend TDX rejects every nonzero DMA reserved byte");
+            }
         }
-
-        auto corrupt = fixture;
-        corrupt[packet + 0x44U] ^= std::byte{1};
-        CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
-                   omega::asset::DecodeErrorCode::Malformed,
-                   "frontend TDX rejects a corrupted GIF IMAGE flag in every packet");
-
-        corrupt = fixture;
-        corrupt[packet + 0x50U] ^= std::byte{1};
-        CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
-                   omega::asset::DecodeErrorCode::Malformed,
-                   "frontend TDX rejects a corrupted DMA REF tag in every packet");
-
-        corrupt = fixture;
-        corrupt[packet + 0x40U] ^= std::byte{1};
-        CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
-                   omega::asset::DecodeErrorCode::Malformed,
-                   "frontend TDX rejects a corrupted transfer qword count in every packet");
-
-        corrupt = fixture;
-        WriteU32(corrupt, packet + 0x54U, 16U);
-        CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
-                   omega::asset::DecodeErrorCode::InvalidReference,
-                   "frontend TDX rejects every shifted data reference");
     }
 
-    auto corrupt = fixture;
+    constexpr std::uint32_t indexed4_primary_qwords = 32U;
+    constexpr std::uint32_t indexed4_primary_stored_count = indexed4_primary_qwords * 2U;
+    constexpr std::uint32_t indexed4_palette_qwords = 4U;
+    Check((ReadU32(indexed4_fixture, kPrimaryObject + 0x40U) & 0x7FFFU) ==
+                  indexed4_primary_stored_count &&
+              (ReadU32(indexed4_fixture, kPrimaryObject + 0x50U) & 0xFFFFU) ==
+                  indexed4_primary_stored_count,
+          "generated indexed-4 primary fixture carries the exact doubled stored counts");
+    auto corrupt = indexed4_fixture;
+    WriteU32(corrupt, kPrimaryObject + 0x40U, indexed4_primary_qwords);
+    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+               omega::asset::DecodeErrorCode::Malformed,
+               "indexed-4 primary rejects an undoubled stored IMAGE count");
+
+    corrupt = indexed4_fixture;
+    WriteU32(corrupt, kPrimaryObject + 0x50U, 0x30000000U | indexed4_primary_qwords);
+    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+               omega::asset::DecodeErrorCode::Malformed,
+               "indexed-4 primary rejects an undoubled stored DMA count");
+
+    corrupt = indexed4_fixture;
+    WriteU32(corrupt, kPaletteObject + 0x40U, indexed4_palette_qwords * 2U);
+    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+               omega::asset::DecodeErrorCode::Malformed,
+               "indexed-4 palette rejects a doubled stored IMAGE count");
+
+    corrupt = indexed4_fixture;
+    WriteU32(corrupt, kPaletteObject + 0x50U,
+             0x30000000U | (indexed4_palette_qwords * 2U));
+    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+               omega::asset::DecodeErrorCode::Malformed,
+               "indexed-4 palette rejects a doubled stored DMA count");
+
+    constexpr std::uint32_t indexed8_primary_qwords = 64U;
+    corrupt = fixture;
+    WriteU32(corrupt, kPrimaryObject + 0x40U, indexed8_primary_qwords * 2U);
+    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+               omega::asset::DecodeErrorCode::Malformed,
+               "indexed-8 primary rejects a doubled stored IMAGE count");
+
+    corrupt = fixture;
+    WriteU32(corrupt, kPrimaryObject + 0x50U, 0x30000000U | indexed8_primary_qwords * 2U);
+    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+               omega::asset::DecodeErrorCode::Malformed,
+               "indexed-8 primary rejects a doubled stored DMA count");
+
+    corrupt = fixture;
     corrupt[kPrimaryObject + 0x07U] = std::byte{0x13};
     CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
                omega::asset::DecodeErrorCode::UnsupportedVariant,

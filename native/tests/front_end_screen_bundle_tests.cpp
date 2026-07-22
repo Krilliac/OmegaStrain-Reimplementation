@@ -356,7 +356,7 @@ void WriteTdxPacket(std::vector<std::byte>& bytes, const std::size_t object,
     WriteU64(bytes, object + 0x28U, 0x52U);
     WriteU64(bytes, object + 0x30U, 0U);
     WriteU64(bytes, object + 0x38U, 0x53U);
-    WriteU32(bytes, object + 0x40U, qword_count | 0x8000U);
+    WriteU32(bytes, object + 0x40U, qword_count);
     WriteU32(bytes, object + 0x44U, 0x08000000U);
     WriteU64(bytes, object + 0x48U, 0U);
     WriteU32(bytes, object + 0x50U, 0x30000000U | qword_count);
