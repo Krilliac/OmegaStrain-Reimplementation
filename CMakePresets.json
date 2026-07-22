@@ -21,6 +21,19 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT": "Embedded"
       }
+    },
+    {
+      "name": "vs2022-x64",
+      "displayName": "Visual Studio 2022 x64 solution",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/vs2022-x64",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo;Release",
+        "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT": "Embedded",
+        "OMEGA_BUILD_RUNTIME": "ON",
+        "BUILD_TESTING": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -41,6 +54,60 @@
       "configurePreset": "msvc",
       "configuration": "Release",
       "jobs": 2
+    },
+    {
+      "name": "vs2022-debug",
+      "displayName": "Visual Studio 2022 - Debug solution",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Debug",
+      "jobs": 1
+    },
+    {
+      "name": "vs2022-game-debug",
+      "displayName": "Visual Studio 2022 - Debug game",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Debug",
+      "targets": [
+        "openomega"
+      ],
+      "jobs": 1
+    },
+    {
+      "name": "vs2022-game-relwithdebinfo",
+      "displayName": "Visual Studio 2022 - RelWithDebInfo game",
+      "configurePreset": "vs2022-x64",
+      "configuration": "RelWithDebInfo",
+      "targets": [
+        "openomega"
+      ],
+      "jobs": 1
+    },
+    {
+      "name": "vs2022-game-release",
+      "displayName": "Visual Studio 2022 - Release game",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Release",
+      "targets": [
+        "openomega"
+      ],
+      "jobs": 1
+    },
+    {
+      "name": "vs2022-sdk-debug",
+      "displayName": "Visual Studio 2022 - Debug SDK tool",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Debug",
+      "targets": [
+        "omega_tool"
+      ],
+      "jobs": 1
+    },
+    {
+      "name": "vs2022-relwithdebinfo",
+      "displayName": "Visual Studio 2022 - RelWithDebInfo solution",
+      "configurePreset": "vs2022-x64",
+      "configuration": "RelWithDebInfo",
+      "jobs": 1
     }
   ],
   "testPresets": [
@@ -64,6 +131,15 @@
       "name": "msvc-release",
       "configurePreset": "msvc",
       "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "vs2022-debug",
+      "displayName": "Visual Studio 2022 - Debug tests",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Debug",
       "output": {
         "outputOnFailure": true
       }

@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+  <Type Name="omega::app::FrontEndState">
+    <DisplayString>mode={mode}, main={selected_main_row}, profile={selected_profile_slot}, character={selected_character_slot}</DisplayString>
+    <Expand>
+      <Item Name="[mode]">mode</Item>
+      <Item Name="[main row]">selected_main_row</Item>
+      <Item Name="[profile slot]">selected_profile_slot</Item>
+      <Item Name="[character slot]">selected_character_slot</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::app::FrontEndView">
+    <DisplayString>mode={mode}, main={selected_main_row}, profile={selected_profile_slot}, character={selected_character_slot}</DisplayString>
+    <Expand>
+      <Item Name="[mode]">mode</Item>
+      <Item Name="[main row]">selected_main_row</Item>
+      <Item Name="[profile slot]">selected_profile_slot</Item>
+      <Item Name="[character slot]">selected_character_slot</Item>
+      <Item Name="[content stage]">content_stage</Item>
+      <Item Name="[profiles]">profiles</Item>
+      <Item Name="[characters]">characters</Item>
+      <Item Name="[active profile]">active_profile_slot</Item>
+      <Item Name="[active character]">active_character_slot</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::runtime::FrameSchedulerConfig">
+    <DisplayString>step={simulation_step}, max steps={max_steps_per_frame}, max delta={max_frame_delta}</DisplayString>
+    <Expand>
+      <Item Name="[simulation step]">simulation_step</Item>
+      <Item Name="[max steps per frame]">max_steps_per_frame</Item>
+      <Item Name="[max frame delta]">max_frame_delta</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::runtime::FrameSchedulerState">
+    <DisplayString>planned={total_planned_steps}, remainder={accumulated_remainder}, dropped={total_dropped_time}</DisplayString>
+    <Expand>
+      <Item Name="[config]">config</Item>
+      <Item Name="[accumulated remainder]">accumulated_remainder</Item>
+      <Item Name="[total planned steps]">total_planned_steps</Item>
+      <Item Name="[total dropped time]">total_dropped_time</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::runtime::FramePlan">
+    <DisplayString>steps={simulation_steps}, alpha={interpolation_alpha}, clamped={clamped_delta}, dropped={dropped_time}</DisplayString>
+    <Expand>
+      <Item Name="[simulation steps]">simulation_steps</Item>
+      <Item Name="[interpolation alpha]">interpolation_alpha</Item>
+      <Item Name="[clamped delta]">clamped_delta</Item>
+      <Item Name="[dropped time]">dropped_time</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::simulation::EntityId">
+    <DisplayString>entity={index}, generation={generation}</DisplayString>
+    <Expand>
+      <Item Name="[index]">index</Item>
+      <Item Name="[generation]">generation</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::simulation::EntityRegistrySnapshot">
+    <DisplayString>alive={alive}/{capacity}, reusable={reusable}, retired={retired}</DisplayString>
+    <Expand>
+      <Item Name="[capacity]">capacity</Item>
+      <Item Name="[alive]">alive</Item>
+      <Item Name="[reusable]">reusable</Item>
+      <Item Name="[retired]">retired</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::simulation::EntityRegistry">
+    <DisplayString>alive={alive_count_}, retired={retired_count_}</DisplayString>
+    <Expand>
+      <Item Name="[alive]">alive_count_</Item>
+      <Item Name="[retired]">retired_count_</Item>
+      <Item Name="[slots]">slots_</Item>
+      <Item Name="[free indices]">free_indices_</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::gameplay::DiagnosticMissionLifecycleState">
+    <DisplayString>status={status}</DisplayString>
+    <Expand>
+      <Item Name="[status]">status</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::gameplay::DiagnosticMissionLifecycleStep">
+    <DisplayString>status={state.status}, reset={reset_gameplay_now}, briefing={enter_briefing_now}</DisplayString>
+    <Expand>
+      <Item Name="[state]">state</Item>
+      <Item Name="[reset gameplay now]">reset_gameplay_now</Item>
+      <Item Name="[enter briefing now]">enter_briefing_now</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::runtime::InputBinding">
+    <DisplayString>device={device}, code={code}, action={action}</DisplayString>
+    <Expand>
+      <Item Name="[device]">device</Item>
+      <Item Name="[code]">code</Item>
+      <Item Name="[action]">action</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::runtime::InputEvent">
+    <DisplayString>device={device}, code={code}, pressed={pressed}</DisplayString>
+    <Expand>
+      <Item Name="[device]">device</Item>
+      <Item Name="[code]">code</Item>
+      <Item Name="[pressed]">pressed</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::runtime::PointerPositionQ16">
+    <DisplayString>x={x}, y={y}</DisplayString>
+    <Expand>
+      <Item Name="[x]">x</Item>
+      <Item Name="[y]">y</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::runtime::InputSnapshot">
+    <DisplayString>frame={frame_index_}, accepted={accepted_event_count_}, rejected={rejected_event_count_}</DisplayString>
+    <Expand>
+      <Item Name="[frame]">frame_index_</Item>
+      <Item Name="[actions]">actions_</Item>
+      <Item Name="[rows]">rows_</Item>
+      <Item Name="[pointer]">pointer_position_</Item>
+      <Item Name="[accepted events]">accepted_event_count_</Item>
+      <Item Name="[rejected events]">rejected_event_count_</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::runtime::RunCaptureSession">
+    <DisplayString>phase={phase_}, pending frame={pending_frame_index_}</DisplayString>
+    <Expand>
+      <Item Name="[config]">config_</Item>
+      <Item Name="[phase]">phase_</Item>
+      <Item Name="[pending frame]">pending_frame_index_</Item>
+      <Item Name="[terminal input]">terminal_input_</Item>
+      <Item Name="[input recorder]">input_recorder_</Item>
+      <Item Name="[elapsed recorder]">scheduler_elapsed_recorder_</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::profiles::ProfileId">
+    <DisplayString>profile id (16 bytes)</DisplayString>
+    <Expand>
+      <Item Name="[bytes]">bytes_</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::profiles::CharacterId">
+    <DisplayString>character id (16 bytes)</DisplayString>
+    <Expand>
+      <Item Name="[bytes]">bytes_</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::profiles::ProfileSummary">
+    <DisplayString>name={metadata.display_name}, revision={metadata_revision}</DisplayString>
+    <Expand>
+      <Item Name="[id]">id</Item>
+      <Item Name="[metadata]">metadata</Item>
+      <Item Name="[revision]">metadata_revision</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="omega::profiles::CharacterSummary">
+    <DisplayString>name={metadata.display_name}, revision={metadata_revision}</DisplayString>
+    <Expand>
+      <Item Name="[id]">id</Item>
+      <Item Name="[metadata]">metadata</Item>
+      <Item Name="[revision]">metadata_revision</Item>
+    </Expand>
+  </Type>
+</AutoVisualizer>

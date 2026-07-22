@@ -2668,3 +2668,7 @@ if(OMEGA_WINDOWS_PORTABLE_PACKAGE_ENABLED)
     set(CPACK_OPENOMEGA_PROJECT_CONFIG_MODE ON)
     include(CPack)
 endif()
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/OmegaVisualStudio.cmake")
+omega_configure_product_outputs()
+omega_configure_visual_studio()

@@ -67,9 +67,9 @@ python -B .\tools\hog.py `
   --json .\analysis\formats\minsk-scripts-hog.json `
   --extract .\analysis\output\MINSK\SCRIPTS
 
-.\build\msvc\Debug\omega_tool.exe hog-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe frontend-envelope-coverage-verify-tree .\private\extracted-disc
+.\build/msvc/products/sdk/Debug/omega_tool.exe hog-verify-tree .\private\extracted-disc
+.\build/msvc/products/sdk/Debug/omega_tool.exe hog-verify-nested-tree .\private\extracted-disc
+.\build/msvc/products/sdk/Debug/omega_tool.exe frontend-envelope-coverage-verify-tree .\private\extracted-disc
 ```
 
 Extraction refuses absolute paths, `.`/`..` components, empty components, and any destination

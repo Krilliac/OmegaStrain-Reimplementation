@@ -226,7 +226,7 @@ The aggregate verifier streams one asset at a time and discards each decoded val
 sanitized counters:
 
 ```powershell
-build/msvc/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc
+build/msvc/products/sdk/Debug/omega_tool.exe asset-metadata-verify-tree private/extracted-disc
 ```
 
 The confirmed semantic baseline is 15,248 textures, 15,442 blocks, 17,960 primary planes,
@@ -237,7 +237,7 @@ The separate public-safe level-scoped verifier executes the native composed stor
 per level followed by one `Load` for every published handle.
 
 ```powershell
-build/msvc/Debug/omega_tool.exe level-texture-store-verify-tree private/extracted-disc
+build/msvc/products/sdk/Debug/omega_tool.exe level-texture-store-verify-tree private/extracted-disc
 ```
 
 The confirmed run accepts all 18 levels, all 36 explicit texture sources, and 5,801 level-inventory
@@ -279,7 +279,7 @@ before both `JobService` and its non-owning `GameDataService`/`LevelTextureStore
 The public-safe owned-tree verifier exercises the complete sequential lifecycle:
 
 ```powershell
-build/msvc/Debug/omega_tool.exe asset-service-verify-tree private/extracted-disc
+build/msvc/products/sdk/Debug/omega_tool.exe asset-service-verify-tree private/extracted-disc
 ```
 
 Two passes produce byte-identical schema-version-1 reports. Both accept 18/18 levels, 36 explicit

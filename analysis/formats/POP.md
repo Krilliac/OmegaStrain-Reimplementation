@@ -214,9 +214,9 @@ python -B .\tools\fingerprint_assets.py `
   .\private\extracted-disc `
   .\analysis\formats\asset-fingerprints.json
 
-.\build\msvc\Debug\omega_tool.exe pop-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe pop-post-terrain-hypotheses-verify-tree .\private\extracted-disc
-.\build\msvc\Debug\omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
+.\build/msvc/products/sdk/Debug/omega_tool.exe pop-verify-tree .\private\extracted-disc
+.\build/msvc/products/sdk/Debug/omega_tool.exe pop-post-terrain-hypotheses-verify-tree .\private\extracted-disc
+.\build/msvc/products/sdk/Debug/omega_tool.exe level-manifest-verify-tree .\private\extracted-disc
 python -B .\tools\scan_pop_post_terrain.py .\private\extracted-disc --pretty
 python -B .\tools\score_pop_section_layout_hypotheses.py .\private\extracted-disc --pretty
 python -B .\tools\profile_pop_candidate_record_shapes.py .\private\extracted-disc --pretty

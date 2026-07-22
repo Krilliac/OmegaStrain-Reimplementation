@@ -77,13 +77,19 @@ function Assert-SequenceEqual {
     )
 
     if ($Actual.Count -ne $Expected.Count) {
-        Assert-True -Condition $false -Message ($Message + ' (argument count)')
+        $actualJson = ConvertTo-Json -InputObject @($Actual) -Compress
+        $expectedJson = ConvertTo-Json -InputObject @($Expected) -Compress
+        Assert-True -Condition $false -Message ($Message +
+            " (argument count: actual=$($Actual.Count) expected=$($Expected.Count); " +
+            "actual=$actualJson expected=$expectedJson)")
         return
     }
     for ($index = 0; $index -lt $Expected.Count; ++$index) {
         if ($Actual[$index] -cne $Expected[$index]) {
             Assert-True -Condition $false -Message `
-                ($Message + ' (argument index ' + $index + ')')
+                ($Message + ' (argument index ' + $index + ': actual=' +
+                    (ConvertTo-Json $Actual[$index] -Compress) + ' expected=' +
+                    (ConvertTo-Json $Expected[$index] -Compress) + ')')
             return
         }
     }
@@ -184,6 +190,90 @@ function Invoke-CapturedLauncher {
     }
 }
 
+function Invoke-NativeLauncherProcess {
+    param(
+        [string]$PowerShellExecutable,
+        [string]$Driver,
+        [string]$Launcher,
+        [string]$CapturePath,
+        [string]$ArgumentsPath,
+        [ValidateSet('auto', 'msvc', 'vs2022-x64')]
+        [string]$Preset = 'auto',
+        [ValidateSet('Debug', 'RelWithDebInfo', 'Release')]
+        [string]$Config = 'Debug',
+        [AllowEmptyString()]
+        [string]$ConfigFile = '__OPENOMEGA_NO_CONFIG__',
+        [string[]]$GameArguments = @()
+    )
+
+    if (Test-Path -LiteralPath $CapturePath) {
+        Remove-Item -LiteralPath $CapturePath -Force
+    }
+    $standardOutputPath = $CapturePath + '.stdout'
+    $standardErrorPath = $CapturePath + '.stderr'
+    foreach ($outputPath in @($standardOutputPath, $standardErrorPath)) {
+        if (Test-Path -LiteralPath $outputPath) {
+            Remove-Item -LiteralPath $outputPath -Force
+        }
+    }
+
+    $argumentsJson = ConvertTo-Json -InputObject @($GameArguments) -Compress
+    [IO.File]::WriteAllText(
+        $ArgumentsPath, $argumentsJson, [Text.UTF8Encoding]::new($false))
+
+    $driverArguments = @(
+        '-NoLogo',
+        '-NoProfile',
+        '-File', $Driver,
+        '-Launcher', $Launcher,
+        '-Preset', $Preset,
+        '-Config', $Config,
+        '-ConfigFile', $ConfigFile,
+        '-ArgumentsPath', $ArgumentsPath
+    )
+    $maximumContentLength = Get-OmegaMaximumWindowsStartProcessContentLength
+    $encodedPowerShellLength = Measure-OmegaWindowsStartProcessFilePath `
+        $PowerShellExecutable -MaximumEncodedLength $maximumContentLength
+    $maximumDriverArgumentLength = $maximumContentLength - $encodedPowerShellLength - 1
+    $driverArgumentLine = Join-OmegaWindowsCommandLineArguments $driverArguments `
+        -MaximumLength $maximumDriverArgumentLength
+
+    $priorCapturePath = [Environment]::GetEnvironmentVariable(
+        'OPENOMEGA_ARGV_CAPTURE_PATH', [EnvironmentVariableTarget]::Process)
+    $process = $null
+    try {
+        [Environment]::SetEnvironmentVariable('OPENOMEGA_ARGV_CAPTURE_PATH', $CapturePath,
+            [EnvironmentVariableTarget]::Process)
+        $process = Start-Process -FilePath $PowerShellExecutable `
+            -ArgumentList $driverArgumentLine -NoNewWindow -PassThru -Wait `
+            -RedirectStandardOutput $standardOutputPath `
+            -RedirectStandardError $standardErrorPath
+        $exitCode = [int]$process.ExitCode
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable('OPENOMEGA_ARGV_CAPTURE_PATH', $priorCapturePath,
+            [EnvironmentVariableTarget]::Process)
+        if ($null -ne $process) {
+            $process.Dispose()
+        }
+    }
+
+    $capturedArguments = $null
+    if (Test-Path -LiteralPath $CapturePath -PathType Leaf) {
+        $capturedArguments = [string[]](Read-ArgumentCapture $CapturePath)
+    }
+    [pscustomobject]@{
+        ExitCode = $exitCode
+        Arguments = $capturedArguments
+        StandardOutput = if (Test-Path -LiteralPath $standardOutputPath) {
+            [IO.File]::ReadAllText($standardOutputPath)
+        } else { '' }
+        StandardError = if (Test-Path -LiteralPath $standardErrorPath) {
+            [IO.File]::ReadAllText($standardErrorPath)
+        } else { '' }
+    }
+}
+
 if (-not [IO.Path]::IsPathRooted($ArgvCaptureExecutable) -or
     -not (Test-Path -LiteralPath $ArgvCaptureExecutable -PathType Leaf)) {
     throw 'ArgvCaptureExecutable must be an absolute existing file.'
@@ -277,8 +367,47 @@ try {
         -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $scriptsRoot 'launch-omega.ps1') `
         -Destination $syntheticScripts
+    Copy-Item -LiteralPath (Join-Path $scriptsRoot 'launch-pcsx2-reference.ps1') `
+        -Destination $syntheticScripts
+    Copy-Item -LiteralPath (Join-Path $scriptsRoot 'run-openomega.ps1') `
+        -Destination $syntheticScripts
     Copy-Item -LiteralPath (Join-Path $scriptsRoot 'windows-command-line.ps1') `
         -Destination $syntheticScripts
+
+    $nativeLauncherDriver = Join-Path $syntheticScripts 'invoke-native-launcher-test-driver.ps1'
+    [IO.File]::WriteAllText($nativeLauncherDriver, @'
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$Launcher,
+    [Parameter(Mandatory = $true)]
+    [string]$Preset,
+    [Parameter(Mandatory = $true)]
+    [string]$Config,
+    [Parameter(Mandatory = $true)]
+    [AllowEmptyString()]
+    [string]$ConfigFile,
+    [Parameter(Mandatory = $true)]
+    [string]$ArgumentsPath
+)
+
+Set-StrictMode -Version Latest
+$decodedArguments = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($ArgumentsPath))
+$gameArgumentList = [Collections.Generic.List[string]]::new()
+foreach ($argument in $decodedArguments) {
+    $gameArgumentList.Add([string]$argument)
+}
+$parameters = @{
+    Preset = $Preset
+    Config = $Config
+    GameArguments = $gameArgumentList.ToArray()
+}
+if ($ConfigFile -cne '__OPENOMEGA_NO_CONFIG__') {
+    $parameters.ConfigFile = $ConfigFile
+}
+& $Launcher @parameters
+exit $LASTEXITCODE
+'@, [Text.UTF8Encoding]::new($false))
 
     $syntheticPcsx2 = Join-Path $syntheticPcsx2Directory 'pcsx2-qtx64-avx2.exe'
     $syntheticIso = Join-Path $syntheticDiscDirectory `
@@ -403,6 +532,155 @@ try {
     )
     Assert-SequenceEqual -Actual $exactRoundTrip.Arguments -Expected $exactExpected `
         -Message 'the exact accepted Start-Process adapter boundary reaches the child intact'
+
+    $nativeLauncher = Join-Path $syntheticScripts 'run-openomega.ps1'
+    $currentPowerShellProcess = [Diagnostics.Process]::GetCurrentProcess()
+    try {
+        $nativePowerShell = $currentPowerShellProcess.MainModule.FileName
+    }
+    finally {
+        $currentPowerShellProcess.Dispose()
+    }
+    $nativeArgumentsPath = Join-Path $syntheticCaptureDirectory 'native-arguments.json'
+    $stableMsvcDirectory = Join-Path $resolvedTemporaryRoot `
+        'build\msvc\products\game\Debug'
+    $stableVisualStudioDirectory = Join-Path $resolvedTemporaryRoot `
+        'build\vs2022-x64\products\game\Debug'
+    $legacyMsvcDirectory = Join-Path $resolvedTemporaryRoot 'build\msvc\Debug'
+    $stableMsvcExecutable = Join-Path $stableMsvcDirectory 'openomega.exe'
+    $stableVisualStudioExecutable = Join-Path $stableVisualStudioDirectory 'openomega.exe'
+    $legacyMsvcExecutable = Join-Path $legacyMsvcDirectory 'openomega.exe'
+    New-Item -ItemType Directory -Path $stableMsvcDirectory, `
+        $stableVisualStudioDirectory, $legacyMsvcDirectory -Force | Out-Null
+
+    # A stable product from the second automatic preset must win over a legacy
+    # artifact from the first preset.
+    Copy-Item -LiteralPath $ArgvCaptureExecutable -Destination $legacyMsvcExecutable
+    Copy-Item -LiteralPath $ArgvCaptureExecutable -Destination $stableVisualStudioExecutable
+    $stableVisualStudioPreference = Invoke-NativeLauncherProcess `
+        -PowerShellExecutable $nativePowerShell -Driver $nativeLauncherDriver `
+        -Launcher $nativeLauncher `
+        -CapturePath (Join-Path $syntheticCaptureDirectory 'native-stable-vs.argv') `
+        -ArgumentsPath $nativeArgumentsPath -GameArguments @('--stable-vs')
+    Assert-True -Condition ($stableVisualStudioPreference.ExitCode -eq 0) `
+        -Message 'the stable Visual Studio product exits successfully'
+    if ($null -ne $stableVisualStudioPreference.Arguments) {
+        Assert-SequenceEqual -Actual $stableVisualStudioPreference.Arguments `
+            -Expected @($stableVisualStudioExecutable, '--stable-vs') `
+            -Message 'automatic selection prefers every stable product over legacy output'
+    } else {
+        Assert-True -Condition $false `
+            -Message 'the stable Visual Studio product writes an argv capture'
+    }
+
+    # The first automatic preset wins when both stable products exist, while
+    # config and game arguments retain exact argv boundaries.
+    Copy-Item -LiteralPath $ArgvCaptureExecutable -Destination $stableMsvcExecutable
+    $nativeConfigRelative = 'config files\native test.cfg'
+    $nativeConfigAbsolute = Join-Path $resolvedTemporaryRoot $nativeConfigRelative
+    New-Item -ItemType Directory -Path (Split-Path -Parent $nativeConfigAbsolute) `
+        -Force | Out-Null
+    [IO.File]::WriteAllText($nativeConfigAbsolute, 'synthetic=true')
+    $nativeSentinelPath = Join-Path $syntheticCaptureDirectory `
+        'native-hostile-text-was-evaluated'
+    $priorNativeSentinelPath = [Environment]::GetEnvironmentVariable(
+        'OPENOMEGA_NATIVE_QUOTING_SENTINEL', [EnvironmentVariableTarget]::Process)
+    try {
+        [Environment]::SetEnvironmentVariable(
+            'OPENOMEGA_NATIVE_QUOTING_SENTINEL', $nativeSentinelPath,
+            [EnvironmentVariableTarget]::Process)
+        $nativeHostileArgument = `
+            '$(Set-Content -LiteralPath $env:OPENOMEGA_NATIVE_QUOTING_SENTINEL ' + `
+            '-Value pwned); & Write-Output injected'
+        $nativeRoundTripArguments = @(
+            $nativeHostileArgument,
+            '',
+            'two words',
+            $terminalBackslashArgument
+        )
+        $nativeRoundTrip = Invoke-NativeLauncherProcess `
+            -PowerShellExecutable $nativePowerShell -Driver $nativeLauncherDriver `
+            -Launcher $nativeLauncher `
+            -CapturePath (Join-Path $syntheticCaptureDirectory 'native-round-trip.argv') `
+            -ArgumentsPath $nativeArgumentsPath -ConfigFile $nativeConfigRelative `
+            -GameArguments $nativeRoundTripArguments
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable(
+            'OPENOMEGA_NATIVE_QUOTING_SENTINEL', $priorNativeSentinelPath,
+            [EnvironmentVariableTarget]::Process)
+    }
+    Assert-True -Condition ($nativeRoundTrip.ExitCode -eq 0) `
+        -Message 'the stable Ninja product exits successfully'
+    if ($null -ne $nativeRoundTrip.Arguments) {
+        Assert-SequenceEqual -Actual $nativeRoundTrip.Arguments -Expected @(
+            $stableMsvcExecutable,
+            ('--config=' + $nativeConfigAbsolute),
+            $nativeHostileArgument,
+            '',
+            'two words',
+            $terminalBackslashArgument
+        ) -Message 'native config, hostile, empty, spaced, and slash arguments round-trip exactly'
+    } else {
+        Assert-True -Condition $false `
+            -Message 'the stable Ninja product writes an argv capture'
+    }
+    Assert-True -Condition (-not (Test-Path -LiteralPath $nativeSentinelPath)) `
+        -Message 'native hostile-looking argument text is never evaluated'
+
+    # With no stable products, automatic selection falls back to the first
+    # preset's legacy artifact.
+    Remove-Item -LiteralPath $stableMsvcExecutable, $stableVisualStudioExecutable -Force
+    $legacyFallback = Invoke-NativeLauncherProcess `
+        -PowerShellExecutable $nativePowerShell -Driver $nativeLauncherDriver `
+        -Launcher $nativeLauncher `
+        -CapturePath (Join-Path $syntheticCaptureDirectory 'native-legacy.argv') `
+        -ArgumentsPath $nativeArgumentsPath -GameArguments @('--legacy')
+    Assert-True -Condition ($legacyFallback.ExitCode -eq 0) `
+        -Message 'the legacy Ninja fallback exits successfully'
+    if ($null -ne $legacyFallback.Arguments) {
+        Assert-SequenceEqual -Actual $legacyFallback.Arguments `
+            -Expected @($legacyMsvcExecutable, '--legacy') `
+            -Message 'automatic selection falls back to legacy output only after stable products'
+    } else {
+        Assert-True -Condition $false `
+            -Message 'the legacy Ninja fallback writes an argv capture'
+    }
+
+    Remove-Item -LiteralPath $legacyMsvcExecutable -Force
+    $missingNativeBinary = Invoke-NativeLauncherProcess `
+        -PowerShellExecutable $nativePowerShell -Driver $nativeLauncherDriver `
+        -Launcher $nativeLauncher `
+        -CapturePath (Join-Path $syntheticCaptureDirectory 'native-missing-binary.argv') `
+        -ArgumentsPath $nativeArgumentsPath
+    Assert-True -Condition ($missingNativeBinary.ExitCode -eq 2 -and
+        $null -eq $missingNativeBinary.Arguments) `
+        -Message ('a missing native binary fails closed with exit code 2 before launch ' +
+            "(actual=$($missingNativeBinary.ExitCode))")
+
+    Copy-Item -LiteralPath $ArgvCaptureExecutable -Destination $stableMsvcExecutable
+    $missingNativeConfig = Invoke-NativeLauncherProcess `
+        -PowerShellExecutable $nativePowerShell -Driver $nativeLauncherDriver `
+        -Launcher $nativeLauncher `
+        -CapturePath (Join-Path $syntheticCaptureDirectory 'native-missing-config.argv') `
+        -ArgumentsPath $nativeArgumentsPath `
+        -ConfigFile 'missing config\openomega.cfg'
+    Assert-True -Condition ($missingNativeConfig.ExitCode -eq 2 -and
+        $null -eq $missingNativeConfig.Arguments) `
+        -Message ('a missing native config fails closed with exit code 2 before launch ' +
+            "(actual=$($missingNativeConfig.ExitCode))")
+
+    # A renamed command processor provides a deterministic nonzero child without
+    # requiring another compiled fixture.
+    Copy-Item -LiteralPath $env:ComSpec -Destination $stableMsvcExecutable -Force
+    $nativeChildFailure = Invoke-NativeLauncherProcess `
+        -PowerShellExecutable $nativePowerShell -Driver $nativeLauncherDriver `
+        -Launcher $nativeLauncher `
+        -CapturePath (Join-Path $syntheticCaptureDirectory 'native-child-exit.argv') `
+        -ArgumentsPath $nativeArgumentsPath -GameArguments @('/d', '/c', 'exit', '7')
+    Assert-True -Condition ($nativeChildFailure.ExitCode -eq 7) `
+        -Message ('the native launcher propagates its child process exit code exactly ' +
+            "(actual=$($nativeChildFailure.ExitCode))")
 
     Remove-Item -LiteralPath $syntheticIso -Force
     Assert-Throws { & $syntheticLauncher -DryRun | Out-Null } `
