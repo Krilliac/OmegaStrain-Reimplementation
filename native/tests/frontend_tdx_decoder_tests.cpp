@@ -410,9 +410,12 @@ void CheckEndToEnd()
               indexed4->image.indices.size() == 1024U && indexed4->image.palette.size() == 16U &&
               indexed4->upload_plan.sampling_format ==
                   omega::retail::TdxGsPixelStorageFormat::Psmt4,
-          "generated indexed-4 transfer decodes to one-byte canonical indices");
+           "generated indexed-4 transfer decodes to one-byte canonical indices");
     if (!indexed8 || !indexed4)
         return;
+    Check(indexed8->upload_plan.texture_alpha_enabled &&
+              indexed4->upload_plan.texture_alpha_enabled,
+          "ordinary flag-5 frontend textures retain the proven alpha mode");
 
     Check(Sha256(indexed8->image.indices) ==
               "e3a5d313cb3382e418c974ca35e3ad32a68a5b4668c8c1291506cddaf52602ca",
@@ -517,8 +520,37 @@ void CheckEndToEnd()
         MakeFixture(omega::asset::IndexedImageEncoding::Indexed4, 0U, 64U, 32U, 7U);
     const auto flags7 = omega::retail::DecodeFrontEndTdx(flags7_bytes);
     Check(flags7 && flags7->upload_plan.header_flags == 7U && flags7->image.width == 64U &&
-              flags7->image.height == 32U,
+              flags7->image.height == 32U && flags7->upload_plan.texture_alpha_enabled,
           "the second observed alpha-enabled header flag and a nonsquare display decode");
+
+    const auto scoped_flags1_bytes =
+        MakeFixture(omega::asset::IndexedImageEncoding::Indexed8, 0U, 32U, 32U, 1U);
+    CheckError(omega::retail::DecodeFrontEndTdx(scoped_flags1_bytes),
+               omega::asset::DecodeErrorCode::UnsupportedVariant,
+               "ordinary frontend decoding rejects the scope-only indexed-8 flag-1 family");
+    const auto scoped_flags1 = omega::retail::DecodeScopedFrontEndTdx(scoped_flags1_bytes);
+    Check(scoped_flags1 && scoped_flags1->upload_plan.header_flags == 1U &&
+              !scoped_flags1->upload_plan.texture_alpha_enabled &&
+              scoped_flags1->image == indexed8->image,
+          "bound external visuals admit exact indexed-8 flag-1 records with alpha disabled");
+
+    const auto scoped_flags3_bytes =
+        MakeFixture(omega::asset::IndexedImageEncoding::Indexed8, 0U, 32U, 32U, 3U);
+    CheckError(omega::retail::DecodeScopedFrontEndTdx(scoped_flags3_bytes),
+               omega::asset::DecodeErrorCode::UnsupportedVariant,
+               "bound external visuals reject the unobserved indexed-8 flag-3 family");
+
+    for (const std::uint16_t flags : {std::uint16_t{1U}, std::uint16_t{3U}})
+    {
+        const auto unobserved = MakeFixture(
+            omega::asset::IndexedImageEncoding::Indexed4, 0U, 32U, 32U, flags);
+        CheckError(omega::retail::DecodeScopedFrontEndTdx(unobserved),
+                   omega::asset::DecodeErrorCode::UnsupportedVariant,
+                   "bound external visuals reject every new indexed-4 flag family");
+    }
+    const auto scoped_canonical = omega::retail::DecodeScopedFrontEndTdx(indexed8_bytes);
+    Check(scoped_canonical && *scoped_canonical == *indexed8,
+          "bound external visual decoding preserves the ordinary canonical family exactly");
 
     const auto expected_image = indexed8->image;
     std::fill(indexed8_bytes.begin(), indexed8_bytes.end(), std::byte{0});
