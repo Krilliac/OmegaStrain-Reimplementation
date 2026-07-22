@@ -6,8 +6,14 @@ set "OPENOMEGA_CMAKE=cmake.exe"
 
 where cmake.exe >nul 2>nul
 if not errorlevel 1 goto cmake_ready
-set "OPENOMEGA_CMAKE=%ProgramFiles%\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+set "OPENOMEGA_VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not exist "%OPENOMEGA_VSWHERE%" goto cmake_missing
+for /f "usebackq delims=" %%I in (`"%OPENOMEGA_VSWHERE%" -latest -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.CMake.Project -property installationPath`) do set "OPENOMEGA_VS_ROOT=%%I"
+if not defined OPENOMEGA_VS_ROOT goto cmake_missing
+set "OPENOMEGA_CMAKE=%OPENOMEGA_VS_ROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
 if exist "%OPENOMEGA_CMAKE%" goto cmake_ready
+
+:cmake_missing
 echo CMake is required to configure the OpenOmega Visual Studio solution. 1>&2
 exit /b 2
 
