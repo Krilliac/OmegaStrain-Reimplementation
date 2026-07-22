@@ -16,7 +16,7 @@ namespace omega::retail
 namespace
 {
 constexpr std::uint64_t kHeaderBytes = 64;
-constexpr std::uint64_t kBlockHeaderBytes = 0x20;
+constexpr std::uint64_t kTransferControlPrefixBytes = 0x20;
 constexpr std::uint64_t kTransferPacketBytes = 0x60;
 constexpr std::uint64_t kGsLocalMemoryBytes = 4ULL * 1024ULL * 1024ULL;
 constexpr std::uint64_t kGsLocalMemoryWords = kGsLocalMemoryBytes / 4U;
@@ -95,6 +95,33 @@ struct ParsedPacket
 [[nodiscard]] constexpr std::uint64_t Bit(const std::uint32_t value, const unsigned bit) noexcept
 {
     return (value >> bit) & 1U;
+}
+
+[[nodiscard]] asset::DecodeResult<void> ValidateTransferControlPrefix(
+    const std::span<const std::byte> block, const std::uint64_t block_file_offset,
+    const std::uint32_t prefix_offset)
+{
+    if (prefix_offset > block.size() ||
+        kTransferControlPrefixBytes > block.size() - prefix_offset)
+        return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
+                                     "frontend TDX transfer control prefix is outside its block",
+                                     block_file_offset + prefix_offset));
+
+    const auto prefix = block.subspan(prefix_offset, kTransferControlPrefixBytes);
+
+    // The active pointer skips a DMA CNT tag followed by a four-loop packed
+    // A+D GIF tag. Keep every reserved field closed rather than accepting an
+    // arbitrary nonzero prefix from an unproven transfer-chain variant.
+    constexpr std::uint32_t kDmaCntTag = (1U << 28U) | 6U;
+    constexpr std::uint64_t kPackedAdGifTag = (1ULL << 60U) | 4U;
+    constexpr std::uint64_t kAdRegisterDescriptor = 0x0EULL;
+    if (ReadU32(prefix, 0x00) != kDmaCntTag || ReadU32(prefix, 0x04) != 0U ||
+        ReadU64(prefix, 0x08) != 0U || ReadU64(prefix, 0x10) != kPackedAdGifTag ||
+        ReadU64(prefix, 0x18) != kAdRegisterDescriptor)
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                     "frontend TDX transfer control prefix is malformed",
+                                     block_file_offset + prefix_offset));
+    return {};
 }
 
 [[nodiscard]] asset::DecodeResult<ParsedPacket> ParsePsmct32UploadPacket(
@@ -473,11 +500,18 @@ asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdx(const std::span<const 
         return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
                                      "frontend TDX block pointer layout is unsupported",
                                      kHeaderBytes));
-    if (!IsZero(block.subspan(4U, 0x10U)) || !IsZero(block.subspan(kBlockHeaderBytes, 0x20U)) ||
-        !IsZero(block.subspan(kPrimaryBase, 0x20U)))
+    if (!IsZero(block.subspan(4U, 0x10U)))
         return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-                                     "frontend TDX block pointer padding is nonzero",
+                                     "frontend TDX inactive block pointer slot is nonzero",
                                      kHeaderBytes + 4U));
+
+    auto secondary_prefix =
+        ValidateTransferControlPrefix(block, kHeaderBytes, kSecondaryBase);
+    if (!secondary_prefix)
+        return std::unexpected(secondary_prefix.error());
+    auto primary_prefix = ValidateTransferControlPrefix(block, kHeaderBytes, kPrimaryBase);
+    if (!primary_prefix)
+        return std::unexpected(primary_prefix.error());
 
     auto primary_packet = ParsePsmct32UploadPacket(block, kHeaderBytes, kPrimaryObjectOffset,
                                                    expected_texture_width / 2U, upload_width,

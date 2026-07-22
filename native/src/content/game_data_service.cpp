@@ -43,9 +43,11 @@ constexpr std::uint64_t kFrontEndMaximumAggregateOutputBytes = 128ULL * 1024ULL 
 constexpr std::uint64_t kFrontEndMaximumAggregateScratchBytes = 128ULL * 1024ULL * 1024ULL;
 constexpr std::uint64_t kFrontEndMaximumAggregateItems = 64ULL * 1024ULL * 1024ULL;
 constexpr std::uint32_t kFrontEndMaximumNestingDepth = 16U;
+constexpr std::size_t kFrontEndMaximumVisualScopes = 20U;
 
 struct FrontEndRoute final
 {
+    std::string_view scope;
     std::string_view archive_member;
     std::string_view gui_member;
     std::string_view visual_member;
@@ -57,18 +59,21 @@ struct FrontEndRoute final
     {
     case FrontEndScreenKey::Title:
         return FrontEndRoute{
+            .scope = "TITLESCR",
             .archive_member = "TITLESCR.HOG",
             .gui_member = "TITLESCR.GUI",
             .visual_member = "TITLESCR.IE",
         };
     case FrontEndScreenKey::CreateAgent:
         return FrontEndRoute{
+            .scope = "AGENTNEW",
             .archive_member = "AGENTNEW.HOG",
             .gui_member = "AGENTNEW.GUI",
             .visual_member = "AGENTNEW.IE",
         };
     case FrontEndScreenKey::LoadAgent:
         return FrontEndRoute{
+            .scope = "AGENTOPN",
             .archive_member = "AGENTOPN.HOG",
             .gui_member = "AGENTOPN.GUI",
             .visual_member = "AGENTOPN.IE",
@@ -686,7 +691,24 @@ using ArchiveDirectory = std::unordered_map<std::string, const archive::HogEntry
     return normalized;
 }
 
+[[nodiscard]] asset::DecodeResult<std::string> NormalizeFrontEndScope(
+    const std::string_view scope, const asset::DecodeLimits limits)
+{
+    auto normalized = NormalizeArchiveName(scope, limits);
+    if (!normalized)
+        return std::unexpected(normalized.error());
+    if (normalized->find('/') != std::string::npos ||
+        normalized->find('.') != std::string::npos)
+    {
+        return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+            "front-end visual scope is not a leaf archive stem"));
+    }
+    return normalized;
+}
+
 using FrontEndDependencySet = std::set<std::string, std::less<>>;
+using FrontEndScopedResourceSet =
+    std::map<std::string, FrontEndVisualScope::ResourceSet, std::less<>>;
 
 [[nodiscard]] asset::DecodeResult<void> CollectFrontEndTextureReferences(
     const asset::FrontendVisualNodeIR& node, FrontEndDependencySet& references,
@@ -713,7 +735,7 @@ using FrontEndDependencySet = std::set<std::string, std::less<>>;
     const asset::FrontendWidgetIR& node, FrontEndDependencySet& references,
     const asset::DecodeLimits limits)
 {
-    if (node.font_reference)
+    if (node.font_reference && !node.font_reference->empty())
     {
         auto normalized = NormalizeFrontEndDependency(
             *node.font_reference, ".FNT", true, limits);
@@ -724,6 +746,100 @@ using FrontEndDependencySet = std::set<std::string, std::less<>>;
     for (const auto& child : node.children)
     {
         auto collected = CollectFrontEndFontReferences(child, references, limits);
+        if (!collected)
+            return collected;
+    }
+    return {};
+}
+
+[[nodiscard]] asset::DecodeResult<void> CollectFrontEndScopedResources(
+    const asset::FrontendWidgetIR& node, const std::string_view primary_scope,
+    const bool parentless, FrontEndScopedResourceSet& scopes,
+    const asset::DecodeLimits limits)
+{
+    if (node.binding)
+    {
+        const std::string_view source_scope = node.binding->scope_reference.empty()
+            ? primary_scope
+            : std::string_view(node.binding->scope_reference);
+        auto normalized_scope = NormalizeFrontEndScope(source_scope, limits);
+        if (!normalized_scope)
+            return std::unexpected(normalized_scope.error());
+
+        const std::string_view source_resource = node.binding->resource_reference.empty()
+            ? std::string_view(node.identifier)
+            : std::string_view(node.binding->resource_reference);
+        std::uint64_t resource_size = source_resource.size();
+        constexpr std::string_view root_suffix = "_root";
+        if (parentless && !Add(resource_size, root_suffix.size(), resource_size))
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "front-end visual resource name size overflows"));
+        }
+        if (resource_size == 0U)
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+                "front-end visual resource name is empty"));
+        }
+        if (resource_size > limits.maximum_string_bytes)
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "front-end visual resource name exceeds the string limit"));
+        }
+
+        std::string resource(source_resource);
+        if (parentless)
+            resource.append(root_suffix);
+        auto [scope, inserted] = scopes.try_emplace(std::move(*normalized_scope));
+        if (inserted && scopes.size() > kFrontEndMaximumVisualScopes)
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "front-end visual scopes exceed the fixed cache limit"));
+        }
+        scope->second.insert(std::move(resource));
+    }
+
+    for (const auto& child : node.children)
+    {
+        auto collected = CollectFrontEndScopedResources(
+            child, primary_scope, false, scopes, limits);
+        if (!collected)
+            return collected;
+    }
+    return {};
+}
+
+[[nodiscard]] const asset::FrontendVisualNodeIR* FindFrontEndVisualResource(
+    const asset::FrontendVisualNodeIR& node,
+    const std::string_view exact_identifier) noexcept
+{
+    if (node.identifier == exact_identifier)
+        return &node;
+    for (const auto& child : node.children)
+    {
+        if (const auto* match = FindFrontEndVisualResource(child, exact_identifier);
+            match != nullptr)
+        {
+            return match;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] asset::DecodeResult<void> CollectScopedFrontEndTextureReferences(
+    const asset::FrontendVisualDocumentIR& document,
+    const FrontEndVisualScope::ResourceSet& resources,
+    FrontEndDependencySet& references, const asset::DecodeLimits limits)
+{
+    for (const auto& resource : resources)
+    {
+        const auto* node = FindFrontEndVisualResource(document.root, resource);
+        if (node == nullptr)
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+                "front-end visual resource does not resolve"));
+        }
+        auto collected = CollectFrontEndTextureReferences(*node, references, limits);
         if (!collected)
             return collected;
     }
@@ -746,6 +862,64 @@ using FrontEndDependencySet = std::set<std::string, std::less<>>;
         }
     }
     return budget.Commit(0U, references.size(), 0U, scratch_bytes, description);
+}
+
+[[nodiscard]] asset::DecodeResult<void> CommitFrontEndScopedResourceSet(
+    const FrontEndScopedResourceSet& scopes, FrontEndLoadBudget& budget)
+{
+    constexpr std::uint64_t map_node_bytes =
+        sizeof(FrontEndScopedResourceSet::value_type) + 3U * sizeof(void*);
+    constexpr std::uint64_t set_node_bytes =
+        sizeof(FrontEndVisualScope::ResourceSet::value_type) + 3U * sizeof(void*);
+    std::uint64_t items = 0U;
+    std::uint64_t scratch_bytes = sizeof(FrontEndScopedResourceSet);
+    for (const auto& [scope, resources] : scopes)
+    {
+        if (!Add(items, 1U, items) || !Add(items, resources.size(), items) ||
+            !Add(scratch_bytes, map_node_bytes, scratch_bytes) ||
+            !Add(scratch_bytes, scope.size(), scratch_bytes))
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "front-end visual-scope workspace size overflows"));
+        }
+        for (const auto& resource : resources)
+        {
+            if (!Add(scratch_bytes, set_node_bytes, scratch_bytes) ||
+                !Add(scratch_bytes, resource.size(), scratch_bytes))
+            {
+                return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                    "front-end visual-resource workspace size overflows"));
+            }
+        }
+    }
+    return budget.Commit(
+        0U, items, 0U, scratch_bytes, "front-end visual-scope references");
+}
+
+[[nodiscard]] asset::DecodeResult<std::uint64_t> FrontEndVisualScopeOutputBytes(
+    const std::string_view scope,
+    const FrontEndVisualScope::ResourceSet& resources)
+{
+    constexpr std::uint64_t map_node_bytes =
+        sizeof(FrontEndScreenBundle::VisualScopeMap::value_type) + 3U * sizeof(void*);
+    constexpr std::uint64_t set_node_bytes =
+        sizeof(FrontEndVisualScope::ResourceSet::value_type) + 3U * sizeof(void*);
+    std::uint64_t output_bytes = map_node_bytes;
+    if (!Add(output_bytes, scope.size(), output_bytes))
+    {
+        return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+            "front-end visual-scope output size overflows"));
+    }
+    for (const auto& resource : resources)
+    {
+        if (!Add(output_bytes, set_node_bytes, output_bytes) ||
+            !Add(output_bytes, resource.size(), output_bytes))
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "front-end visual-resource output size overflows"));
+        }
+    }
+    return output_bytes;
 }
 
 [[nodiscard]] asset::DecodeResult<const archive::HogEntry*> FindFrontEndDependency(
@@ -1342,33 +1516,59 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
 
     FrontEndDependencySet texture_references;
     FrontEndDependencySet font_references;
+    FrontEndScopedResourceSet scoped_resources;
     auto reference_limits = budget.ChildLimits(1U);
     if (!reference_limits)
     {
         return std::unexpected(DecodeFailure(
             "unable to collect front-end dependencies", reference_limits.error()));
     }
+    auto primary_scope = NormalizeFrontEndScope(route->scope, *reference_limits);
+    if (!primary_scope)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to collect front-end visual scopes", primary_scope.error()));
+    }
+    scoped_resources.try_emplace(*primary_scope);
     auto textures_collected = CollectFrontEndTextureReferences(
         visual->document.root, texture_references, *reference_limits);
     auto fonts_collected = CollectFrontEndFontReferences(
         gui->document.root, font_references, *reference_limits);
-    if (!textures_collected || !fonts_collected)
+    auto scopes_collected = CollectFrontEndScopedResources(
+        gui->document.root, *primary_scope, true, scoped_resources, *reference_limits);
+    if (!textures_collected || !fonts_collected || !scopes_collected)
     {
         const asset::DecodeError error = !textures_collected
             ? textures_collected.error()
-            : fonts_collected.error();
+            : !fonts_collected ? fonts_collected.error() : scopes_collected.error();
         return std::unexpected(DecodeFailure(
             "unable to collect front-end dependencies", error));
+    }
+    const auto primary_resources = scoped_resources.find(*primary_scope);
+    if (primary_resources == scoped_resources.end())
+    {
+        return std::unexpected(DecodeFailure("unable to collect front-end visual scopes",
+            AssetError(asset::DecodeErrorCode::InvalidReference,
+                "front-end primary visual scope is unavailable")));
+    }
+    auto primary_resources_collected = CollectScopedFrontEndTextureReferences(
+        visual->document, primary_resources->second, texture_references, *reference_limits);
+    if (!primary_resources_collected)
+    {
+        return std::unexpected(DecodeFailure(
+            "front-end primary visual resource is unavailable",
+            primary_resources_collected.error()));
     }
     auto texture_set_commit = CommitFrontEndDependencySet(
         texture_references, budget, "front-end texture references");
     auto font_set_commit = CommitFrontEndDependencySet(
         font_references, budget, "front-end font references");
-    if (!texture_set_commit || !font_set_commit)
+    auto scope_set_commit = CommitFrontEndScopedResourceSet(scoped_resources, budget);
+    if (!texture_set_commit || !font_set_commit || !scope_set_commit)
     {
         const asset::DecodeError error = !texture_set_commit
             ? texture_set_commit.error()
-            : font_set_commit.error();
+            : !font_set_commit ? font_set_commit.error() : scope_set_commit.error();
         return std::unexpected(DecodeFailure(
             "unable to collect front-end dependencies", error));
     }
@@ -1417,6 +1617,218 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                 "unable to retain front-end texture", texture_commit.error()));
         }
         screen_textures.emplace(reference, std::move(decoded->image));
+    }
+
+    FrontEndScreenBundle::VisualScopeMap visual_scopes;
+    auto primary_scope_output = FrontEndVisualScopeOutputBytes(
+        *primary_scope, primary_resources->second);
+    if (!primary_scope_output)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to retain front-end primary visual scope",
+            primary_scope_output.error()));
+    }
+    auto primary_scope_commit = budget.Commit(0U, 0U, *primary_scope_output, 0U,
+        "front-end primary visual scope");
+    if (!primary_scope_commit)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to retain front-end primary visual scope",
+            primary_scope_commit.error()));
+    }
+    visual_scopes.emplace(*primary_scope,
+        FrontEndVisualScope(std::move(visual->document),
+            std::move(primary_resources->second), std::move(screen_textures)));
+
+    for (auto& [scope, resources] : scoped_resources)
+    {
+        if (scope == *primary_scope)
+            continue;
+
+        auto scope_limits = budget.ChildLimits(1U);
+        if (!scope_limits)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to load front-end visual scope", scope_limits.error()));
+        }
+        auto scope_archive_name = NormalizeFrontEndDependency(
+            scope, ".HOG", true, *scope_limits);
+        auto scope_visual_name = NormalizeFrontEndDependency(
+            scope, ".IE", true, *scope_limits);
+        if (!scope_archive_name || !scope_visual_name)
+        {
+            const asset::DecodeError error = !scope_archive_name
+                ? scope_archive_name.error()
+                : scope_visual_name.error();
+            return std::unexpected(DecodeFailure(
+                "front-end visual scope route is invalid", error));
+        }
+        auto scope_archive_entry = FindFrontEndDependency(
+            *front_end_directory, *scope_archive_name);
+        if (!scope_archive_entry)
+        {
+            return std::unexpected(DecodeFailure(
+                "front-end visual scope archive is unavailable",
+                scope_archive_entry.error()));
+        }
+        const auto scope_archive_bytes = front_end_archive->payload(**scope_archive_entry);
+        auto scope_archive_size = ValidateNestedArchiveSize(scope_archive_bytes,
+            impl_->config.maximum_nested_hog_bytes, "front-end visual scope archive");
+        if (!scope_archive_size)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to load front-end visual scope archive",
+                scope_archive_size.error()));
+        }
+        auto scope_copy = budget.Commit(
+            0U, 0U, 0U, scope_archive_bytes.size(), "front-end visual scope archive copy");
+        if (!scope_copy)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to load front-end visual scope archive", scope_copy.error()));
+        }
+        auto scope_input = CommitFrontEndArchiveInput(
+            scope_archive_bytes, budget, "front-end visual scope archive");
+        if (!scope_input)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to load front-end visual scope archive", scope_input.error()));
+        }
+        auto scope_archive = archive::HogArchive::FromSpan(
+            scope_archive_bytes, impl_->config.maximum_nested_hog_bytes);
+        if (!scope_archive)
+        {
+            return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+                "canonical front-end visual scope archive is malformed"));
+        }
+        auto scope_directory = BuildFrontEndArchiveDirectory(*scope_archive,
+            *scope_limits, budget, "front-end visual scope archive directory");
+        if (!scope_directory)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to index front-end visual scope archive",
+                scope_directory.error()));
+        }
+        auto scope_visual_entry = FindFrontEndDependency(
+            *scope_directory, *scope_visual_name);
+        if (!scope_visual_entry)
+        {
+            return std::unexpected(DecodeFailure(
+                "front-end scoped visual document is unavailable",
+                scope_visual_entry.error()));
+        }
+
+        scope_limits = budget.ChildLimits(1U);
+        if (!scope_limits)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to decode front-end scoped visual document",
+                scope_limits.error()));
+        }
+        const auto scope_visual_bytes = scope_archive->payload(**scope_visual_entry);
+        auto scope_visual = retail::DecodeIeFrontendMeasured(
+            scope_visual_bytes, *scope_limits);
+        if (!scope_visual)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to decode canonical front-end scoped visual document",
+                scope_visual.error()));
+        }
+        auto scope_visual_commit = budget.Commit(scope_visual_bytes.size(),
+            scope_visual->decoded_items, scope_visual->logical_output_bytes, 0U,
+            "front-end scoped visual document");
+        if (!scope_visual_commit)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to decode canonical front-end scoped visual document",
+                scope_visual_commit.error()));
+        }
+
+        FrontEndDependencySet scoped_texture_references;
+        auto scoped_textures_collected = CollectScopedFrontEndTextureReferences(
+            scope_visual->document, resources, scoped_texture_references, *scope_limits);
+        if (!scoped_textures_collected)
+        {
+            return std::unexpected(DecodeFailure(
+                "front-end scoped visual resource is unavailable",
+                scoped_textures_collected.error()));
+        }
+        auto scoped_texture_set_commit = CommitFrontEndDependencySet(
+            scoped_texture_references, budget, "front-end scoped texture references");
+        if (!scoped_texture_set_commit)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to collect front-end scoped textures",
+                scoped_texture_set_commit.error()));
+        }
+
+        FrontEndVisualScope::TextureMap scoped_textures;
+        for (const auto& reference : scoped_texture_references)
+        {
+            auto entry = FindFrontEndDependency(*scope_directory, reference);
+            if (!entry)
+            {
+                return std::unexpected(DecodeFailure(
+                    "front-end scoped texture is unavailable", entry.error()));
+            }
+            auto texture_limits = budget.ChildLimits(1U);
+            if (!texture_limits)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to decode front-end scoped texture",
+                    texture_limits.error()));
+            }
+            const auto bytes = scope_archive->payload(**entry);
+            auto decoded = retail::DecodeFrontEndTdx(bytes, *texture_limits);
+            if (!decoded)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to decode front-end scoped texture", decoded.error()));
+            }
+            auto entry_output = FrontEndMapEntryOutputBytes<
+                FrontEndVisualScope::TextureMap>(reference);
+            if (!entry_output)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to retain front-end scoped texture",
+                    entry_output.error()));
+            }
+            std::uint64_t combined_output = 0U;
+            if (!Add(decoded->logical_output_bytes, *entry_output, combined_output))
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to retain front-end scoped texture",
+                    AssetError(asset::DecodeErrorCode::Overflow,
+                        "front-end scoped texture output size overflows")));
+            }
+            auto texture_commit = budget.Commit(bytes.size(), decoded->decoded_items,
+                combined_output, decoded->peak_scratch_bytes,
+                "front-end scoped texture");
+            if (!texture_commit)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to retain front-end scoped texture",
+                    texture_commit.error()));
+            }
+            scoped_textures.emplace(reference, std::move(decoded->image));
+        }
+
+        auto scope_output = FrontEndVisualScopeOutputBytes(scope, resources);
+        if (!scope_output)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to retain front-end visual scope", scope_output.error()));
+        }
+        auto scope_commit = budget.Commit(
+            0U, 0U, *scope_output, 0U, "front-end visual scope");
+        if (!scope_commit)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to retain front-end visual scope", scope_commit.error()));
+        }
+        visual_scopes.emplace(scope,
+            FrontEndVisualScope(std::move(scope_visual->document),
+                std::move(resources), std::move(scoped_textures)));
     }
 
     FrontEndScreenBundle::FontMap fonts;
@@ -1614,7 +2026,7 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
     RetailFrontEndPresentationCapability capability{
         RetailFrontEndPresentationCapability::ConstructionKey{}};
     return FrontEndScreenBundle(key, std::move(gui->document),
-        std::move(visual->document), std::move(screen_textures), std::move(fonts),
+        std::move(*primary_scope), std::move(visual_scopes), std::move(fonts),
         std::move(font_atlases), std::move(*strings), std::move(capability));
 }
 

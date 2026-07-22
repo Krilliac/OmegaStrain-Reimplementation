@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -177,13 +178,16 @@ struct GuiNode final
     std::string identifier;
     std::string text_reference;
     std::string font_reference;
+    bool decorated = false;
+    std::string scope_reference;
+    std::string resource_reference;
     std::vector<GuiNode> children;
 };
 
 void AppendGuiNode(std::vector<std::byte>& bytes, const GuiNode& node)
 {
     AppendString(bytes, node.factory);
-    AppendString(bytes, "");
+    AppendString(bytes, node.decorated ? "GuiInterfaceDecorator" : "");
     AppendString(bytes, node.identifier);
     Align4(bytes);
     for (unsigned index = 0; index < 4U; ++index)
@@ -200,6 +204,15 @@ void AppendGuiNode(std::vector<std::byte>& bytes, const GuiNode& node)
         AppendF32(bytes, 0.75F);
         AppendU32(bytes, 2U);
     }
+    if (node.decorated)
+    {
+        AppendString(bytes, node.scope_reference);
+        AppendString(bytes, node.resource_reference);
+        Align4(bytes);
+        for (unsigned index = 0; index < 12U; ++index)
+            AppendF32(bytes, static_cast<float>(index));
+        AppendU16(bytes, 0U);
+    }
     AppendU16(bytes, static_cast<std::uint16_t>(node.children.size()));
     for (const auto& child : node.children)
         AppendGuiNode(bytes, child);
@@ -207,13 +220,16 @@ void AppendGuiNode(std::vector<std::byte>& bytes, const GuiNode& node)
 
 [[nodiscard]] std::vector<std::byte> MakeGui(
     const std::string_view root_identifier,
-    const std::string_view localized_reference = "$CreateAgent")
+    const std::string_view localized_reference = "$CreateAgent",
+    const bool unsafe_scope = false, const bool wrong_resource_case = false,
+    const std::size_t extra_scope_count = 0U)
 {
     const GuiNode localized{
         .factory = "GuiTextWidget",
-        .identifier = "localized",
+        .identifier = "first",
         .text_reference = std::string(localized_reference),
-        .font_reference = "Default",
+        .font_reference = "",
+        .decorated = true,
     };
     const GuiNode escaped{
         .factory = "GuiTextWidget",
@@ -221,10 +237,49 @@ void AppendGuiNode(std::vector<std::byte>& bytes, const GuiNode& node)
         .text_reference = "$$LiteralDollar",
         .font_reference = "default",
     };
+    std::string external_resource(root_identifier);
+    external_resource.append("_external");
+    std::string authored_resource = external_resource;
+    if (wrong_resource_case && !authored_resource.empty())
+    {
+        const char value = authored_resource.front();
+        authored_resource.front() = value >= 'A' && value <= 'Z'
+            ? static_cast<char>(value + ('a' - 'A'))
+            : static_cast<char>(value - ('a' - 'A'));
+    }
+    std::vector<GuiNode> children{
+        localized,
+        escaped,
+        GuiNode{
+            .factory = "GuiWidget",
+            .identifier = "external_binding_a",
+            .decorated = true,
+            .scope_reference = unsafe_scope ? "../UNTRUSTED_MEMBER" : "sharedscope",
+            .resource_reference = authored_resource,
+        },
+        GuiNode{
+            .factory = "GuiWidget",
+            .identifier = "external_binding_b",
+            .decorated = true,
+            .scope_reference = "SharedScope",
+            .resource_reference = authored_resource,
+        },
+    };
+    for (std::size_t index = 0; index < extra_scope_count; ++index)
+    {
+        children.push_back(GuiNode{
+            .factory = "GuiWidget",
+            .identifier = "extra_binding_" + std::to_string(index),
+            .decorated = true,
+            .scope_reference = "EXTRA_SCOPE_" + std::to_string(index),
+            .resource_reference = "unused",
+        });
+    }
     const GuiNode root{
         .factory = "GuiWidget",
         .identifier = std::string(root_identifier),
-        .children = {localized, escaped},
+        .decorated = true,
+        .children = std::move(children),
     };
     std::vector<std::byte> bytes{
         std::byte{'G'}, std::byte{'U'}, std::byte{'I'},
@@ -258,7 +313,8 @@ void AppendIeNode(std::vector<std::byte>& bytes, const IeNode& node)
 }
 
 [[nodiscard]] std::vector<std::byte> MakeIe(
-    const std::string_view texture_basename, const bool unsafe_reference = false)
+    const std::string_view root_identifier, const std::string_view texture_basename,
+    const bool unsafe_reference = false)
 {
     const std::string first_texture = unsafe_reference
         ? "../UNTRUSTED_MEMBER"
@@ -270,7 +326,7 @@ void AppendIeNode(std::vector<std::byte>& bytes, const IeNode& node)
             value = static_cast<char>(value + ('a' - 'A'));
     }
     const IeNode root{
-        .identifier = "visual_root",
+        .identifier = std::string(root_identifier) + "_root",
         .children = {
             IeNode{.identifier = "first", .texture_basename = first_texture},
             IeNode{.identifier = "duplicate", .texture_basename = folded},
@@ -308,6 +364,18 @@ void WriteTdxPacket(std::vector<std::byte>& bytes, const std::size_t object,
     WriteU64(bytes, object + 0x58U, 0U);
 }
 
+void WriteTdxTransferControlPrefix(std::vector<std::byte>& bytes, const std::size_t prefix)
+{
+    constexpr std::uint32_t kDmaCntTag = (1U << 28U) | 6U;
+    constexpr std::uint64_t kPackedAdGifTag = (1ULL << 60U) | 4U;
+    constexpr std::uint64_t kAdRegisterDescriptor = 0x0EULL;
+    WriteU32(bytes, prefix + 0x00U, kDmaCntTag);
+    WriteU32(bytes, prefix + 0x04U, 0U);
+    WriteU64(bytes, prefix + 0x08U, 0U);
+    WriteU64(bytes, prefix + 0x10U, kPackedAdGifTag);
+    WriteU64(bytes, prefix + 0x18U, kAdRegisterDescriptor);
+}
+
 [[nodiscard]] std::vector<std::byte> MakeTdx(const std::uint8_t seed)
 {
     constexpr std::uint16_t width = 32U;
@@ -343,6 +411,8 @@ void WriteTdxPacket(std::vector<std::byte>& bytes, const std::size_t object,
     WriteU32(bytes, kTdxHeaderBytes + 0x14U, 0x20U);
     WriteU32(bytes, kTdxHeaderBytes + 0x18U, 0xA0U);
     WriteU32(bytes, kTdxHeaderBytes + 0x1CU, 0x20U);
+    WriteTdxTransferControlPrefix(bytes, kTdxHeaderBytes + 0x20U);
+    WriteTdxTransferControlPrefix(bytes, kTdxHeaderBytes + 0xA0U);
     WriteTdxPacket(bytes, kTdxPrimaryObject, 0U, 1U,
         upload_width, upload_height, primary_bytes);
     WriteTdxPacket(bytes, kTdxPaletteObject, 0U, 1U, 16U, 16U, palette_bytes);
@@ -434,20 +504,41 @@ constexpr std::array kScreens{
     ScreenSpec{omega::content::FrontEndScreenKey::LoadAgent, "AGENTOPN", "LOAD0001", 0x33U},
 };
 
+struct FrontEndFixtureOptions final
+{
+    std::size_t changed_screen = kScreens.size();
+    bool omit_texture = false;
+    bool malformed_gui = false;
+    bool unsafe_texture_reference = false;
+    std::string_view localized_reference = "$CreateAgent";
+    bool unsafe_scope = false;
+    bool wrong_resource_case = false;
+    std::size_t extra_scope_count = 0U;
+    bool omit_scoped_texture = false;
+    bool unsafe_scoped_texture_reference = false;
+    bool scoped_name_collision = false;
+    bool omit_scope_archive = false;
+    bool omit_scoped_visual = false;
+};
+
 [[nodiscard]] std::vector<std::byte> MakeScreenHog(const ScreenSpec& screen,
-    const bool omit_texture = false, const bool malformed_gui = false,
-    const bool unsafe_texture_reference = false,
-    const std::string_view localized_reference = "$CreateAgent")
+    const FrontEndFixtureOptions& options, const bool changed)
 {
     std::vector<HogMember> members{
         HogMember{.name = std::string(screen.stem) + ".GUI",
-            .payload = malformed_gui ? Bytes("not-gui")
-                                     : MakeGui(screen.stem, localized_reference)},
+            .payload = changed && options.malformed_gui
+                ? Bytes("not-gui")
+                : MakeGui(screen.stem,
+                      changed ? options.localized_reference : "$CreateAgent",
+                      changed && options.unsafe_scope,
+                      changed && options.wrong_resource_case,
+                      changed ? options.extra_scope_count : 0U)},
         HogMember{.name = std::string(screen.stem) + ".IE",
-            .payload = MakeIe(screen.texture_basename, unsafe_texture_reference)},
+            .payload = MakeIe(screen.stem, screen.texture_basename,
+                changed && options.unsafe_texture_reference)},
         HogMember{.name = "UNUSED.TDX", .payload = Bytes("malformed unreferenced member")},
     };
-    if (!omit_texture)
+    if (!changed || !options.omit_texture)
     {
         members.push_back(HogMember{
             .name = std::string(screen.texture_basename) + ".TDX",
@@ -457,22 +548,73 @@ constexpr std::array kScreens{
     return MakeHog(members);
 }
 
+[[nodiscard]] std::vector<std::byte> MakeSharedScopeHog(
+    const FrontEndFixtureOptions& options)
+{
+    IeNode root{.identifier = "shared_root"};
+    std::vector<HogMember> members;
+    for (const auto& screen : kScreens)
+    {
+        std::string resource(screen.stem);
+        resource.append("_external");
+        root.children.push_back(IeNode{
+            .identifier = resource,
+            .texture_basename = options.unsafe_scoped_texture_reference
+                ? "../UNTRUSTED_MEMBER"
+                : std::string(screen.texture_basename),
+        });
+        root.children.push_back(IeNode{
+            .identifier = resource,
+            .texture_basename = "UNRESOLVED_DUPLICATE",
+        });
+        if (!options.omit_scoped_texture)
+        {
+            members.push_back(HogMember{
+                .name = std::string(screen.texture_basename) + ".TDX",
+                .payload = MakeTdx(static_cast<std::uint8_t>(screen.seed + 0x40U)),
+            });
+        }
+    }
+    root.children.push_back(IeNode{
+        .identifier = "unbound_resource",
+        .texture_basename = "UNRESOLVED_UNBOUND",
+    });
+    std::vector<std::byte> document{
+        std::byte{0x11}, std::byte{0x22}, std::byte{0x33}, std::byte{0x44}};
+    AppendIeNode(document, root);
+    Align16Zero(document);
+    if (!options.omit_scoped_visual)
+    {
+        members.insert(members.begin(),
+            HogMember{.name = "SHAREDSCOPE.IE", .payload = std::move(document)});
+    }
+    if (options.scoped_name_collision)
+    {
+        members.push_back(HogMember{
+            .name = "title01.tdx",
+            .payload = MakeTdx(0x77U),
+        });
+    }
+    return MakeHog(members);
+}
+
 [[nodiscard]] std::vector<std::byte> MakeFrontEndHog(
-    const std::size_t changed_screen = kScreens.size(),
-    const bool omit_texture = false, const bool malformed_gui = false,
-    const bool unsafe_texture_reference = false,
-    const std::string_view localized_reference = "$CreateAgent")
+    const FrontEndFixtureOptions options = {})
 {
     std::vector<HogMember> members;
     for (std::size_t index = 0; index < kScreens.size(); ++index)
     {
-        const bool changed = index == changed_screen;
+        const bool changed = index == options.changed_screen;
         members.push_back(HogMember{
             .name = std::string(kScreens[index].stem) + ".HOG",
-            .payload = MakeScreenHog(kScreens[index],
-                changed && omit_texture, changed && malformed_gui,
-                changed && unsafe_texture_reference,
-                changed ? localized_reference : "$CreateAgent"),
+            .payload = MakeScreenHog(kScreens[index], options, changed),
+        });
+    }
+    if (!options.omit_scope_archive)
+    {
+        members.push_back(HogMember{
+            .name = "SHAREDSCOPE.HOG",
+            .payload = MakeSharedScopeHog(options),
         });
     }
     return MakeHog(members);
@@ -577,17 +719,24 @@ int main()
 {
     using omega::content::FrontEndScreenBundle;
     using omega::content::FrontEndScreenKey;
+    using omega::content::FrontEndVisualScope;
 
     static_assert(!std::is_default_constructible_v<FrontEndScreenBundle>);
     static_assert(std::is_move_constructible_v<FrontEndScreenBundle>);
     static_assert(std::is_move_assignable_v<FrontEndScreenBundle>);
     static_assert(!std::is_copy_constructible_v<FrontEndScreenBundle>);
     static_assert(!std::is_copy_assignable_v<FrontEndScreenBundle>);
+    static_assert(!std::is_default_constructible_v<FrontEndVisualScope>);
+    static_assert(std::is_move_constructible_v<FrontEndVisualScope>);
+    static_assert(!std::is_copy_constructible_v<FrontEndVisualScope>);
     static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>()
                                             .screen_textures()),
         const FrontEndScreenBundle::TextureMap&>);
     static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>().fonts()),
         const FrontEndScreenBundle::FontMap&>);
+    static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>()
+                                            .visual_scopes()),
+        const FrontEndScreenBundle::VisualScopeMap&>);
 
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -608,10 +757,63 @@ int main()
                   loaded->widget_document().root.identifier == screen.stem &&
                   loaded->presentation_capability().valid(),
             "a loaded route owns its canonical documents and valid retail capability");
+        Check(!loaded->primary_scope().empty() &&
+                  loaded->visual_scopes().count(loaded->primary_scope()) == 1U &&
+                  loaded->visual_scopes().size() == 2U,
+            "the private constructor publishes exactly one nonempty primary scope");
         Check(loaded->screen_textures().size() == 1U &&
                   loaded->screen_textures().contains(texture_name) &&
                   !loaded->screen_textures().contains("UNUSED.TDX"),
             "screen textures are recursively derived, normalized, deduplicated, and exact");
+        std::string folded_primary = loaded->primary_scope();
+        for (char& value : folded_primary)
+        {
+            if (value >= 'A' && value <= 'Z')
+                value = static_cast<char>(value + ('a' - 'A'));
+        }
+        const auto* primary_scope = loaded->FindVisualScope("");
+        const auto* authored_primary = loaded->FindVisualScope(folded_primary);
+        const auto* shared_scope = loaded->FindVisualScope("sHaReDsCoPe");
+        Check(primary_scope != nullptr && primary_scope == authored_primary &&
+                  shared_scope != nullptr &&
+                  loaded->FindVisualScope("missing_scope") == nullptr,
+            "scope lookup applies empty-primary and ASCII-case-insensitive cache semantics");
+        Check(shared_scope != nullptr &&
+                  shared_scope->textures().size() == 1U &&
+                  shared_scope->textures().contains(texture_name) &&
+                  !(shared_scope->textures().at(texture_name) ==
+                      loaded->screen_textures().at(texture_name)),
+            "archive-local texture maps retain same-named primary and scoped images independently");
+
+        const auto& widget_root = loaded->widget_document().root;
+        const auto* root_resource = loaded->ResolveVisualBinding(widget_root, true);
+        const auto* inherited_resource = loaded->ResolveVisualBinding(
+            widget_root.children.at(0U), false);
+        const auto* external_a = loaded->ResolveVisualBinding(
+            widget_root.children.at(2U), false);
+        const auto* external_b = loaded->ResolveVisualBinding(
+            widget_root.children.at(3U), false);
+        Check(root_resource != nullptr &&
+                  root_resource->identifier == std::string(screen.stem) + "_root" &&
+                  loaded->ResolveVisualBinding(widget_root, false) == nullptr &&
+                  inherited_resource != nullptr && inherited_resource->identifier == "first",
+            "binding resolution applies inherited scope/resource and parentless root suffix rules");
+        Check(external_a != nullptr && external_a == external_b &&
+                  external_a->texture_member && *external_a->texture_member == texture_name,
+            "case-folded scopes resolve one exact-case DFS-first visual resource");
+        std::string external_resource(screen.stem);
+        external_resource.append("_external");
+        std::string wrong_resource_case = external_resource;
+        wrong_resource_case.front() = static_cast<char>(
+            wrong_resource_case.front() + ('a' - 'A'));
+        Check(shared_scope != nullptr &&
+                  shared_scope->FindResource(external_resource) == external_a &&
+                  shared_scope->FindResource(wrong_resource_case) == nullptr &&
+                  shared_scope->FindResource("unbound_resource") == nullptr,
+            "resource lookup is exact-case DFS-first and hides decoded but unbound nodes");
+        Check(widget_root.children.at(0U).font_reference &&
+                  widget_root.children.at(0U).font_reference->empty(),
+            "an authored empty font remains in canonical IR for renderer inheritance");
         Check(loaded->fonts().size() == 1U && loaded->fonts().contains("DEFAULT.FNT") &&
                   loaded->font_atlases().size() == 1U &&
                   loaded->font_atlases().contains(kAtlasMember),
@@ -649,14 +851,14 @@ int main()
     }
 
     Check(WriteBytes(paths->front_end_hog,
-              MakeFrontEndHog(0U, true, false, false)),
+              MakeFrontEndHog({.changed_screen = 0U, .omit_texture = true})),
         "missing derived texture fixture is written");
     CheckDecodeError(Load(root, FrontEndScreenKey::Title),
         omega::asset::DecodeErrorCode::InvalidReference,
         "a missing referenced texture fails the whole bundle without fallback");
 
     Check(WriteBytes(paths->front_end_hog,
-              MakeFrontEndHog(0U, false, true, false)),
+              MakeFrontEndHog({.changed_screen = 0U, .malformed_gui = true})),
         "malformed GUI fixture is written");
     const auto malformed_gui = Load(root, FrontEndScreenKey::Title);
     Check(!malformed_gui &&
@@ -664,11 +866,70 @@ int main()
         "a malformed canonical GUI fails closed");
 
     Check(WriteBytes(paths->front_end_hog,
-              MakeFrontEndHog(0U, false, false, true)),
+              MakeFrontEndHog(
+                  {.changed_screen = 0U, .unsafe_texture_reference = true})),
         "unsafe derived reference fixture is written");
     CheckDecodeError(Load(root, FrontEndScreenKey::Title),
         omega::asset::DecodeErrorCode::InvalidReference,
         "an unsafe retail-derived member reference fails with a sanitized typed error");
+
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog({.changed_screen = 0U, .unsafe_scope = true})),
+        "unsafe visual-scope fixture is written");
+    CheckDecodeError(Load(root, FrontEndScreenKey::Title),
+        omega::asset::DecodeErrorCode::InvalidReference,
+        "a traversal-shaped visual scope is rejected without relaxing path safety");
+
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog(
+                  {.changed_screen = 0U, .wrong_resource_case = true})),
+        "wrong-case visual-resource fixture is written");
+    CheckDecodeError(Load(root, FrontEndScreenKey::Title),
+        omega::asset::DecodeErrorCode::InvalidReference,
+        "visual-resource lookup remains exact and case-sensitive");
+
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog(
+                  {.changed_screen = 0U, .extra_scope_count = 19U})),
+        "visual-scope cache overflow fixture is written");
+    CheckDecodeError(Load(root, FrontEndScreenKey::Title),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "the primary scope plus twenty external scopes exceed the fixed cache limit");
+
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog({.omit_scope_archive = true})),
+        "missing scoped archive fixture is written");
+    CheckDecodeError(Load(root, FrontEndScreenKey::Title),
+        omega::asset::DecodeErrorCode::InvalidReference,
+        "a missing derived scope archive fails without a current-screen fallback");
+
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog({.omit_scoped_visual = true})),
+        "missing scoped visual document fixture is written");
+    CheckDecodeError(Load(root, FrontEndScreenKey::Title),
+        omega::asset::DecodeErrorCode::InvalidReference,
+        "a missing derived scoped IE document fails without fallback");
+
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog({.omit_scoped_texture = true})),
+        "missing scoped texture fixture is written");
+    CheckDecodeError(Load(root, FrontEndScreenKey::Title),
+        omega::asset::DecodeErrorCode::InvalidReference,
+        "a missing archive-relative scoped texture fails the complete bundle");
+
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog({.unsafe_scoped_texture_reference = true})),
+        "unsafe scoped texture fixture is written");
+    CheckDecodeError(Load(root, FrontEndScreenKey::Title),
+        omega::asset::DecodeErrorCode::InvalidReference,
+        "a scoped IE cannot escape its own archive through a texture reference");
+
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog({.scoped_name_collision = true})),
+        "normalized scoped-archive collision fixture is written");
+    CheckDecodeError(Load(root, FrontEndScreenKey::Title),
+        omega::asset::DecodeErrorCode::DuplicateReference,
+        "a scoped archive with duplicate normalized names fails before selection");
 
     Check(WriteBytes(paths->front_end_hog, MakeFrontEndHog()),
         "valid front-end archive is restored after document and reference failures");
@@ -692,7 +953,8 @@ int main()
         "valid localization table is restored after missing-key coverage");
 
     Check(WriteBytes(paths->front_end_hog,
-              MakeFrontEndHog(0U, false, false, false, "$")),
+              MakeFrontEndHog(
+                  {.changed_screen = 0U, .localized_reference = "$"})),
         "empty localization-key fixture is written");
     CheckDecodeError(Load(root, FrontEndScreenKey::Title),
         omega::asset::DecodeErrorCode::InvalidReference,
