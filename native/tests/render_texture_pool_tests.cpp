@@ -128,7 +128,7 @@ void CheckContractAndConfiguration()
         "named frame clear color has the exact synthetic default");
     Check(!empty.valid() &&
               packet.clear_color == omega::runtime::kDefaultRenderClearColor &&
-              packet.draw_list.empty(),
+              packet.draw_list.empty() && packet.mesh_draw_list.empty(),
         "default handle is invalid and frame-packet clear/draw values are explicit");
     Check(omega::runtime::kMaximumRenderTextureSlotCapacity == 8192U,
         "the render texture pool hard maximum is fixed at 8192 slots");

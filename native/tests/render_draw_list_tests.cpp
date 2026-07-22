@@ -30,6 +30,11 @@ using omega::runtime::RenderDrawList;
 using omega::runtime::RenderDrawListError;
 using omega::runtime::RenderDrawListErrorCode;
 using omega::runtime::RenderFramePacket;
+using omega::runtime::RenderMeshColorRgba8;
+using omega::runtime::RenderMeshDrawCommand;
+using omega::runtime::RenderMeshDrawList;
+using omega::runtime::RenderMeshHandle;
+using omega::runtime::RenderMeshRasterMode;
 using omega::runtime::RenderSourceRectPixels;
 using omega::runtime::RenderSourceRectQ16;
 using omega::runtime::RenderTargetRectPixels;
@@ -65,6 +70,15 @@ constexpr RenderTextureHandle Handle(const std::uint32_t index = 0U) noexcept
     return RenderTextureHandle{
         .pool_identity = 7U,
         .generation = 11U,
+        .slot_index = index,
+    };
+}
+
+constexpr RenderMeshHandle MeshHandle(const std::uint32_t index = 0U) noexcept
+{
+    return RenderMeshHandle{
+        .pool_identity = 13U,
+        .generation = 17U,
         .slot_index = index,
     };
 }
@@ -189,8 +203,9 @@ void CheckFramePacketClearColor()
         "generic clear color value defaults to zero");
 
     const RenderFramePacket defaults;
-    Check(defaults.clear_color == omega::runtime::kDefaultRenderClearColor,
-        "default frame packet owns the named clear color");
+    Check(defaults.clear_color == omega::runtime::kDefaultRenderClearColor &&
+              defaults.draw_list.empty() && defaults.mesh_draw_list.empty(),
+        "default frame packet owns the named clear color and empty draw lists");
 
     RenderFramePacket source;
     source.clear_color = RenderClearColorRgba8{
@@ -207,9 +222,29 @@ void CheckFramePacketClearColor()
         return;
     source.draw_list = *draw_list;
 
+    const RenderMeshDrawCommand mesh_command{
+        .mesh = MeshHandle(5U),
+        .object_to_clip = omega::asset::kIdentityMatrix4x4IR,
+        .color = RenderMeshColorRgba8{
+            .red = 9U,
+            .green = 8U,
+            .blue = 7U,
+            .alpha = 6U,
+        },
+        .raster_mode = RenderMeshRasterMode::Wireframe,
+    };
+    const std::array mesh_commands{mesh_command};
+    const auto mesh_draw_list = RenderMeshDrawList::Create(mesh_commands);
+    Check(mesh_draw_list.has_value(),
+        "frame-packet copy fixture creates a valid mesh draw list");
+    if (!mesh_draw_list)
+        return;
+    source.mesh_draw_list = *mesh_draw_list;
+
     const RenderFramePacket copied = source;
     source.clear_color = {};
     source.draw_list = {};
+    source.mesh_draw_list = {};
 
     Check(copied.clear_color ==
                   RenderClearColorRgba8{
@@ -219,8 +254,11 @@ void CheckFramePacketClearColor()
                       .alpha = 4U,
                   } &&
               copied.draw_list.size() == 1U && copied.draw_list.commands()[0] == command &&
-              source.clear_color == RenderClearColorRgba8{} && source.draw_list.empty(),
-        "frame-packet value copy owns its clear color and draw command");
+              copied.mesh_draw_list.size() == 1U &&
+              copied.mesh_draw_list.commands()[0] == mesh_command &&
+              source.clear_color == RenderClearColorRgba8{} && source.draw_list.empty() &&
+              source.mesh_draw_list.empty(),
+        "frame-packet value copy owns its clear color and both draw commands");
 }
 
 void CheckDefaultCapacityAndOwnership()
