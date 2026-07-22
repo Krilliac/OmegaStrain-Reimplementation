@@ -1766,9 +1766,11 @@ semantics, runtime consumption, or behavioral parity.
 
 ## Native spatial scene application integration (E-0113, 2026-07-21)
 
-- `OmegaApp` builds the bounded project-owned spatial diagnostic `SceneIR` once when canonical
-  `LevelContentIR` is present, transactionally uploads its complete mesh set, and retains fixed
-  generation-safe mesh and draw-list values for the app lifetime.
+- `OmegaApp` builds the bounded project-owned global-coordinate diagnostic `SceneIR` once when
+  canonical `LevelContentIR` is present. One aggregate projection preserves decoded inter-cell
+  offsets and scale without assigning retail axis or placement meaning; the app transactionally
+  uploads its complete mesh set and retains fixed generation-safe mesh and draw-list values for the
+  app lifetime.
 - Profiles, Characters, BriefingRoom, Controls, AssetTopology, opening-movie, keyboard/mouse, and
   opt-in gamepad behavior are unchanged. Only `DiagnosticPlay` publishes mesh commands. The opaque
   diagnostic base is withheld on that path so the mesh is visible, while the existing actor,

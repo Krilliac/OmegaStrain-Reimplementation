@@ -32,8 +32,9 @@ as an overlay. The host converts ADR 0005 row-major matrices to the column-major
 the shader at the SDL boundary.
 
 When canonical `LevelContentIR` is present, `OmegaApp` now invokes
-`BuildSpatialDiagnosticScene` exactly once during startup. It validates scene instance indices and
-camera-times-instance matrices, transactionally uploads the complete mesh set, and owns one fixed
+`BuildGlobalSpatialDiagnosticScene` exactly once during startup. It preserves decoded inter-cell
+offsets and scale under one aggregate diagnostic projection, then validates scene instance indices
+and camera-times-instance matrices, transactionally uploads the complete mesh set, and owns one fixed
 validated draw list. Only `DiagnosticPlay` copies that list into a frame packet. Its texture list
 keeps the existing actor, targeting, and firing cues but omits the opaque full-screen diagnostic
 base so indexed geometry remains visible; every menu/card list is unchanged. Shutdown clears mesh

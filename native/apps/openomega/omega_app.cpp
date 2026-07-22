@@ -275,7 +275,7 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     asset::SceneIR diagnostic_scene;
     if (content_owner->level_content)
     {
-        auto built_scene = runtime::BuildSpatialDiagnosticScene(
+        auto built_scene = runtime::BuildGlobalSpatialDiagnosticScene(
             content_owner->level_content->spatial);
         if (!built_scene)
         {
