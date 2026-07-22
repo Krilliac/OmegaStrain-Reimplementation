@@ -1784,6 +1784,25 @@ semantics, runtime consumption, or behavioral parity.
 Still unclaimed: retail world placement, camera, visibility, materials, lighting, collision use,
 draw order, owner-corpus geometry publication, or PCSX2/native visual parity.
 
+## Project scene camera transform separation (E-0115, 2026-07-21)
+
+- E-0115 supersedes only E-0114's single-camera-matrix and camera-times-instance wording.
+  `SceneCameraIR` owns separate identity-default `world_to_view` and `view_to_clip` matrices; they are
+  OpenOmega value semantics and do not name or import a retail transform convention.
+- The public, reentrant, allocation-free `ComposeObjectToClip` function computes
+  `view_to_clip * world_to_view * local_to_world`. It returns a typed `NonFiniteInput` or
+  `NonFiniteResult` error, range-checks double accumulators before narrowing to float, and leaves all
+  inputs unchanged.
+- `OmegaApp` uses that contract before allocating or uploading scene presentation resources and
+  preserves its fixed path-free rejection text. Current diagnostic scene builders keep both camera
+  stages identity, so existing mesh command order, renderer submission, and pixels are unchanged.
+- Project-generated fixtures prove identity defaults, full non-commuting three-stage order, a
+  nonidentity homogeneous fourth row, input immutability, non-finite values in every input stage,
+  finite-input overflow at both multiplication stages, and rejection before any mesh upload.
+
+Still unclaimed: retail matrix storage or direction, coordinate axes or handedness, view or projection
+parameters, camera controls, captured transform import, owner-corpus values, or PCSX2/native parity.
+
 ## Private PCSX2 producer readiness (E-0099, 2026-07-20)
 
 - A separately maintained local branch based on official PCSX2

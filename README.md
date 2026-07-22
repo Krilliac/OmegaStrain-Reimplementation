@@ -249,6 +249,16 @@ Studio's historical engine source or internal toolchain.
   large smoke scenarios are heap/sibling-owned so checked Windows builds retain bounded stack use.
   This is a project-authored diagnostic view: it establishes no retail placement, camera,
   visibility, material, lighting, collision, draw order, owner-corpus publication, or visual parity.
+- E-0115 supersedes only E-0114's single-camera-matrix composition wording. `SceneCameraIR` now owns
+  identity-default `world_to_view` and `view_to_clip` stages, and the project-owned
+  `ComposeObjectToClip` contract evaluates `view_to_clip * world_to_view * local_to_world` without
+  retaining state or allocating. It rejects non-finite inputs and non-representable intermediate or
+  final results before any mesh upload. Synthetic fixtures use non-commuting stages and a nontrivial
+  homogeneous fourth row to pin full 4x4 order, identity behavior, input immutability, fixed app
+  rejection, and zero pre-rejection uploads. Current diagnostic builders leave both camera stages
+  identity, so the renderer command and pixel contracts remain unchanged. These are OpenOmega matrix
+  conventions only; no retail coordinate, storage, axis, handedness, camera, projection, or parity
+  claim is made.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public
