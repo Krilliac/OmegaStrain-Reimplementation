@@ -15,8 +15,9 @@ namespace omega::asset
 // [any thread; reentrant] Validates a project-owned ModelIR: a whole-triangle, in-range,
 // finite-position mesh; when present, a self-consistent skeleton (via ValidateSkeletonIR); when
 // present, a skin_influences table sized exactly to mesh.positions with in-range joint indices,
-// finite non-negative weights, and used_influences within kMaximumSkinInfluencesPerVertex; and the
-// caller's aggregate DecodeLimits item/output/string budgets across every owned component.
+// finite non-negative used weights, canonical-zero unused slots, and used_influences within
+// kMaximumSkinInfluencesPerVertex; and the caller's aggregate DecodeLimits item/output/string
+// budgets across every owned component.
 // skin_influences requires an owned skeleton to validate its joint indices against. Count/size
 // limits are checked before full mesh traversal. Assigns no retail vertex/bone semantics.
 [[nodiscard]] ModelIrResult<void> ValidateModelIR(
@@ -31,7 +32,10 @@ namespace omega::asset
 // [any thread; reentrant] Validates a project-owned ClipIR against a specific SkeletonIR. Enforces
 // kMaximumClipKeyframes, a caller-bounded name, finite sample coordinates, one finite local
 // transform per skeleton joint in every keyframe, and checked aggregate item/output budgets across
-// the whole clip. It does not establish ordering, interpolation, blending, or retail time units.
+// the whole clip. It does not validate the SkeletonIR parent hierarchy, joint names, or bind
+// transforms; callers must validate that separately with ValidateSkeletonIR (or validate the owning
+// model with ValidateModelIR). It does not establish ordering, interpolation, blending, or retail
+// time units.
 [[nodiscard]] ModelIrResult<void> ValidateClipAgainstSkeleton(
     const SkeletonIR& skeleton, const ClipIR& clip, const DecodeLimits& limits = {});
 } // namespace omega::asset

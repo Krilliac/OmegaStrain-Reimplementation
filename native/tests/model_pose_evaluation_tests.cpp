@@ -193,6 +193,10 @@ int ModelPoseEvaluationFailureCount()
         oversized.joints.assign(kMaximumSkeletonJoints + 1U, JointIR{});
         CheckError(EvaluateBindPose(oversized), DecodeErrorCode::LimitExceeded,
             "bind pose evaluation rejects joint counts above the fixed ceiling");
+
+        PoseIR mismatched;
+        CheckError(EvaluatePose(oversized, mismatched), DecodeErrorCode::LimitExceeded,
+            "generic pose evaluation prioritizes the fixed joint ceiling over cardinality");
     }
 
     // Caller item-budget boundaries.
