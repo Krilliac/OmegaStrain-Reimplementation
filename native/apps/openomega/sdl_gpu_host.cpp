@@ -1909,8 +1909,8 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
 {
     try
     {
-        if (!packet.draw_list.empty())
-            return std::unexpected("mesh readback requires an empty texture draw list");
+        const std::span<const runtime::RenderTextureBlitCommand> texture_draws =
+            packet.draw_list.commands();
         const std::span<const runtime::RenderMeshDrawCommand> mesh_draws =
             packet.mesh_draw_list.commands();
         if (mesh_draws.empty())
@@ -1966,6 +1966,67 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
         constexpr std::size_t byte_count =
             pixel_count * sizeof(runtime::RenderClearColorRgba8);
         static_assert(pixel_count == 64U && byte_count == 256U);
+
+        std::array<ResolvedTextureBlit,
+            runtime::kMaximumRenderTextureBlitsPerFrame> resolved_blits{};
+        std::array<runtime::RenderSourceRectPixels,
+            runtime::kMaximumRenderTextureBlitsPerFrame> mapped_sources{};
+        std::array<SDL_GPUFilter,
+            runtime::kMaximumRenderTextureBlitsPerFrame> mapped_filters{};
+        std::array<PreparedTextureBlit,
+            runtime::kMaximumRenderTextureBlitsPerFrame> prepared_blits{};
+        for (std::size_t index = 0U; index < texture_draws.size(); ++index)
+        {
+            const runtime::RenderTextureBlitCommand& draw = texture_draws[index];
+            auto metadata = impl_->texture_pool.Get(draw.texture);
+            if (!metadata)
+            {
+                return std::unexpected(
+                    PoolError("mesh readback overlay resolve", metadata.error()));
+            }
+            const std::uint32_t slot_index = metadata->handle.slot_index;
+            if (slot_index >= impl_->texture_slots.size() ||
+                impl_->texture_slots[slot_index] == nullptr)
+            {
+                return std::unexpected(
+                    "mesh readback overlay backend slot invariant failed");
+            }
+            resolved_blits[index] = ResolvedTextureBlit{
+                .texture = impl_->texture_slots[slot_index],
+                .width = metadata->width,
+                .height = metadata->height,
+            };
+        }
+        for (std::size_t index = 0U; index < texture_draws.size(); ++index)
+        {
+            const runtime::RenderTextureBlitCommand& draw = texture_draws[index];
+            const ResolvedTextureBlit& resolved = resolved_blits[index];
+            auto source = runtime::MapTextureSourceRect(
+                draw.source, resolved.width, resolved.height);
+            if (!source)
+            {
+                return std::unexpected(std::string(
+                    "mesh readback overlay source rectangle mapping failed: ") +
+                    std::string(source.error().message));
+            }
+            mapped_sources[index] = *source;
+            if (!TryMapTextureFilter(draw.filter_mode, mapped_filters[index]))
+                return std::unexpected("mesh readback overlay filter mode is invalid");
+
+            auto plan = runtime::PlanTextureBlit(
+                mapped_sources[index], draw.destination, draw.fit_mode, width, height);
+            if (!plan)
+            {
+                return std::unexpected(std::string(
+                    "mesh readback overlay planning failed: ") +
+                    std::string(plan.error().message));
+            }
+            prepared_blits[index] = PreparedTextureBlit{
+                .source = resolved.texture,
+                .plan = *plan,
+                .filter = mapped_filters[index],
+            };
+        }
         if (!SDL_GPUTextureSupportsFormat(impl_->device, format,
                 SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET))
         {
@@ -2062,6 +2123,10 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
             }
             return std::unexpected(std::move(post_acquire_error));
         }
+
+        RecordTextureBlits(commands, texture,
+            std::span<const PreparedTextureBlit>{
+                prepared_blits.data(), texture_draws.size()});
 
         SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
         if (copy == nullptr)

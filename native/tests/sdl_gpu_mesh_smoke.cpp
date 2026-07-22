@@ -2,9 +2,11 @@
 #include "sdl_platform_service.h"
 
 #include "omega/asset/scene_ir.h"
+#include "omega/runtime/render_draw_list.h"
 #include "omega/runtime/render_frame_packet.h"
 #include "omega/runtime/render_mesh.h"
 #include "omega/runtime/render_mesh_draw_list.h"
+#include "omega/runtime/render_texture.h"
 
 #include <SDL3/SDL.h>
 
@@ -59,6 +61,15 @@ using Clock = std::chrono::steady_clock;
            pool.reserved_triangle_indices == 0U &&
            pool.resident_triangle_indices == 0U &&
            pool.reserved_logical_bytes == 0U &&
+           pool.resident_logical_bytes == 0U;
+}
+
+[[nodiscard]] bool TexturePoolIsEmpty(
+    const omega::runtime::RenderTexturePoolSnapshot& pool) noexcept
+{
+    return pool.slot_capacity == 1U && pool.free_slots == 1U &&
+           pool.reserved_slots == 0U && pool.resident_slots == 0U &&
+           pool.retired_slots == 0U && pool.reserved_logical_bytes == 0U &&
            pool.resident_logical_bytes == 0U;
 }
 
@@ -203,19 +214,26 @@ int main()
         return Fail("indexed triangle readback failed", readback.error());
     std::size_t green_pixels = 0U;
     std::size_t black_pixels = 0U;
-    for (const omega::runtime::RenderClearColorRgba8 pixel : *readback)
+    std::size_t overlay_pixel_index = readback->size();
+    for (std::size_t index = 0U; index < readback->size(); ++index)
     {
+        const omega::runtime::RenderClearColorRgba8 pixel = (*readback)[index];
         if (pixel == opaque_green)
+        {
+            if (overlay_pixel_index == readback->size())
+                overlay_pixel_index = index;
             ++green_pixels;
+        }
         else if (pixel == opaque_black)
             ++black_pixels;
         else
             return Fail("indexed triangle readback contained an unexpected RGBA8 pixel");
     }
-    if (green_pixels == 0U || black_pixels == 0U ||
+    if (green_pixels < 2U || black_pixels == 0U ||
         green_pixels + black_pixels != readback->size())
     {
-        return Fail("indexed triangle readback did not cover a strict target subset");
+        return Fail(
+            "indexed triangle readback did not leave both overlay and survivor pixels");
     }
     if (host.Snapshot() != before_readback)
         return Fail("indexed triangle readback mutated production counters or residency");
@@ -270,6 +288,84 @@ int main()
         return Fail("asymmetric transform readback mutated production counters or residency");
 
     packet.mesh_draw_list = *fill_draw_list;
+
+    constexpr omega::runtime::RenderClearColorRgba8 opaque_blue{
+        .red = 0U,
+        .green = 0U,
+        .blue = 255U,
+        .alpha = 255U,
+    };
+    constexpr std::array<std::byte, 4U> overlay_pixels{
+        std::byte{0U}, std::byte{0U}, std::byte{255U}, std::byte{255U}};
+    auto overlay_texture = host.UploadRgba8Texture(
+        omega::runtime::Rgba8TextureUploadView{
+            .width = 1U,
+            .height = 1U,
+            .pixels = overlay_pixels,
+        });
+    if (!overlay_texture)
+        return Fail("mesh overlay texture upload failed", overlay_texture.error());
+
+    constexpr std::uint32_t kReadbackExtent = 8U;
+    static_assert(omega::runtime::kNormalizedRenderExtent % kReadbackExtent == 0U);
+    constexpr std::uint32_t kPixelSpan =
+        omega::runtime::kNormalizedRenderExtent / kReadbackExtent;
+    const std::uint32_t overlay_row =
+        static_cast<std::uint32_t>(overlay_pixel_index / kReadbackExtent);
+    const std::uint32_t overlay_column =
+        static_cast<std::uint32_t>(overlay_pixel_index % kReadbackExtent);
+    constexpr omega::runtime::RenderSourceRectQ16 full_source{
+        .left = 0U,
+        .top = 0U,
+        .right = omega::runtime::kNormalizedRenderExtent,
+        .bottom = omega::runtime::kNormalizedRenderExtent,
+    };
+    const std::array overlay_commands{
+        omega::runtime::RenderTextureBlitCommand{
+            .texture = *overlay_texture,
+            .source = full_source,
+            .destination = omega::runtime::RenderTargetRectQ16{
+                .left = overlay_column * kPixelSpan,
+                .top = overlay_row * kPixelSpan,
+                .right = (overlay_column + 1U) * kPixelSpan,
+                .bottom = (overlay_row + 1U) * kPixelSpan,
+            },
+            .fit_mode = omega::runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = omega::runtime::RenderTextureFilterMode::Nearest,
+        },
+    };
+    auto overlay_draw_list =
+        omega::runtime::RenderDrawList::Create(overlay_commands);
+    if (!overlay_draw_list)
+        return Fail("mesh overlay draw-list creation failed");
+    packet.draw_list = *overlay_draw_list;
+    const omega::app::GpuHostSnapshot before_overlay_readback = host.Snapshot();
+    auto overlay_readback = omega::app::detail::SdlGpuHostTestAccess::
+        ReadbackMeshesForTesting(host, packet);
+    if (!overlay_readback)
+        return Fail("mesh plus texture overlay readback failed", overlay_readback.error());
+    std::size_t surviving_green_pixels = 0U;
+    for (std::size_t index = 0U; index < overlay_readback->size(); ++index)
+    {
+        if (index == overlay_pixel_index)
+        {
+            if ((*overlay_readback)[index] != opaque_blue)
+                return Fail("texture overlay did not replace its selected mesh pixel");
+            continue;
+        }
+        if ((*overlay_readback)[index] != (*readback)[index])
+            return Fail("texture overlay changed a pixel outside its exact destination");
+        if ((*overlay_readback)[index] == opaque_green)
+            ++surviving_green_pixels;
+    }
+    if (surviving_green_pixels != green_pixels - 1U)
+        return Fail("mesh pixels did not survive around the ordered texture overlay");
+    if (host.Snapshot() != before_overlay_readback)
+        return Fail("mesh overlay readback mutated production counters or residency");
+    packet.draw_list = {};
+    auto released_overlay = host.ReleaseTexture(*overlay_texture);
+    if (!released_overlay)
+        return Fail("mesh overlay texture release failed", released_overlay.error());
 
     if (!RenderUntil(host, packet,
             [](const omega::app::GpuHostSnapshot& snapshot)
@@ -349,7 +445,9 @@ int main()
         final.successful_mesh_draws != 2U ||
         final.rejected_nondefault_mesh_handles != 1U ||
         final.frame_submissions != 2U + final.unavailable_swapchain_submissions ||
-        final.successful_uploads != 0U || final.successful_releases != 0U ||
+        final.successful_uploads != 1U ||
+        final.successful_upload_logical_bytes != 4U ||
+        final.successful_releases != 1U || !TexturePoolIsEmpty(final.textures) ||
         final.blit_submissions != 0U || final.successful_blit_draws != 0U ||
         final.clear_submissions != 0U || !MeshPoolIsEmpty(final.meshes))
     {
@@ -359,6 +457,7 @@ int main()
     std::cout << "omega_sdl_gpu_mesh_smoke: passed driver=" << driver
               << " uploads=2 releases=2 mesh_frames=2 mesh_draws=2 colored_pixels="
               << green_pixels << " transformed_pixels=" << transformed_green_pixels
+              << " surviving_overlay_pixels=" << surviving_green_pixels
               << " unavailable="
               << final.unavailable_swapchain_submissions << '\n';
     return 0;
