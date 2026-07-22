@@ -36,6 +36,11 @@ void AppendF32(std::vector<std::byte> &bytes, const float value) {
   AppendU32(bytes, std::bit_cast<std::uint32_t>(value));
 }
 
+void WriteF32(std::vector<std::byte> &bytes, const std::size_t offset,
+              const float value) {
+  WriteU32(bytes, offset, std::bit_cast<std::uint32_t>(value));
+}
+
 void AppendString(std::vector<std::byte> &bytes, const std::string_view value) {
   for (const char character : value)
     bytes.push_back(static_cast<std::byte>(character));
@@ -175,9 +180,15 @@ struct GuiFixture {
 
 struct IeFixture {
   std::vector<std::byte> bytes;
-  std::size_t fixed_stream_data_offset = 0;
+  std::size_t root_transform_offset = 0;
+  std::size_t position_count_offset = 0;
+  std::size_t position_data_offset = 0;
+  std::size_t uv_data_offset = 0;
+  std::size_t color_data_offset = 0;
+  std::size_t triangle_data_offset = 0;
   std::size_t vertex_kind_offset = 0;
   std::size_t vertex_count_offset = 0;
+  std::size_t animation_payload_offset = 0;
   std::size_t secondary_count_offset = 0;
   std::size_t root_child_count_offset = 0;
   std::uint8_t padding = 0;
@@ -206,6 +217,7 @@ void AppendIeEmptyNode(std::vector<std::byte> &bytes,
   AppendString(fixture.bytes, "visual_root");
   AppendString(fixture.bytes, "");
   Align4(fixture.bytes);
+  fixture.root_transform_offset = fixture.bytes.size();
   for (unsigned index = 0; index < 12; ++index)
     AppendF32(fixture.bytes, static_cast<float>(index));
   for (unsigned index = 0; index < 4; ++index)
@@ -221,15 +233,27 @@ void AppendIeEmptyNode(std::vector<std::byte> &bytes,
   for (unsigned index = 0; index < 12; ++index)
     AppendF32(fixture.bytes, 100.0F + static_cast<float>(index));
 
+  fixture.position_count_offset = fixture.bytes.size();
   AppendU32(fixture.bytes, 2);
-  fixture.fixed_stream_data_offset = fixture.bytes.size();
-  AppendZeros(fixture.bytes, 2U * 12U);
+  fixture.position_data_offset = fixture.bytes.size();
+  for (const float value :
+       std::array<float, 6>{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F})
+    AppendF32(fixture.bytes, value);
   AppendU32(fixture.bytes, 1);
-  AppendZeros(fixture.bytes, 8);
+  fixture.uv_data_offset = fixture.bytes.size();
+  AppendF32(fixture.bytes, 0.25F);
+  AppendF32(fixture.bytes, 0.75F);
   AppendU32(fixture.bytes, 1);
-  AppendZeros(fixture.bytes, 16);
+  fixture.color_data_offset = fixture.bytes.size();
+  AppendF32(fixture.bytes, 0.0F);
+  AppendF32(fixture.bytes, 0.5F);
+  AppendF32(fixture.bytes, 1.0F);
+  AppendF32(fixture.bytes, 0.1F);
   AppendU32(fixture.bytes, 1);
-  AppendZeros(fixture.bytes, 36);
+  fixture.triangle_data_offset = fixture.bytes.size();
+  for (const std::uint32_t index :
+       std::array<std::uint32_t, 9>{0, 1, 0, 0, 0, 0, 0, 0, 0})
+    AppendU32(fixture.bytes, index);
 
   AppendU32(fixture.bytes, 4);
   fixture.vertex_kind_offset = fixture.bytes.size();
@@ -239,6 +263,8 @@ void AppendIeEmptyNode(std::vector<std::byte> &bytes,
   AppendU32(fixture.bytes, 2);
   for (unsigned entry = 0; entry < 2; ++entry) {
     AppendU32(fixture.bytes, 2);
+    if (entry == 0)
+      fixture.animation_payload_offset = fixture.bytes.size();
     AppendZeros(fixture.bytes, 2U * 16U);
   }
   AppendString(fixture.bytes, "OPACITY");
@@ -499,6 +525,28 @@ int main() {
               root.children[0].children[0].identifier == "panel_child",
           "IE retains proven identifiers, texture members, ordered transforms, "
           "and topology");
+    const auto &panel = root.children[0];
+    Check(panel.positions.size() == 2 &&
+              panel.positions[0] ==
+                  omega::asset::Float3IR{.x = 1.0F, .y = 2.0F, .z = 3.0F} &&
+              panel.positions[1] ==
+                  omega::asset::Float3IR{.x = 4.0F, .y = 5.0F, .z = 6.0F} &&
+              panel.uvs ==
+                  std::vector<omega::asset::FrontendUvIR>{
+                      {.u = 0.25F, .v = 0.75F}} &&
+              panel.colors == std::vector<omega::asset::FrontendColorRgba8IR>{{
+                                  .red = 0,
+                                  .green = 127,
+                                  .blue = 255,
+                                  .alpha = 25,
+                              }} &&
+              panel.triangles == std::vector<omega::asset::FrontendTriangleIR>{{
+                                     .position_indices = {0, 1, 0},
+                                     .uv_indices = {0, 0, 0},
+                                     .color_indices = {0, 0, 0},
+                                 }},
+          "IE retains owned positions, UVs, toward-zero RGBA8 colors, and "
+          "separate index triples");
     Check(
         ie_measured->decoded_items > 0 &&
             ie_measured->logical_output_bytes >=
@@ -519,20 +567,94 @@ int main() {
   Check(ie && alternate_ie && *ie == *alternate_ie,
         "IE keeps the skipped prefix and observed word outside canonical "
         "semantics");
-  auto changed_fixed_stream = ie_fixture.bytes;
-  changed_fixed_stream[ie_fixture.fixed_stream_data_offset] = std::byte{0x7F};
-  const auto opaque_ie = omega::retail::DecodeIeFrontend(changed_fixed_stream);
+  auto changed_animation = ie_fixture.bytes;
+  changed_animation[ie_fixture.animation_payload_offset] = std::byte{0x7F};
+  const auto opaque_ie = omega::retail::DecodeIeFrontend(changed_animation);
   Check(ie && opaque_ie && *ie == *opaque_ie,
-        "IE validates but does not expose unproven fixed-stream and track "
-        "payload values");
+        "IE validates but does not expose unproven animation payload values");
   auto ie_owned_bytes = ie_fixture.bytes;
   auto owned_ie = omega::retail::DecodeIeFrontend(ie_owned_bytes);
   std::fill(ie_owned_bytes.begin(), ie_owned_bytes.end(), std::byte{0xFF});
-  Check(owned_ie &&
-            owned_ie->root.children[0].texture_member == "panel_skin.TDX",
-        "IE output remains valid after source storage replacement");
+  Check(owned_ie && owned_ie->root.children.size() == 1 &&
+            owned_ie->root.children[0].texture_member == "panel_skin.TDX" &&
+            owned_ie->root.children[0].positions.size() == 2 &&
+            owned_ie->root.children[0].colors.size() == 1 &&
+            owned_ie->root.children[0].triangles.size() == 1 &&
+            owned_ie->root.children[0].positions[1].z == 6.0F &&
+            owned_ie->root.children[0].colors[0].green == 127 &&
+            owned_ie->root.children[0].triangles[0].position_indices[1] == 1,
+        "IE render streams remain owned after source storage replacement");
+
+  auto raised_limits = omega::asset::DecodeLimits{};
+  raised_limits.maximum_items = std::numeric_limits<std::uint64_t>::max();
+  raised_limits.maximum_output_bytes =
+      std::numeric_limits<std::uint64_t>::max();
+  raised_limits.maximum_nesting_depth =
+      std::numeric_limits<std::uint32_t>::max();
 
   auto bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.root_transform_offset,
+           std::numeric_limits<float>::quiet_NaN());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects a nonfinite affine-transform coefficient");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.position_data_offset,
+           std::numeric_limits<float>::infinity());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects a nonfinite position component");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.uv_data_offset,
+           std::numeric_limits<float>::quiet_NaN());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects a nonfinite UV component");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.color_data_offset,
+           std::numeric_limits<float>::infinity());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects a nonfinite normalized color channel");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.color_data_offset, 1.01F);
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects a normalized color channel above one");
+  bad_ie = ie_fixture.bytes;
+  WriteF32(bad_ie, ie_fixture.color_data_offset, -0.01F);
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects a normalized color channel below zero");
+  bad_ie = ie_fixture.bytes;
+  WriteU32(bad_ie, ie_fixture.position_count_offset,
+           std::numeric_limits<std::uint32_t>::max());
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie, raised_limits),
+             omega::asset::DecodeErrorCode::LimitExceeded,
+             "IE bounds a hostile retained-stream count before allocation");
+  bad_ie = ie_fixture.bytes;
+  WriteU32(bad_ie, ie_fixture.triangle_data_offset, 0x00010000U);
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects triangle indices with nonzero upper 16 bits");
+  bad_ie = ie_fixture.bytes;
+  WriteU32(bad_ie, ie_fixture.triangle_data_offset, 2);
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects an out-of-bounds position index");
+  bad_ie = ie_fixture.bytes;
+  WriteU32(bad_ie, ie_fixture.triangle_data_offset + 3U * sizeof(std::uint32_t),
+           1);
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects an out-of-bounds UV index");
+  bad_ie = ie_fixture.bytes;
+  WriteU32(bad_ie, ie_fixture.triangle_data_offset + 6U * sizeof(std::uint32_t),
+           1);
+  CheckError(omega::retail::DecodeIeFrontend(bad_ie),
+             omega::asset::DecodeErrorCode::Malformed,
+             "IE rejects an out-of-bounds color index");
+  bad_ie = ie_fixture.bytes;
   bad_ie[ie_fixture.vertex_kind_offset] = std::byte{'X'};
   CheckError(omega::retail::DecodeIeFrontend(bad_ie),
              omega::asset::DecodeErrorCode::UnsupportedVariant,
@@ -551,12 +673,6 @@ int main() {
   bad_ie = ie_fixture.bytes;
   WriteU32(bad_ie, ie_fixture.root_child_count_offset,
            std::numeric_limits<std::uint32_t>::max());
-  auto raised_limits = omega::asset::DecodeLimits{};
-  raised_limits.maximum_items = std::numeric_limits<std::uint64_t>::max();
-  raised_limits.maximum_output_bytes =
-      std::numeric_limits<std::uint64_t>::max();
-  raised_limits.maximum_nesting_depth =
-      std::numeric_limits<std::uint32_t>::max();
   CheckError(omega::retail::DecodeIeFrontend(bad_ie, raised_limits),
              omega::asset::DecodeErrorCode::LimitExceeded,
              "IE caller limits cannot raise the fixed decoded-item ceiling");

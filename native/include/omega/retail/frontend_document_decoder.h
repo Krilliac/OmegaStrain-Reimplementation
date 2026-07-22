@@ -43,9 +43,10 @@ DecodeGuiFrontendMeasured(std::span<const std::byte> bytes,
                           asset::DecodeLimits limits = {});
 
 // [any worker thread; reentrant] Converts the paired retail IE hierarchy into
-// canonical owned visual-resource data. Fixed streams and the observed
-// animation-track families are structurally validated and discarded rather than
-// assigned unproven canonical meanings.
+// canonical owned visual-resource data. Proven affine transforms, positions,
+// UVs, quantized colors, indexed triangles, and topology are retained. Observed
+// animation-track families are structurally validated and discarded rather
+// than assigned unproven canonical meanings.
 [[nodiscard]] asset::DecodeResult<asset::FrontendVisualDocumentIR>
 DecodeIeFrontend(std::span<const std::byte> bytes,
                  asset::DecodeLimits limits = {});
