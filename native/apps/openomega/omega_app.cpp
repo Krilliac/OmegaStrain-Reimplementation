@@ -3344,6 +3344,7 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
     switch (view.mode)
     {
     case FrontEndMode::Main:
+    case FrontEndMode::AgentCreation:
     case FrontEndMode::BriefingRoom:
         return front_end_presentation_.main_draw_lists[selected_main_row];
     case FrontEndMode::Profiles:

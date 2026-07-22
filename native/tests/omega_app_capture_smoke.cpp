@@ -6132,6 +6132,14 @@ int main()
         "a valid Profiles state selects the immutable profile-card draw list");
     OmegaAppTestAccess::SetFrontEndState(*app,
         omega::app::FrontEndState{
+            .mode = omega::app::FrontEndMode::AgentCreation,
+            .selected_main_row = omega::app::FrontEndMainRow::CreateAgent,
+        });
+    Check(DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
+              initial_visible_draw_lists[0]),
+        "a valid AgentCreation state explicitly retains the Create Agent row while its command completes");
+    OmegaAppTestAccess::SetFrontEndState(*app,
+        omega::app::FrontEndState{
             .mode = omega::app::FrontEndMode::Controls,
             .selected_main_row = omega::app::FrontEndMainRow::Controls,
         });
