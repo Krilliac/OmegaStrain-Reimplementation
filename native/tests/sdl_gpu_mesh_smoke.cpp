@@ -220,6 +220,57 @@ int main()
     if (host.Snapshot() != before_readback)
         return Fail("indexed triangle readback mutated production counters or residency");
 
+    // Row-major, column-vector transform with unequal X/Y scales and translation into the lower
+    // right clip quadrant. If the backend omits its row-to-column storage conversion, the final
+    // column becomes a perspective W term and colored pixels escape this quadrant.
+    constexpr omega::asset::Matrix4x4IR asymmetric_transform{
+        .row_major = {
+            0.4F, 0.0F, 0.0F, 0.5F,
+            0.0F, 0.3F, 0.0F, -0.4F,
+            0.0F, 0.0F, 1.0F, 0.0F,
+            0.0F, 0.0F, 0.0F, 1.0F,
+        },
+    };
+    auto transformed_command = fill_command;
+    transformed_command.object_to_clip = asymmetric_transform;
+    const std::array transformed_commands{transformed_command};
+    auto transformed_draw_list =
+        omega::runtime::RenderMeshDrawList::Create(transformed_commands);
+    if (!transformed_draw_list)
+        return Fail("asymmetric transform draw-list creation failed");
+    packet.mesh_draw_list = *transformed_draw_list;
+    auto transformed_readback = omega::app::detail::SdlGpuHostTestAccess::
+        ReadbackMeshesForTesting(host, packet);
+    if (!transformed_readback)
+        return Fail("asymmetric transform readback failed", transformed_readback.error());
+    std::size_t transformed_green_pixels = 0U;
+    for (std::size_t index = 0U; index < transformed_readback->size(); ++index)
+    {
+        const omega::runtime::RenderClearColorRgba8 pixel =
+            (*transformed_readback)[index];
+        if (pixel == opaque_green)
+        {
+            ++transformed_green_pixels;
+            const std::size_t row = index / 8U;
+            const std::size_t column = index % 8U;
+            if (row < 4U || column < 4U)
+            {
+                return Fail(
+                    "asymmetric transform escaped its expected lower-right quadrant");
+            }
+        }
+        else if (pixel != opaque_black)
+        {
+            return Fail("asymmetric transform readback contained an unexpected RGBA8 pixel");
+        }
+    }
+    if (transformed_green_pixels == 0U)
+        return Fail("asymmetric transform readback produced no colored pixels");
+    if (host.Snapshot() != before_readback)
+        return Fail("asymmetric transform readback mutated production counters or residency");
+
+    packet.mesh_draw_list = *fill_draw_list;
+
     if (!RenderUntil(host, packet,
             [](const omega::app::GpuHostSnapshot& snapshot)
             {
@@ -307,7 +358,8 @@ int main()
 
     std::cout << "omega_sdl_gpu_mesh_smoke: passed driver=" << driver
               << " uploads=2 releases=2 mesh_frames=2 mesh_draws=2 colored_pixels="
-              << green_pixels << " unavailable="
+              << green_pixels << " transformed_pixels=" << transformed_green_pixels
+              << " unavailable="
               << final.unavailable_swapchain_submissions << '\n';
     return 0;
 }

@@ -11,6 +11,7 @@
 #include "sdl_input_service.h"
 #include "sdl_platform_service.h"
 
+#include "omega/asset/scene_ir.h"
 #include "omega/runtime/asset_service.h"
 #include "omega/runtime/config_service.h"
 #include "omega/runtime/content_startup.h"
@@ -19,6 +20,7 @@
 #include "omega/runtime/job_service.h"
 #include "omega/runtime/log_service.h"
 #include "omega/runtime/render_draw_list.h"
+#include "omega/runtime/render_mesh_draw_list.h"
 #include "omega/runtime/render_texture.h"
 #include "omega/runtime/runtime_settings.h"
 #include "omega/simulation/simulation_world.h"
@@ -148,6 +150,7 @@ private:
     [[nodiscard]] std::expected<void, std::string>
     RefreshDiagnosticActorDrawList();
     [[nodiscard]] const runtime::RenderDrawList& CurrentFrontEndDrawList() const noexcept;
+    [[nodiscard]] runtime::RenderMeshDrawList CurrentFrontEndMeshDrawList() const noexcept;
 
     using ProfileActiveDrawListMatrix =
         std::array<std::array<runtime::RenderDrawList, kFrontEndVisibleProfiles>,
@@ -178,6 +181,23 @@ private:
         std::array<runtime::RenderDrawList, kFrontEndVisibleCharacters>
             selection_draw_lists;
     };
+
+    struct DiagnosticScenePresentation
+    {
+        std::array<runtime::RenderMeshHandle,
+            runtime::kMaximumRenderMeshDrawsPerFrame> mesh_handles{};
+        std::size_t mesh_count = 0U;
+        runtime::RenderMeshDrawList draw_list;
+    };
+
+    // [game/main/render thread, startup] Validates the complete scene-to-command projection before
+    // publishing any app-owned presentation. Every successfully uploaded prefix is released if a
+    // later upload or draw-list validation fails.
+    [[nodiscard]] static std::expected<DiagnosticScenePresentation, std::string>
+    BuildDiagnosticScenePresentation(SdlGpuHost& host, const asset::SceneIR& scene);
+    // [game/main/render thread; no concurrent use] Clears commands before releasing exact resident
+    // generations in reverse upload order. The host remains the final cleanup authority.
+    void ReleaseDiagnosticScenePresentation() noexcept;
 
     // [game/main/render thread; no concurrent use] Builds a complete immutable
     // character card. The returned texture remains host-owned and must be
@@ -211,6 +231,8 @@ private:
         runtime::RenderTextureHandle diagnostic_texture,
         runtime::RenderTextureHandle diagnostic_actor_marker_texture,
         runtime::RenderDrawList diagnostic_actor_draw_list,
+        runtime::RenderDrawList diagnostic_scene_overlay_draw_list,
+        DiagnosticScenePresentation diagnostic_scene_presentation,
         FrontEndPresentation front_end_presentation,
         std::optional<FrontEndPresentation> first_profile_presentation,
         runtime::RenderTextureHandle diagnostic_controls_texture,
@@ -260,6 +282,10 @@ private:
     // Allocation-free post-step presentation value. It retains the immutable
     // base command followed by the actor marker command while DiagnosticPlay is active.
     runtime::RenderDrawList diagnostic_actor_draw_list_;
+    // When indexed spatial geometry is resident, this parallel list retains only the existing
+    // actor/target/fire overlays so the opaque full-screen diagnostic texture cannot hide it.
+    runtime::RenderDrawList diagnostic_scene_overlay_draw_list_;
+    DiagnosticScenePresentation diagnostic_scene_presentation_;
     FrontEndPresentation front_end_presentation_;
     // When present, this retains the inactive half of the one-time empty -> first
     // profile presentation swap so both texture pairs remain explicitly releasable.
