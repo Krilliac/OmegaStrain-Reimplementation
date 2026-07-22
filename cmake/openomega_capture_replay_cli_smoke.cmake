@@ -9,6 +9,7 @@ endif()
 
 execute_process(
     COMMAND "${OPENOMEGA_EXECUTABLE}" --frames=2 --capture-run --replay-capture
+        --developer-diagnostics
     RESULT_VARIABLE openomega_result
     OUTPUT_VARIABLE openomega_stdout
     ERROR_VARIABLE openomega_stderr
@@ -26,6 +27,7 @@ endif()
 
 string(CONCAT expected_stdout_pattern
     "^OpenOmega native persistence: profiles=0\n"
+    "OpenOmega mode: DEVELOPER DIAGNOSTICS [(]project-authored presentation/gameplay[)]\n"
     "OpenOmega native shell: GPU driver=[A-Za-z0-9_.-]+ audio_driver=dummy "
     "audio_format=f32/[0-9]+Hz/[0-9]+ch\n"
     "OpenOmega native shell: rendered_frames=2 "
@@ -40,7 +42,7 @@ string(CONCAT expected_stdout_pattern
     "after_dropped_time_ns=[0-9]+\n"
     "OpenOmega fresh replay: replayed_frames=2 planned_simulation_steps=[0-9]+ "
     "completed_simulation_steps=[0-9]+ clamped_frames=[0-9]+ "
-    "dropped_frames=[0-9]+ front_end=Profiles/Profiles/First "
+    "dropped_frames=[0-9]+ front_end=Main/StartDiagnostic/First "
     "completion=complete\n$"
 )
 if(NOT openomega_stdout MATCHES "${expected_stdout_pattern}")

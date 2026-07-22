@@ -244,24 +244,27 @@ OmegaApp::BuildDiagnosticScenePresentation(
 std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore config,
     const runtime::RuntimeSettings& settings, runtime::ContentStartupState content,
     NativePersistence native_persistence, const bool debug_device,
+    const runtime::FrontEndPresentationMode presentation_mode,
     std::optional<std::filesystem::path> opening_movie_path)
 {
     OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_app_host");
     return CreateWithTextureConfig(std::move(config), settings, std::move(content),
         std::make_unique<NativePersistence>(std::move(native_persistence)),
-        debug_device, {}, std::move(opening_movie_path));
+        debug_device, {}, std::move(opening_movie_path), presentation_mode);
 }
 
 std::expected<OmegaApp, std::string> OmegaApp::Create(runtime::ConfigStore config,
     const runtime::RuntimeSettings& settings, runtime::ContentStartupState content,
     NativePersistence native_persistence, const bool debug_device,
+    const runtime::FrontEndPresentationMode presentation_mode,
     asset::OpeningMovieSource opening_movie_source)
 {
     return CreateWithTextureConfigAndOpeningMoviePlayback(std::move(config), settings,
         std::move(content),
         std::make_unique<NativePersistence>(std::move(native_persistence)), debug_device, {},
         std::nullopt,
-        std::optional<asset::OpeningMovieSource>{std::move(opening_movie_source)}, nullptr);
+        std::optional<asset::OpeningMovieSource>{std::move(opening_movie_source)}, nullptr,
+        presentation_mode);
 }
 
 std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
@@ -269,11 +272,13 @@ std::expected<OmegaApp, std::string> OmegaApp::CreateWithTextureConfig(
     runtime::ContentStartupState content,
     std::unique_ptr<NativePersistence> native_persistence, const bool debug_device,
     const runtime::RenderTexturePoolConfig texture_config,
-    std::optional<std::filesystem::path> opening_movie_path)
+    std::optional<std::filesystem::path> opening_movie_path,
+    const runtime::FrontEndPresentationMode presentation_mode)
 {
     return CreateWithTextureConfigAndOpeningMoviePlayback(std::move(config),
         settings, std::move(content), std::move(native_persistence), debug_device,
-        texture_config, std::move(opening_movie_path), std::nullopt, nullptr);
+        texture_config, std::move(opening_movie_path), std::nullopt, nullptr,
+        presentation_mode);
 }
 
 std::expected<OmegaApp, std::string>
@@ -284,8 +289,17 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     const runtime::RenderTexturePoolConfig texture_config,
     std::optional<std::filesystem::path> opening_movie_path,
     std::optional<asset::OpeningMovieSource> opening_movie_source,
-    std::unique_ptr<OpeningMoviePlayback> opening_movie_playback)
+    std::unique_ptr<OpeningMoviePlayback> opening_movie_playback,
+    const runtime::FrontEndPresentationMode presentation_mode)
 {
+    if (presentation_mode != runtime::FrontEndPresentationMode::RetailRequired &&
+        presentation_mode !=
+            runtime::FrontEndPresentationMode::DeveloperDiagnostics)
+    {
+        return std::unexpected(
+            std::string{"front-end presentation mode is invalid"});
+    }
+
     const unsigned source_selection_count = static_cast<unsigned>(opening_movie_path.has_value()) +
         static_cast<unsigned>(opening_movie_source.has_value()) +
         static_cast<unsigned>(opening_movie_playback != nullptr);
@@ -333,6 +347,17 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     if (!created_log)
         return std::unexpected("logging service: " + created_log.error());
     auto log = std::make_unique<runtime::LogService>(std::move(*created_log));
+    if (presentation_mode ==
+        runtime::FrontEndPresentationMode::DeveloperDiagnostics)
+    {
+        log->Warning("presentation",
+            "DEVELOPER DIAGNOSTICS enabled; presentation and gameplay are project-authored");
+    }
+    else
+    {
+        log->Info("presentation",
+            "retail-derived post-launch presentation is required");
+    }
 
     asset::SceneIR diagnostic_scene;
     if (content_owner->level_content)
@@ -634,7 +659,13 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     }
     auto audio = std::make_unique<SdlAudioService>(std::move(*created_audio));
 
-    auto created_host = SdlGpuHost::Create(*platform, debug_device, texture_config);
+    const SdlGpuWindowIdentity window_identity =
+        presentation_mode ==
+                runtime::FrontEndPresentationMode::DeveloperDiagnostics
+            ? SdlGpuWindowIdentity::DeveloperDiagnostics
+            : SdlGpuWindowIdentity::NativeRuntime;
+    auto created_host = SdlGpuHost::Create(
+        *platform, debug_device, texture_config, {}, window_identity);
     if (!created_host)
     {
         log->Error("startup", "SDL/GPU host: " + created_host.error());
@@ -1294,7 +1325,8 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                     diagnostic_asset_topology_texture, diagnostic_asset_transfer_texture,
                     std::move(diagnostic_hidden_draw_list),
                     std::move(diagnostic_controls_draw_list),
-                    std::move(diagnostic_asset_topology_draw_list), content_stage, front_end_startup_model);
+                    std::move(diagnostic_asset_topology_draw_list), content_stage,
+                    front_end_startup_model, presentation_mode);
 }
 
 OmegaApp::OmegaApp(
@@ -1322,7 +1354,8 @@ OmegaApp::OmegaApp(
     runtime::RenderDrawList diagnostic_hidden_draw_list,
     runtime::RenderDrawList diagnostic_controls_draw_list,
     runtime::RenderDrawList diagnostic_asset_topology_draw_list, const runtime::ContentStartupStage content_stage,
-    const FrontEndStartupModel front_end_startup_model) noexcept
+    const FrontEndStartupModel front_end_startup_model,
+    const runtime::FrontEndPresentationMode presentation_mode) noexcept
     : native_persistence_(std::move(native_persistence)), config_(std::move(config)), content_(std::move(content)),
       stderr_sink_(std::move(stderr_sink)), ring_sink_(std::move(ring_sink)), log_(std::move(log)),
       jobs_(std::move(jobs)), assets_(std::move(assets)), frame_scheduler_(std::move(frame_scheduler)),
@@ -1343,7 +1376,8 @@ OmegaApp::OmegaApp(
       diagnostic_hidden_draw_list_(std::move(diagnostic_hidden_draw_list)),
       diagnostic_controls_draw_list_(std::move(diagnostic_controls_draw_list)),
       diagnostic_asset_topology_draw_list_(std::move(diagnostic_asset_topology_draw_list)),
-      content_stage_(content_stage), front_end_startup_model_(front_end_startup_model),
+      content_stage_(content_stage), presentation_mode_(presentation_mode),
+      front_end_startup_model_(front_end_startup_model),
       front_end_state_(PlanProjectFrontEndStartupState(
           front_end_startup_model_.total_profiles,
           front_end_startup_model_.visible_profiles,
@@ -1857,6 +1891,16 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
     bool running = true;
     auto previous_frame = Clock::now();
     AudioServiceSnapshot audio_fault_baseline = audio_->Snapshot();
+    const auto front_end_gate_failure = [this]() -> std::optional<std::string>
+    {
+        const auto authorized = AuthorizeCurrentFrontEndPresentation();
+        if (authorized)
+            return std::nullopt;
+        return "front-end presentation [" +
+               std::string(runtime::FrontEndPresentationGateErrorCodeName(
+                   authorized.error().code)) +
+               "]: " + std::string(authorized.error().message);
+    };
     while (running && (frame_limit < 0 || result.rendered_frames < frame_limit))
     {
         const auto next_rendered_frame_count =
@@ -1878,6 +1922,20 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         const InputPumpResult events = sdl_input_->PumpEvents(*input_, *log_);
         const runtime::InputSnapshot input_snapshot = input_->EndFrame();
         const bool movie_was_active = IsBootSequenceActive(boot_sequence_state_);
+        if (!movie_was_active)
+        {
+            if (auto presentation_error = front_end_gate_failure())
+            {
+                (void)ContainOpeningMovieAudio();
+                jobs_->WaitForIdle();
+                log_->Error("presentation", *presentation_error);
+                return RunLoopResult{
+                    .result = result,
+                    .operational_error = std::move(presentation_error),
+                    .capture_error = std::nullopt,
+                };
+            }
+        }
         if (capture_session != nullptr)
         {
             const auto captured = capture_session->AppendInput(input_snapshot);
@@ -2178,6 +2236,16 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                     return RunLoopResult{
                         .result = result,
                         .operational_error = std::string(error),
+                        .capture_error = std::nullopt,
+                    };
+                }
+                if (auto presentation_error = front_end_gate_failure())
+                {
+                    jobs_->WaitForIdle();
+                    log_->Error("presentation", *presentation_error);
+                    return RunLoopResult{
+                        .result = result,
+                        .operational_error = std::move(presentation_error),
                         .capture_error = std::nullopt,
                     };
                 }
@@ -2827,6 +2895,23 @@ bool OmegaApp::ActiveCharacterIsConfirmed() const noexcept
     return ActiveProfileIsConfirmed() &&
            FrontEndHasConfirmedActiveCharacter(
                front_end_character_startup_model_, active_character_id_);
+}
+
+std::expected<void, runtime::FrontEndPresentationGateError>
+OmegaApp::AuthorizeCurrentFrontEndPresentation() const noexcept
+{
+    if (presentation_mode_ ==
+        runtime::FrontEndPresentationMode::DeveloperDiagnostics)
+    {
+        return runtime::AuthorizeFrontEndPresentation(
+            presentation_mode_, front_end_presentation_.provenance);
+    }
+
+    // The retail FNT/GUI/IE and display-conversion decoders are intentionally
+    // not guessed here. Their future owned presentation must carry the
+    // GameDataService-minted retail capability through this exact seam.
+    return runtime::AuthorizeFrontEndPresentation(
+        presentation_mode_, std::nullopt);
 }
 
 std::expected<void, std::string> OmegaApp::DeployDiagnosticMission()

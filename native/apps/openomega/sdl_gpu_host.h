@@ -51,6 +51,12 @@ struct GpuHostSnapshot
 static_assert(std::is_trivially_copyable_v<GpuHostSnapshot>);
 static_assert(std::is_standard_layout_v<GpuHostSnapshot>);
 
+enum class SdlGpuWindowIdentity : std::uint8_t
+{
+    NativeRuntime = 0U,
+    DeveloperDiagnostics = 1U,
+};
+
 // Non-hot-reloadable main/render-thread owner for SDL window and GPU resources.
 class SdlGpuHost final
 {
@@ -59,7 +65,9 @@ public:
     [[nodiscard]] static std::expected<SdlGpuHost, std::string> Create(
         const SdlPlatformService& platform, bool debug_device,
         runtime::RenderTexturePoolConfig texture_config = {},
-        runtime::RenderMeshPoolConfig mesh_config = {});
+        runtime::RenderMeshPoolConfig mesh_config = {},
+        SdlGpuWindowIdentity window_identity =
+            SdlGpuWindowIdentity::NativeRuntime);
 
     // [main/render thread]
     ~SdlGpuHost();

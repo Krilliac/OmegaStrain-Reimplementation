@@ -1215,7 +1215,8 @@ string(CONCAT launch_usage
     "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
     "[--frames=N [--capture-run [--replay-capture]]] "
     "[--data-root=PATH [--level=CODE]] [--probe-only] "
-    "[--opening-movie=PATH]\n"
+    "[--opening-movie=PATH | --opening-movie-member=NAME] "
+    "[--developer-diagnostics]\n"
 )
 string(CONCAT sentinel_stderr
     "unknown option: --openomega-package-contract-sentinel\n"

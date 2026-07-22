@@ -960,10 +960,14 @@ std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
 std::expected<SdlGpuHost, std::string> SdlGpuHost::Create(
     const SdlPlatformService& platform, const bool debug_device,
     const runtime::RenderTexturePoolConfig texture_config,
-    const runtime::RenderMeshPoolConfig mesh_config)
+    const runtime::RenderMeshPoolConfig mesh_config,
+    const SdlGpuWindowIdentity window_identity)
 {
     if (!platform.ready())
         return std::unexpected("SDL platform service is not ready");
+    if (window_identity != SdlGpuWindowIdentity::NativeRuntime &&
+        window_identity != SdlGpuWindowIdentity::DeveloperDiagnostics)
+        return std::unexpected("SDL/GPU window identity is invalid");
 
     auto created_pool = runtime::RenderTexturePool::Create(texture_config);
     if (!created_pool)
@@ -988,7 +992,11 @@ std::expected<SdlGpuHost, std::string> SdlGpuHost::Create(
         return std::unexpected(SdlError("SDL_InitSubSystem(video)"));
     impl->subsystems_initialized = true;
 
-    impl->window = SDL_CreateWindow("OpenOmega - native runtime", 1280, 720,
+    const char* const window_title =
+        window_identity == SdlGpuWindowIdentity::DeveloperDiagnostics
+            ? "OpenOmega - DEVELOPER DIAGNOSTICS"
+            : "OpenOmega - native runtime";
+    impl->window = SDL_CreateWindow(window_title, 1280, 720,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (impl->window == nullptr)
         return std::unexpected(SdlError("SDL_CreateWindow"));

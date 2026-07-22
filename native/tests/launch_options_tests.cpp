@@ -59,8 +59,18 @@ int LaunchOptionsFailureCount()
               !defaults->config_path &&
               defaults->config_overrides.empty() && !defaults->capture_run &&
               !defaults->replay_capture && !defaults->probe_only &&
+              defaults->front_end_presentation_mode ==
+                  omega::runtime::FrontEndPresentationMode::RetailRequired &&
               !defaults->show_help,
-        "empty launch arguments preserve the interactive content-free shell");
+        "empty launch arguments require a retail-derived post-launch presentation");
+
+    auto developer = Parse({"--developer-diagnostics"});
+    Check(developer && developer->front_end_presentation_mode ==
+                           omega::runtime::FrontEndPresentationMode::DeveloperDiagnostics,
+        "project-authored presentation requires the explicit developer-only route");
+    CheckError(Parse({"--developer-diagnostics", "--developer-diagnostics"}),
+        "--developer-diagnostics may be specified only once",
+        "developer diagnostics are an exact once-only launch token");
 
     auto content = Parse({"--data-root=D:/Owned Game", "--level=minsk", "--probe-only"});
     Check(content && content->frame_limit == -1 && content->data_root &&
@@ -115,7 +125,8 @@ int LaunchOptionsFailureCount()
     const std::string above_maximum_frames = "--frames=" +
         std::to_string(omega::runtime::kMaximumRunCaptureSessionFrames + 1U);
     const std::array maximum_capture_arguments{
-        std::string_view(maximum_frames), std::string_view("--capture-run")};
+        std::string_view(maximum_frames), std::string_view("--capture-run"),
+        std::string_view("--developer-diagnostics")};
     auto maximum_capture = omega::runtime::ParseLaunchOptions(maximum_capture_arguments);
     Check(maximum_capture && maximum_capture->capture_run &&
               !maximum_capture->replay_capture &&
@@ -125,7 +136,8 @@ int LaunchOptionsFailureCount()
 
     const std::array maximum_replay_arguments{
         std::string_view("--replay-capture"), std::string_view(maximum_frames),
-        std::string_view("--capture-run")};
+        std::string_view("--capture-run"),
+        std::string_view("--developer-diagnostics")};
     auto maximum_replay =
         omega::runtime::ParseLaunchOptions(maximum_replay_arguments);
     Check(maximum_replay && maximum_replay->capture_run &&
@@ -134,26 +146,34 @@ int LaunchOptionsFailureCount()
                   omega::runtime::kMaximumRunCaptureSessionFrames),
         "capture replay accepts the exact shared session maximum");
 
-    auto capture_first = Parse({"--capture-run", "--frames=1"});
+    auto capture_first = Parse(
+        {"--capture-run", "--frames=1", "--developer-diagnostics"});
     Check(capture_first && capture_first->capture_run &&
               !capture_first->replay_capture && capture_first->frame_limit == 1,
         "capture accepts its minimum frame count before the frame option");
-    auto frames_first = Parse({"--frames=7", "--capture-run"});
+    auto frames_first = Parse(
+        {"--frames=7", "--developer-diagnostics", "--capture-run"});
     Check(frames_first && frames_first->capture_run &&
               !frames_first->replay_capture && frames_first->frame_limit == 7,
         "capture accepts the frame option before the capture flag");
 
     auto replay_first =
-        Parse({"--replay-capture", "--capture-run", "--frames=1"});
+        Parse({"--replay-capture", "--capture-run", "--frames=1",
+            "--developer-diagnostics"});
     Check(replay_first && replay_first->capture_run &&
               replay_first->replay_capture && replay_first->frame_limit == 1,
         "capture replay accepts replay before capture at the minimum frame count");
     auto capture_first_replay =
-        Parse({"--frames=7", "--capture-run", "--replay-capture"});
+        Parse({"--frames=7", "--capture-run", "--replay-capture",
+            "--developer-diagnostics"});
     Check(capture_first_replay && capture_first_replay->capture_run &&
               capture_first_replay->replay_capture &&
               capture_first_replay->frame_limit == 7,
         "capture replay accepts capture before replay");
+
+    CheckError(Parse({"--capture-run", "--frames=1"}),
+        "--capture-run requires --developer-diagnostics",
+        "project diagnostic capture cannot run through normal retail-required mode");
 
     CheckError(Parse({"--capture-run", "--capture-run", "--frames=1"}),
         "--capture-run may be specified only once",
@@ -295,6 +315,10 @@ int LaunchOptionsFailureCount()
                          "--opening-movie-member=IntroSynthetic.pss"}),
         "--probe-only cannot be combined with --opening-movie-member",
         "headless content probing cannot initialize archive-backed movie playback");
+    CheckError(Parse({"--data-root=A", "--probe-only",
+                         "--developer-diagnostics"}),
+        "--probe-only cannot be combined with --developer-diagnostics",
+        "headless retail-data probing does not enable project-authored presentation");
     CheckError(Parse({"--replay-capture", "--capture-run", "--data-root=A",
                          "--probe-only", "--frames=1"}),
         "--probe-only cannot be combined with --frames",
@@ -350,7 +374,8 @@ int LaunchOptionsFailureCount()
                    "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
                    "[--frames=N [--capture-run [--replay-capture]]] "
                    "[--data-root=PATH [--level=CODE]] [--probe-only] "
-                   "[--opening-movie=PATH | --opening-movie-member=NAME]\n",
+                   "[--opening-movie=PATH | --opening-movie-member=NAME] "
+                   "[--developer-diagnostics]\n",
         "usage documents standalone help and probe plus nested replay and level dependencies");
     return failures;
 }

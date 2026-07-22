@@ -704,6 +704,16 @@ int main(const int argc, char** argv)
 #else
     constexpr bool debug_device = false;
 #endif
+    if (options->front_end_presentation_mode ==
+        omega::runtime::FrontEndPresentationMode::DeveloperDiagnostics)
+    {
+        std::cout << "OpenOmega mode: DEVELOPER DIAGNOSTICS "
+                     "(project-authored presentation/gameplay)\n";
+    }
+    else
+    {
+        std::cout << "OpenOmega mode: retail game-data presentation required\n";
+    }
     std::optional<omega::asset::OpeningMovieSource> opening_movie_source;
     if (options->opening_movie_member)
     {
@@ -736,10 +746,12 @@ int main(const int argc, char** argv)
         {
             return omega::app::OmegaApp::Create(std::move(*config), *settings,
                 std::move(content), std::move(*native_persistence), debug_device,
+                options->front_end_presentation_mode,
                 std::move(*opening_movie_source));
         }
         return omega::app::OmegaApp::Create(std::move(*config), *settings,
             std::move(content), std::move(*native_persistence), debug_device,
+            options->front_end_presentation_mode,
             std::move(options->opening_movie_path));
     }();
     if (!app)
