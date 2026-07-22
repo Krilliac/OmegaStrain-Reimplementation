@@ -113,6 +113,7 @@ add_library(omega_retail_formats STATIC
     native/src/retail/container_descriptors.cpp
     native/src/retail/fnt_envelope_descriptor.cpp
     native/src/retail/frontend_document_decoder.cpp
+    native/src/retail/frontend_tdx_decoder.cpp
     native/src/retail/gui_envelope_descriptor.cpp
     native/src/retail/ie_envelope_descriptor.cpp
     native/src/retail/lpd_envelope_decoder.cpp
@@ -2862,6 +2863,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_core_tests COMMAND omega_core_tests)
     set_tests_properties(omega_core_tests PROPERTIES TIMEOUT 30)
+
+    add_executable(omega_frontend_tdx_decoder_tests
+        native/tests/frontend_tdx_decoder_tests.cpp
+    )
+    target_link_libraries(omega_frontend_tdx_decoder_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_frontend_tdx_decoder_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_frontend_tdx_decoder_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_frontend_tdx_decoder_tests COMMAND omega_frontend_tdx_decoder_tests)
+    set_tests_properties(omega_frontend_tdx_decoder_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_lpd_envelope_decoder_tests
         native/tests/lpd_envelope_decoder_tests.cpp
