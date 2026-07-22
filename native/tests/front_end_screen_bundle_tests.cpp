@@ -377,7 +377,8 @@ void WriteTdxTransferControlPrefix(std::vector<std::byte>& bytes, const std::siz
     WriteU64(bytes, prefix + 0x18U, kAdRegisterDescriptor);
 }
 
-[[nodiscard]] std::vector<std::byte> MakeTdx(const std::uint8_t seed)
+[[nodiscard]] std::vector<std::byte> MakeTdx(
+    const std::uint8_t seed, const std::uint16_t header_flags = 5U)
 {
     constexpr std::uint16_t width = 32U;
     constexpr std::uint16_t height = 32U;
@@ -389,7 +390,7 @@ void WriteTdxTransferControlPrefix(std::vector<std::byte>& bytes, const std::siz
 
     std::vector<std::byte> bytes(kTdxHeaderBytes + stride, std::byte{0});
     WriteU16(bytes, 0x00U, 5U);
-    WriteU16(bytes, 0x02U, 5U);
+    WriteU16(bytes, 0x02U, header_flags);
     WriteU16(bytes, 0x04U, width);
     WriteU16(bytes, 0x06U, height);
     WriteU16(bytes, 0x08U, 8U);
@@ -574,7 +575,8 @@ struct FrontEndFixtureOptions final
         {
             members.push_back(HogMember{
                 .name = std::string(screen.texture_basename) + ".TDX",
-                .payload = MakeTdx(static_cast<std::uint8_t>(screen.seed + 0x40U)),
+                .payload = MakeTdx(
+                    static_cast<std::uint8_t>(screen.seed + 0x40U), 1U),
             });
         }
     }
@@ -753,6 +755,7 @@ int main()
 {
     using omega::content::FrontEndScreenBundle;
     using omega::content::FrontEndScreenKey;
+    using omega::content::FrontEndTextureBinding;
     using omega::content::FrontEndVisualScope;
 
     static_assert(!std::is_default_constructible_v<FrontEndScreenBundle>);
@@ -763,6 +766,11 @@ int main()
     static_assert(!std::is_default_constructible_v<FrontEndVisualScope>);
     static_assert(std::is_move_constructible_v<FrontEndVisualScope>);
     static_assert(!std::is_copy_constructible_v<FrontEndVisualScope>);
+    static_assert(!std::is_default_constructible_v<FrontEndTextureBinding>);
+    static_assert(std::is_move_constructible_v<FrontEndTextureBinding>);
+    static_assert(!std::is_copy_constructible_v<FrontEndTextureBinding>);
+    static_assert(!std::is_default_constructible_v<
+        omega::content::ResolvedFrontEndTextureBinding>);
     static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>()
                                             .screen_textures()),
         const FrontEndScreenBundle::TextureMap&>);
@@ -776,8 +784,21 @@ int main()
                                                 std::declval<const std::optional<std::string>&>())),
         const omega::retail::FntV3IR*>);
     static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>()
-                                            .visual_scopes()),
+                                             .visual_scopes()),
         const FrontEndScreenBundle::VisualScopeMap&>);
+    static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>()
+                                             .ResolveTextureBinding(
+                                                 std::string_view{}, std::string_view{})),
+        std::optional<omega::content::ResolvedFrontEndTextureBinding>>);
+    static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>()
+                                             .ResolveVisualTextureBinding(
+                                                 std::declval<const omega::asset::FrontendWidgetIR&>(),
+                                                 false)),
+        std::optional<omega::content::ResolvedFrontEndTextureBinding>>);
+    static_assert(std::same_as<decltype(std::declval<const FrontEndScreenBundle&>()
+                                             .ResolveFontAtlas(
+                                                 std::declval<const omega::retail::FntV3IR&>())),
+        const FrontEndTextureBinding*>);
 
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -819,12 +840,52 @@ int main()
                   shared_scope != nullptr &&
                   loaded->FindVisualScope("missing_scope") == nullptr,
             "scope lookup applies empty-primary and ASCII-case-insensitive cache semantics");
+        std::string folded_texture_name = texture_name;
+        for (char& value : folded_texture_name)
+        {
+            if (value >= 'A' && value <= 'Z')
+                value = static_cast<char>(value + ('a' - 'A'));
+        }
+        const auto* primary_texture = primary_scope == nullptr
+            ? nullptr
+            : primary_scope->FindTexture(folded_texture_name);
+        const auto* scoped_texture = shared_scope == nullptr
+            ? nullptr
+            : shared_scope->FindTexture(folded_texture_name);
+        Check(primary_texture != nullptr && scoped_texture != nullptr &&
+                  primary_texture->sampling_encoding() ==
+                      omega::asset::IndexedImageEncoding::Indexed8 &&
+                  primary_texture->image().source_encoding ==
+                      primary_texture->sampling_encoding() &&
+                  scoped_texture->sampling_encoding() ==
+                      omega::asset::IndexedImageEncoding::Indexed8 &&
+                  scoped_texture->image().source_encoding ==
+                      scoped_texture->sampling_encoding() &&
+                  primary_texture->alpha_mode() ==
+                      omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha &&
+                  scoped_texture->alpha_mode() ==
+                      omega::content::FrontEndTextureAlphaMode::IgnoresTextureAlpha,
+            "direct and scoped textures retain explicit encoding-consistent TCC modes");
         Check(shared_scope != nullptr &&
                   shared_scope->textures().size() == 1U &&
                   shared_scope->textures().contains(texture_name) &&
                   !(shared_scope->textures().at(texture_name) ==
                       loaded->screen_textures().at(texture_name)),
-            "archive-local texture maps retain same-named primary and scoped images independently");
+            "archive-local texture maps retain same-named primary and scoped bindings independently");
+        const auto primary_texture_resolution = loaded->ResolveTextureBinding(
+            "", folded_texture_name);
+        const auto scoped_texture_resolution = loaded->ResolveTextureBinding(
+            "sHaReDsCoPe", folded_texture_name);
+        Check(primary_texture_resolution && scoped_texture_resolution &&
+                  primary_texture_resolution->owning_scope() == loaded->primary_scope() &&
+                  &primary_texture_resolution->scope() == primary_scope &&
+                  &primary_texture_resolution->texture() == primary_texture &&
+                  scoped_texture_resolution->owning_scope() == "SHAREDSCOPE" &&
+                  &scoped_texture_resolution->scope() == shared_scope &&
+                  &scoped_texture_resolution->texture() == scoped_texture &&
+                  !loaded->ResolveTextureBinding("missing_scope", texture_name) &&
+                  !loaded->ResolveTextureBinding("", "MISSING.TDX"),
+            "texture resolution returns the exact owning scope and never searches globally");
 
         const auto& widget_root = loaded->widget_document().root;
         const auto* root_resource = loaded->ResolveVisualBinding(widget_root, true);
@@ -834,6 +895,10 @@ int main()
             widget_root.children.at(2U), false);
         const auto* external_b = loaded->ResolveVisualBinding(
             widget_root.children.at(3U), false);
+        const auto inherited_texture = loaded->ResolveVisualTextureBinding(
+            widget_root.children.at(0U), false);
+        const auto external_texture = loaded->ResolveVisualTextureBinding(
+            widget_root.children.at(2U), false);
         Check(root_resource != nullptr &&
                   root_resource->identifier == std::string(screen.stem) + "_root" &&
                   loaded->ResolveVisualBinding(widget_root, false) == nullptr &&
@@ -842,6 +907,13 @@ int main()
         Check(external_a != nullptr && external_a == external_b &&
                   external_a->texture_member && *external_a->texture_member == texture_name,
             "case-folded scopes resolve one exact-case DFS-first visual resource");
+        Check(inherited_texture && external_texture &&
+                  inherited_texture->owning_scope() == loaded->primary_scope() &&
+                  &inherited_texture->texture() == primary_texture &&
+                  external_texture->owning_scope() == "SHAREDSCOPE" &&
+                  &external_texture->texture() == scoped_texture &&
+                  !loaded->ResolveVisualTextureBinding(widget_root, true),
+            "widget texture lookup preserves the resolved visual resource's owning scope");
         std::string external_resource(screen.stem);
         external_resource.append("_external");
         std::string wrong_resource_case = external_resource;
@@ -860,6 +932,10 @@ int main()
                   loaded->font_atlases().contains(kAtlasMember),
             "font basenames and decoded atlas references select exact canonical dependencies");
         const auto* default_font = &loaded->fonts().at("DEFAULT.FNT");
+        const auto* default_atlas = loaded->ResolveFontAtlas(*default_font);
+        auto missing_atlas_font = *default_font;
+        missing_atlas_font.atlas_reference = "MISSING.TDX";
+        const auto default_atlas_entry = loaded->font_atlases().find(kAtlasMember);
         const std::optional<std::string> absent_font;
         Check(loaded->ResolveFontReference(widget_root.children.at(0U).font_reference) ==
                       default_font &&
@@ -869,6 +945,17 @@ int main()
                   loaded->ResolveFont("dEfAuLt.FnT") == default_font &&
                   loaded->ResolveFont("missing") == nullptr,
             "font resolution applies null, empty, basename, full-name, and fail-closed rules");
+        Check(default_atlas != nullptr &&
+                  default_atlas_entry != loaded->font_atlases().end() &&
+                  default_atlas == &default_atlas_entry->second &&
+                  default_atlas->sampling_encoding() ==
+                      omega::asset::IndexedImageEncoding::Indexed8 &&
+                  default_atlas->image().source_encoding ==
+                      default_atlas->sampling_encoding() &&
+                  default_atlas->alpha_mode() ==
+                      omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha &&
+                  loaded->ResolveFontAtlas(missing_atlas_font) == nullptr,
+            "font-atlas resolution retains explicit indexed sampling and TCC metadata");
         const auto* localized = loaded->strings().Find("CREATEAGENT");
         Check(localized && localized->value == "Generated Create Agent",
             "the bundle owns the decoded NTSC-U localization table");
@@ -1086,6 +1173,34 @@ int main()
                           !loaded->screen_textures().empty() && !loaded->fonts().empty() &&
                           !loaded->font_atlases().empty() && !loaded->strings().entries.empty(),
                     "an owner-supplied route yields a complete owned retail presentation bundle");
+                bool texture_metadata_complete = true;
+                for (const auto& [scope_name, scope] : loaded->visual_scopes())
+                {
+                    (void)scope_name;
+                    for (const auto& [member, texture] : scope.textures())
+                    {
+                        (void)member;
+                        texture_metadata_complete = texture_metadata_complete &&
+                            texture.image().source_encoding ==
+                                texture.sampling_encoding() &&
+                            (texture.alpha_mode() ==
+                                    omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha ||
+                                texture.alpha_mode() ==
+                                    omega::content::FrontEndTextureAlphaMode::IgnoresTextureAlpha);
+                    }
+                }
+                for (const auto& [member, texture] : loaded->font_atlases())
+                {
+                    (void)member;
+                    texture_metadata_complete = texture_metadata_complete &&
+                        texture.image().source_encoding == texture.sampling_encoding() &&
+                        (texture.alpha_mode() ==
+                                omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha ||
+                            texture.alpha_mode() ==
+                                omega::content::FrontEndTextureAlphaMode::IgnoresTextureAlpha);
+                }
+                Check(texture_metadata_complete,
+                    "every owner-supplied texture retains explicit consistent sampling metadata");
                 const auto default_font_entry = loaded->fonts().find("DEFAULT.FNT");
                 const auto* default_font = default_font_entry == loaded->fonts().end()
                     ? nullptr
@@ -1096,6 +1211,9 @@ int main()
                 Check(font_summary.authored_references != 0U &&
                           font_summary.all_resolved,
                     "every owner-supplied GUI font reference resolves within its bundle");
+                Check(default_font != nullptr &&
+                          loaded->ResolveFontAtlas(*default_font) != nullptr,
+                    "the owner-supplied default font resolves its metadata-bearing atlas");
                 if (screen.key == FrontEndScreenKey::LoadAgent)
                 {
                     Check(default_font != nullptr &&

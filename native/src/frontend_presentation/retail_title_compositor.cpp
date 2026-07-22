@@ -148,8 +148,6 @@ RetailTitleCompositionResult ComposeStaticRetailTitle(
     const auto* const scope = bundle.FindVisualScope({});
     if (scope == nullptr || scope->resources().size() != 1U)
         return std::unexpected(RetailTitleCompositionError::UnsupportedVisualHierarchy);
-    if (!scope->textures().empty())
-        return std::unexpected(RetailTitleCompositionError::UnsupportedTextureSampling);
 
     const auto* const visual = bundle.ResolveVisualBinding(widget, true);
     if (visual == nullptr || visual != &scope->document().root ||
@@ -159,6 +157,16 @@ RetailTitleCompositionResult ComposeStaticRetailTitle(
         return std::unexpected(RetailTitleCompositionError::UnsupportedVisualHierarchy);
     }
     if (visual->texture_member.has_value())
+    {
+        const auto texture = bundle.ResolveVisualTextureBinding(widget, true);
+        if (!texture || &texture->scope() != scope ||
+            texture->owning_scope() != bundle.primary_scope())
+        {
+            return std::unexpected(RetailTitleCompositionError::MissingTextureBinding);
+        }
+        return std::unexpected(RetailTitleCompositionError::UnsupportedTextureSampling);
+    }
+    if (!scope->textures().empty())
         return std::unexpected(RetailTitleCompositionError::UnsupportedTextureSampling);
     if (!visual->animation_tracks.empty())
         return std::unexpected(RetailTitleCompositionError::UnsupportedAnimation);
