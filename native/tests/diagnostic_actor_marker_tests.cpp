@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -16,7 +17,10 @@ namespace
 {
 using omega::app::PlanProjectDiagnosticActorMarkerDestination;
 using omega::app::PlanProjectDiagnosticActorMeshTransform;
+using omega::app::PlanProjectDiagnosticFireCueRectangle;
+using omega::app::PlanProjectDiagnosticTargetCueRectangles;
 using omega::asset::Matrix4x4IR;
+using omega::runtime::PointerPositionQ16;
 using omega::runtime::RenderDrawList;
 using omega::runtime::RenderSourceRectQ16;
 using omega::runtime::RenderTargetRectQ16;
@@ -74,6 +78,46 @@ void Check(const bool condition, const std::string_view message)
     return transform;
 }
 
+[[nodiscard]] constexpr std::uint32_t ClampCueAxis(
+    const std::uint32_t value) noexcept
+{
+    if (value < 4'096U)
+        return 4'096U;
+    if (value > 61'440U)
+        return 61'440U;
+    return value;
+}
+
+[[nodiscard]] constexpr std::array<RenderTargetRectQ16, 2U>
+ExpectedTargetCues(const std::uint32_t x, const std::uint32_t y) noexcept
+{
+    return {
+        RenderTargetRectQ16{
+            .left = x - 4'096U,
+            .top = y - 256U,
+            .right = x + 4'096U,
+            .bottom = y + 256U,
+        },
+        RenderTargetRectQ16{
+            .left = x - 256U,
+            .top = y - 4'096U,
+            .right = x + 256U,
+            .bottom = y + 4'096U,
+        },
+    };
+}
+
+[[nodiscard]] constexpr RenderTargetRectQ16 ExpectedFireCue(
+    const std::uint32_t x, const std::uint32_t y) noexcept
+{
+    return RenderTargetRectQ16{
+        .left = x - 768U,
+        .top = y - 768U,
+        .right = x + 768U,
+        .bottom = y + 768U,
+    };
+}
+
 [[nodiscard]] constexpr bool IsValidDestination(
     const RenderTargetRectQ16 destination) noexcept
 {
@@ -107,6 +151,45 @@ void Check(const bool condition, const std::string_view message)
     const auto draw_list = RenderDrawList::Create(std::span{&command, 1U});
     return draw_list && draw_list->commands().size() == 1U &&
            draw_list->commands().front() == command;
+}
+
+void CheckPointerCuePosition(
+    const std::optional<PointerPositionQ16>& pointer,
+    const std::uint32_t expected_x, const std::uint32_t expected_y,
+    const std::string_view message)
+{
+    const auto first_targets =
+        PlanProjectDiagnosticTargetCueRectangles(pointer);
+    const auto repeat_targets =
+        PlanProjectDiagnosticTargetCueRectangles(pointer);
+    const RenderTargetRectQ16 first_fire =
+        PlanProjectDiagnosticFireCueRectangle(pointer);
+    const RenderTargetRectQ16 repeat_fire =
+        PlanProjectDiagnosticFireCueRectangle(pointer);
+    const auto expected_targets = ExpectedTargetCues(expected_x, expected_y);
+    const RenderTargetRectQ16 expected_fire =
+        ExpectedFireCue(expected_x, expected_y);
+
+    Check(first_targets == expected_targets &&
+              repeat_targets == expected_targets &&
+              first_fire == expected_fire && repeat_fire == expected_fire,
+        message);
+    Check(first_targets[0U].right - first_targets[0U].left == 8'192U &&
+              first_targets[0U].bottom - first_targets[0U].top == 512U &&
+              first_targets[1U].right - first_targets[1U].left == 512U &&
+              first_targets[1U].bottom - first_targets[1U].top == 8'192U,
+        "target cue order remains horizontal then vertical with exact nonzero geometry");
+    Check(first_fire.right - first_fire.left == 1'536U &&
+              first_fire.bottom - first_fire.top == 1'536U,
+        "the fire cue remains one exact nonzero square");
+    Check(IsValidDestination(first_targets[0U]) &&
+              IsValidDestination(first_targets[1U]) &&
+              IsValidDestination(first_fire),
+        "every absolute pointer cue remains a valid in-bounds target rectangle");
+    Check(IsAcceptedByRenderDrawList(first_targets[0U]) &&
+              IsAcceptedByRenderDrawList(first_targets[1U]) &&
+              IsAcceptedByRenderDrawList(first_fire),
+        "every absolute pointer cue is accepted by the renderer-neutral draw list");
 }
 
 void CheckPosition(const Position3 position, const std::string_view message)
@@ -189,6 +272,90 @@ void CheckContract()
                   positive_transform.row_major[7U] == 1.0F / 32.0F);
     static_assert(saturated_transform.row_major[3U] == 31.0F / 32.0F &&
                   saturated_transform.row_major[7U] == -31.0F / 32.0F);
+}
+
+void CheckPointerCueContract()
+{
+    using TargetResult = std::array<RenderTargetRectQ16, 2U>;
+    using FireResult = RenderTargetRectQ16;
+    static_assert(std::is_same_v<decltype(
+                      PlanProjectDiagnosticTargetCueRectangles(
+                          std::optional<PointerPositionQ16>{})),
+        TargetResult>);
+    static_assert(std::is_same_v<decltype(
+                      PlanProjectDiagnosticFireCueRectangle(
+                          std::optional<PointerPositionQ16>{})),
+        FireResult>);
+    static_assert(noexcept(PlanProjectDiagnosticTargetCueRectangles(
+        std::optional<PointerPositionQ16>{})));
+    static_assert(noexcept(PlanProjectDiagnosticFireCueRectangle(
+        std::optional<PointerPositionQ16>{})));
+
+    constexpr std::optional<PointerPositionQ16> unavailable;
+    constexpr std::optional<PointerPositionQ16> centered{
+        PointerPositionQ16{.x = 32'768U, .y = 32'768U}};
+    constexpr TargetResult fallback_targets =
+        PlanProjectDiagnosticTargetCueRectangles(unavailable);
+    constexpr TargetResult centered_targets =
+        PlanProjectDiagnosticTargetCueRectangles(centered);
+    constexpr FireResult fallback_fire =
+        PlanProjectDiagnosticFireCueRectangle(unavailable);
+    constexpr FireResult centered_fire =
+        PlanProjectDiagnosticFireCueRectangle(centered);
+    static_assert(fallback_targets == TargetResult{
+        RenderTargetRectQ16{28'672U, 32'512U, 36'864U, 33'024U},
+        RenderTargetRectQ16{32'512U, 28'672U, 33'024U, 36'864U},
+    });
+    static_assert(centered_targets == fallback_targets);
+    static_assert(fallback_fire ==
+                  RenderTargetRectQ16{32'000U, 32'000U, 33'536U, 33'536U});
+    static_assert(centered_fire == fallback_fire);
+
+    constexpr std::optional<PointerPositionQ16> low{
+        PointerPositionQ16{.x = 0U, .y = 0U}};
+    constexpr std::optional<PointerPositionQ16> high{
+        PointerPositionQ16{.x = 65'536U, .y = 65'536U}};
+    static_assert(PlanProjectDiagnosticTargetCueRectangles(low) == TargetResult{
+        RenderTargetRectQ16{0U, 3'840U, 8'192U, 4'352U},
+        RenderTargetRectQ16{3'840U, 0U, 4'352U, 8'192U},
+    });
+    static_assert(PlanProjectDiagnosticTargetCueRectangles(high) == TargetResult{
+        RenderTargetRectQ16{57'344U, 61'184U, 65'536U, 61'696U},
+        RenderTargetRectQ16{61'184U, 57'344U, 61'696U, 65'536U},
+    });
+    static_assert(PlanProjectDiagnosticFireCueRectangle(low) ==
+                  RenderTargetRectQ16{3'328U, 3'328U, 4'864U, 4'864U});
+    static_assert(PlanProjectDiagnosticFireCueRectangle(high) ==
+                  RenderTargetRectQ16{60'672U, 60'672U, 62'208U, 62'208U});
+}
+
+void CheckPointerCueBoundarySet()
+{
+    CheckPointerCuePosition(std::nullopt, 32'768U, 32'768U,
+        "an unavailable absolute pointer falls back exactly to target center");
+
+    constexpr std::array<std::uint32_t, 10U> coordinates{
+        0U,
+        4'095U,
+        4'096U,
+        4'097U,
+        32'768U,
+        61'439U,
+        61'440U,
+        61'441U,
+        65'536U,
+        std::numeric_limits<std::uint32_t>::max(),
+    };
+    for (const std::uint32_t x : coordinates)
+    {
+        for (const std::uint32_t y : coordinates)
+        {
+            CheckPointerCuePosition(
+                PointerPositionQ16{.x = x, .y = y},
+                ClampCueAxis(x), ClampCueAxis(y),
+                "every boundary and corner pointer sample follows the exact clamp policy");
+        }
+    }
 }
 
 void CheckCompleteVisibleGrid()
@@ -309,6 +476,8 @@ void CheckAxisDirectionAndSaturation()
 int main()
 {
     CheckContract();
+    CheckPointerCueContract();
+    CheckPointerCueBoundarySet();
     CheckCompleteVisibleGrid();
     CheckCompleteInt16AxisSweeps();
     CheckSignedExtremesAndYInvariance();

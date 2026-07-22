@@ -22,10 +22,9 @@ static_assert(kMaximumRunCaptureSessionFrames == kMaximumSchedulerElapsedTraceFr
 // Input frame records, fixed action-schema backing, and elapsed frame records at the hard
 // maximum. This excludes excess vector capacity, allocator/object overhead, and process RSS.
 inline constexpr std::size_t kMaximumRunCaptureSessionElementPayloadBytes =
-    kMaximumRunCaptureSessionFrames * 32U +
-    InputBindingTable::kMaxActions * sizeof(std::uint32_t) +
+    kMaximumInputTraceElementPayloadBytes +
     kMaximumRunCaptureSessionFrames * sizeof(std::int64_t);
-static_assert(kMaximumRunCaptureSessionElementPayloadBytes == 2'621'696U);
+static_assert(kMaximumRunCaptureSessionElementPayloadBytes == 3'145'984U);
 
 struct RunCaptureSessionConfig
 {

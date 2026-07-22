@@ -95,6 +95,11 @@ std::span<const std::uint32_t> InputSnapshot::actions() const noexcept
     return actions_;
 }
 
+const std::optional<PointerPositionQ16>& InputSnapshot::pointer_position() const noexcept
+{
+    return pointer_position_;
+}
+
 bool InputSnapshot::IsHeld(const std::uint32_t action) const noexcept
 {
     for (const ActionRow& row : rows_)
@@ -138,10 +143,11 @@ std::uint32_t InputSnapshot::rejected_event_count() const noexcept
 InputSnapshot::InputSnapshot(const std::uint64_t frame_index,
     const std::span<const std::uint32_t> actions,
     const std::span<const ActionRow> rows,
+    const std::optional<PointerPositionQ16> pointer_position,
     const std::uint32_t accepted_event_count,
     const std::uint32_t rejected_event_count)
     : frame_index_(frame_index), actions_(actions.begin(), actions.end()),
-      rows_(rows.begin(), rows.end()),
+      rows_(rows.begin(), rows.end()), pointer_position_(pointer_position),
       accepted_event_count_(accepted_event_count),
       rejected_event_count_(rejected_event_count)
 {
@@ -217,6 +223,20 @@ std::expected<void, std::string> InputTracker::PushEvent(const InputEvent event)
     return {};
 }
 
+std::expected<void, std::string> InputTracker::SetPointerPosition(
+    const PointerPositionQ16 position)
+{
+    if (position.x > kNormalizedInputExtent || position.y > kNormalizedInputExtent)
+        return std::unexpected("pointer position exceeds the normalized extent");
+    pointer_position_ = position;
+    return {};
+}
+
+void InputTracker::ClearPointerPosition() noexcept
+{
+    pointer_position_.reset();
+}
+
 void InputTracker::ResetDevice(const InputDevice device) noexcept
 {
     if (!IsKnownDevice(device))
@@ -256,6 +276,7 @@ InputSnapshot InputTracker::EndFrame()
 {
     InputSnapshot snapshot;
     snapshot.frame_index_ = next_frame_index_;
+    snapshot.pointer_position_ = pointer_position_;
     snapshot.accepted_event_count_ = frame_accepted_events_;
     snapshot.rejected_event_count_ = frame_rejected_events_;
     snapshot.actions_.reserve(action_states_.size());

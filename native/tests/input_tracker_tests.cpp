@@ -26,6 +26,7 @@ using omega::runtime::InputDevice;
 using omega::runtime::InputEvent;
 using omega::runtime::InputSnapshot;
 using omega::runtime::InputTracker;
+using omega::runtime::PointerPositionQ16;
 
 constexpr std::uint32_t kFire = 10U;
 constexpr std::uint32_t kJump = 20U;
@@ -389,16 +390,116 @@ void ResetDeviceChecks()
         "the remaining device class can be reconciled independently");
 }
 
+void PointerPositionChecks()
+{
+    static_assert(std::is_trivially_copyable_v<PointerPositionQ16>);
+    static_assert(std::is_standard_layout_v<PointerPositionQ16>);
+    static_assert(noexcept(
+        std::declval<const InputSnapshot&>().pointer_position()));
+    static_assert(noexcept(std::declval<InputTracker&>().ClearPointerPosition()));
+    Check(omega::runtime::kNormalizedInputExtent == 65'536U,
+        "the normalized pointer extent is fixed at one Q16 unit");
+
+    InputTracker tracker = MakeTracker(2U);
+    const InputSnapshot absent = tracker.EndFrame();
+    Check(!absent.pointer_position(),
+        "a tracker publishes unavailable pointer state before its first sample");
+
+    const PointerPositionQ16 first_position{
+        .x = 0U,
+        .y = omega::runtime::kNormalizedInputExtent,
+    };
+    Check(tracker.SetPointerPosition(first_position).has_value() &&
+              Push(tracker, InputDevice::Keyboard, 44U, true),
+        "an edge-inclusive pointer sample is accepted independently of a digital event");
+    const InputSnapshot first = tracker.EndFrame();
+    Check(first.pointer_position() == first_position && first.IsHeld(kJump) &&
+              first.accepted_event_count() == 1U && first.rejected_event_count() == 0U,
+        "pointer publication leaves digital state and counters exact");
+
+    const InputSnapshot persisted = tracker.EndFrame();
+    Check(persisted.pointer_position() == first_position &&
+              persisted.accepted_event_count() == 0U &&
+              persisted.rejected_event_count() == 0U,
+        "the latest pointer position persists unchanged across empty frames");
+
+    const PointerPositionQ16 replacement{
+        .x = omega::runtime::kNormalizedInputExtent,
+        .y = 0U,
+    };
+    Check(tracker.SetPointerPosition({.x = 12U, .y = 34U}).has_value() &&
+              tracker.SetPointerPosition(replacement).has_value(),
+        "the latest valid pointer sample replaces an earlier same-frame sample");
+    const auto invalid_x = tracker.SetPointerPosition(
+        {.x = omega::runtime::kNormalizedInputExtent + 1U, .y = 7U});
+    const auto invalid_y = tracker.SetPointerPosition(
+        {.x = 7U, .y = omega::runtime::kNormalizedInputExtent + 1U});
+    Check(!invalid_x && !invalid_y &&
+              invalid_x.error() == "pointer position exceeds the normalized extent" &&
+              invalid_y.error() == "pointer position exceeds the normalized extent",
+        "either out-of-range coordinate receives the fixed pointer rejection");
+    const InputSnapshot after_invalid = tracker.EndFrame();
+    Check(after_invalid.pointer_position() == replacement &&
+              after_invalid.accepted_event_count() == 0U &&
+              after_invalid.rejected_event_count() == 0U &&
+              tracker.total_rejected_event_count() == 0U,
+        "invalid pointer samples are atomic and do not change digital counters");
+
+    InputTracker independent_budget = MakeTracker(1U);
+    Check(Push(independent_budget, InputDevice::Keyboard, 500U, true) &&
+              independent_budget.SetPointerPosition({.x = 1U, .y = 2U}).has_value() &&
+              !Push(independent_budget, InputDevice::Keyboard, 501U, true),
+        "a valid pointer update neither consumes nor depends on the exhausted digital budget");
+    const InputSnapshot budgeted = independent_budget.EndFrame();
+    Check(budgeted.pointer_position() == PointerPositionQ16{.x = 1U, .y = 2U} &&
+              budgeted.accepted_event_count() == 1U &&
+              budgeted.rejected_event_count() == 1U,
+        "pointer state coexists with exact independent digital budget counters");
+
+    InputTracker reset = MakeTracker(2U);
+    const PointerPositionQ16 reset_position{.x = 22U, .y = 33U};
+    Check(reset.SetPointerPosition(reset_position).has_value() &&
+              Push(reset, InputDevice::MouseButton, 1U, true),
+        "the reset fixture has pointer and digital state");
+    reset.ResetDevice(InputDevice::Keyboard);
+    reset.ResetAllControls();
+    const InputSnapshot reset_snapshot = reset.EndFrame();
+    Check(reset_snapshot.pointer_position() == reset_position &&
+              !reset_snapshot.IsHeld(kCrouch) &&
+              reset_snapshot.WasReleased(kCrouch) &&
+              reset_snapshot.accepted_event_count() == 1U,
+        "device and all-control resets preserve pointer state and digital counters");
+    reset.ClearPointerPosition();
+    const InputSnapshot cleared = reset.EndFrame();
+    Check(!cleared.pointer_position() && cleared.accepted_event_count() == 0U &&
+              cleared.rejected_event_count() == 0U,
+        "explicit clear makes the pointer unavailable without touching counters");
+
+    InputTracker move_source = MakeTracker(1U);
+    const PointerPositionQ16 moved_position{.x = 44U, .y = 55U};
+    Check(move_source.SetPointerPosition(moved_position).has_value(),
+        "the move fixture accepts pointer state");
+    InputTracker move_destination = std::move(move_source);
+    Check(move_destination.EndFrame().pointer_position() == moved_position,
+        "tracker move construction transfers the latest pointer position");
+}
+
 void SnapshotValueChecks()
 {
     InputTracker tracker = MakeTracker(16U);
-    Check(Push(tracker, InputDevice::Keyboard, 7U, true), "press for snapshot capture");
+    const PointerPositionQ16 captured_position{.x = 123U, .y = 456U};
+    Check(Push(tracker, InputDevice::Keyboard, 7U, true) &&
+              tracker.SetPointerPosition(captured_position).has_value(),
+        "press and pointer position for snapshot capture");
     const InputSnapshot captured = tracker.EndFrame();
-    Check(Push(tracker, InputDevice::Keyboard, 7U, false), "release after capture");
+    Check(Push(tracker, InputDevice::Keyboard, 7U, false) &&
+              tracker.SetPointerPosition({.x = 789U, .y = 1'234U}).has_value(),
+        "release and pointer replacement after capture");
     (void)tracker.EndFrame();
     Check(captured.IsHeld(kFire) && captured.WasPressed(kFire) &&
-              !captured.WasReleased(kFire),
-        "an earlier snapshot is immune to later frames");
+              !captured.WasReleased(kFire) &&
+              captured.pointer_position() == captured_position,
+        "an earlier snapshot is immune to later digital and pointer frames");
     Check(captured.actions().size() == 3U && captured.actions()[0] == kFire,
         "a snapshot lists the registered actions ascending");
     Check(!captured.IsHeld(999U) && !captured.WasPressed(999U) &&
@@ -406,7 +507,7 @@ void SnapshotValueChecks()
         "unregistered action queries report false, not an error");
 
     const InputSnapshot blank;
-    Check(blank.actions().empty() && !blank.IsHeld(kFire) &&
+    Check(blank.actions().empty() && !blank.pointer_position() && !blank.IsHeld(kFire) &&
               blank.accepted_event_count() == 0U && blank.rejected_event_count() == 0U,
         "a default snapshot is empty and fully inactive");
 }
@@ -457,6 +558,7 @@ int InputTrackerFailureCount()
     BudgetAndRejectionChecks();
     ResetAllControlsChecks();
     ResetDeviceChecks();
+    PointerPositionChecks();
     SnapshotValueChecks();
     DeterminismChecks();
     return failures;

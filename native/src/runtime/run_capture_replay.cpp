@@ -272,12 +272,15 @@ RunCaptureReplaySession::Next() noexcept
                 RunCaptureReplayErrorCode::TraceReadFailed));
         }
     }
+    const std::optional<PointerPositionQ16> pointer_position =
+        input_trace.PointerAt(cursor_);
 
     std::unique_ptr<InputSnapshot> snapshot;
     try
     {
         snapshot.reset(new InputSnapshot(input_frame->frame_index, actions,
             std::span<const InputSnapshot::ActionRow>{rows.data(), actions.size()},
+            pointer_position,
             input_frame->accepted_event_count, input_frame->rejected_event_count));
     }
     catch (const std::bad_alloc&)

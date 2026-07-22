@@ -76,6 +76,7 @@ using omega::runtime::InputDevice;
 using omega::runtime::InputEvent;
 using omega::runtime::InputSnapshot;
 using omega::runtime::InputTracker;
+using omega::runtime::PointerPositionQ16;
 using omega::runtime::RunCaptureReplayError;
 using omega::runtime::RunCaptureReplayErrorCode;
 using omega::runtime::RunCaptureReplayFrame;
@@ -90,6 +91,12 @@ using omega::simulation::SimulationStepResult;
 using omega::simulation::SimulationWorld;
 
 int failures = 0;
+
+constexpr PointerPositionQ16 kFirstPointerPosition{.x = 111U, .y = 222U};
+constexpr PointerPositionQ16 kSecondPointerPosition{
+    .x = omega::runtime::kNormalizedInputExtent,
+    .y = 0U,
+};
 
 [[noreturn]] void FailFixture(const std::string_view site) noexcept
 {
@@ -178,8 +185,14 @@ struct TerminalReasons
 
     for (std::size_t index = 0U; index < elapsed_values.size(); ++index)
     {
-        if (index == 0U && !Push(tracker, 0U, true))
-            FailFixture("BuildPair initial press");
+        if (index == 0U)
+        {
+            if (!Push(tracker, 0U, true) ||
+                !tracker.SetPointerPosition(kFirstPointerPosition))
+            {
+                FailFixture("BuildPair initial input");
+            }
+        }
         if (index == 1U)
         {
             if (!Push(tracker, 0U, false))
@@ -191,7 +204,11 @@ struct TerminalReasons
             });
             if (rejected)
                 FailFixture("BuildPair invalid event rejection");
+            if (!tracker.SetPointerPosition(kSecondPointerPosition))
+                FailFixture("BuildPair replacement pointer");
         }
+        if (index == 2U)
+            tracker.ClearPointerPosition();
 
         const InputSnapshot snapshot = tracker.EndFrame();
         if (!capture.AppendInput(snapshot) ||
@@ -229,6 +246,8 @@ struct TerminalReasons
 
 void CheckContract()
 {
+    static_assert(std::is_trivially_copyable_v<PointerPositionQ16>);
+    static_assert(std::is_standard_layout_v<PointerPositionQ16>);
     static_assert(!std::is_copy_constructible_v<RunCaptureReplaySession>);
     static_assert(!std::is_copy_assignable_v<RunCaptureReplaySession>);
     static_assert(std::is_nothrow_move_constructible_v<RunCaptureReplaySession>);
@@ -480,6 +499,7 @@ void CheckNormalAndPartialReplay()
               first->input().actions()[1] == 20U &&
               first->input().accepted_event_count() == 1U &&
               first->input().rejected_event_count() == 0U &&
+              first->input().pointer_position() == kFirstPointerPosition &&
               first->input().IsHeld(10U) && first->input().WasPressed(10U) &&
               !first->input().WasReleased(10U) && !first->input().IsHeld(20U) &&
               first->elapsed() == elapsed_values[0] && !first->terminal_input(),
@@ -491,6 +511,7 @@ void CheckNormalAndPartialReplay()
     Check(second && second->input().frame_index() == 1U &&
               second->input().accepted_event_count() == 1U &&
               second->input().rejected_event_count() == 1U &&
+              second->input().pointer_position() == kSecondPointerPosition &&
               !second->input().IsHeld(10U) &&
               !second->input().WasPressed(10U) &&
               second->input().WasReleased(10U) &&
@@ -536,6 +557,7 @@ void CheckEmptyTerminalAndBothReasons()
         TakeReplay(terminal_created, "a terminal-only replay is created");
     auto terminal_frame = terminal.Next();
     Check(terminal_frame && terminal_frame->input().frame_index() == 0U &&
+              !terminal_frame->input().pointer_position() &&
               !terminal_frame->elapsed() && terminal_frame->terminal_input() ==
                   RunCaptureTerminalInput{
                       .frame_index = 0U,
@@ -560,6 +582,7 @@ void CheckEmptyTerminalAndBothReasons()
     Check(first && first->elapsed() == nanoseconds::min() && !first->terminal_input() &&
               second && second->elapsed() == nanoseconds::max() &&
               !second->terminal_input() && last && !last->elapsed() &&
+              last->input().pointer_position() == kSecondPointerPosition &&
               last->terminal_input() == RunCaptureTerminalInput{
                                           .frame_index = 2U,
                                           .host_quit_requested = true,
@@ -585,6 +608,7 @@ void CheckMaximumSchemaAndMoveLifecycle()
               std::equal(actions.begin(), actions.end(),
                   schema_frame->input().actions().begin(),
                   schema_frame->input().actions().end()) &&
+              schema_frame->input().pointer_position() == kFirstPointerPosition &&
               schema_frame->input().IsHeld(actions.front()) &&
               !schema_frame->input().IsHeld(actions.back()),
         "the maximum 64-action schema reconstructs in exact ascending order");
@@ -652,6 +676,7 @@ void CheckAllocationFailureAtomicity()
 
     auto retried = replay.Next();
     Check(retried && retried->input().frame_index() == 0U &&
+              retried->input().pointer_position() == kFirstPointerPosition &&
               retried->elapsed() == elapsed_values[0] &&
               !retried->terminal_input() && replay.complete(),
         "the exact failed frame remains retryable after allocation recovers");
@@ -680,6 +705,8 @@ void CheckSchedulerWorldHarness()
     constexpr std::array<nanoseconds, 4U> elapsed_values{
         nanoseconds{milliseconds{5}}, nanoseconds{milliseconds{17}},
         nanoseconds{milliseconds{40}}, nanoseconds{-3}};
+    constexpr std::array<std::optional<PointerPositionQ16>, 4U> expected_pointers{
+        kFirstPointerPosition, kSecondPointerPosition, std::nullopt, std::nullopt};
     RunCaptureTracePair pair = BuildPair(
         actions, 8U, elapsed_values,
         TerminalReasons{.logical_quit_pressed = true});
@@ -702,6 +729,7 @@ void CheckSchedulerWorldHarness()
         return;
 
     bool all_frames_match = true;
+    std::size_t frame_offset = 0U;
     for (const nanoseconds elapsed : elapsed_values)
     {
         auto frame = replay.Next();
@@ -713,7 +741,10 @@ void CheckSchedulerWorldHarness()
 
         const FramePlan direct_plan = direct_scheduler->BeginFrame(elapsed);
         const FramePlan replay_plan = replay_scheduler->BeginFrame(*frame->elapsed());
-        all_frames_match = all_frames_match && SamePlan(direct_plan, replay_plan);
+        all_frames_match = all_frames_match && SamePlan(direct_plan, replay_plan) &&
+                           frame->input().pointer_position() ==
+                               expected_pointers[frame_offset];
+        ++frame_offset;
         AdvanceWorld(*direct_world, direct_plan,
             "the direct harness world advances each planned step");
         AdvanceWorld(*replay_world, replay_plan,
@@ -735,6 +766,7 @@ void CheckSchedulerWorldHarness()
     const auto scheduler_after_terminal = replay_scheduler->Snapshot();
     const auto world_after_terminal = replay_world->Snapshot();
     Check(terminal && !terminal->elapsed() &&
+              !terminal->input().pointer_position() &&
               terminal->terminal_input() == RunCaptureTerminalInput{
                                                   .frame_index = 4U,
                                                   .logical_quit_pressed = true,

@@ -315,10 +315,10 @@ SDL host shell is complete through an app-owned composition root: strict file/co
 configuration resolves their bounded settings, logging owns stderr and ring sinks, the worker
 pool drains before shutdown, and steady-clock deltas drive fixed-step planning. SDL input now has
 an app-owned, non-hot-reloadable `SdlInputService` that owns the global event pump through
-`PumpEvents` and keyboard/mouse routing. Gamepad discovery is disabled by default; the exact
-`input.gamepad_enabled=true` setting opts into at most one primary gamepad. It filters controller
-button events by instance ID,
-reconciles only gamepad controls on disconnect, and promotes the next available device;
+`PumpEvents` and keyboard/mouse routing. The SDL gamepad subsystem is not initialized and discovery
+is disabled by default; the exact `input.gamepad_enabled=true` setting opts into at most one primary
+gamepad. It filters controller button events by instance ID, reconciles only gamepad controls on
+disconnect, and promotes the next available device;
 deterministic headless virtual-gamepad coverage exercises this boundary. The single-primary rule is
 synthetic shell policy, not inferred retail behavior, and `SdlGpuHost` is now video/render-only.
 Executing a `SimulationWorld` from the fixed-step plans is wired through `OmegaApp`: every planned
@@ -572,10 +572,11 @@ swapchain/presentation, asynchronous lifetime, cross-backend, public readback, a
 retail-rendering, or gameplay guarantee.
 
 E-0052 adds the bounded logical input-capture foundation. A move-only game-thread recorder copies
-one validated nonempty, ascending, unique schema of at most 64 actions and pre-sizes 1 through
-65,536 private 32-byte frame records without permitting contiguous `uint64_t` frame-index overflow.
-At the hard maximum, those record elements plus the fixed 64-slot `uint32_t` schema backing contain
-exactly 2,097,408 bytes of element payload. This does not measure excess vector capacity,
+one validated nonempty, ascending, unique schema of at most 64 actions and, after E-0117's packed-
+pointer extension, pre-sizes 1 through 65,536 private 40-byte frame records without permitting
+contiguous `uint64_t` frame-index overflow. At the hard maximum, those record elements plus the
+fixed 64-slot `uint32_t` schema backing contain exactly 2,621,696 bytes of element payload. This does
+not measure excess vector capacity,
 allocator/object overhead, or process RSS. Allocation-free atomic appends capture only post-binding
 held/pressed/released masks and accepted/rejected counts. Allocation-free expected finalization
 publishes an immutable move-only trace, including a valid empty trace; owned frame/action queries
@@ -625,7 +626,7 @@ finalization consumes the session once leaf finish begins. Session and immutable
 with nothrow moves and inert sources. The pair lends trace references and returns an owned optional
 terminal value. Published pair reads are reentrant on any thread when no read races pair move or
 destruction. At the hard maximum, the paired records and fixed schema backing contain exactly
-2,621,696 bytes of element payload, excluding excess vector capacity, allocator/object overhead,
+3,145,984 bytes of element payload, excluding excess vector capacity, allocator/object overhead,
 and process RSS.
 
 The final MSVC build completed with zero warnings or errors. The focused
@@ -1238,8 +1239,15 @@ emulator equivalence. It is not wired into level loading, effects, or the front 
 
 Status: in progress. E-0060 owns one synthetic positioned diagnostic actor and bounded digital
 locomotion. E-0107 presents that value through one generated marker and a derived replay observer;
-it is deliberately not a retail actor, transform, camera, collision, animation, or scene-placement
-implementation.
+E-0116 presents it as one indexed synthetic triangle when a nonempty diagnostic scene is resident.
+E-0117 adds an optional absolute pointer sample normalized from current SDL logical-window motion and
+button coordinates into inclusive Q16 `[0,65536]`. The latest valid sample persists, invalid samples
+do not mutate it, focus loss clears it, and capture/replay retains it exactly. Project target/fire
+cues follow the sample with target-center fallback. LMB selects/fires, RMB targets/backs, and
+W/A/S/D plus arrows navigate/move without a controller; the gamepad subsystem is not initialized
+unless `--set=input.gamepad_enabled=true` explicitly opts in. These are deliberately not retail
+actor, transform, mouse sensitivity/acceleration, crosshair, camera, weapon/projectile/raycast,
+damage, collision, coordinate-axis, or scene-placement implementations or parity claims.
 
 - Skeletons, animation, player movement, camera, collision, weapons, and basic AI.
 - Deterministic capture/replay for input and simulation state.

@@ -387,10 +387,10 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
 37. E-0052 adds bounded in-process post-binding logical snapshot capture through the move-only
     `InputTraceRecorder` and immutable `InputTrace`. Creation validates a synthetic capacity from
     1 through 65,536 frames and a nonoverflowing contiguous `uint64_t` range before a nonempty,
-    strictly ascending, unique schema of at most 64 logical actions, then pre-sizes private 32-byte
-    records.
-    At the hard maximum, 65,536 32-byte record elements plus the fixed 64-slot `uint32_t` schema
-    backing contain exactly 2,097,408 bytes of element payload. This does not measure excess vector
+    strictly ascending, unique schema of at most 64 logical actions, then, after E-0117's packed-
+    pointer extension, pre-sizes private 40-byte records.
+    At the hard maximum, 65,536 40-byte record elements plus the fixed 64-slot `uint32_t` schema
+    backing contain exactly 2,621,696 bytes of element payload. This does not measure excess vector
     capacity, allocator/object overhead, or process RSS. Allocation-free `Append` observes but never
     retains or mutates its const snapshot, stores only held/pressed/released masks and
     accepted/rejected counts, and preserves both caller and recorder on every ordered failure.
@@ -434,7 +434,7 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     configuration validates capacity from 1 through 65,536 and a contiguous leaf range that may
     end exactly at `UINT64_MAX`. `Create` constructs input backing before elapsed backing and
     publishes a session only after both succeed. At the hard maximum, the paired input records,
-    fixed action-schema backing, and elapsed records contain exactly 2,621,696 bytes of element
+    fixed action-schema backing, and elapsed records contain exactly 3,145,984 bytes of element
     payload, excluding excess vector capacity, allocator/object overhead, and process RSS.
     The exclusive game-thread phase machine accepts input followed by elapsed or terminal input.
     Elapsed capture uses the retained pending input index. A terminal owns that index plus
@@ -1833,6 +1833,41 @@ parameters, camera controls, captured transform import, owner-corpus values, or 
 Still unclaimed: retail actor geometry or identity, placement, coordinate axes or units, camera or
 projection parameters, materials, animation, collision, owner-corpus results, PCSX2 equivalence, or
 visual parity.
+
+## Absolute pointer diagnostic cues (E-0117, 2026-07-21)
+
+- E-0117 adds one optional project-owned absolute pointer sample outside the bounded digital-control
+  event stream. SDL motion and button events contribute their finite window-relative `x`/`y`
+  coordinates only after the event window resolves and reports positive current logical dimensions.
+  Each axis is clamped to the logical window and rounded into inclusive Q16 `[0,65536]`; no physical
+  pixel, DPI scale, private coordinate, or device identity is retained.
+- The latest valid sample in queue order wins and persists across frames. A non-finite coordinate,
+  unknown window, or unusable logical size leaves the previous position and digital accepted/rejected
+  counts unchanged. Window focus loss resets held controls and also makes the pointer unavailable.
+  Mouse-button coordinates are sampled as well as motion, so LMB/RMB can position their cue without
+  requiring an earlier motion event.
+- `InputSnapshot` owns the optional position. The bounded in-process `InputTrace` packs that state
+  into each frame record, distinguishing unavailable from `{0,0}` and the inclusive maximum, and
+  fresh replay reconstructs the exact optional value. Pointer updates neither consume nor bypass the
+  independent digital-event budget.
+- `OmegaApp` passes the current optional sample to pure target/fire cue planners. The two target bars
+  and one fire square follow the clamped pointer center; an unavailable sample uses exact target
+  center. LMB remains select/fire, RMB remains target/back, W/A/S/D and arrows remain movement/menu
+  navigation, and F10 remains quit. Keyboard/mouse is the complete default path. The SDL gamepad
+  subsystem is not initialized unless `--set=input.gamepad_enabled=true` explicitly opts in.
+- Project-generated fixtures cover unavailable/edge/persistent/replaced/cleared state, atomic invalid
+  samples, digital-budget independence, logical-window resize and clamping, button-only positioning,
+  focus clearing, exact trace packing/replay, and deterministic in-bounds cue planning. The serialized
+  full MSVC Debug build completed with zero warnings or errors; CTest passed 74/74; the direct real-host
+  capture smoke, clean Release app build, isolated owned-input two-frame capture/fresh replay smoke,
+  361/361 tooling tests, Python compile-all, the 290-file native dependency gate, both 117-record ledger
+  gates, and diff checks passed. Hosted CI, exact-main, retail-fidelity, and visual-parity validation
+  remain pending and unclaimed for this dependent slice.
+
+Still unclaimed: retail mouse sensitivity or acceleration, crosshair or cursor artwork, camera or
+weapon behavior, projectile, raycast, damage, collision, coordinate-axis parity, owner-corpus values,
+PCSX2 equivalence, or visual parity. No proprietary input, captured value, private address, or private
+path is recorded by E-0117.
 
 ## Private PCSX2 producer readiness (E-0099, 2026-07-20)
 

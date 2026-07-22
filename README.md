@@ -93,11 +93,12 @@ Studio's historical engine source or internal toolchain.
   are assigned.
 - An app-owned, non-hot-reloadable SDL input leaf owns the process-global event pump, keyboard and
   mouse routing, and explicitly opt-in primary-gamepad support. No controller is required to start,
-  navigate, or play the native diagnostic runtime. Gamepad discovery is disabled by default and is
-  enabled with `--set=input.gamepad_enabled=true`; only then does the leaf filter controller events
-  by SDL instance ID, reset gamepad controls on disconnect, and promote the next available device. A
-  deterministic headless virtual-gamepad test covers that hotplug boundary; selecting only one
-  primary gamepad is a synthetic host-shell policy, not a claim about retail behavior.
+  navigate, or play the native diagnostic runtime. The SDL gamepad subsystem and discovery are
+  disabled by default and enabled with `--set=input.gamepad_enabled=true`; only then does the leaf
+  filter controller events by SDL instance ID, reset gamepad controls on disconnect, and promote the
+  next available device. A deterministic headless virtual-gamepad test covers that hotplug boundary;
+  selecting only one primary gamepad is a synthetic host-shell policy, not a claim about retail
+  behavior.
 - The standalone `omega_persistence` foundation implements OpenOmega-owned native saves instead of
   PS2 RAM, memory-card-device, or emulator-savestate state. Its versioned little-endian key/value
   database uses two complete checksummed snapshots, private-temp flush plus atomic inactive-slot
@@ -277,6 +278,19 @@ Studio's historical engine source or internal toolchain.
   establishes no retail actor,
   geometry, placement, camera, materials, animation, owner-corpus result, emulator equivalence, or
   visual parity.
+- E-0117 adds a project-owned absolute pointer sample beside, but independent from, bounded digital
+  input. `SdlInputService` reads finite SDL mouse-motion and mouse-button `x`/`y` values, resolves the
+  event window's current logical dimensions, clamps each coordinate to that window, and rounds it
+  into the inclusive `PointerPositionQ16` range `[0,65536]`. The latest valid sample persists until
+  replacement or focus loss; malformed samples leave the prior value and digital event counters
+  unchanged. Capture retains the exact optional sample for every frame and replay reconstructs it
+  exactly. The project target bars and fire square follow that sample, with a bounded target-center
+  fallback while no pointer is available. LMB still selects or fires, RMB still targets or backs,
+  and W/A/S/D plus arrows still navigate or move. Keyboard and mouse are the complete default path;
+  the SDL gamepad subsystem is not initialized unless
+  `--set=input.gamepad_enabled=true` explicitly opts in. This is synthetic diagnostic input and
+  presentation policy only. It establishes no retail mouse sensitivity, acceleration, crosshair,
+  camera, weapon, projectile, raycast, damage, collision, coordinate-axis, or parity semantics.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public
@@ -564,9 +578,10 @@ Studio's historical engine source or internal toolchain.
   post-binding logical snapshot capture. `Create` accepts a synthetic capacity of 1 through 65,536
   frames whose contiguous `uint64_t` range cannot overflow and one nonempty, strictly ascending,
   unique schema of at most 64 logical actions. It validates configuration before schema before
-  allocation and pre-sizes private 32-byte records. At the hard maximum, 65,536 record elements
-  plus the fixed 64-slot `uint32_t` schema backing contain exactly 2,097,408 bytes of element
-  payload. This does not measure excess vector capacity, allocator/object overhead, or process RSS.
+  allocation and, after E-0117's packed-pointer extension, pre-sizes private 40-byte records. At the
+  hard maximum, 65,536 record elements plus the fixed 64-slot `uint32_t` schema backing contain
+  exactly 2,621,696 bytes of element payload. This does not measure excess vector capacity,
+  allocator/object overhead, or process RSS.
   Allocation-free `Append` observes a const caller snapshot,
   captures held/pressed/released masks plus accepted/rejected event counts, and fails atomically in
   fixed recorder-state, capacity, frame-discontinuity, then schema-mismatch priority.
@@ -620,7 +635,7 @@ Studio's historical engine source or internal toolchain.
   optional terminal query returns an owned value. Published pair reads are reentrant on any thread
   when no read races pair move or destruction.
   At the hard maximum, the paired input records, fixed action-schema backing, and elapsed records
-  contain exactly 2,621,696 bytes of element payload. This excludes excess vector capacity,
+  contain exactly 3,145,984 bytes of element payload after E-0117. This excludes excess vector capacity,
   allocator/object overhead, and process RSS. The final MSVC build completed with zero warnings or
   errors. The focused `omega_run_capture_session_tests` executable passed once plus 100/100
   repeated runs; default CTest passed 23/23. The opt-in Direct3D12 configuration passed 24/24, was
@@ -1381,11 +1396,12 @@ only when explicitly enabled. `SdlGpuHost` is consequently limited to video, win
 rendering resources.
 
 The current native controls are keyboard/mouse first. W/A/S/D or the arrow keys navigate and move;
-Return, keypad Enter, or F1 select; Space or left mouse selects in menus and fires the synthetic
-diagnostic cue in play; Escape or Backspace cancels; T or held right mouse targets in play, with
-right mouse acting as back in menus; and F10 quits. Gamepad discovery is off by default;
-`--set=input.gamepad_enabled=true` opts into optional button and D-pad aliases. These are
-project-authored diagnostic controls, not a retail input or combat map.
+Return, keypad Enter, or F1 select; Space or LMB selects in menus and fires the synthetic diagnostic
+cue in play; Escape or Backspace cancels; T or held RMB targets in play, with RMB acting as back in
+menus; and F10 quits. Target and fire cues follow the latest valid normalized mouse position and use
+target center when no pointer sample is available. The gamepad subsystem is not initialized by
+default; `--set=input.gamepad_enabled=true` opts into optional button and D-pad aliases. These are
+project-authored diagnostic controls, not a retail input, aiming, or combat map.
 
 The zero-file `omega_sdl_gpu_texture_smoke` target compiles whenever tests and the SDL backend are
 built, but hardware/display-dependent CTest registration is off by default for headless safety.

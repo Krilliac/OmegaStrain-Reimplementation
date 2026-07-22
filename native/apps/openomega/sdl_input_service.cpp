@@ -7,6 +7,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -58,6 +60,39 @@ namespace
     default:
         return std::nullopt;
     }
+}
+
+[[nodiscard]] std::optional<runtime::PointerPositionQ16> TranslatePointerPosition(
+    const SDL_WindowID window_id, const float x, const float y) noexcept
+{
+    if (!std::isfinite(x) || !std::isfinite(y))
+        return std::nullopt;
+
+    SDL_Window* window = SDL_GetWindowFromID(window_id);
+    if (window == nullptr)
+        return std::nullopt;
+
+    int logical_width = 0;
+    int logical_height = 0;
+    if (!SDL_GetWindowSize(window, &logical_width, &logical_height) ||
+        logical_width <= 0 || logical_height <= 0)
+    {
+        return std::nullopt;
+    }
+
+    const auto normalize_axis = [](const float coordinate,
+                                    const int logical_extent) noexcept {
+        const double clamped = std::clamp(
+            static_cast<double>(coordinate), 0.0,
+            static_cast<double>(logical_extent));
+        return static_cast<std::uint32_t>(std::llround(
+            clamped * static_cast<double>(runtime::kNormalizedInputExtent) /
+            static_cast<double>(logical_extent)));
+    };
+    return runtime::PointerPositionQ16{
+        .x = normalize_axis(x, logical_width),
+        .y = normalize_axis(y, logical_height),
+    };
 }
 } // namespace
 
@@ -161,6 +196,7 @@ InputPumpResult SdlInputService::PumpEvents(
         else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
         {
             input.ResetAllControls();
+            input.ClearPointerPosition();
         }
         else if (impl_->gamepad_enabled &&
                  event.type == SDL_EVENT_GAMEPAD_ADDED &&
@@ -180,6 +216,24 @@ InputPumpResult SdlInputService::PumpEvents(
             log.Info("input",
                 "closed removed primary SDL gamepad " + std::to_string(removed_id));
             impl_->OpenFirstAvailable(&log);
+        }
+
+        std::optional<runtime::PointerPositionQ16> pointer_position;
+        if (event.type == SDL_EVENT_MOUSE_MOTION)
+        {
+            pointer_position = TranslatePointerPosition(
+                event.motion.windowID, event.motion.x, event.motion.y);
+        }
+        else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                 event.type == SDL_EVENT_MOUSE_BUTTON_UP)
+        {
+            pointer_position = TranslatePointerPosition(
+                event.button.windowID, event.button.x, event.button.y);
+        }
+        if (pointer_position)
+        {
+            const auto sampled = input.SetPointerPosition(*pointer_position);
+            (void)sampled;
         }
 
         if (const auto translated = TranslateInputEvent(event, impl_->gamepad_id))

@@ -10,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -63,12 +64,28 @@ constexpr std::uint16_t kGamepadCode =
     return PushEvent(event);
 }
 
-[[nodiscard]] bool PushMouseButton(const bool down)
+[[nodiscard]] bool PushMouseButton(const bool down,
+    const SDL_WindowID window_id = 0U, const float x = 0.0F,
+    const float y = 0.0F)
 {
     SDL_Event event{};
     event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+    event.button.windowID = window_id;
     event.button.button = SDL_BUTTON_LEFT;
     event.button.down = down;
+    event.button.x = x;
+    event.button.y = y;
+    return PushEvent(event);
+}
+
+[[nodiscard]] bool PushMouseMotion(const SDL_WindowID window_id,
+    const float x, const float y)
+{
+    SDL_Event event{};
+    event.type = SDL_EVENT_MOUSE_MOTION;
+    event.motion.windowID = window_id;
+    event.motion.x = x;
+    event.motion.y = y;
     return PushEvent(event);
 }
 
@@ -113,6 +130,7 @@ int main()
     using omega::runtime::InputTracker;
     using omega::runtime::LogService;
     using omega::runtime::LogServiceConfig;
+    using omega::runtime::PointerPositionQ16;
     using omega::runtime::RingLogSink;
 
     static_assert(std::is_move_constructible_v<SdlInputService>);
@@ -125,6 +143,9 @@ int main()
     Check(SDL_SetHintWithPriority(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT,
               "0xF00D/0x0001", SDL_HINT_OVERRIDE),
         "the test excludes non-fixture gamepads");
+    Check(SDL_SetHintWithPriority(
+              SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE),
+        "the pointer fixture selects SDL's headless video driver");
 
     auto platform = omega::app::SdlPlatformService::Create();
     Check(platform.has_value(), "the SDL process-global runtime initializes");
@@ -133,6 +154,20 @@ int main()
         std::cerr << platform.error() << '\n';
         return 1;
     }
+
+    Check(SDL_InitSubSystem(SDL_INIT_VIDEO),
+        "the pointer fixture initializes SDL's video subsystem");
+    SDL_Window* pointer_window = SDL_CreateWindow(
+        "Omega pointer input fixture", 800, 600,
+        SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE |
+            SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    Check(pointer_window != nullptr,
+        "the pointer fixture creates a hidden resizable window");
+    if (pointer_window == nullptr)
+        return 1;
+    const SDL_WindowID pointer_window_id = SDL_GetWindowID(pointer_window);
+    Check(pointer_window_id != 0U,
+        "the pointer fixture exposes a stable SDL window identifier");
 
     Check((SDL_WasInit(SDL_INIT_GAMEPAD) & SDL_INIT_GAMEPAD) == 0U,
         "the process-global platform does not initialize the gamepad subsystem");
@@ -237,6 +272,74 @@ int main()
         Check(!keyboard_mouse_released.IsHeld(kKeyboardAction) &&
                   !keyboard_mouse_released.IsHeld(kMouseAction),
             "default keyboard and mouse releases reconcile normally");
+
+        Check(PushMouseMotion(pointer_window_id, 200.0F, 150.0F),
+            "absolute mouse motion enters the default input queue");
+        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto mouse_motion = tracker.EndFrame();
+        Check(mouse_motion.pointer_position() ==
+                  PointerPositionQ16{.x = 16'384U, .y = 16'384U} &&
+                  mouse_motion.accepted_event_count() == 0U &&
+                  mouse_motion.rejected_event_count() == 0U,
+            "default input publishes normalized absolute motion without consuming the digital-event budget");
+
+        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto mouse_motion_persisted = tracker.EndFrame();
+        Check(mouse_motion_persisted.pointer_position() ==
+                  PointerPositionQ16{.x = 16'384U, .y = 16'384U},
+            "absolute pointer position persists until replaced or cleared");
+
+        const bool resized = SDL_SetWindowSize(pointer_window, 400, 200) &&
+                             SDL_SyncWindow(pointer_window);
+        int resized_width = 0;
+        int resized_height = 0;
+        Check(resized &&
+                  SDL_GetWindowSize(
+                      pointer_window, &resized_width, &resized_height) &&
+                  resized_width == 400 && resized_height == 200,
+            "the pointer fixture synchronously resizes its logical window");
+        Check(PushMouseMotion(pointer_window_id, 200.0F, 100.0F),
+            "motion after resize enters the SDL queue");
+        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto resized_motion = tracker.EndFrame();
+        Check(resized_motion.pointer_position() ==
+                  PointerPositionQ16{.x = 32'768U, .y = 32'768U},
+            "normalization uses the window's current logical size");
+
+        Check(PushMouseMotion(pointer_window_id, -10.0F, 300.0F),
+            "out-of-window absolute motion enters the SDL queue");
+        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto clamped_motion = tracker.EndFrame();
+        Check(clamped_motion.pointer_position() ==
+                  PointerPositionQ16{.x = 0U, .y = 65'536U},
+            "finite absolute coordinates clamp to the complete normalized extent");
+
+        Check(PushMouseButton(true, pointer_window_id, 300.0F, 50.0F),
+            "a positioned mouse press enters the SDL queue");
+        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto positioned_button = tracker.EndFrame();
+        Check(positioned_button.pointer_position() ==
+                  PointerPositionQ16{.x = 49'152U, .y = 16'384U} &&
+                  positioned_button.IsHeld(kMouseAction) &&
+                  positioned_button.accepted_event_count() == 1U,
+            "a button event updates aim even without preceding motion and still reports its digital edge");
+        Check(PushMouseButton(false, pointer_window_id, 300.0F, 50.0F),
+            "the positioned mouse release enters the SDL queue");
+        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        (void)tracker.EndFrame();
+
+        Check(PushMouseMotion(pointer_window_id,
+                  std::numeric_limits<float>::quiet_NaN(), 1.0F) &&
+                  PushMouseMotion(std::numeric_limits<SDL_WindowID>::max(),
+                      1.0F, 1.0F),
+            "malformed and unknown-window pointer events enter the SDL queue");
+        (void)keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto malformed_mouse_motion = tracker.EndFrame();
+        Check(malformed_mouse_motion.pointer_position() ==
+                  PointerPositionQ16{.x = 49'152U, .y = 16'384U} &&
+                  malformed_mouse_motion.accepted_event_count() == 0U &&
+                  malformed_mouse_motion.rejected_event_count() == 0U,
+            "invalid absolute samples leave the prior position and digital-event counters unchanged");
     }
 
     {
@@ -329,6 +432,8 @@ int main()
                   promoted_press.WasPressed(kGamepadAction),
             "the promoted secondary becomes the accepted primary");
 
+        Check(PushMouseMotion(pointer_window_id, 100.0F, 100.0F),
+            "pointer motion enters the queue immediately before focus loss");
         SDL_Event focus_lost{};
         focus_lost.type = SDL_EVENT_WINDOW_FOCUS_LOST;
         Check(PushEvent(focus_lost), "focus loss enters SDL's queue");
@@ -338,8 +443,9 @@ int main()
                   focus_reset.WasReleased(kKeyboardAction) &&
                   !focus_reset.IsHeld(kMouseAction) && focus_reset.WasReleased(kMouseAction) &&
                   !focus_reset.IsHeld(kGamepadAction) &&
-                  focus_reset.WasReleased(kGamepadAction),
-            "focus loss atomically resets every control class");
+                  focus_reset.WasReleased(kGamepadAction) &&
+                  !focus_reset.pointer_position().has_value(),
+            "focus loss atomically resets every control class and clears pointer availability");
 
         SDL_Event quit{};
         quit.type = SDL_EVENT_QUIT;
@@ -360,6 +466,9 @@ int main()
         "the remaining virtual gamepad detaches after service teardown");
     SDL_UpdateJoysticks();
     SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    SDL_DestroyWindow(pointer_window);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
     SDL_ResetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT);
     SDL_ResetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS);
 
