@@ -55,7 +55,9 @@ class PublicTreeGateTests(unittest.TestCase):
             stdout=f"100644 {object_id} 0\tnative/src/example.cpp\0".encode(),
         )
         contents = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=b"safe text\n"
+            args=[],
+            returncode=0,
+            stdout=(f"{object_id} blob 10\n".encode() + b"safe text\n\n"),
         )
         with mock.patch.object(gate.subprocess, "run", side_effect=[inventory, contents]):
             result, stdout, stderr = self.invoke_main()
@@ -104,6 +106,57 @@ class PublicTreeGateTests(unittest.TestCase):
         )
         self.assertEqual(stderr, "")
         self.assertNotIn(private_detail.decode(), stdout)
+
+    def test_main_reads_multiple_blobs_with_one_batch_process(self) -> None:
+        first_id = "c" * 40
+        second_id = "d" * 40
+        inventory = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                f"100644 {first_id} 0\tnative/src/first.cpp\0"
+                f"100644 {second_id} 0\tnative/src/second.cpp\0"
+            ).encode(),
+        )
+        batch = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                f"{first_id} blob 6\nfirst\n\n"
+                f"{second_id} blob 7\nsecond\n\n"
+            ).encode(),
+        )
+        with mock.patch.object(
+            gate.subprocess, "run", side_effect=[inventory, batch]
+        ) as run:
+            result, stdout, stderr = self.invoke_main()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout, "public-tree gate: OK (2 indexed text blobs checked)\n")
+        self.assertEqual(stderr, "")
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args_list[1].args[0], ["git", "cat-file", "--batch"])
+        self.assertEqual(
+            run.call_args_list[1].kwargs["input"],
+            f"{first_id}\n{second_id}\n".encode(),
+        )
+
+    def test_batch_response_must_be_exact_and_complete(self) -> None:
+        object_id = "e" * 40
+        blob = gate.TrackedBlob("100644", object_id, Path("safe.txt"))
+        invalid_responses = (
+            b"",
+            f"{object_id} tree 4\ndata\n".encode(),
+            f"{'f' * 40} blob 4\ndata\n".encode(),
+            f"{object_id} blob 5\ndata\n".encode(),
+            f"{object_id} blob 4\ndata\ntrailing".encode(),
+        )
+        for response in invalid_responses:
+            with self.subTest(response=response), mock.patch.object(
+                gate, "run_git", return_value=response
+            ):
+                with self.assertRaises(gate.GitInspectionError):
+                    gate.read_blobs([blob])
 
     def test_safe_text_file_passes(self) -> None:
         self.assertEqual(self.errors("native/src/example.cpp"), [])

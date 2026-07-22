@@ -142,11 +142,12 @@ class GitInspectionError(RuntimeError):
     """Raised when the tracked Git tree cannot be inspected safely."""
 
 
-def run_git(*arguments: str) -> bytes:
+def run_git(*arguments: str, input_data: bytes | None = None) -> bytes:
     try:
         return subprocess.run(
             ["git", *arguments],
             check=True,
+            input=input_data,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         ).stdout
@@ -176,7 +177,58 @@ def read_blob(object_id: str) -> bytes:
     return run_git("cat-file", "blob", object_id)
 
 
-def check_blob(blob: TrackedBlob) -> list[str]:
+def read_blobs(blobs: list[TrackedBlob]) -> list[bytes]:
+    """Read every indexed blob through one Git batch process.
+
+    The response is parsed against the exact requested object sequence. A
+    missing, non-blob, reordered, truncated, or trailing response fails the
+    complete inspection instead of silently checking a partial tree.
+    """
+    if not blobs:
+        return []
+
+    for blob in blobs:
+        if re.fullmatch(r"[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64}", blob.object_id) is None:
+            raise GitInspectionError
+
+    request = b"".join(blob.object_id.encode("ascii") + b"\n" for blob in blobs)
+    response = run_git("cat-file", "--batch", input_data=request)
+    offset = 0
+    contents: list[bytes] = []
+
+    for blob in blobs:
+        header_end = response.find(b"\n", offset)
+        if header_end < 0:
+            raise GitInspectionError
+        header = response[offset:header_end].split(b" ")
+        if len(header) != 3:
+            raise GitInspectionError
+        try:
+            returned_id = header[0].decode("ascii")
+            object_type = header[1].decode("ascii")
+            size = int(header[2].decode("ascii"), 10)
+        except (UnicodeDecodeError, ValueError):
+            raise GitInspectionError from None
+        if (
+            returned_id.casefold() != blob.object_id.casefold()
+            or object_type != "blob"
+            or size < 0
+        ):
+            raise GitInspectionError
+
+        data_start = header_end + 1
+        data_end = data_start + size
+        if data_end >= len(response) or response[data_end : data_end + 1] != b"\n":
+            raise GitInspectionError
+        contents.append(response[data_start:data_end])
+        offset = data_end + 1
+
+    if offset != len(response):
+        raise GitInspectionError
+    return contents
+
+
+def check_blob(blob: TrackedBlob, data: bytes | None = None) -> list[str]:
     errors: list[str] = []
     path = blob.path
     normalized = path.as_posix()
@@ -199,7 +251,8 @@ def check_blob(blob: TrackedBlob) -> list[str]:
     if blob.mode not in {"100644", "100755"}:
         errors.append(f"unsupported Git mode {blob.mode}: {normalized}")
 
-    data = read_blob(blob.object_id)
+    if data is None:
+        data = read_blob(blob.object_id)
     size = len(data)
     if size > MAX_TRACKED_BYTES:
         errors.append(f"tracked file exceeds {MAX_TRACKED_BYTES} bytes: {normalized} ({size})")
@@ -227,7 +280,12 @@ def check_blob(blob: TrackedBlob) -> list[str]:
 def main() -> int:
     try:
         blobs = tracked_blobs()
-        errors = [error for blob in blobs for error in check_blob(blob)]
+        contents = read_blobs(blobs)
+        errors = [
+            error
+            for blob, data in zip(blobs, contents, strict=True)
+            for error in check_blob(blob, data)
+        ]
     except GitInspectionError:
         print("public-tree gate: FAILED (1 issue(s))")
         print("- Git repository could not be inspected safely")

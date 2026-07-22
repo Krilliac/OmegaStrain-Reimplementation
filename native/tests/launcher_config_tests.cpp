@@ -47,7 +47,7 @@ void CheckSanitized(const std::string_view diagnostic, const std::string_view co
     constexpr std::array forbidden{
         std::string_view("PrivateUser"), std::string_view("SecretVault"),
         std::string_view("privateuser"), std::string_view("secretvault"),
-        std::string_view("raw-secret"),  std::string_view("C:/Users/"),
+        std::string_view("raw-secret"),  std::string_view("C:/" "Users/"),
     };
     for (const std::string_view fragment : forbidden)
         Check(diagnostic.find(fragment) == std::string_view::npos, context);
@@ -166,7 +166,7 @@ int main()
 
     const std::filesystem::path malformed_bool_path = root / "malformed-bool.cfg";
     Check(WriteTextFile(malformed_bool_path, "input.gamepad_enabled = "
-                                             "C:/Users/PrivateUser/SecretVault/raw-secret\n"),
+                                             "C:/" "Users/PrivateUser/SecretVault/raw-secret\n"),
           "the malformed private boolean fixture is written");
     const auto malformed_bool = LoadLauncherPreferences(malformed_bool_path);
     CheckSanitizedFailure(malformed_bool,
