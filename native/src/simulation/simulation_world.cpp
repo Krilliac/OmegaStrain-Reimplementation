@@ -113,6 +113,20 @@ std::optional<Position3> SimulationWorld::PositionOf(const EntityId entity) cons
     return *position;
 }
 
+PositionResetResult SimulationWorld::ResetPosition(
+    const EntityId entity, const Position3 position) noexcept
+{
+    if (!entities_.IsAlive(entity))
+        return PositionResetResult::EntityNotAlive;
+
+    Position3* const existing = positions_.Find(entities_, entity);
+    if (existing == nullptr)
+        return PositionResetResult::PositionNotPresent;
+
+    *existing = position;
+    return PositionResetResult::Reset;
+}
+
 SimulationStepResult SimulationWorld::AdvanceOneStep() noexcept
 {
     return AdvanceOneStep(SimulationStepInput{});

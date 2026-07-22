@@ -2337,6 +2337,55 @@ engagement. It assigns no retail target position, camera projection, aim assist,
 raycast, damage, health, combat, AI, owner-corpus result, emulator equivalence, or visual-parity
 semantics.
 
+### E-0120 project diagnostic mission lifecycle
+
+`AdvanceDiagnosticMissionLifecycle` is a third allocation-free, platform-free gameplay reducer. It
+accepts one owned `DiagnosticMissionLifecycleState` and one event, validates the state before the
+event, and forms no successor for an invalid representation or transition. Its complete project
+transition policy is:
+
+| Prior state | Event | Successor | App effect |
+| --- | --- | --- | --- |
+| `Ready`, `Succeeded`, or `Failed` | `Deploy` | `Active` | reset gameplay |
+| `Active` | `Complete` | `Succeeded` | enter BriefingRoom |
+| `Active` | `Abort` | `Failed` | enter BriefingRoom |
+| any valid state | `None` | unchanged | none |
+
+All other valid state/event pairs are rejected. These labels and transitions are project policy,
+not imported mission-state names or retail control flow.
+
+`OmegaApp::DeployDiagnosticMission` runs on the game thread after the existing diagnostic-session
+preparation. It requires the reducer's reset edge, uses `SimulationWorld::ResetPosition` to replace
+the positioned actor component with `{0,0,0}` without recreating the entity or changing simulation
+clock state, clears the proximity and target/fire reducers plus transient held/pressed cues, and then
+publishes `Active`. Thus a successful or failed return to BriefingRoom retains its terminal snapshot
+until the next deployment; that keyboard-select or menu-LMB edge resets the complete project seam and
+cannot leak into same-frame gameplay.
+
+After target/fire evaluation and every successful fixed step, the app converts a newly latched target
+completion into `Complete`. The resulting `Succeeded` state and BriefingRoom mode are published in
+that same rendered frame. If the frame began in active DiagnosticPlay and a direct Primary or Cancel
+edge moves the front end out of play, `Abort` instead publishes `Failed`; the reducer has already
+selected BriefingRoom for that authorized route. If identity authorization instead becomes stale,
+the mission still fails but the front end remains at its fail-closed initial state rather than being
+reopened by mission projection. Fire and target aliases deliberately remain gameplay-only while the
+input context is DiagnosticPlay.
+
+`RunReplaySession` enables this optional composition only alongside locomotion, target/fire, a valid
+modal front end, character-selection support, and diagnostic-start capability. It owns frame-local
+successors for front-end, proximity, target, and mission state; deployment applies the same actor and
+reducer reset, and completion/abort selects the same terminal BriefingRoom result. Move transfers the
+owned mission value and inert normalization clears it. Production fresh replay enables the policy
+from the captured action schema and compares exact final mission, proximity, target, actor-position,
+and front-end values without changing the input trace or capture-session representation.
+
+No persistence key/value, gamepad default, SDL resource, asset lookup, texture/mesh allocation,
+upload, release, or residency contract changes. A serialized MSVC Debug build of the executable and
+focused targets is warning-free; focused CTest passes 3/3 and the direct real-host app-capture smoke
+passes. Hosted gates remain pending. This establishes no retail
+mission, death, health, timer, debrief, checkpoint, spawn, campaign, inventory, reward, owner-corpus
+observation, emulator equivalence, or PCSX2 parity.
+
 ### Project-owned front-end cancel action
 
 Logical action 7 remains the distinct project-owned cancel edge. Keyboard Escape and Backspace map

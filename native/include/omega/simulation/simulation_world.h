@@ -85,6 +85,13 @@ enum class PositionedEntityCreateError : std::uint8_t
     PositionCapacityExhausted,
 };
 
+enum class PositionResetResult : std::uint8_t
+{
+    Reset,
+    EntityNotAlive,
+    PositionNotPresent,
+};
+
 // App-owned, non-hot-reloadable deterministic game-thread state boundary. This
 // implementation owns the canonical simulation clock, entity identity storage,
 // and the first justified project-owned component store. Entity lifecycle stays
@@ -136,6 +143,13 @@ public:
     // [game thread] Returns an owned position copy only for an exact live
     // generation with a position. No component-store pointer escapes the world.
     [[nodiscard]] std::optional<Position3> PositionOf(EntityId entity) const noexcept;
+
+    // [game thread] Replaces the position of one exact live positioned entity.
+    // This operation never inserts a component and never changes clock,
+    // identity, or entity-count state. Stale, dead, and unpositioned targets
+    // are rejected atomically.
+    [[nodiscard]] PositionResetResult ResetPosition(
+        EntityId entity, Position3 position) noexcept;
 
     // [game thread] Advances exactly one fixed step. If either diagnostic representation is full,
     // returns RepresentationExhausted and leaves the complete state unchanged.

@@ -1934,6 +1934,42 @@ inventory supplied no target/fire value or behavior to this slice. No private or
 proprietary byte, captured value, raw address, private path, disc image, executable, save,
 memory-card image, savestate, emulator state, or PCSX2 observation is recorded by E-0119.
 
+## Diagnostic mission lifecycle (E-0120, 2026-07-22)
+
+- E-0120 adds an allocation-free, platform-free reducer with the project states `Ready`, `Active`,
+  `Succeeded`, and `Failed`. `Deploy` is accepted from every non-active state, requests one gameplay
+  reset, and enters `Active`; `Complete` and `Abort` are accepted only while active, latch their
+  terminal state, and request an immediate BriefingRoom transition. Invalid states, events, and
+  transitions fail before a successor is formed.
+- `OmegaApp` applies an accepted BriefingRoom deployment only after the existing profile/character
+  and diagnostic-session preparation succeeds. It resets the positioned actor to `{0,0,0}`, clears
+  the launch-local proximity and target reducers plus transient target/fire inputs, and then
+  publishes `Active`. This supersedes only E-0118/E-0119's open-ended BriefingRoom-retention wording:
+  returning to BriefingRoom itself preserves the terminal values, while the next keyboard-select or
+  menu-LMB deployment resets them. The deployment edge remains menu context and cannot become a
+  same-frame fire attempt.
+- A target transition from incomplete to complete emits `Complete`, publishes `Succeeded`, and
+  returns the character-enabled route to BriefingRoom in the same rendered frame. An explicit direct
+  Primary or Cancel edge from active DiagnosticPlay emits `Abort`, publishes `Failed`, and returns to
+  BriefingRoom. Fire and target aliases remain gameplay-only while in DiagnosticPlay.
+- `RunReplaySession` optionally owns the same mission state only with its locomotion, target/fire,
+  modal-front-end, and diagnostic-start prerequisites. It applies the same deployment reset,
+  completion/abort precedence, BriefingRoom publication, move/inert ownership, and fixed failure
+  categories. Production fresh replay compares exact final mission, proximity, target, actor-position,
+  and front-end values with the live app without adding fields to the capture format.
+- The implementation and project-generated reducer, simulation-reset, replay, and real-host fixtures
+  are present. A serialized MSVC Debug build of `openomega` plus the focused lifecycle, replay, core,
+  and capture targets completed without warnings or errors; focused CTest passed 3/3 and the direct
+  real-host app-capture smoke passed. Hosted gates remain pending. Keyboard/mouse remains the complete
+  default path, gamepad initialization remains explicit
+  opt-in, and no persistence record, asset load, mesh/texture allocation, upload, release, or residency
+  policy changes.
+
+This is only a project-owned diagnostic deployment loop. It establishes no retail mission, death,
+health, timer, debrief, checkpoint, spawn, campaign, inventory, reward, owner-corpus observation, or
+PCSX2 parity. No proprietary input, captured value, private address, or private path is recorded by
+E-0120.
+
 ## Private PCSX2 producer readiness (E-0099, 2026-07-20)
 
 - A separately maintained local branch based on official PCSX2

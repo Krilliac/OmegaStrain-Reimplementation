@@ -21,6 +21,15 @@ void Check(const bool condition, const std::string_view message)
     }
 }
 
+[[nodiscard]] bool SameSimulationState(
+    const omega::simulation::SimulationState left,
+    const omega::simulation::SimulationState right) noexcept
+{
+    return left.completed_steps == right.completed_steps &&
+           left.simulated_time == right.simulated_time &&
+           left.alive_entities == right.alive_entities;
+}
+
 template <typename T>
 concept HasMutableEntityRegistryAccessor = requires(T& value) { value.entities(); };
 
@@ -36,6 +45,7 @@ int SimulationWorldFailureCount()
     using omega::simulation::EntityTranslation;
     using omega::simulation::EntityRegistrySnapshot;
     using omega::simulation::Position3;
+    using omega::simulation::PositionResetResult;
     using omega::simulation::PositionedEntityCreateError;
     using omega::simulation::SimulationStepInput;
     using omega::simulation::SimulationStepResult;
@@ -60,6 +70,8 @@ int SimulationWorldFailureCount()
     static_assert(noexcept(std::declval<const SimulationWorld&>().IsAlive(EntityId{})));
     static_assert(noexcept(std::declval<const SimulationWorld&>().EntitySnapshot()));
     static_assert(noexcept(std::declval<const SimulationWorld&>().PositionOf(EntityId{})));
+    static_assert(noexcept(std::declval<SimulationWorld&>().ResetPosition(
+        EntityId{}, Position3{})));
     static_assert(noexcept(std::declval<SimulationWorld&>().AdvanceOneStep()));
     static_assert(noexcept(std::declval<SimulationWorld&>().AdvanceOneStep(
         std::declval<const SimulationStepInput&>())));
@@ -69,6 +81,10 @@ int SimulationWorldFailureCount()
     static_assert(std::is_same_v<
         decltype(std::declval<const SimulationWorld&>().PositionOf(EntityId{})),
         std::optional<Position3>>);
+    static_assert(std::is_same_v<
+        decltype(std::declval<SimulationWorld&>().ResetPosition(
+            EntityId{}, Position3{})),
+        PositionResetResult>);
 
     Check(!SimulationWorld::Create({.fixed_step = std::chrono::nanoseconds::zero()}),
         "a zero fixed step is rejected");
@@ -333,6 +349,111 @@ int SimulationWorldFailureCount()
                       world.PositionOf(*replacement) == replacement_position &&
                       !world.PositionOf(*first_positioned),
                 "position capacity is restored and stale generations cannot see replacement data");
+        }
+    }
+
+    auto reset_created = SimulationWorld::Create({
+        .fixed_step = std::chrono::nanoseconds{7},
+        .maximum_entities = 5U,
+        .maximum_positioned_entities = 3U,
+    });
+    Check(reset_created.has_value(), "a bounded position-reset world constructs");
+    if (reset_created)
+    {
+        SimulationWorld& world = *reset_created;
+        const Position3 initial{.x = 10, .y = 20, .z = 30};
+        const Position3 replacement{
+            .x = std::numeric_limits<std::int64_t>::min(),
+            .y = -4,
+            .z = std::numeric_limits<std::int64_t>::max(),
+        };
+        const auto target = world.CreatePositionedEntity(initial);
+        const auto unpositioned = world.CreateEntity();
+        const auto stale = world.CreatePositionedEntity(
+            Position3{.x = 101, .y = 102, .z = 103});
+        const auto dead = world.CreateEntity();
+        Check(target && unpositioned && stale && dead,
+            "position-reset fixtures acquire positioned, plain, stale, and dead candidates");
+        if (target && unpositioned && stale && dead)
+        {
+            Check(world.AdvanceOneStep() == SimulationStepResult::Advanced &&
+                      world.AdvanceOneStep() == SimulationStepResult::Advanced,
+                "the position-reset fixture owns nonzero clock state");
+            Check(world.DestroyEntity(*stale) == EntityDestroyResult::Destroyed,
+                "the position-reset stale fixture is destroyed before reuse");
+            const Position3 reused_position{.x = -101, .y = -102, .z = -103};
+            const auto reused = world.CreatePositionedEntity(reused_position);
+            Check(reused && reused->index == stale->index &&
+                      reused->generation == stale->generation + 1U,
+                "the position-reset stale slot is occupied by a newer exact generation");
+            Check(world.DestroyEntity(*dead) == EntityDestroyResult::Destroyed,
+                "the position-reset dead fixture is destroyed without reuse");
+            const auto filler = world.CreatePositionedEntity(
+                Position3{.x = 201, .y = 202, .z = 203});
+            Check(filler.has_value(),
+                "the position store is full before replacing an existing position");
+
+            const auto before_reset_state = world.Snapshot();
+            const auto before_reset_entities = world.EntitySnapshot();
+            Check(world.ResetPosition(*target, replacement) ==
+                          PositionResetResult::Reset &&
+                      world.PositionOf(*target) == replacement &&
+                      world.IsAlive(*target) &&
+                      SameSimulationState(world.Snapshot(), before_reset_state) &&
+                      world.EntitySnapshot() == before_reset_entities,
+                "reset replaces all position coordinates without changing clock or identity state");
+
+            const Position3 before_rejected_target = *world.PositionOf(*target);
+            const std::optional<Position3> before_reused =
+                reused ? world.PositionOf(*reused) : std::nullopt;
+            const EntityId forged{
+                .index = target->index,
+                .generation = target->generation + 1U,
+            };
+            const EntityId out_of_range{
+                .index = std::numeric_limits<std::uint32_t>::max(),
+                .generation = target->generation,
+            };
+            const EntityId not_alive[]{
+                EntityId{}, forged, out_of_range, *stale, *dead};
+            bool not_alive_is_atomic = true;
+            for (const EntityId entity : not_alive)
+            {
+                const auto before_state = world.Snapshot();
+                const auto before_entities = world.EntitySnapshot();
+                const PositionResetResult result =
+                    world.ResetPosition(entity, Position3{.x = 999});
+                const bool current_is_atomic =
+                    result == PositionResetResult::EntityNotAlive &&
+                    world.PositionOf(*target) == before_rejected_target &&
+                    (!reused || world.PositionOf(*reused) == before_reused) &&
+                    SameSimulationState(world.Snapshot(), before_state) &&
+                    world.EntitySnapshot() == before_entities;
+                not_alive_is_atomic = not_alive_is_atomic && current_is_atomic;
+            }
+            Check(not_alive_is_atomic,
+                "default, forged, out-of-range, stale, and dead reset targets are atomically rejected");
+
+            const auto before_missing_state = world.Snapshot();
+            const auto before_missing_entities = world.EntitySnapshot();
+            Check(world.ResetPosition(*unpositioned, Position3{.x = 777}) ==
+                          PositionResetResult::PositionNotPresent &&
+                      !world.PositionOf(*unpositioned) &&
+                      world.PositionOf(*target) == before_rejected_target &&
+                      (!reused || world.PositionOf(*reused) == before_reused) &&
+                      SameSimulationState(world.Snapshot(), before_missing_state) &&
+                      world.EntitySnapshot() == before_missing_entities,
+                "a live unpositioned reset target remains unpositioned without any world mutation");
+
+            const Position3 second_reset{.x = 1, .y = 2, .z = 3};
+            const auto before_second_state = world.Snapshot();
+            const auto before_second_entities = world.EntitySnapshot();
+            Check(world.ResetPosition(*target, second_reset) ==
+                          PositionResetResult::Reset &&
+                      world.PositionOf(*target) == second_reset &&
+                      SameSimulationState(world.Snapshot(), before_second_state) &&
+                      world.EntitySnapshot() == before_second_entities,
+                "repeated resets replace an existing component deterministically");
         }
     }
 
