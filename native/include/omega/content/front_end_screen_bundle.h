@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <exception>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -174,6 +175,45 @@ public:
         return visual_scopes_.find(primary_scope_)->second.textures();
     }
     [[nodiscard]] const FontMap& fonts() const noexcept { return fonts_; }
+
+    // Applies the retail font-manager lookup rule to an authored GUI value.
+    // Empty or absent references select the registered default. Named fonts
+    // accept their authored basename or full .FNT member name and fold ASCII
+    // case only; a font not retained by this bundle fails closed.
+    [[nodiscard]] const retail::FntV3IR* ResolveFont(
+        const std::string_view authored_reference) const noexcept
+    {
+        constexpr std::string_view default_member = "DEFAULT.FNT";
+        constexpr std::string_view suffix = ".FNT";
+        const std::string_view reference = authored_reference.empty()
+            ? default_member
+            : authored_reference;
+        for (const auto& [normalized_member, font] : fonts_)
+        {
+            const std::string_view member(normalized_member);
+            if (AsciiCaseEqual(member, reference))
+                return &font;
+            if (!authored_reference.empty() &&
+                authored_reference.find('.') == std::string_view::npos &&
+                member.size() == authored_reference.size() + suffix.size() &&
+                AsciiCaseEqual(member.substr(0U, authored_reference.size()),
+                    authored_reference) &&
+                AsciiCaseEqual(member.substr(authored_reference.size()), suffix))
+            {
+                return &font;
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] const retail::FntV3IR* ResolveFontReference(
+        const std::optional<std::string>& authored_reference) const noexcept
+    {
+        return ResolveFont(authored_reference
+                ? std::string_view(*authored_reference)
+                : std::string_view{});
+    }
+
     [[nodiscard]] const TextureMap& font_atlases() const noexcept
     {
         return font_atlases_;

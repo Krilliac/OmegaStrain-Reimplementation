@@ -37,6 +37,7 @@ constexpr std::string_view kOpeningMovieArchiveMountRoot = "OPENING_MOVIE_ARCHIV
 constexpr std::size_t kMaximumLevelCodeBytes = 32;
 constexpr std::string_view kFrontEndArchiveGamePath = "GAMEDATA/FRONTEND/NTSC.HOG";
 constexpr std::string_view kFontArchiveGamePath = "GAMEDATA/COMMON/FONTS.HOG";
+constexpr std::string_view kDefaultFrontEndFontMember = "DEFAULT.FNT";
 constexpr std::string_view kStringTableGamePath = "GAMEDATA/COMMON/STRINGS.DAT";
 constexpr std::uint64_t kFrontEndMaximumAggregateInputBytes = 64ULL * 1024ULL * 1024ULL;
 constexpr std::uint64_t kFrontEndMaximumAggregateOutputBytes = 128ULL * 1024ULL * 1024ULL;
@@ -735,13 +736,20 @@ using FrontEndScopedResourceSet =
     const asset::FrontendWidgetIR& node, FrontEndDependencySet& references,
     const asset::DecodeLimits limits)
 {
-    if (node.font_reference && !node.font_reference->empty())
+    if (node.font_reference)
     {
-        auto normalized = NormalizeFrontEndDependency(
-            *node.font_reference, ".FNT", true, limits);
-        if (!normalized)
-            return std::unexpected(normalized.error());
-        references.insert(std::move(*normalized));
+        if (node.font_reference->empty())
+        {
+            references.emplace(kDefaultFrontEndFontMember);
+        }
+        else
+        {
+            auto normalized = NormalizeFrontEndDependency(
+                *node.font_reference, ".FNT", true, limits);
+            if (!normalized)
+                return std::unexpected(normalized.error());
+            references.insert(std::move(*normalized));
+        }
     }
     for (const auto& child : node.children)
     {
