@@ -299,6 +299,18 @@ Studio's historical engine source or internal toolchain.
   reconstructed step and exposes the same owned trigger state. This is a synthetic movement-to-
   objective seam only: it establishes no retail coordinate, trigger, objective, mission, checkpoint,
   collision, AI, combat, or persistence behavior.
+- E-0119 turns the existing normalized pointer and target/fire actions into one deterministic project
+  diagnostic engagement. A successful proximity crossing publishes a fixed inclusive Q16 target
+  marker in that rendered frame; target/fire eligibility observes that completion on the following
+  input frame. Held RMB or T acquires only while an available normalized pointer sample is inside it;
+  an LMB or Space press is one attempt and latches completion only when acquired. Missing-pointer,
+  untargeted, and outside-target shots remain misses rather than using the presentation fallback.
+  Evaluation occurs once per normal input frame; closed menu/play gates supply a disabled input that
+  clears transient acquisition, while successful zero-step play frames can accept an edge. State
+  publishes only after the frame's complete fixed-step batch succeeds. The target reuses the existing
+  marker texture, replaces the completed objective marker, and disappears on a hit; fresh replay owns
+  and reproduces the same state. This is project-authored 2D hit-test policy, not evidence for retail
+  targeting, weapons, projectiles, raycasts, damage, camera behavior, AI, or visual parity.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public

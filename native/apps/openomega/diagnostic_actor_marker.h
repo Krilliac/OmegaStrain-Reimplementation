@@ -1,6 +1,7 @@
 #pragma once
 
 #include "omega/gameplay/diagnostic_proximity_trigger.h"
+#include "omega/gameplay/diagnostic_target_fire.h"
 #include "omega/runtime/diagnostic_actor_scene.h"
 #include "omega/runtime/input_tracker.h"
 #include "omega/runtime/render_draw_list.h"
@@ -79,6 +80,34 @@ PlanProjectDiagnosticObjectiveMarkerDestination(
         .top = static_cast<std::uint32_t>(center - volume.max_z * unit),
         .right = static_cast<std::uint32_t>(center + volume.max_x * unit),
         .bottom = static_cast<std::uint32_t>(center - volume.min_z * unit),
+    };
+}
+
+// [any thread; reentrant] Projects the fixed project-owned diagnostic aim target directly into
+// the normalized presentation plane. It becomes visible only after the proximity objective has
+// completed and remains visible until the launch-local target latches complete. This assigns no
+// retail target, hitbox, weapon, camera, or mission semantics.
+[[nodiscard]] constexpr std::optional<runtime::RenderTargetRectQ16>
+PlanProjectDiagnosticTargetMarkerDestination(
+    const gameplay::DiagnosticProximityTriggerState proximity_state,
+    const gameplay::DiagnosticTargetFireState target_fire_state) noexcept
+{
+    if (!proximity_state.objective_complete || target_fire_state.target_complete)
+        return std::nullopt;
+
+    constexpr gameplay::DiagnosticAimTargetQ16 target =
+        gameplay::kProjectDiagnosticAimTarget;
+    static_assert(gameplay::kDiagnosticAimExtent ==
+                  runtime::kNormalizedRenderExtent);
+    static_assert(target.left < target.right);
+    static_assert(target.top < target.bottom);
+    static_assert(target.right <= gameplay::kDiagnosticAimExtent);
+    static_assert(target.bottom <= gameplay::kDiagnosticAimExtent);
+    return runtime::RenderTargetRectQ16{
+        .left = target.left,
+        .top = target.top,
+        .right = target.right,
+        .bottom = target.bottom,
     };
 }
 

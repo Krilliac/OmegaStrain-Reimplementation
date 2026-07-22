@@ -2301,6 +2301,42 @@ establishes only a synthetic movement-to-objective seam. It assigns no retail co
 objective, mission, checkpoint, persistence, collision, camera, weapon, damage, AI, or parity
 semantics.
 
+### E-0119 diagnostic pointer target and fire resolution
+
+`AdvanceDiagnosticTargetFire` is a second allocation-free, platform-free gameplay reducer. It owns
+an optional normalized Q16 pointer, an inclusive target rectangle, an enable gate, held-targeting and
+pressed-fire inputs, and a two-boolean prior state. The reducer validates every target and available
+pointer before forming a successor. When enabled, acquisition requires a held target action and an
+available pointer inside all four inclusive edges. Every fire press is exactly one attempt, but only
+an acquired attempt emits a hit and monotonically latches target completion. Disabled and completed
+states are inert and clear transient acquisition. A missing pointer is a gameplay miss; the earlier
+center fallback remains presentation-only.
+
+The native composition fixes its project target to normalized bounds `{47104, 30720, 51200, 34816}`.
+`OmegaApp` samples it once per input frame rather than once per fixed simulation step. Eligibility is
+copied from proximity completion at frame start, so entering the objective volume and firing in the
+same frame cannot ambiguously hit. Both the pre-reduction DiagnosticPlay context and post-reduction
+simulation gate must be open, preventing a menu-confirm or return click from reaching gameplay. The
+next target state is derived before the fixed-step batch and published only after every scheduled
+step succeeds; a successful zero-step play frame still publishes its one input-edge result.
+
+`PlanProjectDiagnosticTargetMarkerDestination` exposes the same fixed rectangle only after the
+proximity objective is complete and before the target is complete. It reuses the existing marker
+texture and is mutually exclusive with the objective marker, so the six-command fallback bound and
+the environment-plus-actor mesh budget do not change. Fallback texture order is base, actor,
+objective-or-target, two targeting bars, then fire. Indexed presentation orders environment meshes
+then the actor mesh, with objective-or-target, two targeting bars, and fire in its texture overlay.
+A hit removes the target marker in that frame; transient targeting and fire cues may still describe
+the accepted input.
+
+`RunReplaySession` optionally owns the same target state and advances it once per reconstructed
+normal input frame under the identical front-end gates and frame-start proximity rule. It commits
+after the complete simulation batch, transfers the state on move, clears it from inert sources, and
+exposes an owned copy for exact comparison. This establishes only a synthetic normalized 2D target
+engagement. It assigns no retail target position, camera projection, aim assist, weapon, projectile,
+raycast, damage, health, combat, AI, owner-corpus result, emulator equivalence, or visual-parity
+semantics.
+
 ### Project-owned front-end cancel action
 
 Logical action 7 remains the distinct project-owned cancel edge. Keyboard Escape and Backspace map

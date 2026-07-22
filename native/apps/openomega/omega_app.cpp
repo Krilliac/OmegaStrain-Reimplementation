@@ -2206,6 +2206,37 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             input_snapshot.IsHeld(kDebugTargetAction);
         debug_fire_pressed_ = simulation_allowed && diagnostic_play_input_context &&
             input_snapshot.WasPressed(kDebugFireAction);
+        std::optional<gameplay::DiagnosticAimPointQ16> diagnostic_aim_pointer;
+        if (const auto pointer = input_snapshot.pointer_position())
+        {
+            diagnostic_aim_pointer = gameplay::DiagnosticAimPointQ16{
+                .x = pointer->x,
+                .y = pointer->y,
+            };
+        }
+        const auto target_fire_step = gameplay::AdvanceDiagnosticTargetFire(
+            gameplay::kProjectDiagnosticAimTarget,
+            diagnostic_target_fire_state_,
+            gameplay::DiagnosticTargetFireInput{
+                .pointer = diagnostic_aim_pointer,
+                .enabled = diagnostic_proximity_trigger_state_.objective_complete &&
+                    simulation_allowed && diagnostic_play_input_context,
+                .target_held = debug_target_held_,
+                .fire_pressed = debug_fire_pressed_,
+            });
+        if (!target_fire_step)
+        {
+            (void)ContainOpeningMovieAudio();
+            jobs_->WaitForIdle();
+            constexpr std::string_view error =
+                "diagnostic target/fire evaluation failed";
+            log_->Error("simulation", error);
+            return RunLoopResult{
+                .result = result,
+                .operational_error = std::string(error),
+                .capture_error = std::nullopt,
+            };
+        }
         const std::chrono::nanoseconds effective_elapsed = simulation_allowed
             ? elapsed
             : std::chrono::nanoseconds::zero();
@@ -2325,6 +2356,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             }
         }
         diagnostic_proximity_trigger_state_ = next_proximity_trigger_state;
+        diagnostic_target_fire_state_ = target_fire_step->state;
 
         const simulation::SimulationState simulation_snapshot = simulation_->Snapshot();
         const bool movie_is_active = IsBootSequenceActive(boot_sequence_state_);
@@ -2954,7 +2986,7 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
         .right = runtime::kNormalizedRenderExtent,
         .bottom = runtime::kNormalizedRenderExtent,
     };
-    // Fixed worst case: base, actor, armed objective, two target bars, and fire.
+    // Fixed worst case: base, actor, one objective-or-target marker, two target bars, and fire.
     std::array<runtime::RenderTextureBlitCommand, 6U> commands{};
     const std::span<const runtime::RenderTextureBlitCommand> base_commands =
         diagnostic_hidden_draw_list_.commands();
@@ -2985,6 +3017,19 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
             .texture = diagnostic_actor_marker_texture_,
             .source = full_source,
             .destination = *objective_destination,
+            .fit_mode = runtime::RenderTextureFitMode::Stretch,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        };
+    }
+    const auto target_destination =
+        PlanProjectDiagnosticTargetMarkerDestination(
+            diagnostic_proximity_trigger_state_, diagnostic_target_fire_state_);
+    if (target_destination)
+    {
+        commands[command_count++] = runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_actor_marker_texture_,
+            .source = full_source,
+            .destination = *target_destination,
             .fit_mode = runtime::RenderTextureFitMode::Stretch,
             .filter_mode = runtime::RenderTextureFilterMode::Nearest,
         };
@@ -3209,5 +3254,10 @@ std::optional<profiles::ProfileId> OmegaApp::active_profile_id() const noexcept
 std::optional<profiles::CharacterId> OmegaApp::active_character_id() const noexcept
 {
     return active_character_id_;
+}
+
+gameplay::DiagnosticTargetFireState OmegaApp::diagnostic_target_fire_state() const noexcept
+{
+    return diagnostic_target_fire_state_;
 }
 } // namespace omega::app

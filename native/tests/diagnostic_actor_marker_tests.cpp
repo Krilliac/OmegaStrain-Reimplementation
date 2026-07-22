@@ -19,6 +19,7 @@ using omega::app::PlanProjectDiagnosticActorMarkerDestination;
 using omega::app::PlanProjectDiagnosticActorMeshTransform;
 using omega::app::PlanProjectDiagnosticFireCueRectangle;
 using omega::app::PlanProjectDiagnosticObjectiveMarkerDestination;
+using omega::app::PlanProjectDiagnosticTargetMarkerDestination;
 using omega::app::PlanProjectDiagnosticTargetCueRectangles;
 using omega::asset::Matrix4x4IR;
 using omega::runtime::PointerPositionQ16;
@@ -365,6 +366,58 @@ void CheckObjectiveMarkerContract()
         "a completed launch-local objective removes its presentation marker");
 }
 
+void CheckTargetMarkerContract()
+{
+    using ProximityState =
+        omega::gameplay::DiagnosticProximityTriggerState;
+    using TargetState = omega::gameplay::DiagnosticTargetFireState;
+    using Result = std::optional<RenderTargetRectQ16>;
+    static_assert(std::is_same_v<decltype(
+                      PlanProjectDiagnosticTargetMarkerDestination(
+                          ProximityState{}, TargetState{})),
+        Result>);
+    static_assert(noexcept(PlanProjectDiagnosticTargetMarkerDestination(
+        ProximityState{}, TargetState{})));
+
+    constexpr Result before_objective =
+        PlanProjectDiagnosticTargetMarkerDestination(
+            ProximityState{}, TargetState{});
+    constexpr Result ready =
+        PlanProjectDiagnosticTargetMarkerDestination(
+            ProximityState{.objective_complete = true}, TargetState{});
+    constexpr Result acquired =
+        PlanProjectDiagnosticTargetMarkerDestination(
+            ProximityState{.objective_complete = true},
+            TargetState{.acquired = true});
+    constexpr Result completed =
+        PlanProjectDiagnosticTargetMarkerDestination(
+            ProximityState{.objective_complete = true},
+            TargetState{.target_complete = true});
+    constexpr RenderTargetRectQ16 expected{
+        .left = 47'104U,
+        .top = 30'720U,
+        .right = 51'200U,
+        .bottom = 34'816U,
+    };
+    static_assert(!before_objective);
+    static_assert(ready == Result{expected});
+    static_assert(acquired == ready);
+    static_assert(!completed);
+    static_assert(!PlanProjectDiagnosticObjectiveMarkerDestination(
+        ProximityState{.objective_complete = true}));
+
+    Check(ready && IsValidDestination(*ready) &&
+              IsAcceptedByRenderDrawList(*ready),
+        "the exact ready target rectangle is renderer-valid");
+    Check(!PlanProjectDiagnosticTargetMarkerDestination(
+              ProximityState{}, TargetState{.acquired = true}),
+        "target acquisition cannot expose the target before proximity completion");
+    Check(!PlanProjectDiagnosticTargetMarkerDestination(
+              ProximityState{.objective_complete = true},
+              TargetState{.acquired = true, .target_complete = true}),
+        "target completion removes its launch-local presentation marker");
+}
+
 void CheckPointerCueBoundarySet()
 {
     CheckPointerCuePosition(std::nullopt, 32'768U, 32'768U,
@@ -514,6 +567,7 @@ int main()
     CheckContract();
     CheckPointerCueContract();
     CheckObjectiveMarkerContract();
+    CheckTargetMarkerContract();
     CheckPointerCueBoundarySet();
     CheckCompleteVisibleGrid();
     CheckCompleteInt16AxisSweeps();

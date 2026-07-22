@@ -12,6 +12,7 @@
 #include "sdl_platform_service.h"
 
 #include "omega/gameplay/diagnostic_proximity_trigger.h"
+#include "omega/gameplay/diagnostic_target_fire.h"
 #include "omega/runtime/asset_service.h"
 #include "omega/runtime/config_service.h"
 #include "omega/runtime/content_startup.h"
@@ -81,6 +82,10 @@ public:
     // the bounded front-end model. Null means no explicit selection has occurred.
     [[nodiscard]] std::optional<profiles::ProfileId> active_profile_id() const noexcept;
     [[nodiscard]] std::optional<profiles::CharacterId> active_character_id() const noexcept;
+    // [game/main thread; no concurrent use] Returns an owned snapshot of the launch-local
+    // project diagnostic target/fire reducer state for exact capture/replay validation.
+    [[nodiscard]] gameplay::DiagnosticTargetFireState
+    diagnostic_target_fire_state() const noexcept;
 
 private:
     friend struct detail::OmegaAppTestAccess;
@@ -290,8 +295,8 @@ private:
     runtime::RenderTextureHandle diagnostic_texture_;
     runtime::RenderTextureHandle diagnostic_actor_marker_texture_;
     // Allocation-free post-step presentation value. It retains the immutable
-    // base command followed by the actor marker, armed objective marker, and contextual cues
-    // while DiagnosticPlay is active.
+    // base command followed by the actor marker, one objective-or-target marker,
+    // and contextual cues while DiagnosticPlay is active.
     runtime::RenderDrawList diagnostic_actor_draw_list_;
     // Heap-owned presentation storage. Indirection keeps the complete fixed mesh and overlay
     // command backing out of OmegaApp value/expected stack storage; per-frame overlay replacement
@@ -339,6 +344,10 @@ private:
     // Launch-local project diagnostic state. It survives front-end round trips, is never written
     // to native persistence, and latches only from successful DiagnosticPlay simulation steps.
     gameplay::DiagnosticProximityTriggerState diagnostic_proximity_trigger_state_{};
+    // One project-owned target/fire reducer state. Completion is sampled once per host input frame,
+    // commits only after every fixed step succeeds, survives front-end round trips, and has no GPU
+    // or persistence lifetime.
+    gameplay::DiagnosticTargetFireState diagnostic_target_fire_state_{};
     // Contextual native playtest controls. Mouse/keyboard actions update these
     // only when DiagnosticPlay was already active at frame input time, so the
     // same physical controls remain menu select/back aliases without leaking a

@@ -319,6 +319,8 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     const omega::app::RunResult capture_result,
     const omega::runtime::FrameSchedulerState capture_before,
     const omega::runtime::FrameSchedulerState capture_after,
+    const omega::gameplay::DiagnosticTargetFireState
+        capture_diagnostic_target_fire_state,
     const std::size_t front_end_total_profile_count,
     const std::uint8_t front_end_visible_profile_slots,
     const std::array<std::uint8_t, omega::app::kFrontEndVisibleProfiles>&
@@ -343,6 +345,12 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     };
     config.enable_debug_locomotion = std::ranges::includes(
         traces->input_trace().actions(), debug_locomotion_actions);
+    constexpr std::array debug_target_fire_actions{
+        omega::app::kDebugFireAction,
+        omega::app::kDebugTargetAction,
+    };
+    config.enable_debug_target_fire = std::ranges::includes(
+        traces->input_trace().actions(), debug_target_fire_actions);
     if (front_end_total_profile_count > omega::app::kFrontEndMaximumProfiles)
     {
         std::cerr << "runtime capture replay: profile snapshot exceeds the project limit\n";
@@ -417,6 +425,8 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     const auto scheduler = replay.scheduler_state();
     const auto simulation = replay.simulation_state();
     const auto replay_debug_position = replay.debug_locomotion_position();
+    const auto replay_diagnostic_target =
+        replay.diagnostic_target_fire_state();
     const auto replay_front_end = replay.front_end_state();
     if (!scheduler || !simulation || !replay_front_end)
     {
@@ -435,6 +445,16 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     if (*scheduler != capture_after)
     {
         std::cerr << "runtime capture replay: final scheduler states differ\n";
+        return false;
+    }
+    const std::optional<omega::gameplay::DiagnosticTargetFireState>
+        expected_diagnostic_target = config.enable_debug_target_fire
+        ? std::optional<omega::gameplay::DiagnosticTargetFireState>{
+              capture_diagnostic_target_fire_state}
+        : std::nullopt;
+    if (replay_diagnostic_target != expected_diagnostic_target)
+    {
+        std::cerr << "runtime capture replay: final diagnostic target states differ\n";
         return false;
     }
 
@@ -679,7 +699,8 @@ int main(const int argc, char** argv)
             return EXIT_FAILURE;
         }
         if (!ReplayFreshCapture(std::move(*capture), capture_result,
-                capture_before, capture_after, startup_profile_count,
+                capture_before, capture_after,
+                app->diagnostic_target_fire_state(), startup_profile_count,
                 front_end_visible_profile_slots,
                 front_end_visible_character_slots_by_profile,
                 front_end_total_character_counts_by_profile))
