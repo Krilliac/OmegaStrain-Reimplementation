@@ -34,6 +34,15 @@ struct RetailFrontEndPresentationCapabilityTestAccess final
 
 struct FrontEndScreenBundleTestAccess final
 {
+    [[nodiscard]] static FrontEndTextureBinding MakeTexture(
+        asset::IndexedImageIR image,
+        const asset::IndexedImageEncoding sampling_encoding,
+        const FrontEndTextureAlphaMode alpha_mode)
+    {
+        return FrontEndTextureBinding(
+            std::move(image), sampling_encoding, alpha_mode);
+    }
+
     [[nodiscard]] static FrontEndVisualScope MakeScope(
         asset::FrontendVisualDocumentIR document,
         FrontEndVisualScope::ResourceSet resources,
@@ -83,6 +92,7 @@ struct Fixture final
     FrontEndScreenKey key = FrontEndScreenKey::Title;
     bool valid_capability = true;
     bool add_extra_scope = false;
+    bool omit_texture_binding = false;
     omega::asset::FrontendWidgetIR widget;
     omega::asset::FrontendVisualNodeIR visual;
 };
@@ -139,15 +149,20 @@ struct Fixture final
     using omega::content::detail::RetailFrontEndPresentationCapabilityTestAccess;
 
     FrontEndVisualScope::TextureMap textures;
-    if (fixture.visual.texture_member)
+    if (fixture.visual.texture_member && !fixture.omit_texture_binding)
     {
         textures.emplace(*fixture.visual.texture_member,
-            omega::asset::IndexedImageIR{
-                .width = 1U,
-                .height = 1U,
-                .indices = {0U},
-                .palette = {{.red = 1U, .green = 2U, .blue = 3U, .alpha = 128U}},
-            });
+            FrontEndScreenBundleTestAccess::MakeTexture(
+                omega::asset::IndexedImageIR{
+                    .width = 1U,
+                    .height = 1U,
+                    .source_encoding = omega::asset::IndexedImageEncoding::Indexed8,
+                    .indices = {0U},
+                    .palette = {
+                        {.red = 1U, .green = 2U, .blue = 3U, .alpha = 128U}},
+                },
+                omega::asset::IndexedImageEncoding::Indexed8,
+                omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha));
     }
 
     omega::asset::FrontendVisualDocumentIR document{
@@ -186,6 +201,11 @@ void CheckError(const RetailTitleCompositionResult& result,
 
 void TestOwnedCanonicalFrame()
 {
+    static_assert(!std::is_default_constructible_v<omega::content::FrontEndTextureBinding>);
+    static_assert(!std::is_copy_constructible_v<omega::content::FrontEndTextureBinding>);
+    static_assert(std::is_move_constructible_v<omega::content::FrontEndTextureBinding>);
+    static_assert(!std::is_default_constructible_v<
+        omega::content::ResolvedFrontEndTextureBinding>);
     static_assert(std::same_as<decltype(ComposeStaticRetailTitle(
                                    std::declval<const FrontEndScreenBundle&>())),
         RetailTitleCompositionResult>);
@@ -263,6 +283,13 @@ void TestUnprovenSemanticRejections()
     CheckError(ComposeStaticRetailTitle(MakeBundle(std::move(texture))),
         RetailTitleCompositionError::UnsupportedTextureSampling,
         "sampling and address mode are not guessed");
+
+    auto missing_texture = MakeFixture();
+    missing_texture.visual.texture_member = "BOUND.TDX";
+    missing_texture.omit_texture_binding = true;
+    CheckError(ComposeStaticRetailTitle(MakeBundle(std::move(missing_texture))),
+        RetailTitleCompositionError::MissingTextureBinding,
+        "a declared texture without explicit sampling and alpha metadata fails closed");
 
     auto animation = MakeFixture();
     animation.visual.animation_tracks.emplace_back(

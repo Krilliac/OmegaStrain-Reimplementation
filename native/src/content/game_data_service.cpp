@@ -1395,6 +1395,40 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
         return std::move(resolved->terminal_bytes);
     };
 
+    struct RetainedFrontEndTextureMetadata final
+    {
+        asset::IndexedImageEncoding sampling_encoding;
+        FrontEndTextureAlphaMode alpha_mode;
+    };
+    const auto retained_texture_metadata = [](const retail::DecodedFrontEndTdx& decoded)
+        -> asset::DecodeResult<RetainedFrontEndTextureMetadata> {
+        asset::IndexedImageEncoding sampling_encoding;
+        switch (decoded.upload_plan.sampling_format)
+        {
+        case retail::TdxGsPixelStorageFormat::Psmt4:
+            sampling_encoding = asset::IndexedImageEncoding::Indexed4;
+            break;
+        case retail::TdxGsPixelStorageFormat::Psmt8:
+            sampling_encoding = asset::IndexedImageEncoding::Indexed8;
+            break;
+        case retail::TdxGsPixelStorageFormat::Psmct32:
+        default:
+            return std::unexpected(AssetError(asset::DecodeErrorCode::UnsupportedVariant,
+                "front-end texture has no supported indexed sampling format"));
+        }
+        if (decoded.image.source_encoding != sampling_encoding)
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Malformed,
+                "front-end texture sampling metadata is inconsistent"));
+        }
+        return RetainedFrontEndTextureMetadata{
+            .sampling_encoding = sampling_encoding,
+            .alpha_mode = decoded.upload_plan.texture_alpha_enabled
+                ? FrontEndTextureAlphaMode::UsesPaletteAlpha
+                : FrontEndTextureAlphaMode::IgnoresTextureAlpha,
+        };
+    };
+
     auto front_end_bytes = read_direct(
         kFrontEndArchiveGamePath, kFrontEndMaximumAggregateInputBytes);
     if (!front_end_bytes)
@@ -1603,6 +1637,12 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
             return std::unexpected(DecodeFailure(
                 "unable to decode front-end texture", decoded.error()));
         }
+        auto retained_metadata = retained_texture_metadata(*decoded);
+        if (!retained_metadata)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to retain front-end texture", retained_metadata.error()));
+        }
         auto entry_output = FrontEndMapEntryOutputBytes<
             FrontEndScreenBundle::TextureMap>(reference);
         if (!entry_output)
@@ -1624,7 +1664,9 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
             return std::unexpected(DecodeFailure(
                 "unable to retain front-end texture", texture_commit.error()));
         }
-        screen_textures.emplace(reference, std::move(decoded->image));
+        screen_textures.emplace(reference,
+            FrontEndTextureBinding(std::move(decoded->image),
+                retained_metadata->sampling_encoding, retained_metadata->alpha_mode));
     }
 
     FrontEndScreenBundle::VisualScopeMap visual_scopes;
@@ -1793,6 +1835,13 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                 return std::unexpected(DecodeFailure(
                     "unable to decode front-end scoped texture", decoded.error()));
             }
+            auto retained_metadata = retained_texture_metadata(*decoded);
+            if (!retained_metadata)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to retain front-end scoped texture",
+                    retained_metadata.error()));
+            }
             auto entry_output = FrontEndMapEntryOutputBytes<
                 FrontEndVisualScope::TextureMap>(reference);
             if (!entry_output)
@@ -1818,7 +1867,10 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                     "unable to retain front-end scoped texture",
                     texture_commit.error()));
             }
-            scoped_textures.emplace(reference, std::move(decoded->image));
+            scoped_textures.emplace(reference,
+                FrontEndTextureBinding(std::move(decoded->image),
+                    retained_metadata->sampling_encoding,
+                    retained_metadata->alpha_mode));
         }
 
         auto scope_output = FrontEndVisualScopeOutputBytes(scope, resources);
@@ -1961,6 +2013,13 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                 return std::unexpected(DecodeFailure(
                     "unable to decode front-end font atlas", decoded.error()));
             }
+            auto retained_metadata = retained_texture_metadata(*decoded);
+            if (!retained_metadata)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to retain front-end font atlas",
+                    retained_metadata.error()));
+            }
             auto entry_output = FrontEndMapEntryOutputBytes<
                 FrontEndScreenBundle::TextureMap>(reference);
             if (!entry_output)
@@ -1983,7 +2042,10 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                 return std::unexpected(DecodeFailure(
                     "unable to retain front-end font atlas", atlas_commit.error()));
             }
-            font_atlases.emplace(reference, std::move(decoded->image));
+            font_atlases.emplace(reference,
+                FrontEndTextureBinding(std::move(decoded->image),
+                    retained_metadata->sampling_encoding,
+                    retained_metadata->alpha_mode));
         }
     }
 

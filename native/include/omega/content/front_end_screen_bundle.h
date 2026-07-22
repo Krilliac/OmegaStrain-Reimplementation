@@ -7,6 +7,7 @@
 #include "omega/retail/retail_string_table_decoder.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <map>
 #include <optional>
@@ -21,6 +22,27 @@ class GameDataService;
 namespace detail
 {
 struct FrontEndScreenBundleTestAccess;
+
+[[nodiscard]] constexpr bool FrontEndAsciiCaseEqual(
+    const std::string_view left, const std::string_view right) noexcept
+{
+    if (left.size() != right.size())
+        return false;
+    for (std::size_t index = 0; index < left.size(); ++index)
+    {
+        const auto fold = [](const unsigned char value) noexcept {
+            return value >= 'a' && value <= 'z'
+                ? static_cast<unsigned char>(value - ('a' - 'A'))
+                : value;
+        };
+        if (fold(static_cast<unsigned char>(left[index])) !=
+            fold(static_cast<unsigned char>(right[index])))
+        {
+            return false;
+        }
+    }
+    return true;
+}
 }
 
 enum class FrontEndScreenKey
@@ -30,6 +52,69 @@ enum class FrontEndScreenKey
     LoadAgent,
 };
 
+// Proven GS TCC behavior retained at the content/presentation boundary. This
+// is deliberately not a bool: a missing/default value cannot be mistaken for
+// an observed texture that ignores or consumes palette alpha.
+enum class FrontEndTextureAlphaMode : std::uint8_t
+{
+    IgnoresTextureAlpha,
+    UsesPaletteAlpha,
+};
+
+// Fully owned renderer-neutral pixels plus the two proven sampling facts that
+// survive the retail TDX adapter. Addressing, filtering, upload rectangles,
+// GS base pointers, header flags, and palette-transfer state do not cross this
+// boundary. Construction is restricted to the content service and generated
+// tests so every live value has explicit, encoding-consistent metadata. All
+// accessors are [any thread; immutable] while the owning bundle remains live
+// and is not moved concurrently.
+class FrontEndTextureBinding final
+{
+public:
+    FrontEndTextureBinding() = delete;
+    FrontEndTextureBinding(const FrontEndTextureBinding&) = delete;
+    FrontEndTextureBinding& operator=(const FrontEndTextureBinding&) = delete;
+    FrontEndTextureBinding(FrontEndTextureBinding&&) noexcept = default;
+    FrontEndTextureBinding& operator=(FrontEndTextureBinding&&) noexcept = default;
+    ~FrontEndTextureBinding() = default;
+
+    [[nodiscard]] const asset::IndexedImageIR& image() const noexcept { return image_; }
+    [[nodiscard]] asset::IndexedImageEncoding sampling_encoding() const noexcept
+    {
+        return sampling_encoding_;
+    }
+    [[nodiscard]] FrontEndTextureAlphaMode alpha_mode() const noexcept
+    {
+        return alpha_mode_;
+    }
+
+    [[nodiscard]] bool operator==(const FrontEndTextureBinding& other) const noexcept
+    {
+        return image_ == other.image_ && sampling_encoding_ == other.sampling_encoding_ &&
+               alpha_mode_ == other.alpha_mode_;
+    }
+
+private:
+    FrontEndTextureBinding(asset::IndexedImageIR image,
+        const asset::IndexedImageEncoding sampling_encoding,
+        const FrontEndTextureAlphaMode alpha_mode) noexcept
+        : image_(std::move(image)), sampling_encoding_(sampling_encoding),
+          alpha_mode_(alpha_mode)
+    {
+        // A mismatch can only be introduced by content-service code or the
+        // friend test seam, never by owner input after the TDX decoder passed.
+        if (image_.source_encoding != sampling_encoding_)
+            std::terminate();
+    }
+
+    asset::IndexedImageIR image_;
+    asset::IndexedImageEncoding sampling_encoding_;
+    FrontEndTextureAlphaMode alpha_mode_;
+
+    friend class GameDataService;
+    friend struct detail::FrontEndScreenBundleTestAccess;
+};
+
 // One case-insensitive retail visual scope, keyed by its normalized scope name
 // in FrontEndScreenBundle. The decoded document remains fully owned. Only
 // resource identifiers proven reachable from the paired GUI are exposed by
@@ -37,7 +122,7 @@ enum class FrontEndScreenKey
 class FrontEndVisualScope final
 {
 public:
-    using TextureMap = std::map<std::string, asset::IndexedImageIR, std::less<>>;
+    using TextureMap = std::map<std::string, FrontEndTextureBinding, std::less<>>;
     using ResourceSet = std::set<std::string, std::less<>>;
 
     FrontEndVisualScope() = delete;
@@ -53,6 +138,21 @@ public:
     }
     [[nodiscard]] const ResourceSet& resources() const noexcept { return resources_; }
     [[nodiscard]] const TextureMap& textures() const noexcept { return textures_; }
+
+    // [any thread; immutable] Resolves one normalized archive member only
+    // within this exact owning scope. Member matching folds ASCII case like
+    // the frozen archive index; no same-named texture in another scope can
+    // satisfy this lookup.
+    [[nodiscard]] const FrontEndTextureBinding* FindTexture(
+        const std::string_view member) const noexcept
+    {
+        for (const auto& [normalized_member, texture] : textures_)
+        {
+            if (detail::FrontEndAsciiCaseEqual(normalized_member, member))
+                return &texture;
+        }
+        return nullptr;
+    }
 
     // Returns only GUI-bound resources. An identifier with different ASCII
     // case does not match, and an unbound node in the same document is hidden.
@@ -112,6 +212,39 @@ private:
     friend struct detail::FrontEndScreenBundleTestAccess;
 };
 
+// Borrowed result of a scope-qualified lookup. Both the normalized owning
+// scope and texture value remain tied to the immutable live bundle; neither
+// may outlive, race a move of, or outlive destruction of that bundle.
+class ResolvedFrontEndTextureBinding final
+{
+public:
+    ResolvedFrontEndTextureBinding() = delete;
+    ResolvedFrontEndTextureBinding(const ResolvedFrontEndTextureBinding&) noexcept = default;
+    ResolvedFrontEndTextureBinding& operator=(
+        const ResolvedFrontEndTextureBinding&) noexcept = default;
+
+    [[nodiscard]] std::string_view owning_scope() const noexcept
+    {
+        return *owning_scope_;
+    }
+    [[nodiscard]] const FrontEndVisualScope& scope() const noexcept { return *scope_; }
+    [[nodiscard]] const FrontEndTextureBinding& texture() const noexcept { return *texture_; }
+
+private:
+    ResolvedFrontEndTextureBinding(const std::string& owning_scope,
+        const FrontEndVisualScope& scope,
+        const FrontEndTextureBinding& texture) noexcept
+        : owning_scope_(&owning_scope), scope_(&scope), texture_(&texture)
+    {
+    }
+
+    const std::string* owning_scope_;
+    const FrontEndVisualScope* scope_;
+    const FrontEndTextureBinding* texture_;
+
+    friend class FrontEndScreenBundle;
+};
+
 // Fully owned canonical presentation data for one retail front-end screen. The
 // game-data service is the only constructor: ordinary runtime code can consume
 // or move this value, but cannot fabricate retail presentation evidence.
@@ -148,14 +281,8 @@ public:
     [[nodiscard]] const FrontEndVisualScope* FindVisualScope(
         const std::string_view authored_scope) const noexcept
     {
-        if (authored_scope.empty())
-            return &visual_scopes_.find(primary_scope_)->second;
-        for (const auto& [normalized_scope, scope] : visual_scopes_)
-        {
-            if (AsciiCaseEqual(normalized_scope, authored_scope))
-                return &scope;
-        }
-        return nullptr;
+        const auto match = FindVisualScopeEntry(authored_scope);
+        return match == visual_scopes_.end() ? nullptr : &match->second;
     }
 
     // Applies the complete validated decorator lookup rule: empty scope uses
@@ -174,6 +301,48 @@ public:
             : std::string_view(widget.binding->resource_reference);
         return parentless ? scope->FindRootResource(resource)
                           : scope->FindResource(resource);
+    }
+
+    // [any thread; immutable] Resolves one member inside an explicitly selected
+    // authored scope and returns the normalized scope with the texture. Empty
+    // selects the primary scope. This never performs a global same-name lookup.
+    [[nodiscard]] std::optional<ResolvedFrontEndTextureBinding> ResolveTextureBinding(
+        const std::string_view authored_scope,
+        const std::string_view texture_member) const noexcept
+    {
+        const auto match = FindVisualScopeEntry(authored_scope);
+        if (match == visual_scopes_.end())
+            return std::nullopt;
+        const auto* texture = match->second.FindTexture(texture_member);
+        if (texture == nullptr)
+            return std::nullopt;
+        return ResolvedFrontEndTextureBinding(match->first, match->second, *texture);
+    }
+
+    // [any thread; immutable] Resolves the widget's proven visual resource and
+    // then its declared texture in that same owning scope. An untextured
+    // resource, missing metadata, or cross-scope same-name candidate returns no
+    // value.
+    [[nodiscard]] std::optional<ResolvedFrontEndTextureBinding>
+    ResolveVisualTextureBinding(
+        const asset::FrontendWidgetIR& widget, const bool parentless) const noexcept
+    {
+        if (!widget.binding)
+            return std::nullopt;
+        const auto match = FindVisualScopeEntry(widget.binding->scope_reference);
+        if (match == visual_scopes_.end())
+            return std::nullopt;
+        const std::string_view resource = widget.binding->resource_reference.empty()
+            ? std::string_view(widget.identifier)
+            : std::string_view(widget.binding->resource_reference);
+        const auto* visual = parentless ? match->second.FindRootResource(resource)
+                                        : match->second.FindResource(resource);
+        if (visual == nullptr || !visual->texture_member)
+            return std::nullopt;
+        const auto* texture = match->second.FindTexture(*visual->texture_member);
+        if (texture == nullptr)
+            return std::nullopt;
+        return ResolvedFrontEndTextureBinding(match->first, match->second, *texture);
     }
     [[nodiscard]] const TextureMap& screen_textures() const noexcept
     {
@@ -196,14 +365,15 @@ public:
         for (const auto& [normalized_member, font] : fonts_)
         {
             const std::string_view member(normalized_member);
-            if (AsciiCaseEqual(member, reference))
+            if (detail::FrontEndAsciiCaseEqual(member, reference))
                 return &font;
             if (!authored_reference.empty() &&
                 authored_reference.find('.') == std::string_view::npos &&
                 member.size() == authored_reference.size() + suffix.size() &&
-                AsciiCaseEqual(member.substr(0U, authored_reference.size()),
+                detail::FrontEndAsciiCaseEqual(member.substr(0U, authored_reference.size()),
                     authored_reference) &&
-                AsciiCaseEqual(member.substr(authored_reference.size()), suffix))
+                detail::FrontEndAsciiCaseEqual(
+                    member.substr(authored_reference.size()), suffix))
             {
                 return &font;
             }
@@ -223,6 +393,18 @@ public:
     {
         return font_atlases_;
     }
+    // [any thread; immutable] Resolves only within the retained font-archive
+    // atlas domain; visual-scope texture maps are never searched.
+    [[nodiscard]] const FrontEndTextureBinding* ResolveFontAtlas(
+        const retail::FntV3IR& font) const noexcept
+    {
+        for (const auto& [normalized_member, atlas] : font_atlases_)
+        {
+            if (detail::FrontEndAsciiCaseEqual(normalized_member, font.atlas_reference))
+                return &atlas;
+        }
+        return nullptr;
+    }
     [[nodiscard]] const retail::RetailStringTableIR& strings() const noexcept
     {
         return strings_;
@@ -234,25 +416,17 @@ public:
     }
 
 private:
-    [[nodiscard]] static bool AsciiCaseEqual(
-        const std::string_view left, const std::string_view right) noexcept
+    [[nodiscard]] VisualScopeMap::const_iterator FindVisualScopeEntry(
+        const std::string_view authored_scope) const noexcept
     {
-        if (left.size() != right.size())
-            return false;
-        for (std::size_t index = 0; index < left.size(); ++index)
+        if (authored_scope.empty())
+            return visual_scopes_.find(primary_scope_);
+        for (auto match = visual_scopes_.cbegin(); match != visual_scopes_.cend(); ++match)
         {
-            const auto fold = [](const unsigned char value) noexcept {
-                return value >= 'a' && value <= 'z'
-                    ? static_cast<unsigned char>(value - ('a' - 'A'))
-                    : value;
-            };
-            if (fold(static_cast<unsigned char>(left[index])) !=
-                fold(static_cast<unsigned char>(right[index])))
-            {
-                return false;
-            }
+            if (detail::FrontEndAsciiCaseEqual(match->first, authored_scope))
+                return match;
         }
-        return true;
+        return visual_scopes_.end();
     }
 
     FrontEndScreenBundle(FrontEndScreenKey key,

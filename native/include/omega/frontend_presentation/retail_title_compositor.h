@@ -40,6 +40,7 @@ enum class RetailTitleCompositionError : std::uint8_t
     UnsupportedTextEncoding,
     UnsupportedVisualHierarchy,
     UnsupportedAnimation,
+    MissingTextureBinding,
     UnsupportedTextureSampling,
     UnsupportedTransform,
     UnsupportedProjection,

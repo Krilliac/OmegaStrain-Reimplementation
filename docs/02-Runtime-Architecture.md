@@ -377,6 +377,17 @@ state reducer consumes explicit create-agent availability, saved-profile availab
 request; indeterminate availability or a request for a disabled control fails closed, while absence
 of a focus request leaves both controls unfocused instead of inventing a default.
 
+`FrontEndScreenBundle` retains every referenced TDX as a move-only
+`FrontEndTextureBinding`: owned `IndexedImageIR`, an explicit indexed sampling encoding checked
+against that image, and a non-defaultable TCC mode distinguishing palette-alpha use from ignored
+texture alpha. The content boundary deliberately discards upload rectangles, GS base pointers,
+buffer widths, header flags, and palette-transfer fields after decode; it assigns no address or
+filter behavior. Visual texture resolution returns the normalized owning scope together with the
+binding and searches only that scope, so same-named members in different HOGs cannot alias. Font
+atlases use the same metadata-bearing value through their separate font-archive lookup. The static
+title compositor still rejects all textured input and now distinguishes a declared texture whose
+binding is absent from merely unsupported texture sampling; neither case returns a partial frame.
+
 The Windows prelaunch process is deliberately outside the game composition graph.
 `openomega_launcher.exe` owns only owner-data selection, validation, the default-off gamepad
 preference, and starting its adjacent `openomega.exe`. It does not link profiles, gameplay,
