@@ -1645,7 +1645,7 @@ void CheckPersistenceBackedMovieProfileFlow(
         const bool diagnostic_started = OmegaAppTestAccess::ArmNextRunElapsed(
                                             *app, std::chrono::nanoseconds::zero()) &&
             PushKey(SDL_SCANCODE_F1, true) &&
-            RunOneModalFrameWithExactDraws(*app, 2U, context);
+            RunOneModalFrameWithExactDraws(*app, 3U, context);
         Check(diagnostic_started &&
                   OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlay &&
                   OmegaAppTestAccess::ActiveProfile(*app) == *first_profile_id &&
