@@ -16,7 +16,7 @@ namespace
 {
 constexpr double kClipMinimum = -1.0;
 constexpr double kClipSpan = 2.0;
-constexpr double kTileInsetFraction = 0.1;
+constexpr double kDiagnosticInsetFraction = 0.1;
 constexpr float kDiagnosticDepth = 0.5F;
 constexpr std::uint64_t kIndicesPerTriangle = 3U;
 
@@ -39,10 +39,32 @@ struct Projection
     std::array<double, 2> minimum{};
     std::array<double, 2> offsets{};
     double scale = 0.0;
-    double tile_left = 0.0;
-    double tile_bottom = 0.0;
-    double tile_inset = 0.0;
+    double left = 0.0;
+    double bottom = 0.0;
+    double inset = 0.0;
     double usable_span = 0.0;
+};
+
+struct CoordinateBounds
+{
+    std::array<double, 3> minimum{
+        std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity(),
+        std::numeric_limits<double>::infinity()};
+    std::array<double, 3> maximum{-std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
+};
+
+struct ProjectionBasis
+{
+    std::array<std::size_t, 2> axes{};
+    std::array<double, 2> minimum{};
+    std::array<double, 2> extents{};
+};
+
+enum class ProjectionMode
+{
+    ContactSheet,
+    GlobalCoordinates,
 };
 
 [[nodiscard]] bool Add(
@@ -87,6 +109,63 @@ struct Projection
     if (axis == 1U)
         return vertex.y;
     return vertex.z;
+}
+
+void Include(CoordinateBounds& bounds, const asset::Float3IR& vertex) noexcept
+{
+    for (std::size_t axis = 0U; axis < bounds.minimum.size(); ++axis)
+    {
+        const double value = Coordinate(vertex, axis);
+        bounds.minimum[axis] = std::min(bounds.minimum[axis], value);
+        bounds.maximum[axis] = std::max(bounds.maximum[axis], value);
+    }
+}
+
+[[nodiscard]] CoordinateBounds MeasureBounds(const asset::SpatialMeshIR& mesh) noexcept
+{
+    CoordinateBounds bounds;
+    for (const asset::Float3IR& vertex : mesh.vertices)
+        Include(bounds, vertex);
+    return bounds;
+}
+
+[[nodiscard]] CoordinateBounds MeasureBounds(const asset::LevelSpatialIR& spatial) noexcept
+{
+    CoordinateBounds bounds;
+    for (const asset::SpatialMeshIR& mesh : spatial.terrain_cells)
+    {
+        if (mesh.triangles.empty())
+            continue;
+        for (const asset::Float3IR& vertex : mesh.vertices)
+            Include(bounds, vertex);
+    }
+    return bounds;
+}
+
+[[nodiscard]] ProjectionBasis SelectProjectionBasis(const CoordinateBounds& bounds) noexcept
+{
+    std::array<double, 3> extents{};
+    for (std::size_t axis = 0U; axis < extents.size(); ++axis)
+        extents[axis] = bounds.maximum[axis] - bounds.minimum[axis];
+
+    std::array<std::size_t, 3> axes{0U, 1U, 2U};
+    for (std::size_t left = 0U; left < axes.size(); ++left)
+    {
+        std::size_t best = left;
+        for (std::size_t right = left + 1U; right < axes.size(); ++right)
+        {
+            if (extents[axes[right]] > extents[axes[best]] ||
+                (extents[axes[right]] == extents[axes[best]] && axes[right] < axes[best]))
+                best = right;
+        }
+        if (best != left)
+            std::swap(axes[left], axes[best]);
+    }
+    return ProjectionBasis{
+        .axes = {axes[0], axes[1]},
+        .minimum = {bounds.minimum[axes[0]], bounds.minimum[axes[1]]},
+        .extents = {extents[axes[0]], extents[axes[1]]},
+    };
 }
 
 [[nodiscard]] std::expected<ScenePlan, std::string> Preflight(
@@ -178,64 +257,25 @@ struct Projection
     return plan;
 }
 
-[[nodiscard]] Projection MakeProjection(const asset::SpatialMeshIR& mesh,
-    const std::size_t cell_index, const std::uint32_t side_tiles) noexcept
+[[nodiscard]] Projection FitProjection(const ProjectionBasis& basis, const double left,
+    const double bottom, const double inset, const double usable_span) noexcept
 {
-    std::array minimum{
-        std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity(),
-        std::numeric_limits<double>::infinity()};
-    std::array maximum{-std::numeric_limits<double>::infinity(),
-        -std::numeric_limits<double>::infinity(),
-        -std::numeric_limits<double>::infinity()};
-    for (const asset::Float3IR& vertex : mesh.vertices)
-    {
-        for (std::size_t axis = 0U; axis < minimum.size(); ++axis)
-        {
-            const double value = Coordinate(vertex, axis);
-            minimum[axis] = std::min(minimum[axis], value);
-            maximum[axis] = std::max(maximum[axis], value);
-        }
-    }
-
-    std::array<double, 3> extents{};
-    for (std::size_t axis = 0U; axis < extents.size(); ++axis)
-        extents[axis] = maximum[axis] - minimum[axis];
-    std::array<std::size_t, 3> axes{0U, 1U, 2U};
-    for (std::size_t left = 0U; left < axes.size(); ++left)
-    {
-        std::size_t best = left;
-        for (std::size_t right = left + 1U; right < axes.size(); ++right)
-        {
-            if (extents[axes[right]] > extents[axes[best]] ||
-                (extents[axes[right]] == extents[axes[best]] && axes[right] < axes[best]))
-                best = right;
-        }
-        if (best != left)
-            std::swap(axes[left], axes[best]);
-    }
-
-    const double tile_span = kClipSpan / static_cast<double>(side_tiles);
-    const double tile_inset = tile_span * kTileInsetFraction;
-    const double usable_span = tile_span - 2.0 * tile_inset;
-    const std::uint64_t column = static_cast<std::uint64_t>(cell_index) % side_tiles;
-    const std::uint64_t row = static_cast<std::uint64_t>(cell_index) / side_tiles;
     Projection projection{
-        .axes = {axes[0], axes[1]},
-        .minimum = {minimum[axes[0]], minimum[axes[1]]},
-        .tile_left = kClipMinimum + static_cast<double>(column) * tile_span,
-        .tile_bottom = 1.0 - static_cast<double>(row + 1U) * tile_span,
-        .tile_inset = tile_inset,
+        .axes = basis.axes,
+        .minimum = basis.minimum,
+        .left = left,
+        .bottom = bottom,
+        .inset = inset,
         .usable_span = usable_span,
     };
-    const std::array projected_extents{extents[axes[0]], extents[axes[1]]};
-    const double largest_extent = std::max(projected_extents[0], projected_extents[1]);
+    const double largest_extent = std::max(basis.extents[0], basis.extents[1]);
     if (largest_extent > 0.0)
     {
         projection.scale = usable_span / largest_extent;
         for (std::size_t axis = 0U; axis < projection.offsets.size(); ++axis)
         {
             projection.offsets[axis] =
-                (usable_span - projected_extents[axis] * projection.scale) * 0.5;
+                (usable_span - basis.extents[axis] * projection.scale) * 0.5;
         }
     }
     else
@@ -243,6 +283,26 @@ struct Projection
         projection.offsets = {usable_span * 0.5, usable_span * 0.5};
     }
     return projection;
+}
+
+[[nodiscard]] Projection MakeContactSheetProjection(const asset::SpatialMeshIR& mesh,
+    const std::size_t cell_index, const std::uint32_t side_tiles) noexcept
+{
+    const double tile_span = kClipSpan / static_cast<double>(side_tiles);
+    const double tile_inset = tile_span * kDiagnosticInsetFraction;
+    const std::uint64_t column = static_cast<std::uint64_t>(cell_index) % side_tiles;
+    const std::uint64_t row = static_cast<std::uint64_t>(cell_index) / side_tiles;
+    return FitProjection(SelectProjectionBasis(MeasureBounds(mesh)),
+        kClipMinimum + static_cast<double>(column) * tile_span,
+        1.0 - static_cast<double>(row + 1U) * tile_span, tile_inset,
+        tile_span - 2.0 * tile_inset);
+}
+
+[[nodiscard]] Projection MakeGlobalProjection(const asset::LevelSpatialIR& spatial) noexcept
+{
+    const double inset = kClipSpan * kDiagnosticInsetFraction;
+    return FitProjection(SelectProjectionBasis(MeasureBounds(spatial)), kClipMinimum,
+        kClipMinimum, inset, kClipSpan - 2.0 * inset);
 }
 
 [[nodiscard]] asset::Float3IR Project(
@@ -258,15 +318,15 @@ struct Projection
         fitted[axis] = std::clamp(fitted[axis], 0.0, projection.usable_span);
     }
     return asset::Float3IR{
-        .x = static_cast<float>(projection.tile_left + projection.tile_inset + fitted[0]),
-        .y = static_cast<float>(projection.tile_bottom + projection.tile_inset + fitted[1]),
+        .x = static_cast<float>(projection.left + projection.inset + fitted[0]),
+        .y = static_cast<float>(projection.bottom + projection.inset + fitted[1]),
         .z = kDiagnosticDepth,
     };
 }
-} // namespace
 
-std::expected<asset::SceneIR, std::string> BuildSpatialDiagnosticScene(
-    const asset::LevelSpatialIR& spatial, const SpatialDiagnosticSceneLimits& limits)
+[[nodiscard]] std::expected<asset::SceneIR, std::string> BuildProjectedScene(
+    const asset::LevelSpatialIR& spatial, const SpatialDiagnosticSceneLimits& limits,
+    const ProjectionMode mode)
 {
     auto planned = Preflight(spatial, limits);
     if (!planned)
@@ -283,6 +343,10 @@ std::expected<asset::SceneIR, std::string> BuildSpatialDiagnosticScene(
         render_mesh.triangle_indices.reserve(
             static_cast<std::size_t>(planned->output_triangle_indices));
 
+        const Projection global_projection = mode == ProjectionMode::GlobalCoordinates
+                                                 ? MakeGlobalProjection(spatial)
+                                                 : Projection{};
+
         for (std::size_t cell_index = 0U; cell_index < spatial.terrain_cells.size();
              ++cell_index)
         {
@@ -290,7 +354,10 @@ std::expected<asset::SceneIR, std::string> BuildSpatialDiagnosticScene(
             if (mesh.triangles.empty())
                 continue;
 
-            const Projection projection = MakeProjection(mesh, cell_index, planned->side_tiles);
+            const Projection projection = mode == ProjectionMode::GlobalCoordinates
+                                              ? global_projection
+                                              : MakeContactSheetProjection(
+                                                    mesh, cell_index, planned->side_tiles);
             const auto position_base = static_cast<std::uint32_t>(render_mesh.positions.size());
             for (const asset::Float3IR& vertex : mesh.vertices)
                 render_mesh.positions.push_back(Project(vertex, projection));
@@ -316,5 +383,18 @@ std::expected<asset::SceneIR, std::string> BuildSpatialDiagnosticScene(
         return std::unexpected("spatial diagnostic scene exceeds host container capacity");
     }
     return scene;
+}
+} // namespace
+
+std::expected<asset::SceneIR, std::string> BuildSpatialDiagnosticScene(
+    const asset::LevelSpatialIR& spatial, const SpatialDiagnosticSceneLimits& limits)
+{
+    return BuildProjectedScene(spatial, limits, ProjectionMode::ContactSheet);
+}
+
+std::expected<asset::SceneIR, std::string> BuildGlobalSpatialDiagnosticScene(
+    const asset::LevelSpatialIR& spatial, const SpatialDiagnosticSceneLimits& limits)
+{
+    return BuildProjectedScene(spatial, limits, ProjectionMode::GlobalCoordinates);
 }
 } // namespace omega::runtime

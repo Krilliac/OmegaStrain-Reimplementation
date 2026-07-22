@@ -41,6 +41,18 @@ All source vertices and triangle indices are validated before allocation. Aggreg
 rebasing, host capacity, and logical output bytes are bounded. Triangle-free cells still consume
 the inspection limits and participate in the source-order grid.
 
+`BuildGlobalSpatialDiagnosticScene` is a second, opt-in diagnostic adapter. Instead of assigning
+independent contact-sheet tiles, it measures the union of triangle-bearing decoded-cell vertices,
+selects the two largest aggregate coordinate extents with the same X-then-Y-then-Z tie-break, and
+uniformly fits that one projection into the project clip volume. Consequently, relative offsets and
+scale along the selected axes survive normalization. Triangle-free cells remain fully validated and
+consume inspection budgets, but do not distort a projection for geometry they do not publish.
+
+"Global" means only that the diagnostic uses one shared decoded coordinate domain. It does not
+establish that cell coordinates are retail world placement, assign semantic names or handedness to
+the selected axes, or infer retail camera, visibility, winding, collision, material, or draw-order
+behavior.
+
 ## Consequences
 
 - Project-authored geometry and future evidence-backed importers can target the same small owned
@@ -49,6 +61,8 @@ the inspection limits and participate in the source-order grid.
   conversion stays at the platform boundary.
 - Diagnostic images and native indexed geometry can share observable source-order and axis-selection
   behavior without claiming that the contact sheet represents retail world space.
+- The global diagnostic can expose decoded inter-cell coordinate relationships without promoting
+  those relationships to retail placement or axis semantics.
 - Retail placement, visibility, camera, materials, and draw submission remain separately gated by
   clean-room evidence.
 
