@@ -6,21 +6,38 @@
 #include <optional>
 #include <string>
 #include <utility>
-#include <vector>
 
 namespace omega::runtime
 {
 namespace
 {
-[[nodiscard]] asset::DecodeError Error(
+[[nodiscard]] asset::ModelIrError Error(
     const asset::DecodeErrorCode code, std::string message,
     const std::optional<std::uint64_t> item_index = std::nullopt)
 {
-    return asset::DecodeError{
+    return asset::ModelIrError{
         .code = code,
-        .byte_offset = item_index,
+        .item_index = item_index,
         .message = std::move(message),
     };
+}
+
+[[nodiscard]] bool Add(
+    const std::uint64_t left, const std::uint64_t right, std::uint64_t& result) noexcept
+{
+    if (right > std::numeric_limits<std::uint64_t>::max() - left)
+        return false;
+    result = left + right;
+    return true;
+}
+
+[[nodiscard]] bool Multiply(
+    const std::uint64_t left, const std::uint64_t right, std::uint64_t& result) noexcept
+{
+    if (left != 0 && right > std::numeric_limits<std::uint64_t>::max() / left)
+        return false;
+    result = left * right;
+    return true;
 }
 
 [[nodiscard]] bool IsFiniteMatrix(const asset::Matrix4x4IR& matrix) noexcept
@@ -36,8 +53,9 @@ namespace
 // Mirrors the finite-checked composition used by omega::runtime::ComposeObjectToClip
 // (scene_transform.cpp): standard row-major 4x4 product, rejecting a non-finite or
 // out-of-float-range accumulator before it is ever narrowed back to float.
-[[nodiscard]] asset::DecodeResult<asset::Matrix4x4IR> MultiplyFinite(
-    const asset::Matrix4x4IR& left, const asset::Matrix4x4IR& right)
+[[nodiscard]] asset::ModelIrResult<asset::Matrix4x4IR> MultiplyFinite(
+    const asset::Matrix4x4IR& left, const asset::Matrix4x4IR& right,
+    const std::size_t joint_index)
 {
     asset::Matrix4x4IR result;
     constexpr double float_max = static_cast<double>(std::numeric_limits<float>::max());
@@ -54,7 +72,7 @@ namespace
             if (!std::isfinite(value) || value > float_max || value < -float_max)
             {
                 return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-                    "model pose composition produced a non-finite transform"));
+                    "model pose composition produced a non-finite transform", joint_index));
             }
             result.row_major[(row * 4) + column] = static_cast<float>(value);
         }
@@ -62,12 +80,13 @@ namespace
     return result;
 }
 
-[[nodiscard]] asset::DecodeResult<asset::WorldPoseIR> EvaluateLocalTransforms(
-    const asset::SkeletonIR& skeleton, const std::vector<asset::Matrix4x4IR>& local_transforms,
-    const asset::DecodeLimits& limits)
+template <typename LocalTransformAt>
+[[nodiscard]] asset::ModelIrResult<asset::GlobalPoseIR> EvaluateLocalTransforms(
+    const asset::SkeletonIR& skeleton, const std::size_t local_transform_count,
+    LocalTransformAt&& local_transform_at, const asset::DecodeLimits& limits)
 {
     const std::size_t joint_count = skeleton.joints.size();
-    if (local_transforms.size() != joint_count)
+    if (local_transform_count != joint_count)
     {
         return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
             "pose joint-transform count does not match the skeleton joint count"));
@@ -78,34 +97,46 @@ namespace
             "skeleton joint count exceeds the fixed evaluation ceiling"));
     }
 
-    const auto item_count = static_cast<std::uint64_t>(joint_count) + 1U; // root
+    std::uint64_t item_count = 0;
+    if (!Add(1, joint_count, item_count))
+    {
+        return std::unexpected(
+            Error(asset::DecodeErrorCode::Overflow, "pose evaluation item count overflows"));
+    }
     if (item_count > limits.maximum_items)
     {
         return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
             "pose evaluation exceeds the caller item budget"));
     }
-    const auto output_bytes =
-        static_cast<std::uint64_t>(joint_count) * sizeof(asset::Matrix4x4IR);
+
+    std::uint64_t transform_bytes = 0;
+    std::uint64_t output_bytes = sizeof(asset::GlobalPoseIR);
+    if (!Multiply(joint_count, sizeof(asset::Matrix4x4IR), transform_bytes) ||
+        !Add(output_bytes, transform_bytes, output_bytes))
+    {
+        return std::unexpected(
+            Error(asset::DecodeErrorCode::Overflow, "pose evaluation output size overflows"));
+    }
     if (output_bytes > limits.maximum_output_bytes)
     {
         return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
             "pose evaluation exceeds the caller output-byte budget"));
     }
 
-    asset::WorldPoseIR world_pose;
-    world_pose.joint_world_transforms.reserve(joint_count);
+    asset::GlobalPoseIR global_pose;
+    global_pose.joint_global_transforms.reserve(joint_count);
     for (std::size_t index = 0; index < joint_count; ++index)
     {
         const asset::JointIR& joint = skeleton.joints[index];
-        const asset::Matrix4x4IR& local = local_transforms[index];
+        const asset::Matrix4x4IR& local = local_transform_at(index);
         if (!IsFiniteMatrix(local))
         {
-            return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-                "pose local transform is not finite", index));
+            return std::unexpected(Error(
+                asset::DecodeErrorCode::Malformed, "pose local transform is not finite", index));
         }
         if (!joint.parent_index.has_value())
         {
-            world_pose.joint_world_transforms.push_back(local);
+            global_pose.joint_global_transforms.push_back(local);
             continue;
         }
 
@@ -115,29 +146,34 @@ namespace
             return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
                 "joint parent_index does not strictly precede its own index", index));
         }
-        auto composed = MultiplyFinite(world_pose.joint_world_transforms[parent_index], local);
+        auto composed = MultiplyFinite(
+            global_pose.joint_global_transforms[parent_index], local, index);
         if (!composed)
             return std::unexpected(composed.error());
-        world_pose.joint_world_transforms.push_back(*composed);
+        global_pose.joint_global_transforms.push_back(*composed);
     }
-    return world_pose;
+    return global_pose;
 }
 } // namespace
 
-asset::DecodeResult<asset::WorldPoseIR> EvaluateBindPose(
+asset::ModelIrResult<asset::GlobalPoseIR> EvaluateBindPose(
     const asset::SkeletonIR& skeleton, const asset::DecodeLimits& limits)
 {
-    std::vector<asset::Matrix4x4IR> local_transforms;
-    local_transforms.reserve(skeleton.joints.size());
-    for (const asset::JointIR& joint : skeleton.joints)
-        local_transforms.push_back(joint.local_bind_transform);
-    return EvaluateLocalTransforms(skeleton, local_transforms, limits);
+    return EvaluateLocalTransforms(skeleton, skeleton.joints.size(),
+        [&skeleton](const std::size_t index) -> const asset::Matrix4x4IR& {
+            return skeleton.joints[index].local_bind_transform;
+        },
+        limits);
 }
 
-asset::DecodeResult<asset::WorldPoseIR> EvaluatePose(
+asset::ModelIrResult<asset::GlobalPoseIR> EvaluatePose(
     const asset::SkeletonIR& skeleton, const asset::PoseIR& pose,
     const asset::DecodeLimits& limits)
 {
-    return EvaluateLocalTransforms(skeleton, pose.joint_local_transforms, limits);
+    return EvaluateLocalTransforms(skeleton, pose.joint_local_transforms.size(),
+        [&pose](const std::size_t index) -> const asset::Matrix4x4IR& {
+            return pose.joint_local_transforms[index];
+        },
+        limits);
 }
 } // namespace omega::runtime
