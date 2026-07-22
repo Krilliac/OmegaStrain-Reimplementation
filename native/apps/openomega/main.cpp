@@ -614,6 +614,11 @@ int main(const int argc, char** argv)
     {
         options->data_root = (*content_profile)->data_root;
         options->level_code = (*content_profile)->level_code;
+        if (!options->opening_movie_path && !options->opening_movie_member)
+        {
+            options->opening_movie_member =
+                (*content_profile)->opening_movie_member;
+        }
     }
 
     auto startup = omega::runtime::StartContent(*options);
