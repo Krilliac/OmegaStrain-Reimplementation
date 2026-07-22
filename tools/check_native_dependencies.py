@@ -266,9 +266,13 @@ _RETAIL_EDGES = frozenset({"omega_retail_formats", "omega_assets", "omega_core"}
 _FRONTEND_TEXT_EDGES = frozenset(
     {"omega_frontend_text", "omega_retail_formats"}
 )
+_FRONTEND_TRIANGLE_KERNEL_EDGES = frozenset(
+    {"omega_frontend_triangle_kernel"}
+)
 _FRONTEND_PRESENTATION_EDGES = frozenset(
     {
         "omega_frontend_presentation",
+        "omega_frontend_triangle_kernel",
         "omega_assets",
         "omega_content",
         "omega_frontend",
@@ -480,6 +484,18 @@ MODULE_RULES = (
 )
 
 EXACT_MODULE_RULES = {
+    "native/include/omega/frontend_presentation/screen_space_triangle_kernel.h": ModuleRule(
+        "native/include/omega/frontend_presentation/screen_space_triangle_kernel.h",
+        "omega_frontend_triangle_kernel",
+        _FRONTEND_TRIANGLE_KERNEL_EDGES,
+        platform_neutral=True,
+    ),
+    "native/src/frontend_presentation/screen_space_triangle_kernel.cpp": ModuleRule(
+        "native/src/frontend_presentation/screen_space_triangle_kernel.cpp",
+        "omega_frontend_triangle_kernel",
+        _FRONTEND_TRIANGLE_KERNEL_EDGES,
+        platform_neutral=True,
+    ),
     "native/apps/openomega_launcher/launcher_config.cpp": ModuleRule(
         "native/apps/openomega_launcher/launcher_config.cpp",
         "omega_launcher_core",
@@ -537,6 +553,9 @@ PROJECT_HEADER_MODULES = (
     ("omega/vfs/", "omega_core"),
 )
 EXACT_PROJECT_HEADER_MODULES = {
+    "omega/frontend_presentation/screen_space_triangle_kernel.h": (
+        "omega_frontend_triangle_kernel"
+    ),
     "omega/debug/subsystem_entry_break.h": "omega_debug",
     "omega/asset/pop_terrain_index.h": "omega_core",
 }

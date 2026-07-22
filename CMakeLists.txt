@@ -153,6 +153,12 @@ target_include_directories(omega_frontend_text PUBLIC native/include)
 target_link_libraries(omega_frontend_text PUBLIC omega_retail_formats)
 target_compile_features(omega_frontend_text PUBLIC cxx_std_23)
 
+add_library(omega_frontend_triangle_kernel STATIC
+    native/src/frontend_presentation/screen_space_triangle_kernel.cpp
+)
+target_include_directories(omega_frontend_triangle_kernel PUBLIC native/include)
+target_compile_features(omega_frontend_triangle_kernel PUBLIC cxx_std_23)
+
 add_library(omega_content STATIC
     native/src/content/game_data_service.cpp
     native/src/content/level_texture_store.cpp
@@ -3136,6 +3142,35 @@ if(BUILD_TESTING)
     add_test(NAME omega_frontend_texture_sampler_tests
         COMMAND omega_frontend_texture_sampler_tests)
     set_tests_properties(omega_frontend_texture_sampler_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_frontend_triangle_kernel_tests
+        native/tests/screen_space_triangle_kernel_tests.cpp
+    )
+    target_link_libraries(omega_frontend_triangle_kernel_tests PRIVATE
+        omega_frontend_triangle_kernel
+    )
+    target_compile_features(omega_frontend_triangle_kernel_tests PRIVATE cxx_std_23)
+    if(MSVC)
+        target_compile_options(omega_frontend_triangle_kernel_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_frontend_triangle_kernel_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_frontend_triangle_kernel_tests
+        COMMAND omega_frontend_triangle_kernel_tests)
+    set_tests_properties(omega_frontend_triangle_kernel_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_lpd_envelope_decoder_tests
         native/tests/lpd_envelope_decoder_tests.cpp

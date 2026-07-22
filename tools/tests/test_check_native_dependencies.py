@@ -669,6 +669,7 @@ class NativeDependencyGateTests(unittest.TestCase):
         expected_edges = frozenset(
             {
                 "omega_frontend_presentation",
+                "omega_frontend_triangle_kernel",
                 "omega_assets",
                 "omega_content",
                 "omega_frontend",
@@ -693,6 +694,57 @@ class NativeDependencyGateTests(unittest.TestCase):
                 )
         self.assert_rejected(
             "native/src/frontend_presentation/example.cpp",
+            "#include <windows.h>\n",
+            "unapproved external header",
+        )
+
+    def test_frontend_triangle_kernel_is_a_pure_leaf_target(self) -> None:
+        header_path = (
+            "native/include/omega/frontend_presentation/"
+            "screen_space_triangle_kernel.h"
+        )
+        source_path = (
+            "native/src/frontend_presentation/screen_space_triangle_kernel.cpp"
+        )
+        checked, errors = self.check_sources(
+            {
+                header_path: "#pragma once\n#include <span>\n",
+                source_path: (
+                    '#include "omega/frontend_presentation/'
+                    'screen_space_triangle_kernel.h"\n'
+                    "#include <array>\n"
+                ),
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(errors, [])
+
+        header_rule = gate.module_rule(Path(header_path))
+        source_rule = gate.module_rule(Path(source_path))
+        self.assertIsNotNone(header_rule)
+        self.assertIsNotNone(source_rule)
+        expected_edges = frozenset({"omega_frontend_triangle_kernel"})
+        self.assertEqual(header_rule.name, "omega_frontend_triangle_kernel")
+        self.assertEqual(source_rule.name, "omega_frontend_triangle_kernel")
+        self.assertEqual(header_rule.allowed_omega_modules, expected_edges)
+        self.assertEqual(source_rule.allowed_omega_modules, expected_edges)
+        self.assertTrue(header_rule.platform_neutral)
+        self.assertTrue(source_rule.platform_neutral)
+
+        for include, message in (
+            ("omega/asset/frontend_ir.h", "forbidden dependency"),
+            ("omega/frontend/compositor_math.h", "forbidden dependency"),
+            ("omega/content/game_data_service.h", "forbidden dependency"),
+            ("pcsx2/GS/GS.h", "forbidden PCSX2 header"),
+        ):
+            with self.subTest(include=include):
+                self.assert_rejected(
+                    source_path,
+                    f'#include "{include}"\n',
+                    message,
+                )
+        self.assert_rejected(
+            source_path,
             "#include <windows.h>\n",
             "unapproved external header",
         )
