@@ -42,13 +42,22 @@ validates content and returns without touching native persistence. Owner-supplie
 outside this archive and can be selected with the documented `--data-root` and optional `--level`
 arguments or configuration.
 
-Interactive startup uses a project-generated native Main screen with Start Diagnostic, Profiles,
-Controls, and Asset Topology rows. Use W/S, Up/Down, or the gamepad D-pad to navigate; F1, Enter,
-keypad Enter, gamepad Start, or gamepad South confirms. Backspace or gamepad East returns from a
-subscreen, while Escape or gamepad Back quits. Profiles are a bounded read-only startup snapshot:
-choosing a populated slot selects it only for the current process and never creates, updates,
-imports, exports, or persists a profile. The screen and its controls are development-shell policy,
-not reproduced retail artwork or a retail-behavior claim.
+Interactive startup opens the project-generated Profiles screen. Durable profile confirmation
+opens Characters, durable character confirmation opens BriefingRoom, and its mission row enters
+DiagnosticPlay. The native Main screen remains available through cancel navigation with Start
+Diagnostic, Profiles, Controls, and Asset Topology rows. Keyboard and mouse provide the complete
+default route: use
+W/A/S/D or the arrow keys to navigate and move; F1, Enter, keypad Enter, Space, or LMB confirms;
+Space or LMB fires in DiagnosticPlay; Escape, Backspace, or RMB returns from a modal screen; T or
+held RMB targets in DiagnosticPlay; and F10 quits. Target and fire cues follow the latest valid
+normalized mouse position and use target center while no pointer sample is available. The SDL
+gamepad subsystem is not initialized unless `--set=input.gamepad_enabled=true` explicitly opts into
+optional button and D-pad aliases. The empty Profiles and Characters screens can create the fixed
+project-owned `PROFILE 1` and `DIAGNOSTIC CHARACTER` records, persist them transactionally, and
+confirm them in separate steps before entering BriefingRoom. No arbitrary naming, editing,
+importing, exporting, or retail slot semantics are implemented. The screens and controls are
+development-shell policy, not reproduced retail artwork, mouse behavior, combat behavior, or a
+retail-parity claim.
 
 The adjacent `.zip.sha256` file records the archive's SHA-256 digest for integrity checks. This preview is not code-signed
 and may trigger Windows reputation warnings. It is an early native clean-room runtime, not a claim

@@ -147,9 +147,12 @@ private:
     // [game/main/render thread; no concurrent use] Atomically rebuilds fixed CPU
     // texture fallback/overlay commands and, when a scene is resident, the
     // environment-plus-actor mesh commands for the final post-step position.
-    // All texture and mesh resources remain immutable and resident.
+    // Target/fire cues use the current normalized host pointer sample, with a
+    // deterministic center fallback. All texture and mesh resources remain
+    // immutable and resident.
     [[nodiscard]] std::expected<void, std::string>
-    RefreshDiagnosticActorDrawList();
+    RefreshDiagnosticActorDrawList(
+        const std::optional<runtime::PointerPositionQ16>& pointer_position);
     [[nodiscard]] const runtime::RenderDrawList& CurrentFrontEndDrawList() const noexcept;
     [[nodiscard]] runtime::RenderMeshDrawList CurrentFrontEndMeshDrawList() const noexcept;
 

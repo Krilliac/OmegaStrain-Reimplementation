@@ -25,6 +25,7 @@ using omega::runtime::InputEvent;
 using omega::runtime::InputSnapshot;
 using omega::runtime::InputTraceErrorCode;
 using omega::runtime::InputTracker;
+using omega::runtime::PointerPositionQ16;
 using omega::runtime::RunCaptureSession;
 using omega::runtime::RunCaptureSessionConfig;
 using omega::runtime::RunCaptureSessionError;
@@ -164,7 +165,7 @@ void CheckContract()
     Check(omega::runtime::kMaximumRunCaptureSessionFrames == 65'536U,
         "the run-capture session frame maximum is fixed");
     Check(omega::runtime::kMaximumRunCaptureSessionElementPayloadBytes ==
-              2'621'696U,
+              3'145'984U,
         "the hard-maximum combined element payload is exact");
     Check(RunCaptureSessionConfig{}.maximum_frames == 0U &&
               RunCaptureSessionConfig{}.first_frame_index == 0U,
@@ -352,12 +353,13 @@ void CheckEmptyFinish()
 [[nodiscard]] RunCaptureTracePair BuildNormalPair()
 {
     constexpr std::array<std::uint32_t, 2U> actions{10U, 20U};
+    constexpr PointerPositionQ16 pointer{.x = 1'234U, .y = 56'789U};
     InputTracker tracker = MakeTracker(actions);
     auto created = RunCaptureSession::Create(
-        RunCaptureSessionConfig{.maximum_frames = 2U}, actions);
+        RunCaptureSessionConfig{.maximum_frames = 3U}, actions);
     RunCaptureSession session = TakeSession(created, "the normal session is created");
 
-    if (!Push(tracker, 0U, true))
+    if (!tracker.SetPointerPosition(pointer) || !Push(tracker, 0U, true))
         std::abort();
     const InputSnapshot first = tracker.EndFrame();
     if (!session.AppendInput(first) || !session.AppendElapsed(nanoseconds{-7}))
@@ -372,6 +374,11 @@ void CheckEmptyFinish()
         std::abort();
     }
 
+    tracker.ClearPointerPosition();
+    const InputSnapshot third = tracker.EndFrame();
+    if (!session.AppendInput(third) || !session.AppendElapsed(nanoseconds{0}))
+        std::abort();
+
     auto finished = std::move(session).Finish();
     return TakePair(finished, "the normal session finishes");
 }
@@ -382,23 +389,31 @@ void CheckNormalPair()
     const auto& input = pair.input_trace();
     const auto& elapsed = pair.scheduler_elapsed_trace();
     Check(input.first_frame_index() == 0U && elapsed.first_frame_index() == 0U &&
-              input.maximum_frames() == 2U && elapsed.maximum_frames() == 2U &&
-              input.frame_count() == 2U && elapsed.frame_count() == 2U &&
-              !pair.terminal_input(),
+               input.maximum_frames() == 3U && elapsed.maximum_frames() == 3U &&
+               input.frame_count() == 3U && elapsed.frame_count() == 3U &&
+               !pair.terminal_input(),
         "a normal pair exposes equal aligned trace counts and no terminal");
-    Check(input.ActionAt(0U, 10U) && input.ActionAt(0U, 10U)->held &&
+    constexpr PointerPositionQ16 pointer{.x = 1'234U, .y = 56'789U};
+    Check(input.PointerAt(0U) == pointer && input.ActionAt(0U, 10U) &&
+              input.ActionAt(0U, 10U)->held &&
               input.ActionAt(0U, 10U)->pressed &&
               !input.ActionAt(0U, 10U)->released &&
               elapsed.FrameAt(0U) &&
               elapsed.FrameAt(0U)->frame_index == 0U &&
               elapsed.FrameAt(0U)->elapsed == nanoseconds{-7},
-        "the first logical snapshot and exact signed elapsed value remain paired");
-    Check(input.ActionAt(1U, 10U) && !input.ActionAt(1U, 10U)->held &&
+        "the first logical snapshot, pointer, and exact signed elapsed value remain paired");
+    Check(input.PointerAt(1U) == pointer && input.ActionAt(1U, 10U) &&
+              !input.ActionAt(1U, 10U)->held &&
               input.ActionAt(1U, 10U)->released && input.ActionAt(1U, 20U) &&
               input.ActionAt(1U, 20U)->pressed && elapsed.FrameAt(1U) &&
               elapsed.FrameAt(1U)->frame_index == 1U &&
               elapsed.FrameAt(1U)->elapsed == nanoseconds::max(),
-        "the second logical snapshot and representation-limit elapsed stay aligned");
+        "the second snapshot preserves the pointer and representation-limit elapsed");
+    Check(!input.PointerAt(2U) && input.ActionAt(2U, 20U) &&
+              input.ActionAt(2U, 20U)->held && elapsed.FrameAt(2U) &&
+              elapsed.FrameAt(2U)->frame_index == 2U &&
+              elapsed.FrameAt(2U)->elapsed == nanoseconds{0},
+        "the third paired snapshot preserves explicit pointer clearing");
 }
 
 [[nodiscard]] RunCaptureTracePair BuildTerminalPair(const std::size_t prior_pairs,
@@ -657,6 +672,8 @@ void CheckTwoRunDeterminism()
     {
         identical = first.input_trace().FrameAt(index) ==
                         second.input_trace().FrameAt(index) &&
+                    first.input_trace().PointerAt(index) ==
+                        second.input_trace().PointerAt(index) &&
                     first.scheduler_elapsed_trace().FrameAt(index) ==
                         second.scheduler_elapsed_trace().FrameAt(index);
         for (const std::uint32_t action : first.input_trace().actions())

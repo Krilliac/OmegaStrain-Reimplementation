@@ -733,12 +733,32 @@ struct OmegaAppTestAccess final
     {
         return app.input_ ? app.input_->next_frame_index() : 0U;
     }
+
+    [[nodiscard]] static bool ClearPointerPosition(OmegaApp& app) noexcept
+    {
+        if (!app.input_)
+            return false;
+        app.input_->ClearPointerPosition();
+        return true;
+    }
 };
 } // namespace omega::app::detail
 
 namespace
 {
 int failures = 0;
+
+constexpr omega::runtime::PointerPositionQ16 kQuarterThreeQuarterPointer{
+    .x = omega::runtime::kNormalizedInputExtent / 4U,
+    .y = (omega::runtime::kNormalizedInputExtent * 3U) / 4U,
+};
+
+struct SdlWindowGeometry final
+{
+    SDL_WindowID id = 0U;
+    int logical_width = 0;
+    int logical_height = 0;
+};
 
 void Check(const bool condition, const std::string_view message)
 {
@@ -2174,12 +2194,55 @@ void CheckPackedTransferUploadBudgetFallback(omega::app::OmegaApp& app,
     return SDL_PushEvent(&event);
 }
 
-[[nodiscard]] bool PushMouseButton(const Uint8 button, const bool down)
+[[nodiscard]] std::optional<SdlWindowGeometry> ResolveOpenOmegaWindow() noexcept
+{
+    int window_count = 0;
+    SDL_Window** windows = SDL_GetWindows(&window_count);
+    if (windows == nullptr)
+        return std::nullopt;
+
+    std::optional<SdlWindowGeometry> resolved;
+    for (int index = 0; index < window_count && !resolved; ++index)
+    {
+        SDL_Window* const window = windows[index];
+        if (window == nullptr)
+            continue;
+        const char* const title = SDL_GetWindowTitle(window);
+        if (title == nullptr ||
+            std::string_view{title} != "OpenOmega - native runtime")
+        {
+            continue;
+        }
+
+        int logical_width = 0;
+        int logical_height = 0;
+        const SDL_WindowID id = SDL_GetWindowID(window);
+        if (id != 0U && SDL_GetWindowSize(
+                            window, &logical_width, &logical_height) &&
+            logical_width > 0 && logical_height > 0)
+        {
+            resolved = SdlWindowGeometry{
+                .id = id,
+                .logical_width = logical_width,
+                .logical_height = logical_height,
+            };
+        }
+    }
+    SDL_free(windows);
+    return resolved;
+}
+
+[[nodiscard]] bool PushMouseButton(const Uint8 button, const bool down,
+    const SDL_WindowID window_id = 0U, const float x = 0.0F,
+    const float y = 0.0F)
 {
     SDL_Event event{};
     event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+    event.button.windowID = window_id;
     event.button.button = button;
     event.button.down = down;
+    event.button.x = x;
+    event.button.y = y;
     return SDL_PushEvent(&event);
 }
 
@@ -2960,12 +3023,30 @@ void CheckDiagnosticSceneMissionActivation(
         if (!reached_briefing)
             return;
 
-        const bool pressed = PushMouseButton(SDL_BUTTON_LEFT, true);
+        const auto app_window = ResolveOpenOmegaWindow();
+        Check(app_window.has_value(),
+            "the diagnostic-scene app exposes its current logical SDL window geometry");
+        if (!app_window)
+            return;
+        const float pointer_x =
+            static_cast<float>(app_window->logical_width) / 4.0F;
+        const float pointer_y =
+            static_cast<float>(app_window->logical_height) * 3.0F / 4.0F;
+        const bool pressed = PushMouseButton(SDL_BUTTON_LEFT, true,
+            app_window->id, pointer_x, pointer_y);
         auto started = app->RunWithCapture(1);
+        const auto* const started_pair = started ? started->trace_pair() : nullptr;
+        const auto started_pointer = started_pair != nullptr
+                                         ? started_pair->input_trace().PointerAt(0U)
+                                         : std::nullopt;
         const omega::app::GpuHostSnapshot play_gpu = Access::GpuSnapshot(*app);
         Check(pressed && started && !started->failure() &&
+                  started_pointer == kQuarterThreeQuarterPointer &&
+                  IsFreshPress(CapturedActionState(
+                      started, omega::app::kDebugFireAction)) &&
                   Access::FrontEnd(*app).mode ==
                       omega::app::FrontEndMode::DiagnosticPlay &&
+                  SameTextureResidency(briefing_gpu, play_gpu) &&
                   play_gpu.meshes == briefing_gpu.meshes &&
                   play_gpu.successful_mesh_uploads ==
                       briefing_gpu.successful_mesh_uploads &&
@@ -2979,10 +3060,11 @@ void CheckDiagnosticSceneMissionActivation(
                   play_gpu.successful_mesh_draws ==
                       briefing_gpu.successful_mesh_draws + 2U &&
                   Access::CurrentFrontEndMeshDrawList(*app).size() == 2U &&
+                  Access::DiagnosticSceneOverlayDrawList(*app).empty() &&
                   Access::CurrentFrontEndDrawList(*app).empty() &&
                   DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
                       Access::DiagnosticSceneOverlayDrawList(*app)),
-            "BriefingRoom mission activation publishes environment then magenta actor with no duplicate texture marker or deploy-click fire cue");
+            "the positioned BriefingRoom mission click records the exact project pointer, publishes environment then magenta actor, and emits no deploy-click fire cue or resource upload");
 
         Check(PushMouseButton(SDL_BUTTON_LEFT, false) && app->Run(1).has_value(),
             "the diagnostic-scene mission click releases in DiagnosticPlay");
@@ -5195,25 +5277,32 @@ int main()
         .right = 33'792U,
         .bottom = 33'792U,
     };
-    constexpr std::array kTargetCueDestinations{
+    constexpr std::array kPositionedTargetCueDestinations{
         omega::runtime::RenderTargetRectQ16{
-            .left = 28'672U,
-            .top = 32'512U,
-            .right = 36'864U,
-            .bottom = 33'024U,
+            .left = 12'288U,
+            .top = 48'896U,
+            .right = 20'480U,
+            .bottom = 49'408U,
         },
         omega::runtime::RenderTargetRectQ16{
-            .left = 32'512U,
-            .top = 28'672U,
-            .right = 33'024U,
-            .bottom = 36'864U,
+            .left = 16'128U,
+            .top = 45'056U,
+            .right = 16'640U,
+            .bottom = 53'248U,
         },
     };
     constexpr omega::runtime::RenderTargetRectQ16 kFireCueDestination{
         .left = 32'000U,
-        .top = 24'000U,
+        .top = 32'000U,
         .right = 33'536U,
-        .bottom = 25'536U,
+        .bottom = 33'536U,
+    };
+    constexpr omega::runtime::RenderTargetRectQ16
+        kPositionedFireCueDestination{
+        .left = 15'616U,
+        .top = 48'384U,
+        .right = 17'152U,
+        .bottom = 49'920U,
     };
     constexpr omega::runtime::RenderTargetRectQ16 kMenuDestination{
         .left = 2048U,
@@ -6968,9 +7057,30 @@ int main()
                        keyboard_mouse_base_commands.end(), commands.begin());
         };
 
-    Check(PushMouseButton(SDL_BUTTON_LEFT, true),
-        "a left mouse press enters the live DiagnosticPlay input queue");
+    const auto app_window = ResolveOpenOmegaWindow();
+    Check(app_window.has_value(),
+        "the live app exposes its current logical SDL window geometry");
+    if (!app_window)
+        return EXIT_FAILURE;
+    const float pointer_x =
+        static_cast<float>(app_window->logical_width) / 4.0F;
+    const float pointer_y =
+        static_cast<float>(app_window->logical_height) * 3.0F / 4.0F;
+    const omega::app::GpuHostSnapshot pointer_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+
+    Check(OmegaAppTestAccess::ClearPointerPosition(*app) &&
+              PushMouseButton(SDL_BUTTON_LEFT, true),
+        "the fallback fixture clears pointer availability before a left mouse press enters DiagnosticPlay");
     auto mouse_fire = app->RunWithCapture(1);
+    const auto mouse_fire_commands =
+        OmegaAppTestAccess::DiagnosticActorDrawList(*app).commands();
+    const bool centered_mouse_fire_draw_is_exact =
+        mouse_fire_commands.size() == keyboard_mouse_base_command_count + 1U &&
+        has_exact_base_prefix(mouse_fire_commands) &&
+        marker_command_is_exact(
+            mouse_fire_commands[keyboard_mouse_base_command_count],
+            kFireCueDestination);
     Check(mouse_fire &&
               mouse_fire->completion() ==
                   omega::app::RunCaptureCompletion::FrameLimitReached &&
@@ -6979,64 +7089,94 @@ int main()
               OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
               OmegaAppTestAccess::DiagnosticActorDrawList(*app).commands().size() ==
                   keyboard_mouse_base_command_count + 1U &&
+              centered_mouse_fire_draw_is_exact &&
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   OmegaAppTestAccess::DiagnosticActorDrawList(*app)),
-        "left mouse fires one native cue without opening a menu or requiring a gamepad");
+        "left mouse fires one exact centered project cue when no pointer sample is available, without opening a menu or requiring a gamepad");
 
     Check(PushMouseButton(SDL_BUTTON_LEFT, false) &&
-              PushMouseButton(SDL_BUTTON_RIGHT, true),
-        "the fire release and right-mouse target press enter the input queue");
+              PushMouseButton(SDL_BUTTON_RIGHT, true, app_window->id,
+                  pointer_x, pointer_y),
+        "the fire release and positioned right-mouse target press enter the input queue");
     auto mouse_target = app->RunWithCapture(1);
     const omega::runtime::RenderDrawList mouse_target_draw_list =
         OmegaAppTestAccess::DiagnosticActorDrawList(*app);
+    const auto mouse_target_commands = mouse_target_draw_list.commands();
+    const auto* const mouse_target_pair =
+        mouse_target ? mouse_target->trace_pair() : nullptr;
+    const auto mouse_target_pointer = mouse_target_pair != nullptr
+                                          ? mouse_target_pair->input_trace().PointerAt(0U)
+                                          : std::nullopt;
+    const bool positioned_mouse_target_draw_is_exact =
+        mouse_target_commands.size() == keyboard_mouse_base_command_count + 2U &&
+        has_exact_base_prefix(mouse_target_commands) &&
+        marker_command_is_exact(
+            mouse_target_commands[keyboard_mouse_base_command_count],
+            kPositionedTargetCueDestinations[0U]) &&
+        marker_command_is_exact(
+            mouse_target_commands[keyboard_mouse_base_command_count + 1U],
+            kPositionedTargetCueDestinations[1U]);
     Check(mouse_target &&
               mouse_target->completion() ==
                   omega::app::RunCaptureCompletion::FrameLimitReached &&
               !mouse_target->failure() &&
               mouse_target->result().rendered_frames == 1 &&
+              mouse_target_pointer == kQuarterThreeQuarterPointer &&
               OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
-              mouse_target_draw_list.commands().size() ==
-                  keyboard_mouse_base_command_count + 2U &&
+              positioned_mouse_target_draw_is_exact &&
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   OmegaAppTestAccess::DiagnosticActorDrawList(*app)),
-        "right mouse holds a centered native targeting cue without leaving DiagnosticPlay");
+        "positioned right mouse records the exact normalized pointer and holds both exact project target bars without leaving DiagnosticPlay");
 
     auto mouse_target_held = app->RunWithCapture(1);
     const auto held_target_action = CapturedActionState(
         mouse_target_held, omega::app::kDebugTargetAction);
+    const auto* const held_target_pair =
+        mouse_target_held ? mouse_target_held->trace_pair() : nullptr;
+    const auto held_target_pointer = held_target_pair != nullptr
+                                         ? held_target_pair->input_trace().PointerAt(0U)
+                                         : std::nullopt;
     Check(mouse_target_held &&
               mouse_target_held->completion() ==
                   omega::app::RunCaptureCompletion::FrameLimitReached &&
               !mouse_target_held->failure() &&
               mouse_target_held->result().rendered_frames == 1 &&
+              held_target_pointer == kQuarterThreeQuarterPointer &&
               held_target_action && held_target_action->held &&
               !held_target_action->pressed && !held_target_action->released &&
               OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
               DrawListsEqual(
                   OmegaAppTestAccess::DiagnosticActorDrawList(*app),
                   mouse_target_draw_list),
-        "held right mouse preserves the exact targeting cue across a later frame without a repeated press edge");
+        "held right mouse persists the exact normalized pointer and targeting cue across a later frame without a repeated press edge");
 
-    Check(PushMouseButton(SDL_BUTTON_LEFT, true),
-        "a left-mouse fire press enters the queue while right-mouse targeting remains held");
+    Check(PushMouseButton(SDL_BUTTON_LEFT, true, app_window->id,
+              pointer_x, pointer_y),
+        "a positioned left-mouse fire press enters the queue while right-mouse targeting remains held");
     auto mouse_target_fire = app->RunWithCapture(1);
     const auto mouse_target_fire_commands =
         OmegaAppTestAccess::DiagnosticActorDrawList(*app).commands();
     const auto chord_target_action = CapturedActionState(
         mouse_target_fire, omega::app::kDebugTargetAction);
+    const auto* const mouse_target_fire_pair =
+        mouse_target_fire ? mouse_target_fire->trace_pair() : nullptr;
+    const auto mouse_target_fire_pointer = mouse_target_fire_pair != nullptr
+                                               ? mouse_target_fire_pair->input_trace().PointerAt(
+                                                     0U)
+                                               : std::nullopt;
     const bool mouse_target_fire_draw_is_exact =
         mouse_target_fire_commands.size() ==
             keyboard_mouse_base_command_count + 3U &&
         has_exact_base_prefix(mouse_target_fire_commands) &&
         marker_command_is_exact(
             mouse_target_fire_commands[keyboard_mouse_base_command_count],
-            kTargetCueDestinations[0U]) &&
+            kPositionedTargetCueDestinations[0U]) &&
         marker_command_is_exact(
             mouse_target_fire_commands[keyboard_mouse_base_command_count + 1U],
-            kTargetCueDestinations[1U]) &&
+            kPositionedTargetCueDestinations[1U]) &&
         marker_command_is_exact(
             mouse_target_fire_commands[keyboard_mouse_base_command_count + 2U],
-            kFireCueDestination);
+            kPositionedFireCueDestination);
     Check(mouse_target_fire &&
               mouse_target_fire->completion() ==
                   omega::app::RunCaptureCompletion::FrameLimitReached &&
@@ -7044,13 +7184,14 @@ int main()
               mouse_target_fire->result().rendered_frames == 1 &&
               IsFreshPress(CapturedActionState(
                   mouse_target_fire, omega::app::kDebugFireAction)) &&
+              mouse_target_fire_pointer == kQuarterThreeQuarterPointer &&
               chord_target_action && chord_target_action->held &&
               !chord_target_action->pressed && !chord_target_action->released &&
               OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlayRowZero &&
               mouse_target_fire_draw_is_exact &&
               DrawListsEqual(OmegaAppTestAccess::CurrentFrontEndDrawList(*app),
                   OmegaAppTestAccess::DiagnosticActorDrawList(*app)),
-        "left-mouse fire composes after both exact targeting bars while right mouse remains held");
+        "positioned left-mouse fire composes its exact moved square after both exact targeting bars while right mouse remains held");
 
     Check(PushMouseButton(SDL_BUTTON_LEFT, false) &&
               PushMouseButton(SDL_BUTTON_RIGHT, false),
@@ -7074,6 +7215,14 @@ int main()
         OmegaAppTestAccess::GpuSnapshot(*app);
     const omega::runtime::RenderDrawList ready_actor_draw_list =
         OmegaAppTestAccess::DiagnosticActorDrawList(*app);
+
+    Check(SameTextureResidency(pointer_gpu_before, ready_gpu) &&
+              ready_gpu.meshes == pointer_gpu_before.meshes &&
+              ready_gpu.successful_mesh_uploads ==
+                  pointer_gpu_before.successful_mesh_uploads &&
+              ready_gpu.successful_mesh_releases ==
+                  pointer_gpu_before.successful_mesh_releases,
+        "pointer target/fire presentation changes no texture or mesh residency");
 
     Check(DrawListsEqual(OmegaAppTestAccess::DiagnosticHiddenDrawList(*app),
               initial_hidden_draw_list) &&

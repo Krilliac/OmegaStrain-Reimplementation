@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -17,6 +18,14 @@ namespace omega::runtime
 // Synthetic in-process diagnostic policy, not a retail limit or timing claim.
 inline constexpr std::size_t kMaximumInputTraceFrames = 65'536U;
 static_assert(InputBindingTable::kMaxActions == 64U);
+
+// Private frame-record element width and complete maximum element payload. These expose only the
+// bounded in-process storage policy, not a file, wire, stable-ABI, or retail format.
+inline constexpr std::size_t kInputTraceFrameElementBytes = 40U;
+inline constexpr std::size_t kMaximumInputTraceElementPayloadBytes =
+    kMaximumInputTraceFrames * kInputTraceFrameElementBytes +
+    InputBindingTable::kMaxActions * sizeof(std::uint32_t);
+static_assert(kMaximumInputTraceElementPayloadBytes == 2'621'696U);
 
 struct InputTraceConfig
 {
@@ -142,6 +151,12 @@ public:
     [[nodiscard]] std::optional<InputTraceFrameState> FrameAt(
         std::size_t frame_offset) const noexcept;
 
+    // [any thread; reentrant after publication] Returns the owned normalized pointer position for
+    // a frame. Both an out-of-range frame and an active frame with unavailable pointer state return
+    // std::nullopt; use FrameAt first when the distinction matters.
+    [[nodiscard]] std::optional<PointerPositionQ16> PointerAt(
+        std::size_t frame_offset) const noexcept;
+
     // [any thread; reentrant after publication] An invalid frame returns std::nullopt. An unknown
     // action on a valid frame returns an engaged all-false value, matching InputSnapshot queries.
     [[nodiscard]] std::optional<InputTraceActionState> ActionAt(
@@ -155,11 +170,17 @@ private:
         std::uint64_t held_mask = 0U;
         std::uint64_t pressed_mask = 0U;
         std::uint64_t released_mask = 0U;
+        // UINT64_MAX is unavailable; otherwise bits 63..32 are y and bits 31..0 are x.
+        std::uint64_t packed_pointer_position =
+            std::numeric_limits<std::uint64_t>::max();
         std::uint32_t accepted_event_count = 0U;
         std::uint32_t rejected_event_count = 0U;
     };
 
-    static_assert(sizeof(FrameRecord) == 32U);
+    static_assert(sizeof(FrameRecord) == kInputTraceFrameElementBytes);
+    // The packed pointer adds exactly eight bytes per frame: 512 KiB at the hard maximum.
+    static_assert((sizeof(FrameRecord) - 32U) * kMaximumInputTraceFrames ==
+                  512U * 1024U);
     static_assert(std::is_trivially_copyable_v<FrameRecord>);
     static_assert(std::is_standard_layout_v<FrameRecord>);
 

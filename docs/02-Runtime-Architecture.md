@@ -203,12 +203,12 @@ handles fail closed at resident lookup.
   `Contain`/`Stretch` fit plus `Nearest`/`Linear` filter policy. Commands retain handles without
   owning or pinning the referenced texture generations.
 - `SdlInputService` is an app-owned, non-hot-reloadable main-thread leaf. It pumps the global SDL
-  event queue and routes keyboard and mouse controls without requiring a controller. Gamepad
-  discovery is disabled by default; `input.gamepad_enabled=true` opts into the ref-counted SDL
-  subsystem and at most one primary gamepad. Button events are then accepted only when their
-  instance ID matches that primary. Window focus loss
-  reconciles all neutral controls; primary disconnect instead reconciles only `GamepadButton`
-  controls to up, preserving keyboard and mouse state, then promotes the next available gamepad.
+  event queue and routes keyboard and mouse controls without requiring a controller. The ref-counted
+  SDL gamepad subsystem is not initialized and discovery is disabled by default;
+  `input.gamepad_enabled=true` opts into that subsystem and at most one primary gamepad. Button events
+  are then accepted only when their instance ID matches that primary. Window focus loss reconciles
+  all neutral controls; primary disconnect instead reconciles only `GamepadButton` controls to up,
+  preserving keyboard and mouse state, then promotes the next available gamepad.
   Choosing one primary is a synthetic host-shell policy, not a retail behavior claim. A
   deterministic headless virtual-gamepad regression covers attach/open, filtered button edges,
   disconnect reconciliation, and promotion without a window or physical controller.
@@ -1364,10 +1364,11 @@ E-0052 adds a bounded post-binding logical capture boundary without changing eve
 `InputTraceRecorder::Create` may run on any thread before publication. It validates configuration
 before schema before allocation: capacity is 1 through the synthetic hard maximum of 65,536,
 the configured contiguous `uint64_t` frame range cannot overflow, and the copied schema is
-nonempty, strictly ascending, unique, and at most 64 logical actions. Creation pre-sizes every
-private 32-byte frame record. At maximum configuration, 65,536 32-byte record elements plus the
-fixed 64-slot `uint32_t` schema backing contain exactly 2,097,408 bytes of element payload. This
-does not measure excess vector capacity, allocator/object overhead, or process RSS.
+nonempty, strictly ascending, unique, and at most 64 logical actions. After E-0117's packed-pointer
+extension, creation pre-sizes every private 40-byte frame record. At maximum configuration, 65,536
+40-byte record elements plus the fixed 64-slot `uint32_t` schema backing contain exactly 2,621,696
+bytes of element payload. This does not measure excess vector capacity, allocator/object overhead,
+or process RSS.
 
 After creation the recorder is an exclusive game-thread owner. Allocation-free `Append` observes
 a const `InputSnapshot` without retaining or mutating it. It requires the exact next contiguous
@@ -1431,7 +1432,7 @@ E-0054 adds `RunCaptureSession`, an SDL-free `omega_runtime` coordinator that pa
 logical input and scheduler-elapsed traces. Creation accepts 1 through 65,536 frames and a
 contiguous leaf range that may end exactly at `UINT64_MAX`. It creates input backing first, elapsed
 backing second, and publishes no session unless both succeed. At the hard maximum, input records,
-the fixed action-schema backing, and elapsed records contain exactly 2,621,696 bytes of element
+the fixed action-schema backing, and elapsed records contain exactly 3,145,984 bytes of element
 payload. This excludes excess vector capacity, allocator/object overhead, and process RSS.
 
 After creation the session is an exclusive game-thread owner. Its phase machine accepts one input
@@ -2233,6 +2234,44 @@ mouse target/fire overlay separation, actor-first production teardown, and zero 
 The keyboard/mouse-first and opt-in-only gamepad contract remains unchanged. This slice establishes
 no retail actor, geometry, placement, coordinate, camera, material, animation, collision,
 owner-corpus result, emulator equivalence, or visual parity.
+
+### E-0117 absolute pointer diagnostic presentation
+
+`PointerPositionQ16` is a trivially copyable project input value whose `x` and `y` axes each use the
+inclusive normalized extent `[0,65536]`. It is frame state rather than a digital `InputEvent`:
+`InputTracker::SetPointerPosition` atomically rejects an out-of-range coordinate without mutating the
+prior sample or the digital accepted/rejected counters, `ClearPointerPosition` makes it unavailable,
+and `EndFrame` copies the latest optional value into the immutable `InputSnapshot`. The latest valid
+sample persists until replacement or explicit clear.
+
+For SDL mouse motion and button events, `SdlInputService` resolves `windowID`, obtains that window's
+current logical width and height, requires finite coordinates and positive extents, clamps to the
+logical bounds, and applies nearest-integer rounding into Q16. Button coordinates are sampled before
+their independently translated digital edge, allowing an LMB fire or RMB target/back event to carry
+its own position without prior motion. Invalid or unknown-window samples are ignored without
+disturbing an earlier valid sample. Focus loss performs the existing all-control reset and clears
+pointer availability. This logical-window normalization is independent of drawable-pixel density;
+it does not implement sensitivity or acceleration.
+
+`InputTrace` packs the optional pointer into one additional 64-bit word per active frame, reserving
+`UINT64_MAX` for unavailable and otherwise storing exact 32-bit `y` and `x` fields. The 40-byte
+record adds exactly 512 KiB at the 65,536-frame hard limit. `PointerAt` returns the exact optional
+sample and `RunCaptureReplaySession` reconstructs it in a fresh snapshot; unavailable, `{0,0}`,
+inclusive maximum, replacement, and clear therefore remain distinguishable.
+
+`PlanProjectDiagnosticTargetCueRectangles` and `PlanProjectDiagnosticFireCueRectangle` are pure
+`constexpr`/`noexcept` presentation policies. They use the optional pointer position or exact target
+center when unavailable, clamp the cue center so all edges remain in bounds, and produce a stable
+horizontal/vertical target-bar order plus one fire square. `OmegaApp` uses those values only for the
+existing target/fire texture overlays. LMB remains select/fire, RMB remains target/back, W/A/S/D and
+arrows remain navigation/movement, and F10 remains quit. Keyboard and mouse provide the complete
+default route. `SdlInputService::Create` returns without initializing `SDL_INIT_GAMEPAD` unless
+`--set=input.gamepad_enabled=true` explicitly enables optional controller aliases.
+
+This is project-authored host-input and diagnostic presentation policy. It establishes no retail
+mouse sensitivity, acceleration, crosshair, camera, weapon, projectile, raycast, damage, collision,
+coordinate-axis parity, owner-corpus value, emulator equivalence, or visual parity. It retains no
+proprietary input, raw address, or private path.
 
 ### Project-owned front-end cancel action
 

@@ -2270,7 +2270,8 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                                     CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
                                     ActiveCharacterIsConfirmed()))
         {
-            auto refreshed_actor_draw_list = RefreshDiagnosticActorDrawList();
+            auto refreshed_actor_draw_list = RefreshDiagnosticActorDrawList(
+                input_snapshot.pointer_position());
             if (!refreshed_actor_draw_list)
             {
                 (void)ContainOpeningMovieAudio();
@@ -2869,7 +2870,8 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
     return {};
 }
 
-std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
+std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
+    const std::optional<runtime::PointerPositionQ16>& pointer_position)
 {
     if (simulation_ == nullptr)
     {
@@ -2913,22 +2915,10 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
     const std::size_t overlay_command_offset = command_count;
     if (debug_target_held_)
     {
-        constexpr std::array target_cue_destinations{
-            runtime::RenderTargetRectQ16{
-                .left = 28'672U,
-                .top = 32'512U,
-                .right = 36'864U,
-                .bottom = 33'024U,
-            },
-            runtime::RenderTargetRectQ16{
-                .left = 32'512U,
-                .top = 28'672U,
-                .right = 33'024U,
-                .bottom = 36'864U,
-            },
-        };
+        const auto target_cue_destinations =
+            PlanProjectDiagnosticTargetCueRectangles(pointer_position);
         for (const runtime::RenderTargetRectQ16 destination :
-            target_cue_destinations)
+             target_cue_destinations)
         {
             commands[command_count++] = runtime::RenderTextureBlitCommand{
                 .texture = diagnostic_actor_marker_texture_,
@@ -2944,12 +2934,8 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList()
         commands[command_count++] = runtime::RenderTextureBlitCommand{
             .texture = diagnostic_actor_marker_texture_,
             .source = full_source,
-            .destination = runtime::RenderTargetRectQ16{
-                .left = 32'000U,
-                .top = 24'000U,
-                .right = 33'536U,
-                .bottom = 25'536U,
-            },
+            .destination =
+                PlanProjectDiagnosticFireCueRectangle(pointer_position),
             .fit_mode = runtime::RenderTextureFitMode::Stretch,
             .filter_mode = runtime::RenderTextureFilterMode::Nearest,
         };

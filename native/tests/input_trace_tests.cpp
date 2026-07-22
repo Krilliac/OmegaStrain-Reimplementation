@@ -29,6 +29,7 @@ using omega::runtime::InputTraceErrorCode;
 using omega::runtime::InputTraceFrameState;
 using omega::runtime::InputTraceRecorder;
 using omega::runtime::InputTracker;
+using omega::runtime::PointerPositionQ16;
 
 int failures = 0;
 
@@ -106,6 +107,9 @@ bool Push(InputTracker& tracker, const std::uint16_t code, const bool pressed)
 
 void CheckContract()
 {
+    static_assert(std::is_trivially_copyable_v<PointerPositionQ16>);
+    static_assert(std::is_standard_layout_v<PointerPositionQ16>);
+    static_assert(sizeof(PointerPositionQ16) == 8U);
     static_assert(std::is_trivially_copyable_v<InputTraceFrameState>);
     static_assert(std::is_standard_layout_v<InputTraceFrameState>);
     static_assert(std::is_trivially_copyable_v<InputTraceActionState>);
@@ -122,10 +126,17 @@ void CheckContract()
         std::declval<const InputSnapshot&>())));
     static_assert(noexcept(std::declval<InputTraceRecorder&&>().Finish()));
     static_assert(noexcept(std::declval<const InputTrace&>().FrameAt(0U)));
+    static_assert(noexcept(std::declval<const InputTrace&>().PointerAt(0U)));
     static_assert(noexcept(std::declval<const InputTrace&>().ActionAt(0U, 0U)));
 
     Check(omega::runtime::kMaximumInputTraceFrames == 65'536U,
         "the input-trace frame hard maximum is fixed");
+    Check(omega::runtime::kInputTraceFrameElementBytes == 40U &&
+              omega::runtime::kMaximumInputTraceElementPayloadBytes ==
+                  2'621'696U,
+        "the current hard-maximum input-trace element payload is exact");
+    Check(omega::runtime::kNormalizedInputExtent == 65'536U,
+        "the normalized pointer extent is fixed");
     Check(InputTraceConfig{}.maximum_frames == 0U &&
               InputTraceConfig{}.first_frame_index == 0U,
         "default input-trace configuration is deliberately invalid");
@@ -276,6 +287,9 @@ void CheckSnapshotParityAndPreservation()
     InputTracker tracker = MakeTracker(schema, 2U);
     Check(Push(tracker, 0U, true) && Push(tracker, 1U, true),
         "two bound presses enter the capture fixture");
+    const PointerPositionQ16 pointer_position{.x = 12'345U, .y = 54'321U};
+    Check(tracker.SetPointerPosition(pointer_position).has_value(),
+        "a pointer position enters the capture fixture without using its digital budget");
     Check(!Push(tracker, 2U, true),
         "the capture fixture records one rejected over-budget event");
     const InputSnapshot snapshot = tracker.EndFrame();
@@ -305,6 +319,7 @@ void CheckSnapshotParityAndPreservation()
     Check(appended && recorder.frame_count() == 1U,
         "a const real InputSnapshot is captured once");
     Check(snapshot.frame_index() == expected_frame.frame_index &&
+              snapshot.pointer_position() == pointer_position &&
               snapshot.accepted_event_count() == expected_frame.accepted_event_count &&
               snapshot.rejected_event_count() == expected_frame.rejected_event_count &&
               snapshot.actions().size() == schema.size(),
@@ -325,6 +340,8 @@ void CheckSnapshotParityAndPreservation()
         "the partial trace retains configuration, schema, and active count");
     Check(trace.FrameAt(0U) == expected_frame,
         "owned trace frame metadata matches the real snapshot exactly");
+    Check(trace.PointerAt(0U) == pointer_position,
+        "owned trace pointer state matches the real snapshot exactly");
     for (std::size_t index = 0U; index < schema.size(); ++index)
     {
         Check(trace.ActionAt(0U, schema[index]) == expected_actions[index],
@@ -336,6 +353,9 @@ void CheckSnapshotParityAndPreservation()
         "an unknown action on a valid frame is engaged and all-false");
     Check(!trace.FrameAt(1U) && !trace.FrameAt(std::numeric_limits<std::size_t>::max()),
         "frame queries reject offsets at and far beyond the active count");
+    Check(!trace.PointerAt(1U) &&
+              !trace.PointerAt(std::numeric_limits<std::size_t>::max()),
+        "pointer queries return unavailable for offsets outside the active count");
     Check(!trace.ActionAt(1U, schema[0]) && !trace.ActionAt(1U, 999U),
         "action queries reject an invalid frame before action lookup");
 }
@@ -390,12 +410,16 @@ void CheckFailurePriorityAndAtomicity()
     (void)wrong_tracker.EndFrame();
     Check(Push(wrong_tracker, 1U, true),
         "the schema-mismatch snapshot carries a nontrivial action state");
+    Check(wrong_tracker.SetPointerPosition({.x = 91U, .y = 92U}).has_value(),
+        "the schema-mismatch snapshot carries nontrivial pointer state");
     const InputSnapshot wrong_schema_at_expected_frame = wrong_tracker.EndFrame();
     const InputTraceFrameState mismatch_frame_before{
         .frame_index = wrong_schema_at_expected_frame.frame_index(),
         .accepted_event_count = wrong_schema_at_expected_frame.accepted_event_count(),
         .rejected_event_count = wrong_schema_at_expected_frame.rejected_event_count(),
     };
+    const auto mismatch_pointer_before =
+        wrong_schema_at_expected_frame.pointer_position();
     std::array<std::uint32_t, wrong_schema.size()> mismatch_schema_before{};
     std::array<InputTraceActionState, wrong_schema.size()> mismatch_actions_before{};
     for (std::size_t index = 0U; index < wrong_schema.size(); ++index)
@@ -412,6 +436,7 @@ void CheckFailurePriorityAndAtomicity()
         "an exact frame with a different ordered schema is rejected");
     bool mismatch_snapshot_preserved =
         wrong_schema_at_expected_frame.frame_index() == mismatch_frame_before.frame_index &&
+        wrong_schema_at_expected_frame.pointer_position() == mismatch_pointer_before &&
         wrong_schema_at_expected_frame.accepted_event_count() ==
             mismatch_frame_before.accepted_event_count &&
         wrong_schema_at_expected_frame.rejected_event_count() ==
@@ -487,7 +512,10 @@ void CheckEmptyAndMoveLifecycle()
         "an open zero-frame recorder publishes an immutable empty trace");
 
     InputTracker tracker = MakeTracker(schema, 4U);
-    Check(Push(tracker, 1U, true), "the move fixture press is accepted");
+    const PointerPositionQ16 move_pointer{.x = 321U, .y = 654U};
+    Check(Push(tracker, 1U, true) &&
+              tracker.SetPointerPosition(move_pointer).has_value(),
+        "the move fixture press and pointer are accepted");
     const InputSnapshot snapshot = tracker.EndFrame();
     auto source_created = InputTraceRecorder::Create(
         InputTraceConfig{.maximum_frames = 2U}, schema);
@@ -512,18 +540,22 @@ void CheckEmptyAndMoveLifecycle()
 
     std::optional<InputTraceFrameState> owned_frame;
     std::optional<InputTraceActionState> owned_action;
+    std::optional<PointerPositionQ16> owned_pointer;
     {
         auto destination_finish = std::move(destination).Finish();
         InputTrace trace = TakeTrace(destination_finish, "the moved recorder finishes");
         owned_frame = trace.FrameAt(0U);
         owned_action = trace.ActionAt(0U, schema[1]);
+        owned_pointer = trace.PointerAt(0U);
         InputTrace moved_trace = std::move(trace);
         Check(trace.first_frame_index() == 0U && trace.maximum_frames() == 0U &&
                   trace.frame_count() == 0U && trace.actions().empty() &&
-                  !trace.FrameAt(0U) && !trace.ActionAt(0U, schema[1]),
+                  !trace.FrameAt(0U) && !trace.PointerAt(0U) &&
+                  !trace.ActionAt(0U, schema[1]),
             "move construction leaves the trace source inert");
         Check(moved_trace.maximum_frames() == 2U && moved_trace.frame_count() == 1U &&
                   moved_trace.FrameAt(0U) == owned_frame &&
+                  moved_trace.PointerAt(0U) == owned_pointer &&
                   moved_trace.ActionAt(0U, schema[1]) == owned_action,
             "trace move construction transfers all immutable query state");
     }
@@ -531,12 +563,60 @@ void CheckEmptyAndMoveLifecycle()
                              .frame_index = 0U,
                              .accepted_event_count = 1U,
                          } &&
+              owned_pointer == move_pointer &&
               owned_action == InputTraceActionState{
                                   .held = true,
                                   .pressed = true,
                                   .released = false,
                               },
         "owned query values survive destruction of the final owning trace");
+}
+
+void CheckPointerPackingAndAvailability()
+{
+    constexpr std::array schema{7U};
+    InputTracker tracker = MakeTracker(schema, 1U);
+    auto created = InputTraceRecorder::Create(
+        InputTraceConfig{.maximum_frames = 4U}, schema);
+    Check(created.has_value(), "a pointer packing recorder is created");
+    if (!created)
+        return;
+
+    const InputSnapshot absent = tracker.EndFrame();
+    Check(created->Append(absent).has_value(),
+        "an unavailable pointer frame is captured");
+    Check(tracker.SetPointerPosition({.x = 0U, .y = 0U}).has_value(),
+        "the zero pointer position is valid and distinct from unavailable");
+    const InputSnapshot zero = tracker.EndFrame();
+    Check(created->Append(zero).has_value(), "the zero pointer frame is captured");
+    const PointerPositionQ16 maximum{
+        .x = omega::runtime::kNormalizedInputExtent,
+        .y = omega::runtime::kNormalizedInputExtent,
+    };
+    Check(tracker.SetPointerPosition(maximum).has_value(),
+        "the inclusive maximum pointer position is valid");
+    const InputSnapshot edge = tracker.EndFrame();
+    Check(created->Append(edge).has_value(), "the maximum pointer frame is captured");
+    tracker.ClearPointerPosition();
+    const InputSnapshot cleared = tracker.EndFrame();
+    Check(created->Append(cleared).has_value(),
+        "an explicit pointer clear is captured as unavailable");
+
+    auto finished = std::move(*created).Finish();
+    Check(finished && finished->frame_count() == 4U,
+        "all pointer availability states finish into one trace");
+    if (!finished)
+        return;
+    Check(finished->FrameAt(0U) == InputTraceFrameState{.frame_index = 0U} &&
+              finished->FrameAt(1U) == InputTraceFrameState{.frame_index = 1U} &&
+              finished->FrameAt(2U) == InputTraceFrameState{.frame_index = 2U} &&
+              finished->FrameAt(3U) == InputTraceFrameState{.frame_index = 3U},
+        "pointer packing does not alter the trivially-copyable frame metadata");
+    Check(!finished->PointerAt(0U) &&
+              finished->PointerAt(1U) == PointerPositionQ16{.x = 0U, .y = 0U} &&
+              finished->PointerAt(2U) == maximum && !finished->PointerAt(3U) &&
+              !finished->PointerAt(4U),
+        "packed pointers preserve unavailable, zero, inclusive maximum, clear, and range failure");
 }
 
 void CheckSixtyFourthAction()
@@ -595,13 +675,17 @@ void CheckSixtyFourthAction()
         std::abort();
     InputTraceRecorder recorder = std::move(*created);
 
-    if (!Push(tracker, 0U, true) || !recorder.Append(tracker.EndFrame()))
+    if (!tracker.SetPointerPosition(
+            {.x = 0U, .y = omega::runtime::kNormalizedInputExtent}) ||
+        !Push(tracker, 0U, true) || !recorder.Append(tracker.EndFrame()))
         std::abort();
-    if (!Push(tracker, 1U, true) || !Push(tracker, 0U, false) ||
+    if (!tracker.SetPointerPosition({.x = 123U, .y = 456U}) ||
+        !Push(tracker, 1U, true) || !Push(tracker, 0U, false) ||
         !recorder.Append(tracker.EndFrame()))
     {
         std::abort();
     }
+    tracker.ClearPointerPosition();
     if (!Push(tracker, 2U, true) || !Push(tracker, 2U, false) ||
         !Push(tracker, 99U, true) || !recorder.Append(tracker.EndFrame()))
     {
@@ -626,7 +710,8 @@ void CheckTwoRunDeterminism()
         identical = first.actions()[index] == second.actions()[index];
     for (std::size_t frame = 0U; identical && frame < first.frame_count(); ++frame)
     {
-        identical = first.FrameAt(frame) == second.FrameAt(frame);
+        identical = first.FrameAt(frame) == second.FrameAt(frame) &&
+                    first.PointerAt(frame) == second.PointerAt(frame);
         for (const std::uint32_t action : first.actions())
             identical = identical && first.ActionAt(frame, action) ==
                                          second.ActionAt(frame, action);
@@ -643,6 +728,7 @@ int main()
     CheckSnapshotParityAndPreservation();
     CheckFailurePriorityAndAtomicity();
     CheckEmptyAndMoveLifecycle();
+    CheckPointerPackingAndAvailability();
     CheckSixtyFourthAction();
     CheckTwoRunDeterminism();
 

@@ -42,6 +42,26 @@ namespace
     }
     return true;
 }
+
+[[nodiscard]] constexpr std::uint64_t PackPointerPosition(
+    const std::optional<PointerPositionQ16>& position) noexcept
+{
+    if (!position)
+        return std::numeric_limits<std::uint64_t>::max();
+    return (static_cast<std::uint64_t>(position->y) << 32U) |
+           static_cast<std::uint64_t>(position->x);
+}
+
+[[nodiscard]] constexpr std::optional<PointerPositionQ16> UnpackPointerPosition(
+    const std::uint64_t packed) noexcept
+{
+    if (packed == std::numeric_limits<std::uint64_t>::max())
+        return std::nullopt;
+    return PointerPositionQ16{
+        .x = static_cast<std::uint32_t>(packed),
+        .y = static_cast<std::uint32_t>(packed >> 32U),
+    };
+}
 } // namespace
 
 InputTrace::InputTrace(const InputTraceConfig config, const std::size_t action_count,
@@ -105,6 +125,14 @@ std::optional<InputTraceFrameState> InputTrace::FrameAt(
         .accepted_event_count = frame.accepted_event_count,
         .rejected_event_count = frame.rejected_event_count,
     };
+}
+
+std::optional<PointerPositionQ16> InputTrace::PointerAt(
+    const std::size_t frame_offset) const noexcept
+{
+    if (frame_offset >= frame_count_)
+        return std::nullopt;
+    return UnpackPointerPosition(frames_[frame_offset].packed_pointer_position);
 }
 
 std::optional<InputTraceActionState> InputTrace::ActionAt(
@@ -206,6 +234,7 @@ std::expected<void, InputTraceError> InputTraceRecorder::Append(
     }
 
     InputTrace::FrameRecord record{
+        .packed_pointer_position = PackPointerPosition(snapshot.pointer_position()),
         .accepted_event_count = snapshot.accepted_event_count(),
         .rejected_event_count = snapshot.rejected_event_count(),
     };
