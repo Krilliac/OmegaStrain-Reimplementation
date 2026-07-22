@@ -13,7 +13,10 @@ CATALOG_PATH = DOSSIER_ROOT / "catalog.json"
 
 EXPECTED_MATRIX = {
     ".col": "canonical_decoder",
+    ".fnt": "canonical_decoder",
+    ".gui": "canonical_decoder",
     ".hog": "canonical_decoder",
+    ".ie": "canonical_decoder",
     ".pop": "canonical_decoder",
     ".tdx": "canonical_decoder",
     ".vag": "canonical_decoder",
@@ -29,10 +32,7 @@ EXPECTED_MATRIX = {
     ".bin": "aggregate_scanner_only",
     ".bnk": "aggregate_scanner_only",
     ".bon": "aggregate_scanner_only",
-    ".fnt": "passive_descriptor_only",
-    ".gui": "passive_descriptor_only",
     ".gun": "aggregate_scanner_only",
-    ".ie": "passive_descriptor_only",
     ".prn": "aggregate_scanner_only",
     ".pss": "aggregate_scanner_only",
     ".scc": "aggregate_scanner_only",
@@ -65,9 +65,9 @@ EXPECTED_WHOLE_DISC = {
 }
 
 EXPECTED_PARTITIONS = {
-    "canonical_decoder": 6,
+    "canonical_decoder": 9,
     "structural_envelope_only": 4,
-    "passive_descriptor_only": 8,
+    "passive_descriptor_only": 5,
     "aggregate_scanner_only": 11,
     "unknown": 2,
     "whole_disc_disposition": 16,

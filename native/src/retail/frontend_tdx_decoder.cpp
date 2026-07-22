@@ -463,7 +463,7 @@ enum class FrontEndTdxDependencyScope
     BoundExternalVisual,
 };
 
-[[nodiscard]] asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdxImpl(
+[[nodiscard]] asset::DecodeResult<DecodedFrontEndTdx> DecodeTdxFrontEndImpl(
     const std::span<const std::byte> bytes, const asset::DecodeLimits limits,
     const FrontEndTdxDependencyScope dependency_scope)
 {
@@ -675,16 +675,16 @@ enum class FrontEndTdxDependencyScope
 }
 } // namespace
 
-asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdx(const std::span<const std::byte> bytes,
+asset::DecodeResult<DecodedFrontEndTdx> DecodeTdxFrontEnd(const std::span<const std::byte> bytes,
                                                           const asset::DecodeLimits limits)
 {
-    return DecodeFrontEndTdxImpl(bytes, limits, FrontEndTdxDependencyScope::Direct);
+    return DecodeTdxFrontEndImpl(bytes, limits, FrontEndTdxDependencyScope::Direct);
 }
 
-asset::DecodeResult<DecodedFrontEndTdx> DecodeScopedFrontEndTdx(
+asset::DecodeResult<DecodedFrontEndTdx> DecodeTdxScopedFrontEnd(
     const std::span<const std::byte> bytes, const asset::DecodeLimits limits)
 {
-    return DecodeFrontEndTdxImpl(
+    return DecodeTdxFrontEndImpl(
         bytes, limits, FrontEndTdxDependencyScope::BoundExternalVisual);
 }
 } // namespace omega::retail

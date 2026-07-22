@@ -399,8 +399,8 @@ void CheckEndToEnd()
 
     auto indexed8_bytes = MakeFixture(omega::asset::IndexedImageEncoding::Indexed8);
     auto indexed4_bytes = MakeFixture(omega::asset::IndexedImageEncoding::Indexed4);
-    const auto indexed8 = omega::retail::DecodeFrontEndTdx(indexed8_bytes);
-    const auto indexed4 = omega::retail::DecodeFrontEndTdx(indexed4_bytes);
+    const auto indexed8 = omega::retail::DecodeTdxFrontEnd(indexed8_bytes);
+    const auto indexed4 = omega::retail::DecodeTdxFrontEnd(indexed4_bytes);
     Check(indexed8 && indexed8->image.width == 32U && indexed8->image.height == 32U &&
               indexed8->image.indices.size() == 1024U && indexed8->image.palette.size() == 256U &&
               indexed8->upload_plan.sampling_format ==
@@ -508,7 +508,7 @@ void CheckEndToEnd()
           "boundaries");
 
     auto based_bytes = MakeFixture(omega::asset::IndexedImageEncoding::Indexed8, 3U);
-    const auto based = omega::retail::DecodeFrontEndTdx(based_bytes);
+    const auto based = omega::retail::DecodeTdxFrontEnd(based_bytes);
     Check(based && based->image == indexed8->image &&
               based->upload_plan.texture_base_pointer == 3U &&
               based->upload_plan.primary_upload.destination_base_pointer == 3U &&
@@ -518,17 +518,17 @@ void CheckEndToEnd()
 
     const auto flags7_bytes =
         MakeFixture(omega::asset::IndexedImageEncoding::Indexed4, 0U, 64U, 32U, 7U);
-    const auto flags7 = omega::retail::DecodeFrontEndTdx(flags7_bytes);
+    const auto flags7 = omega::retail::DecodeTdxFrontEnd(flags7_bytes);
     Check(flags7 && flags7->upload_plan.header_flags == 7U && flags7->image.width == 64U &&
               flags7->image.height == 32U && flags7->upload_plan.texture_alpha_enabled,
           "the second observed alpha-enabled header flag and a nonsquare display decode");
 
     const auto scoped_flags1_bytes =
         MakeFixture(omega::asset::IndexedImageEncoding::Indexed8, 0U, 32U, 32U, 1U);
-    CheckError(omega::retail::DecodeFrontEndTdx(scoped_flags1_bytes),
+    CheckError(omega::retail::DecodeTdxFrontEnd(scoped_flags1_bytes),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "ordinary frontend decoding rejects the scope-only indexed-8 flag-1 family");
-    const auto scoped_flags1 = omega::retail::DecodeScopedFrontEndTdx(scoped_flags1_bytes);
+    const auto scoped_flags1 = omega::retail::DecodeTdxScopedFrontEnd(scoped_flags1_bytes);
     Check(scoped_flags1 && scoped_flags1->upload_plan.header_flags == 1U &&
               !scoped_flags1->upload_plan.texture_alpha_enabled &&
               scoped_flags1->image == indexed8->image,
@@ -536,7 +536,7 @@ void CheckEndToEnd()
 
     const auto scoped_flags3_bytes =
         MakeFixture(omega::asset::IndexedImageEncoding::Indexed8, 0U, 32U, 32U, 3U);
-    CheckError(omega::retail::DecodeScopedFrontEndTdx(scoped_flags3_bytes),
+    CheckError(omega::retail::DecodeTdxScopedFrontEnd(scoped_flags3_bytes),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "bound external visuals reject the unobserved indexed-8 flag-3 family");
 
@@ -544,11 +544,11 @@ void CheckEndToEnd()
     {
         const auto unobserved = MakeFixture(
             omega::asset::IndexedImageEncoding::Indexed4, 0U, 32U, 32U, flags);
-        CheckError(omega::retail::DecodeScopedFrontEndTdx(unobserved),
+        CheckError(omega::retail::DecodeTdxScopedFrontEnd(unobserved),
                    omega::asset::DecodeErrorCode::UnsupportedVariant,
                    "bound external visuals reject every new indexed-4 flag family");
     }
-    const auto scoped_canonical = omega::retail::DecodeScopedFrontEndTdx(indexed8_bytes);
+    const auto scoped_canonical = omega::retail::DecodeTdxScopedFrontEnd(indexed8_bytes);
     Check(scoped_canonical && *scoped_canonical == *indexed8,
           "bound external visual decoding preserves the ordinary canonical family exactly");
 
@@ -557,7 +557,7 @@ void CheckEndToEnd()
     Check(indexed8->image == expected_image,
           "decoded image owns its pixels and palette after source destruction");
     const auto repeated_bytes = MakeFixture(omega::asset::IndexedImageEncoding::Indexed8);
-    const auto repeated = omega::retail::DecodeFrontEndTdx(repeated_bytes);
+    const auto repeated = omega::retail::DecodeTdxFrontEnd(repeated_bytes);
     Check(repeated && repeated->image == expected_image &&
               repeated->upload_plan == indexed8->upload_plan,
           "repeated generated decodes are deterministic");
@@ -566,45 +566,45 @@ void CheckEndToEnd()
 void CheckBudgets()
 {
     const auto bytes = MakeFixture(omega::asset::IndexedImageEncoding::Indexed8);
-    const auto baseline = omega::retail::DecodeFrontEndTdx(bytes);
+    const auto baseline = omega::retail::DecodeTdxFrontEnd(bytes);
     Check(baseline.has_value(), "baseline generated fixture is available for budget checks");
     if (!baseline)
         return;
 
     omega::asset::DecodeLimits limits;
     limits.maximum_input_bytes = bytes.size();
-    Check(omega::retail::DecodeFrontEndTdx(bytes, limits).has_value(),
+    Check(omega::retail::DecodeTdxFrontEnd(bytes, limits).has_value(),
           "frontend TDX exact input-byte budget succeeds");
     limits.maximum_input_bytes = bytes.size() - 1U;
-    CheckError(omega::retail::DecodeFrontEndTdx(bytes, limits),
+    CheckError(omega::retail::DecodeTdxFrontEnd(bytes, limits),
                omega::asset::DecodeErrorCode::LimitExceeded,
                "frontend TDX one-below input-byte budget fails");
 
     limits = omega::asset::DecodeLimits{};
     limits.maximum_items = baseline->decoded_items;
-    Check(omega::retail::DecodeFrontEndTdx(bytes, limits).has_value(),
+    Check(omega::retail::DecodeTdxFrontEnd(bytes, limits).has_value(),
           "frontend TDX exact operation budget succeeds");
     limits.maximum_items = baseline->decoded_items - 1U;
-    CheckError(omega::retail::DecodeFrontEndTdx(bytes, limits),
+    CheckError(omega::retail::DecodeTdxFrontEnd(bytes, limits),
                omega::asset::DecodeErrorCode::LimitExceeded,
                "frontend TDX one-below operation budget fails");
 
     limits = omega::asset::DecodeLimits{};
     limits.maximum_output_bytes = baseline->logical_output_bytes;
-    Check(omega::retail::DecodeFrontEndTdx(bytes, limits).has_value(),
+    Check(omega::retail::DecodeTdxFrontEnd(bytes, limits).has_value(),
           "frontend TDX exact owned-output budget succeeds");
     limits.maximum_output_bytes = baseline->logical_output_bytes - 1U;
-    CheckError(omega::retail::DecodeFrontEndTdx(bytes, limits),
+    CheckError(omega::retail::DecodeTdxFrontEnd(bytes, limits),
                omega::asset::DecodeErrorCode::LimitExceeded,
                "frontend TDX one-below owned-output budget fails");
 
     limits = omega::asset::DecodeLimits{};
     limits.maximum_scratch_bytes = baseline->peak_scratch_bytes;
     limits.maximum_nesting_depth = 0;
-    Check(omega::retail::DecodeFrontEndTdx(bytes, limits).has_value(),
+    Check(omega::retail::DecodeTdxFrontEnd(bytes, limits).has_value(),
           "frontend TDX exact scratch budget succeeds without recursion");
     limits.maximum_scratch_bytes = baseline->peak_scratch_bytes - 1U;
-    CheckError(omega::retail::DecodeFrontEndTdx(bytes, limits),
+    CheckError(omega::retail::DecodeTdxFrontEnd(bytes, limits),
                omega::asset::DecodeErrorCode::LimitExceeded,
                "frontend TDX one-below scratch budget fails");
 }
@@ -618,7 +618,7 @@ void CheckStrictRejections()
     {
         auto corrupt = fixture;
         std::fill_n(corrupt.begin() + static_cast<std::ptrdiff_t>(prefix), 0x20U, std::byte{0});
-        CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+        CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                    omega::asset::DecodeErrorCode::Malformed,
                    "frontend TDX rejects a missing active transfer control prefix");
 
@@ -626,7 +626,7 @@ void CheckStrictRejections()
         {
             corrupt = fixture;
             corrupt[prefix + byte] ^= std::byte{1};
-            CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+            CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                        omega::asset::DecodeErrorCode::Malformed,
                        "frontend TDX rejects every corrupted transfer control field");
         }
@@ -636,7 +636,7 @@ void CheckStrictRejections()
     {
         auto corrupt = fixture;
         corrupt[kHeaderBytes + byte] ^= std::byte{1};
-        CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+        CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                    omega::asset::DecodeErrorCode::Malformed,
                    "frontend TDX rejects every nonzero inactive pointer byte");
     }
@@ -645,7 +645,7 @@ void CheckStrictRejections()
     {
         auto corrupt = fixture;
         corrupt[kHeaderBytes + word] ^= std::byte{1};
-        CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+        CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                    omega::asset::DecodeErrorCode::UnsupportedVariant,
                    "frontend TDX rejects every corrupted active pointer-layout word");
     }
@@ -658,7 +658,7 @@ void CheckStrictRejections()
             {
                 auto corrupt = *packet_fixture;
                 corrupt[packet + register_offset] ^= std::byte{1};
-                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                            omega::asset::DecodeErrorCode::Malformed,
                            "frontend TDX rejects every corrupted packet register identifier");
             }
@@ -668,14 +668,14 @@ void CheckStrictRejections()
                 auto corrupt = *packet_fixture;
                 corrupt[packet + 0x40U + bit / 8U] ^=
                     static_cast<std::byte>(1U << (bit % 8U));
-                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                            omega::asset::DecodeErrorCode::Malformed,
                            "frontend TDX rejects every corrupted stored IMAGE count bit");
             }
 
             auto corrupt = *packet_fixture;
             corrupt[packet + 0x41U] ^= std::byte{0x80};
-            CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+            CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                        omega::asset::DecodeErrorCode::Malformed,
                        "frontend TDX rejects a nonzero stored IMAGE EOP bit");
 
@@ -683,7 +683,7 @@ void CheckStrictRejections()
             {
                 corrupt = *packet_fixture;
                 corrupt[packet + byte] ^= std::byte{1};
-                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                            omega::asset::DecodeErrorCode::Malformed,
                            "frontend TDX rejects every nonzero stored IMAGE reserved byte");
             }
@@ -691,7 +691,7 @@ void CheckStrictRejections()
             {
                 corrupt = *packet_fixture;
                 corrupt[packet + byte] ^= std::byte{1};
-                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                            omega::asset::DecodeErrorCode::Malformed,
                            "frontend TDX rejects every corrupted stored IMAGE mode byte");
             }
@@ -699,7 +699,7 @@ void CheckStrictRejections()
             {
                 corrupt = *packet_fixture;
                 corrupt[packet + byte] ^= std::byte{1};
-                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                            omega::asset::DecodeErrorCode::Malformed,
                            "frontend TDX rejects every nonzero stored IMAGE register byte");
             }
@@ -707,7 +707,7 @@ void CheckStrictRejections()
             {
                 corrupt = *packet_fixture;
                 corrupt[packet + byte] ^= std::byte{1};
-                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                            omega::asset::DecodeErrorCode::Malformed,
                            "frontend TDX rejects every corrupted DMA tag or count byte");
             }
@@ -715,7 +715,7 @@ void CheckStrictRejections()
             {
                 corrupt = *packet_fixture;
                 corrupt[packet + byte] ^= std::byte{1};
-                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                            omega::asset::DecodeErrorCode::InvalidReference,
                            "frontend TDX rejects every nonzero DMA data-reference byte");
             }
@@ -723,7 +723,7 @@ void CheckStrictRejections()
             {
                 corrupt = *packet_fixture;
                 corrupt[packet + byte] ^= std::byte{1};
-                CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+                CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                            omega::asset::DecodeErrorCode::Malformed,
                            "frontend TDX rejects every nonzero DMA reserved byte");
             }
@@ -740,121 +740,121 @@ void CheckStrictRejections()
           "generated indexed-4 primary fixture carries the exact doubled stored counts");
     auto corrupt = indexed4_fixture;
     WriteU32(corrupt, kPrimaryObject + 0x40U, indexed4_primary_qwords);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::Malformed,
                "indexed-4 primary rejects an undoubled stored IMAGE count");
 
     corrupt = indexed4_fixture;
     WriteU32(corrupt, kPrimaryObject + 0x50U, 0x30000000U | indexed4_primary_qwords);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::Malformed,
                "indexed-4 primary rejects an undoubled stored DMA count");
 
     corrupt = indexed4_fixture;
     WriteU32(corrupt, kPaletteObject + 0x40U, indexed4_palette_qwords * 2U);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::Malformed,
                "indexed-4 palette rejects a doubled stored IMAGE count");
 
     corrupt = indexed4_fixture;
     WriteU32(corrupt, kPaletteObject + 0x50U,
              0x30000000U | (indexed4_palette_qwords * 2U));
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::Malformed,
                "indexed-4 palette rejects a doubled stored DMA count");
 
     constexpr std::uint32_t indexed8_primary_qwords = 64U;
     corrupt = fixture;
     WriteU32(corrupt, kPrimaryObject + 0x40U, indexed8_primary_qwords * 2U);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::Malformed,
                "indexed-8 primary rejects a doubled stored IMAGE count");
 
     corrupt = fixture;
     WriteU32(corrupt, kPrimaryObject + 0x50U, 0x30000000U | indexed8_primary_qwords * 2U);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::Malformed,
                "indexed-8 primary rejects a doubled stored DMA count");
 
     corrupt = fixture;
     corrupt[kPrimaryObject + 0x07U] = std::byte{0x13};
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "frontend TDX rejects a direct PSMT8 primary upload");
 
     corrupt = fixture;
     corrupt[kPrimaryObject + 0x06U] = std::byte{2};
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "frontend TDX rejects an inconsistent primary DBW");
 
     corrupt = fixture;
     corrupt[kPrimaryObject + 0x30U] = std::byte{1};
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "frontend TDX rejects a non-host-to-local TRXDIR");
 
     corrupt = fixture;
     corrupt[kPrimaryObject + 0x17U] = std::byte{8};
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "frontend TDX rejects a nonzero transfer direction bit");
 
     corrupt = fixture;
     WriteU32(corrupt, kPrimaryObject + 0x20U, 17U);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "frontend TDX rejects a rectangle outside the display relationship");
 
     corrupt = fixture;
     WriteU16(corrupt, 0x22U, 2U);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "frontend TDX rejects multiple counted blocks");
 
     corrupt = fixture;
     WriteU32(corrupt, 0x38U, ReadU32(corrupt, 0x38U) + 16U);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt), omega::asset::DecodeErrorCode::Malformed,
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt), omega::asset::DecodeErrorCode::Malformed,
                "frontend TDX rejects a counted-length mismatch");
 
     corrupt = fixture;
     corrupt[kPrimaryObject + 0x05U] |= std::byte{0x40};
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt), omega::asset::DecodeErrorCode::Malformed,
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt), omega::asset::DecodeErrorCode::Malformed,
                "frontend TDX rejects a destination-address reserved-bit corruption");
 
     corrupt = fixture;
     WriteU16(corrupt, 0x16U, 1U);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "frontend TDX rejects an alternate palette storage format");
 
     corrupt = fixture;
     WriteU16(corrupt, 0x02U, 1U);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "frontend TDX rejects header flags without the proven alpha mode");
 
     corrupt = MakeFixture(omega::asset::IndexedImageEncoding::Indexed4);
     corrupt[kPaletteData + 64U] = std::byte{1};
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt), omega::asset::DecodeErrorCode::Malformed,
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt), omega::asset::DecodeErrorCode::Malformed,
                "frontend TDX rejects nonzero palette-slot padding");
 
     corrupt = fixture;
     corrupt.resize(corrupt.size() + 16U, std::byte{0});
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt), omega::asset::DecodeErrorCode::Malformed,
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt), omega::asset::DecodeErrorCode::Malformed,
                "frontend TDX rejects an all-zero trailing region");
     corrupt.back() = std::byte{1};
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt), omega::asset::DecodeErrorCode::Malformed,
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt), omega::asset::DecodeErrorCode::Malformed,
                "frontend TDX rejects a nonzero trailing region");
 
     corrupt = fixture;
     corrupt.resize(corrupt.size() - 16U);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt), omega::asset::DecodeErrorCode::Malformed,
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt), omega::asset::DecodeErrorCode::Malformed,
                "frontend TDX rejects a truncated counted block");
 
     corrupt = fixture;
     WriteU32(corrupt, kHeaderBytes, 0xFFFFFFF0U);
-    CheckError(omega::retail::DecodeFrontEndTdx(corrupt),
+    CheckError(omega::retail::DecodeTdxFrontEnd(corrupt),
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "frontend TDX rejects an unsupported block pointer layout");
 }

@@ -128,7 +128,7 @@ SUPPLEMENTAL_HOOKS = (
     (
         "native/src/retail/retail_string_table_decoder.cpp",
         "omega_retail_formats",
-        "DecodeRetailStringTable(const std::span<const std::byte> bytes,",
+        "ParseRetailStringTable(const std::span<const std::byte> bytes,",
         "auto layout = Preflight(bytes, limits)",
     ),
 )

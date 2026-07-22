@@ -50,6 +50,6 @@ inline constexpr std::uint64_t kRetailStringTableMaximumLogicalOutputBytes =
 // Duplicate normalized keys, incomplete NUL termination, malformed fixed-key
 // padding, and bytes after the final counted record fail closed.
 [[nodiscard]] asset::DecodeResult<RetailStringTableIR>
-DecodeRetailStringTable(std::span<const std::byte> bytes,
+ParseRetailStringTable(std::span<const std::byte> bytes,
                         asset::DecodeLimits limits = {});
 } // namespace omega::retail

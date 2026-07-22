@@ -346,7 +346,7 @@ RetailStringTableIR::Find(const std::string_view key) const noexcept {
 }
 
 asset::DecodeResult<RetailStringTableIR>
-DecodeRetailStringTable(const std::span<const std::byte> bytes,
+ParseRetailStringTable(const std::span<const std::byte> bytes,
                         const asset::DecodeLimits limits) {
   OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_retail_formats");
   auto layout = Preflight(bytes, limits);

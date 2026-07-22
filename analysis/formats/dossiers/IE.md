@@ -1,14 +1,15 @@
-# .ie — passive prefix/envelope dossier
+# .ie — bounded visual decoder and passive envelope dossier
 
 ## 1. Identity
 
-The suffix `.ie` is observed as a HOG member and now has one bounded native passive descriptor for a
-project-defined prefix-layout hypothesis. `InspectIeEnvelope` preserves the leading bytes as an
-opaque range, reports one neutral word, and stops at an otherwise opaque root region without
-retaining source bytes. The authoritative coverage matrix therefore classifies the implementation
-`passive_descriptor_only`. No tracked evidence records the retail provenance of its offsets, and
-this boundary establishes no tag, string, node, layout, lookup, render, menu, or recursive-payload
-semantics.
+The suffix `.ie` is observed as a HOG member and has two deliberately separate native boundaries.
+`DecodeIeFrontend` owns the bounded visual hierarchy used by the documented title/create/open-agent
+screen family, retaining proven transforms, positions, UVs, colors, triangles, topology, and four
+animation-track families. `InspectIeEnvelope` remains an older project-passive prefix-layout
+hypothesis that reports neutral ranges only. The authoritative coverage matrix classifies the
+suffix `canonical_decoder` because of the former; the passive observation remains non-semantic.
+Decoder coverage does not establish animation evaluation, sampling, blending, rendering, or
+suffix-wide compatibility.
 
 ## 2. Occurrence evidence
 
@@ -30,8 +31,11 @@ semantics.
 - The descriptor has a dedicated generated-fixture test executable covering its accepted boundary,
   truncation/malformed inputs, resource limits, unaligned input, determinism, and typed path-free
   failures.
-- `analysis/formats/DECODER-COVERAGE.md` classifies `.ie` as
-  `passive_descriptor_only`; no canonical or semantic decoder is claimed.
+- `DecodeIeFrontend`/`DecodeIeFrontendMeasured` are bounded reentrant decoders that return owned
+  `asset::FrontendVisualDocumentIR` for the exact hierarchy and track families documented by their
+  public contract.
+- `analysis/formats/DECODER-COVERAGE.md` classifies `.ie` as `canonical_decoder`; the claim is
+  limited to that documented screen family and its retained fields.
 - The bounded front-end topology scanner schema version 3 maps `.ie` to the
   public aggregate category `ie` and includes the fixed `.gui+.ie`
   sibling-pair key. The label and pair key expose only frozen aggregate
@@ -46,7 +50,8 @@ The aggregate inventories still carry occurrence totals and the derived nested c
 sanitized owner-corpus size or accepted-prefix coverage result is tracked. The hardened size-only
 member collector includes this suffix in its default set. Its implementation and synthetic tests do
 not become corpus evidence until a sanitized result is independently reviewed. The native
-descriptor's bounded checks establish only its implemented passive boundary.
+descriptor's bounded checks establish only its implemented passive boundary. The canonical decoder
+is implementation evidence for its exact accepted family, not a tracked suffix-wide corpus result.
 
 ## 5. Hypotheses
 
@@ -58,27 +63,26 @@ descriptor's bounded checks establish only its implemented passive boundary.
 ## 6. Missing observations
 
 - No sanitized owner-corpus size or accepted-prefix coverage result is tracked for this suffix.
-- Retail provenance and owner-corpus coverage for the project-defined offsets are not recorded; the
-  leading bytes and root beyond the neutral word remain opaque and unparsed.
-- No tracked consumer observation assigns tag, string, node, layout, lookup, menu, render, audio,
-  gameplay, or other semantics.
+- Retail provenance and owner-corpus coverage for the older project-passive offsets are not recorded;
+  those descriptor ranges remain neutral.
+- Animation lifecycle/evaluation, texture address and filtering modes, lane ordering, output alpha,
+  text integration, and complete render behavior remain outside the decoder contract.
 
 ## 7. Decoder/tooling status
 
-**Classification: `passive_descriptor_only`.**
+**Classification: `canonical_decoder` (bounded visual family, with an independent passive view).**
 
-`InspectIeEnvelope` is a stateless/reentrant, bounded passive hypothesis descriptor backed by
-generated fixtures. It reports neutral scalars and ranges only. It is not a UI decoder, semantic IR,
-node tree, renderer binding, retail-prefix evidence, owner-corpus acceptance claim, or retail
-behavior claim.
+`DecodeIeFrontend` is stateless/reentrant, bounded, and returns an owned canonical visual document
+for its exact accepted family. `InspectIeEnvelope` remains a stateless/reentrant passive hypothesis
+descriptor and is not a visual IR or evidence that its offsets are retail-authentic. Neither
+boundary is a renderer binding, owner-corpus acceptance claim, or complete retail behavior claim.
 
 ## 8. Codex work order
 
-1. Preserve the project-defined hypothesis and its opaque root; do not rename the neutral word as an
-   observed retail fact or semantic field.
-2. If run, review only the hardened collector's fixed-schema size aggregate and treat it as coverage
-   evidence rather than a decoder promotion.
-3. Preserve size GCD as a divisor of observed sizes, never an address-alignment claim.
+1. Preserve the independent passive hypothesis and do not transfer canonical decoder semantics into
+   its neutral ranges.
+2. Keep lifecycle, sampler, blend, lane-order, and presentation semantics fail-closed until
+   separately evidenced.
+3. Treat any private corpus run as bounded coverage evidence, not automatic semantic promotion.
 4. Add no raw magic-value histogram, member identity, per-file row, or payload excerpt.
-5. Require independent consumer evidence and a falsifiable deeper grammar before adding tag,
-   string, node, layout, lookup, render, or menu semantics.
+5. Require independent consumer evidence before widening the accepted hierarchy or runtime binding.
