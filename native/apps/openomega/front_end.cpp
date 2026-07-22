@@ -1,5 +1,7 @@
 #include "front_end.h"
 
+#include "omega/debug/subsystem_entry_break.h"
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -386,6 +388,7 @@ void DrawOpenOmegaHeader(runtime::DebugImage &image) noexcept
 std::expected<FrontEndStartupModel, FrontEndModelError> MakeFrontEndStartupModel(
     const std::span<const profiles::ProfileSummary> summaries) noexcept
 {
+    OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_app_core");
     if (summaries.size() > kFrontEndMaximumProfiles)
         return std::unexpected(FrontEndModelError::TooManyProfiles);
 

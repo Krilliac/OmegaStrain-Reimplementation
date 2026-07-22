@@ -64,6 +64,86 @@ class NativeDependencyGateTests(unittest.TestCase):
                 self.assertEqual(checked, 1)
                 self.assertEqual(errors, [])
 
+    def test_exact_debug_instrumentation_header_is_cross_cutting_and_fail_closed(
+        self,
+    ) -> None:
+        shipping_sources = (
+            "native/apps/openomega/front_end.cpp",
+            "native/apps/openomega/native_persistence.cpp",
+            "native/apps/openomega/omega_app.cpp",
+            "native/apps/openomega/sdl_platform_service.cpp",
+            "native/src/archive/hog_archive.cpp",
+            "native/src/compat/ps2_memory_card_image.cpp",
+            "native/src/content/game_data_service.cpp",
+            "native/src/gameplay/debug_locomotion.cpp",
+            "native/src/media/mpeg_program_stream_descriptor.cpp",
+            "native/src/persistence/save_database.cpp",
+            "native/src/profiles/profile_catalog.cpp",
+            "native/src/retail/vag_adpcm_decoder.cpp",
+            "native/src/runtime/input_trace.cpp",
+            "native/src/simulation/simulation_world.cpp",
+            "native/tests/subsystem_entry_break_contract_tests.cpp",
+        )
+        self.assertEqual(
+            gate._DEBUG_SUBSYSTEM_ENTRY_BREAK_SOURCES,
+            frozenset(shipping_sources),
+        )
+        for relative_path in shipping_sources:
+            with self.subTest(relative_path=relative_path):
+                checked, errors = self.check_source(
+                    relative_path,
+                    '#include "omega/debug/subsystem_entry_break.h"\n',
+                )
+                self.assertEqual(checked, 1)
+                self.assertEqual(errors, [])
+
+        for relative_path in (
+            "native/src/archive/example.cpp",
+            "native/include/omega/archive/hog_archive.h",
+            "native/apps/openomega/example.cpp",
+        ):
+            with self.subTest(rejected_path=relative_path):
+                self.assert_rejected(
+                    relative_path,
+                    '#include "omega/debug/subsystem_entry_break.h"\n',
+                    "debug instrumentation header is restricted to exact private callsites",
+                )
+
+        self.assert_rejected(
+            "native/src/archive/example.cpp",
+            '#include "omega/debug/another_helper.h"\n',
+            "unclassified project include",
+        )
+
+        checked, errors = self.check_source(
+            "native/include/omega/debug/subsystem_entry_break.h",
+            (
+                "#pragma once\n"
+                "#include <debugapi.h>\n"
+                "#include <intrin.h>\n"
+                "#include <processenv.h>\n"
+            ),
+        )
+        self.assertEqual(checked, 1)
+        self.assertEqual(errors, [])
+        rule = gate.module_rule(
+            Path("native/include/omega/debug/subsystem_entry_break.h")
+        )
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule.name, "omega_debug")
+        self.assertEqual(rule.allowed_omega_modules, frozenset({"omega_debug"}))
+        self.assertTrue(rule.platform_neutral)
+        self.assert_rejected(
+            "native/include/omega/debug/subsystem_entry_break.h",
+            '#include "omega/runtime/frame_scheduler.h"\n',
+            "omega_debug includes forbidden dependency",
+        )
+        self.assert_rejected(
+            "native/include/omega/debug/subsystem_entry_break.h",
+            "#include <Windows.h>\n",
+            "omega_debug includes unapproved external header",
+        )
+
     def test_explicit_forbidden_module_edges(self) -> None:
         cases = (
             ("native/src/archive/example.cpp", "omega/runtime/frame_scheduler.h"),

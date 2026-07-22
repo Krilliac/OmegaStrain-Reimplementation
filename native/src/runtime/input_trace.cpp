@@ -1,4 +1,5 @@
 #include "omega/runtime/input_trace.h"
+#include "omega/debug/subsystem_entry_break.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -168,6 +169,7 @@ std::expected<InputTraceRecorder, InputTraceError> InputTraceRecorder::Create(
     const InputTraceConfig config,
     const std::span<const std::uint32_t> action_schema)
 {
+    OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_runtime");
     if (!IsValidConfig(config))
         return std::unexpected(Error(InputTraceErrorCode::InvalidConfiguration));
     if (!IsValidActionSchema(action_schema))

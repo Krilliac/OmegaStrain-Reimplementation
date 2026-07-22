@@ -2,6 +2,7 @@
 
 #include "omega/archive/hog_archive.h"
 #include "omega/asset/source_locator.h"
+#include "omega/debug/subsystem_entry_break.h"
 #include "omega/retail/col_spatial_mesh_decoder.h"
 #include "omega/retail/pop_level_manifest_decoder.h"
 #include "omega/retail/vum_material_catalog_decoder.h"
@@ -686,6 +687,7 @@ std::string_view GameDataErrorCodeName(const GameDataErrorCode code) noexcept
 std::expected<GameDataService, GameDataError> GameDataService::Open(
     GameDataServiceConfig config)
 {
+    OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_content");
     if (config.root.empty() || config.maximum_system_config_bytes == 0 ||
         config.maximum_pop_bytes == 0 || config.maximum_data_hog_bytes == 0 ||
         config.maximum_nested_hog_bytes == 0)

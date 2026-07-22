@@ -1,5 +1,7 @@
 #include "sdl_platform_service.h"
 
+#include "omega/debug/subsystem_entry_break.h"
+
 #include <SDL3/SDL.h>
 
 #include <memory>
@@ -32,6 +34,7 @@ struct SdlPlatformService::Impl
 
 std::expected<SdlPlatformService, std::string> SdlPlatformService::Create()
 {
+    OMEGA_DEBUG_BREAK_SUBSYSTEM_ENTRY("omega_sdl_backend");
     auto impl = std::make_unique<Impl>();
     if (!SDL_SetAppMetadata("OpenOmega", "0.1.0", "io.github.krilliac.openomega"))
         return std::unexpected(SdlError("SDL_SetAppMetadata"));

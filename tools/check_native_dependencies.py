@@ -206,6 +206,13 @@ class ModuleRule:
 # of an otherwise platform-neutral module eligible to include arbitrary SDK
 # headers.
 _EXACT_EXTERNAL_HEADER_ALLOWLIST = {
+    "native/include/omega/debug/subsystem_entry_break.h": frozenset(
+        {
+            "debugapi.h",
+            "intrin.h",
+            "processenv.h",
+        }
+    ),
     "native/src/media/media_foundation_h262_decoder.cpp": frozenset(
         {
             "windows.h",
@@ -217,6 +224,27 @@ _EXACT_EXTERNAL_HEADER_ALLOWLIST = {
         }
     ),
 }
+
+_DEBUG_SUBSYSTEM_ENTRY_BREAK_HEADER = "omega/debug/subsystem_entry_break.h"
+_DEBUG_SUBSYSTEM_ENTRY_BREAK_SOURCES = frozenset(
+    {
+        "native/apps/openomega/front_end.cpp",
+        "native/apps/openomega/native_persistence.cpp",
+        "native/apps/openomega/omega_app.cpp",
+        "native/apps/openomega/sdl_platform_service.cpp",
+        "native/src/archive/hog_archive.cpp",
+        "native/src/compat/ps2_memory_card_image.cpp",
+        "native/src/content/game_data_service.cpp",
+        "native/src/gameplay/debug_locomotion.cpp",
+        "native/src/media/mpeg_program_stream_descriptor.cpp",
+        "native/src/persistence/save_database.cpp",
+        "native/src/profiles/profile_catalog.cpp",
+        "native/src/retail/vag_adpcm_decoder.cpp",
+        "native/src/runtime/input_trace.cpp",
+        "native/src/simulation/simulation_world.cpp",
+        "native/tests/subsystem_entry_break_contract_tests.cpp",
+    }
+)
 
 
 _CORE_EDGES = frozenset({"omega_core", "omega_assets"})
@@ -392,6 +420,12 @@ MODULE_RULES = (
 )
 
 EXACT_MODULE_RULES = {
+    "native/include/omega/debug/subsystem_entry_break.h": ModuleRule(
+        "native/include/omega/debug/subsystem_entry_break.h",
+        "omega_debug",
+        frozenset({"omega_debug"}),
+        platform_neutral=True,
+    ),
     "native/include/omega/asset/pop_terrain_index.h": ModuleRule(
         "native/include/omega/asset/pop_terrain_index.h",
         "omega_core",
@@ -415,6 +449,7 @@ PROJECT_HEADER_MODULES = (
     ("omega/vfs/", "omega_core"),
 )
 EXACT_PROJECT_HEADER_MODULES = {
+    "omega/debug/subsystem_entry_break.h": "omega_debug",
     "omega/asset/pop_terrain_index.h": "omega_core",
 }
 
@@ -811,6 +846,20 @@ def check_include(
             return _format_error(
                 relative_path, line_number, f"unclassified project include <{include}>"
             )
+        # The exact header is a cross-cutting, Debug-only private shim, not a
+        # production module edge.  The source allowlist prevents this exception
+        # from entering public headers or expanding to another implementation.
+        if include_lower == _DEBUG_SUBSYSTEM_ENTRY_BREAK_HEADER:
+            if (
+                relative_path.as_posix().casefold()
+                not in _DEBUG_SUBSYSTEM_ENTRY_BREAK_SOURCES
+            ):
+                return _format_error(
+                    relative_path,
+                    line_number,
+                    "debug instrumentation header is restricted to exact private callsites",
+                )
+            return None
         if rule is not None and destination not in rule.allowed_omega_modules:
             return _format_error(
                 relative_path,
