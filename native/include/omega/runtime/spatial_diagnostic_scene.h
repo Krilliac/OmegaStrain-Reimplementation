@@ -26,4 +26,12 @@ struct SpatialDiagnosticSceneLimits
 [[nodiscard]] std::expected<asset::SceneIR, std::string> BuildSpatialDiagnosticScene(
     const asset::LevelSpatialIR& spatial,
     const SpatialDiagnosticSceneLimits& limits = SpatialDiagnosticSceneLimits{});
+
+// [any worker thread; reentrant] Builds an opt-in diagnostic view using one projection for the
+// decoded coordinate union. Relative offsets and scale along the selected aggregate axes are
+// preserved. "Global" describes only that shared decoded coordinate domain; it makes no claim
+// about retail placement, axis meaning, visibility, camera, winding, collision use, or materials.
+[[nodiscard]] std::expected<asset::SceneIR, std::string> BuildGlobalSpatialDiagnosticScene(
+    const asset::LevelSpatialIR& spatial,
+    const SpatialDiagnosticSceneLimits& limits = SpatialDiagnosticSceneLimits{});
 } // namespace omega::runtime
