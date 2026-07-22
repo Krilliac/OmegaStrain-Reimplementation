@@ -1224,6 +1224,16 @@ wired into startup, asset selection, renderer upload, material binding, or menu 
 testable hypothesis plumbing for later independent behavioral comparison, not completion of M3
 texture rendering or evidence for any retail display semantics.
 
+E-0121 records a sibling strict Indexed4 diagnostic candidate projection over canonical storage. It
+accepts only one matching direct `Packed4` plane, exactly one block, exactly one 16-entry palette,
+and a packed plane of exactly `(width * height + 1) / 2` bytes, and its caller must name all five
+unresolved policy axes explicitly: nibble order, source-order-only palette lookup, source-slot
+mapping, alpha, and linear row origin. An odd texel count leaves one nibble of the final packed byte
+unread and unable to affect the output. Like E-0087 it is not wired into startup, asset selection,
+renderer upload, material binding, or menu presentation. It widens the space of testable display
+hypotheses for later independent behavioral comparison; it does not advance M3 texture rendering and
+is not evidence for any retail display semantics.
+
 E-0092 supplies the bounded native PAR text-envelope boundary. It owns exact CRLF logical text and
 source-order opaque line ranges, recognizes only the eight exact six-decimal version tokens in the
 public aggregate fingerprint, and discards only validated bounded NUL padding. It performs no

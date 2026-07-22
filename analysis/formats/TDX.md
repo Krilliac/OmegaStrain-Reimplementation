@@ -364,3 +364,72 @@ purpose, material binding, menu use, GPU upload, retail rendering, gameplay, or 
 equivalence. Only public project source and generated fixtures were used; no private or owner file,
 proprietary input, D-drive content, disc image, retail executable, emulator, or PCSX2 input was
 accessed.
+
+## Indexed4 display-candidate projection
+
+E-0121 records `BuildTdxIndexed4CandidateDebugImage`, a second renderer-neutral diagnostic over
+already-owned `TextureStorageIR`. It is an independent sibling of the Indexed8 candidate above: it
+does not alter the TDX decoder, does not extend the Indexed8 utility, and identifies no retail
+display path. The accepted shape is a strict direct Indexed4/Packed4 slice and is deliberately
+narrower than the complete Indexed4 storage family: one nonzero top-level `Indexed4` texture
+rectangle, exactly one block, exactly one nonzero `Packed4` plane whose rectangle exactly equals the
+texture rectangle, exactly one present palette whose nonzero rectangle exactly covers its owned
+entries, exactly 16 four-source-slot palette entries, and a packed plane whose byte count is exactly
+`(width * height + 1) / 2`. Any additional block, plane, palette cardinality, encoding, or payload
+byte fails closed.
+
+Every unresolved display choice remains an explicit caller-selected hypothesis across five axes,
+supplied through a non-default-constructible policy: two packed nibble orders (low nibble first or
+high nibble first within each source byte); palette lookup in source order only, so no permuted
+Indexed4 palette candidate is asserted at all and the enumeration exists solely to keep the axis
+explicit; all six permutations of palette source slots zero through two into output slots zero
+through two; three output-slot-three mappings (constant `0xff`, palette source slot three unchanged,
+or that slot doubled and clamped to `0xff`); and two linear row origins (top-to-bottom or whole-row
+bottom-to-top). That is 2 x 1 x 6 x 3 x 2 = 72 explicit combinations. The slot-zero-through-two
+permutation never affects output slot three: opaque emits constant `0xff`, source-slot-three copies
+palette source slot three, and doubled-clamped source-slot-three doubles and clamps that source slot.
+No intra-row, page, or block swizzle candidate is implemented, and no mip, frame, or material
+candidate exists.
+
+Odd texel cardinality has an exact stated behavior rather than an inferred one. The plane must carry
+`(width * height + 1) / 2` bytes, so an odd rectangle requires a final packed byte whose second
+nibble is never read: under low-nibble-first that is the final high nibble, and under
+high-nibble-first that is the final low nibble. Changing the unused nibble cannot change any output
+byte. This is a project containment rule for a synthetic shape, not an observed retail padding,
+alignment, or tail convention.
+
+The result is an independently owned four-slot RGBA8-shaped `DebugImage` of exactly
+`width * height * 4` bytes. Its field name does not promote the source slots to channel names or the
+result to display-correct RGBA. The borrowed storage is never mutated, repeated projections are
+byte-identical yet separately allocated, and the returned pixels survive mutation and destruction of
+the source. Caller limits may tighten but cannot raise the project hard maxima of 8 MiB of packed
+source plus the exact 64-byte palette and 64 MiB of output; a caller budget above either maximum is
+rejected as `invalid-limits` rather than silently clamped. `std::bad_alloc` and `std::length_error`
+are contained and reported as `allocation-failed`, so no exception escapes the entry point.
+
+Twenty-five fixed typed diagnostics carry fixed kebab-case names and fixed category-only messages
+that disclose no input-derived dimensions, payload, offset, source identity, path, runtime value, or
+exception text. Validation priority is fixed and asserted rather than incidental: the five policy
+axes in declared order, then caller limits, then texture dimensions, then sample-encoding validity
+before Indexed4 support, then block count, plane count, and palette presence, then plane dimensions,
+then transfer-element-encoding validity before `Packed4` support, then the texture/plane rectangle
+match, then source and output byte arithmetic, then packed index cardinality, then palette
+dimensions, palette entry-count agreement, and the exact 16-entry requirement, and only then the
+source and output byte budgets.
+
+The utility is stateless, reentrant, callable from any worker thread, CPU-only, and performs no I/O,
+platform, GPU, service, or shared-state work. It is not wired into startup, `AssetService`, asset
+selection, renderer upload, material binding, or menu presentation. Generated tests cover the fixed
+error contract, all 72 candidate combinations with every source-order index traversed, distinguishing
+outputs for each multi-valued implemented axis while enumerating the singleton identity-palette axis,
+both odd-cardinality unused-nibble cases, determinism, source nonmutation, independent ownership after
+source mutation and destruction, representative competing-invalid-input boundaries across the
+documented validation order, exact and one-below budgets, and an exact 4097x4096 packed rectangle
+above the 8 MiB hard cap.
+
+This is hypothesis plumbing, not corroboration. It assigns no retail nibble order, palette order,
+channel names, alpha meaning or scale, row origin, swizzle, color space, premultiplication,
+filtering, UV, block/plane/mip/frame purpose, material binding, menu use, GPU upload, rendering,
+gameplay, corpus result, or PCSX2 equivalence. Only tracked clean-room source and project-generated
+fixtures were used; no private or owner file, proprietary input, D-drive content, disc image, retail
+executable, emulator, or PCSX2 runtime input was accessed.
