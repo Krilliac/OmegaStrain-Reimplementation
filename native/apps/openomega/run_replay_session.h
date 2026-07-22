@@ -3,6 +3,7 @@
 #include "diagnostic_actor_marker.h"
 #include "front_end.h"
 
+#include "omega/gameplay/diagnostic_mission_lifecycle.h"
 #include "omega/gameplay/diagnostic_proximity_trigger.h"
 #include "omega/gameplay/diagnostic_target_fire.h"
 #include "omega/runtime/frame_scheduler.h"
@@ -45,6 +46,10 @@ struct RunReplaySessionConfig
     // Project-owned pointer/fire objective policy. Disabled preserves prior replay behavior.
     // When enabled, replay owns one target-fire state without adding identity or persistence.
     bool enable_debug_target_fire = false;
+    // Project-owned diagnostic mission-loop policy. Disabled preserves E-0119 replay behavior.
+    // Enabling it requires the modal front end plus locomotion/proximity and target/fire owners;
+    // Create rejects an incoherent combination before transferring the caller's traces.
+    bool enable_debug_mission_lifecycle = false;
     // Null preserves legacy nonmodal replay. A supplied value enables replay-owned menu reduction
     // and gates simulation from each resulting state without changing the captured elapsed value.
     std::optional<FrontEndState> initial_front_end_state;
@@ -109,6 +114,9 @@ enum class RunReplayErrorCode
     DebugLocomotionPlanFailed,
     DiagnosticProximityTriggerFailed,
     DiagnosticTargetFireFailed,
+    InvalidDiagnosticMissionLifecycleConfig,
+    DiagnosticMissionLifecycleFailed,
+    DiagnosticMissionPositionResetFailed,
 };
 
 [[nodiscard]] constexpr std::string_view RunReplayErrorCodeName(
@@ -140,6 +148,12 @@ enum class RunReplayErrorCode
         return "diagnostic-proximity-trigger-failed";
     case RunReplayErrorCode::DiagnosticTargetFireFailed:
         return "diagnostic-target-fire-failed";
+    case RunReplayErrorCode::InvalidDiagnosticMissionLifecycleConfig:
+        return "invalid-diagnostic-mission-lifecycle-config";
+    case RunReplayErrorCode::DiagnosticMissionLifecycleFailed:
+        return "diagnostic-mission-lifecycle-failed";
+    case RunReplayErrorCode::DiagnosticMissionPositionResetFailed:
+        return "diagnostic-mission-position-reset-failed";
     }
     return "unknown";
 }
@@ -173,6 +187,12 @@ enum class RunReplayErrorCode
         return "run replay diagnostic proximity trigger failed";
     case RunReplayErrorCode::DiagnosticTargetFireFailed:
         return "run replay diagnostic target fire failed";
+    case RunReplayErrorCode::InvalidDiagnosticMissionLifecycleConfig:
+        return "run replay diagnostic mission lifecycle configuration is invalid";
+    case RunReplayErrorCode::DiagnosticMissionLifecycleFailed:
+        return "run replay diagnostic mission lifecycle evaluation failed";
+    case RunReplayErrorCode::DiagnosticMissionPositionResetFailed:
+        return "run replay diagnostic mission actor reset failed";
     }
     return "run replay error is unknown";
 }
@@ -267,9 +287,9 @@ public:
     ~RunReplaySession() = default;
 
     // [game thread; no concurrent use] Consumes one replay frame. Lower replay failures are
-    // retryable and transactional. After a normal replay frame is consumed, diagnostic target/fire
-    // failure permanently fails this session; locomotion-planning or simulation-step failure does
-    // the same after scheduler planning begins.
+    // retryable and transactional. After a normal replay frame is consumed, diagnostic objective,
+    // mission-lifecycle, locomotion-planning, reset, or simulation-step failure permanently fails
+    // this session. New mission publications commit only after the successful fixed-step batch.
     [[nodiscard]] std::expected<RunReplayFrame, RunReplayError> Next() noexcept;
 
     // [game thread; no concurrent use] Returned snapshots are owned copies.
@@ -292,6 +312,10 @@ public:
     // present exactly when the explicit replay option enabled the synthetic objective.
     [[nodiscard]] std::optional<gameplay::DiagnosticTargetFireState>
     diagnostic_target_fire_state() const noexcept;
+    // [game thread; no concurrent use] Owned project-diagnostic deployment state. This optional is
+    // present exactly when the explicit replay option enabled the synthetic mission lifecycle.
+    [[nodiscard]] std::optional<gameplay::DiagnosticMissionLifecycleState>
+    diagnostic_mission_lifecycle_state() const noexcept;
     // [game thread; no concurrent use] Derived from the current owned position through the fixed
     // project diagnostic presentation policy. No marker state or renderer resource is retained;
     // null means the positioned diagnostic entity is absent or this session is inert.
@@ -320,6 +344,8 @@ private:
             diagnostic_proximity_trigger_state,
         std::optional<gameplay::DiagnosticTargetFireState>
             diagnostic_target_fire_state,
+        std::optional<gameplay::DiagnosticMissionLifecycleState>
+            diagnostic_mission_lifecycle_state,
         std::optional<FrontEndState> front_end_state,
         std::uint8_t front_end_visible_profile_slots,
         std::size_t front_end_total_profile_count,
@@ -338,6 +364,8 @@ private:
         diagnostic_proximity_trigger_state_;
     std::optional<gameplay::DiagnosticTargetFireState>
         diagnostic_target_fire_state_;
+    std::optional<gameplay::DiagnosticMissionLifecycleState>
+        diagnostic_mission_lifecycle_state_;
     std::optional<FrontEndState> front_end_state_;
     std::uint8_t front_end_visible_profile_slots_ = 0U;
     std::size_t front_end_total_profile_count_ = 0U;

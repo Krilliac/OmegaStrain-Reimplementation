@@ -311,6 +311,20 @@ Studio's historical engine source or internal toolchain.
   marker texture, replaces the completed objective marker, and disappears on a hit; fresh replay owns
   and reproduces the same state. This is project-authored 2D hit-test policy, not evidence for retail
   targeting, weapons, projectiles, raycasts, damage, camera behavior, AI, or visual parity.
+- E-0120 wraps that diagnostic seam in one allocation-free project mission lifecycle with `Ready`,
+  `Active`, `Succeeded`, and `Failed` states. Every accepted BriefingRoom deployment resets the
+  positioned actor to the project origin, clears proximity and target completion, and enters
+  `Active`; keyboard select and menu LMB can redeploy without leaking their edge into play. A newly
+  latched target hit enters `Succeeded` and returns to BriefingRoom in the same rendered frame. An
+  explicit direct Primary or Cancel edge while already in DiagnosticPlay enters `Failed` and returns
+  to BriefingRoom; LMB fire and held RMB/T targeting remain gameplay-only there. Fresh replay owns
+  the same optional lifecycle and reset policy, and production capture/replay compares exact final
+  mission, proximity, target, actor-position, and front-end values. No gamepad default, persistence
+  record, renderer resource, input/capture schema, or asset lifetime changes. A serialized MSVC Debug
+  build of the executable and focused targets is warning-free; focused CTest passes 3/3 and the direct
+  real-host app-capture smoke passes. Hosted gates remain pending. This is not evidence for retail
+  mission, death, health, timer, debrief, checkpoint,
+  spawn, campaign, inventory, reward, owner-corpus behavior, or PCSX2 parity.
 - E-0086 adds a bounded aggregate-only front-end HOG topology scanner. It accepts one supplied HOG
   or recursively discovers HOG files below one supplied directory, then follows only normalized
   `.hog` members through the established span parser. Its fixed schema reports approved public

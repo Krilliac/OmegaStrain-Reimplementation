@@ -1266,7 +1266,17 @@ implementation.
 
 Status: in progress. E-0118 supplies the first project-owned movement-to-trigger-to-latched-objective
 vertical seam. E-0119 extends that seam through mouse target acquisition and one latched hit, with
-deterministic live/replay state and diagnostic presentation only.
+deterministic live/replay state and diagnostic presentation only. E-0120 adds the first complete
+project diagnostic deployment loop: deploy resets actor, proximity, and target state before entering
+`Active`; a newly latched target hit enters `Succeeded` and returns to BriefingRoom in the same
+rendered frame; an explicit direct Primary or Cancel exit from active play enters `Failed`; and the
+next keyboard-select or menu-LMB redeploy resets the seam again. Fresh replay owns and compares the
+same mission, proximity, target, actor-position, and front-end results without changing capture,
+persistence, gamepad defaults, or renderer resources. A serialized MSVC Debug build of the executable
+and focused targets is warning-free; focused CTest passes 3/3 and the direct real-host app-capture
+smoke passes. Hosted validation remains pending. This is not a retail mission, death, health,
+timer, debrief, checkpoint, spawn, campaign, inventory, reward, owner-corpus observation, or PCSX2
+parity claim.
 
 - Independently rewritten native mission behavior required by MINSK.
 - Objectives, triggers, combat, inventory, checkpoints, failure, and completion.
@@ -1298,7 +1308,9 @@ creation and selection, a durable active-character pointer invalidated by profil
 project-owned BriefingRoom/mission-selection surface, and a character-owned diagnostic-session
 marker. Character confirmation enters BriefingRoom; mission activation enters DiagnosticPlay only
 after both per-launch identities resolve and both durable revisions validate. Cancel returns from
-BriefingRoom to Characters, and the DiagnosticPlay menu edge returns to BriefingRoom. The
+BriefingRoom to Characters. E-0120 classifies an explicit direct Primary or Cancel exit from active
+DiagnosticPlay as a launch-local diagnostic failure and returns to BriefingRoom; successful target
+completion also returns there, and the next deployment resets only the project gameplay seam. The
 implemented zero-to-one path
 uses one fixed `DIAGNOSTIC CHARACTER` record and deliberately assigns no appearance, body, class,
 skill, equipment, inventory, progression, or retail slot semantics. Keyboard/mouse operation needs

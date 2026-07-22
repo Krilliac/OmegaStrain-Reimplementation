@@ -90,6 +90,17 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
             RunReplayErrorCode::InvalidEntityCapacity));
     }
 
+    if (config.enable_debug_mission_lifecycle &&
+        (!config.enable_debug_locomotion || !config.enable_debug_target_fire ||
+         !config.initial_front_end_state ||
+         !IsValidFrontEndState(*config.initial_front_end_state) ||
+         !config.front_end_capabilities.can_start_diagnostic_campaign ||
+         !config.front_end_capabilities.supports_character_selection))
+    {
+        return std::unexpected(Error(RunReplayOperation::Create,
+            RunReplayErrorCode::InvalidDiagnosticMissionLifecycleConfig));
+    }
+
     auto world = simulation::SimulationWorld::Create(
         simulation::SimulationWorldConfig{
             .fixed_step = scheduler->config().simulation_step,
@@ -140,6 +151,16 @@ std::expected<RunReplaySession, RunReplayError> RunReplaySession::Create(
             ? std::optional<gameplay::DiagnosticTargetFireState>{
                   gameplay::DiagnosticTargetFireState{}}
             : std::nullopt,
+        config.enable_debug_mission_lifecycle
+            ? std::optional<gameplay::DiagnosticMissionLifecycleState>{
+                  gameplay::DiagnosticMissionLifecycleState{
+                      .status = FrontEndAllowsSimulation(
+                                    *config.initial_front_end_state,
+                                    front_end_capabilities, false, false)
+                                    ? gameplay::DiagnosticMissionStatus::Active
+                                    : gameplay::DiagnosticMissionStatus::Ready,
+                  }}
+            : std::nullopt,
         config.initial_front_end_state,
         config.front_end_visible_profile_slots,
         config.front_end_total_profile_count,
@@ -157,6 +178,8 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
         diagnostic_proximity_trigger_state,
     const std::optional<gameplay::DiagnosticTargetFireState>
         diagnostic_target_fire_state,
+    const std::optional<gameplay::DiagnosticMissionLifecycleState>
+        diagnostic_mission_lifecycle_state,
     const std::optional<FrontEndState> front_end_state,
     const std::uint8_t front_end_visible_profile_slots,
     const std::size_t front_end_total_profile_count,
@@ -171,6 +194,7 @@ RunReplaySession::RunReplaySession(runtime::FrameScheduler&& scheduler,
       debug_locomotion_entity_(debug_locomotion_entity),
       diagnostic_proximity_trigger_state_(diagnostic_proximity_trigger_state),
       diagnostic_target_fire_state_(diagnostic_target_fire_state),
+      diagnostic_mission_lifecycle_state_(diagnostic_mission_lifecycle_state),
       front_end_state_(front_end_state),
       front_end_visible_profile_slots_(front_end_visible_profile_slots),
       front_end_total_profile_count_(front_end_total_profile_count),
@@ -200,6 +224,8 @@ RunReplaySession::RunReplaySession(RunReplaySession&& other) noexcept
           other.diagnostic_proximity_trigger_state_, std::nullopt)),
       diagnostic_target_fire_state_(std::exchange(
           other.diagnostic_target_fire_state_, std::nullopt)),
+      diagnostic_mission_lifecycle_state_(std::exchange(
+          other.diagnostic_mission_lifecycle_state_, std::nullopt)),
       front_end_state_(std::exchange(
           other.front_end_state_, std::nullopt)),
       front_end_visible_profile_slots_(std::exchange(
@@ -235,6 +261,7 @@ void RunReplaySession::NormalizeInert() noexcept
     debug_locomotion_entity_.reset();
     diagnostic_proximity_trigger_state_.reset();
     diagnostic_target_fire_state_.reset();
+    diagnostic_mission_lifecycle_state_.reset();
     front_end_state_.reset();
     front_end_visible_profile_slots_ = 0U;
     front_end_total_profile_count_ = 0U;
@@ -279,6 +306,16 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             RunReplayFrame(std::move(*replay_frame))};
     }
 
+    std::optional<FrontEndState> next_front_end_state = front_end_state_;
+    std::optional<gameplay::DiagnosticProximityTriggerState>
+        next_diagnostic_proximity_trigger_state =
+            diagnostic_proximity_trigger_state_;
+    std::optional<gameplay::DiagnosticTargetFireState>
+        next_diagnostic_target_fire_state = diagnostic_target_fire_state_;
+    std::optional<gameplay::DiagnosticMissionLifecycleState>
+        next_diagnostic_mission_lifecycle_state =
+            diagnostic_mission_lifecycle_state_;
+
     // One capability value authorizes both the reducer and the simulation check,
     // so replay cannot open the gate for one and leave it closed for the other.
     const FrontEndCapabilities front_end_capabilities{
@@ -305,10 +342,10 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
     const bool gameplay_input_context =
         !front_end_state_ ||
         front_end_state_->mode == FrontEndMode::DiagnosticPlay;
-    if (front_end_state_)
+    if (next_front_end_state)
     {
-        const FrontEndReduction front_end = ReduceFrontEnd(*front_end_state_,
-            ResolveFrontEndInputEdges(front_end_state_->mode,
+        const FrontEndReduction front_end = ReduceFrontEnd(*next_front_end_state,
+            ResolveFrontEndInputEdges(next_front_end_state->mode,
                 FrontEndInputEdges{
                     .primary_pressed = replay_frame->input().WasPressed(
                         kFrontEndPrimaryAction),
@@ -327,7 +364,7 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
             front_end_active_profile_is_confirmed_,
             front_end_active_visible_character_slots_,
             front_end_active_character_is_confirmed_);
-        *front_end_state_ = front_end.state;
+        *next_front_end_state = front_end.state;
         front_end_command = front_end.command;
         if (front_end_command.type == FrontEndCommandType::CreateFirstProfile)
         {
@@ -395,17 +432,54 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
                 selected_character_slot < front_end_active_visible_character_slots_ &&
                 selected_character_slot < front_end_active_total_character_count_;
         }
-        // StartDiagnosticCampaign is deliberately publication-only here. Replay
-        // owns no profile/character identity or persistence boundary and cannot
-        // create or validate a durable diagnostic session marker.
+        // StartDiagnosticCampaign remains identity- and persistence-free. The
+        // optional project diagnostic lifecycle below consumes only the bounded
+        // command and owns no durable game-session marker.
     }
-    const bool simulation_allowed = !front_end_state_ ||
-                                     FrontEndAllowsSimulation(
-                                         *front_end_state_, front_end_capabilities,
-                                         front_end_active_profile_is_confirmed_,
-                                         front_end_active_character_is_confirmed_);
-    std::optional<gameplay::DiagnosticTargetFireState>
-        next_diagnostic_target_fire_state = diagnostic_target_fire_state_;
+    const bool diagnostic_mission_aborted_now =
+        next_diagnostic_mission_lifecycle_state && gameplay_input_context &&
+        next_diagnostic_mission_lifecycle_state->status ==
+            gameplay::DiagnosticMissionStatus::Active &&
+        next_front_end_state &&
+        next_front_end_state->mode != FrontEndMode::DiagnosticPlay;
+    bool diagnostic_mission_deployment_reset_pending = false;
+
+    if (next_diagnostic_mission_lifecycle_state &&
+        front_end_command.type == FrontEndCommandType::StartDiagnosticCampaign)
+    {
+        const auto deployed = gameplay::AdvanceDiagnosticMissionLifecycle(
+            *next_diagnostic_mission_lifecycle_state,
+            gameplay::DiagnosticMissionEvent::Deploy);
+        if (!deployed || !deployed->reset_gameplay_now ||
+            deployed->enter_briefing_now)
+        {
+            state_ = RunReplaySessionState::Failed;
+            return std::unexpected(Error(RunReplayOperation::Next,
+                RunReplayErrorCode::DiagnosticMissionLifecycleFailed));
+        }
+        if (!debug_locomotion_entity_ ||
+            !simulation_->PositionOf(*debug_locomotion_entity_))
+        {
+            state_ = RunReplaySessionState::Failed;
+            return std::unexpected(Error(RunReplayOperation::Next,
+                RunReplayErrorCode::DiagnosticMissionPositionResetFailed));
+        }
+        diagnostic_mission_deployment_reset_pending = true;
+        *next_diagnostic_mission_lifecycle_state = deployed->state;
+        next_diagnostic_proximity_trigger_state =
+            gameplay::DiagnosticProximityTriggerState{};
+        next_diagnostic_target_fire_state =
+            gameplay::DiagnosticTargetFireState{};
+    }
+
+    const bool simulation_allowed =
+        !next_front_end_state ||
+        FrontEndAllowsSimulation(*next_front_end_state, front_end_capabilities,
+            front_end_active_profile_is_confirmed_,
+            front_end_active_character_is_confirmed_);
+    const bool target_complete_at_frame_start =
+        next_diagnostic_target_fire_state &&
+        next_diagnostic_target_fire_state->target_complete;
     if (next_diagnostic_target_fire_state)
     {
         std::optional<gameplay::DiagnosticAimPointQ16> pointer;
@@ -471,10 +545,6 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
         };
     }
 
-    std::optional<gameplay::DiagnosticProximityTriggerState>
-        next_diagnostic_proximity_trigger_state =
-            diagnostic_proximity_trigger_state_;
-    bool diagnostic_proximity_trigger_advanced = false;
     for (std::uint32_t step = 0U; step < plan.simulation_steps; ++step)
     {
         if (simulation_->AdvanceOneStep(simulation_input) !=
@@ -493,7 +563,9 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
                     RunReplayErrorCode::DiagnosticProximityTriggerFailed));
             }
             const std::optional<simulation::Position3> position =
-                simulation_->PositionOf(*debug_locomotion_entity_);
+                diagnostic_mission_deployment_reset_pending
+                ? std::optional<simulation::Position3>{simulation::Position3{}}
+                : simulation_->PositionOf(*debug_locomotion_entity_);
             if (!position)
             {
                 state_ = RunReplaySessionState::Failed;
@@ -510,15 +582,74 @@ std::expected<RunReplayFrame, RunReplayError> RunReplaySession::Next() noexcept
                     RunReplayErrorCode::DiagnosticProximityTriggerFailed));
             }
             *next_diagnostic_proximity_trigger_state = advanced->state;
-            diagnostic_proximity_trigger_advanced = true;
         }
     }
-    if (diagnostic_proximity_trigger_advanced)
+
+    if (next_diagnostic_mission_lifecycle_state)
     {
-        diagnostic_proximity_trigger_state_ =
-            next_diagnostic_proximity_trigger_state;
+        gameplay::DiagnosticMissionEvent mission_event =
+            gameplay::DiagnosticMissionEvent::None;
+        if (diagnostic_mission_aborted_now)
+        {
+            mission_event = gameplay::DiagnosticMissionEvent::Abort;
+        }
+        else if (next_diagnostic_mission_lifecycle_state->status ==
+                     gameplay::DiagnosticMissionStatus::Active &&
+                 !target_complete_at_frame_start &&
+                 next_diagnostic_target_fire_state &&
+                 next_diagnostic_target_fire_state->target_complete)
+        {
+            mission_event = gameplay::DiagnosticMissionEvent::Complete;
+        }
+
+        const auto advanced = gameplay::AdvanceDiagnosticMissionLifecycle(
+            *next_diagnostic_mission_lifecycle_state, mission_event);
+        if (!advanced)
+        {
+            state_ = RunReplaySessionState::Failed;
+            return std::unexpected(Error(RunReplayOperation::Next,
+                RunReplayErrorCode::DiagnosticMissionLifecycleFailed));
+        }
+        *next_diagnostic_mission_lifecycle_state = advanced->state;
+        if (advanced->enter_briefing_now &&
+            mission_event == gameplay::DiagnosticMissionEvent::Complete)
+        {
+            if (!next_front_end_state)
+            {
+                state_ = RunReplaySessionState::Failed;
+                return std::unexpected(Error(RunReplayOperation::Next,
+                    RunReplayErrorCode::DiagnosticMissionLifecycleFailed));
+            }
+            if (front_end_capabilities.supports_character_selection)
+            {
+                next_front_end_state->mode = FrontEndMode::BriefingRoom;
+                next_front_end_state->selected_main_row =
+                    FrontEndMainRow::StartDiagnostic;
+            }
+            else
+            {
+                *next_front_end_state = InitialFrontEndState();
+            }
+        }
     }
+
+    if (diagnostic_mission_deployment_reset_pending &&
+        (!debug_locomotion_entity_ ||
+            simulation_->ResetPosition(
+                *debug_locomotion_entity_, simulation::Position3{}) !=
+                simulation::PositionResetResult::Reset))
+    {
+        state_ = RunReplaySessionState::Failed;
+        return std::unexpected(Error(RunReplayOperation::Next,
+            RunReplayErrorCode::DiagnosticMissionPositionResetFailed));
+    }
+
+    front_end_state_ = next_front_end_state;
+    diagnostic_proximity_trigger_state_ =
+        next_diagnostic_proximity_trigger_state;
     diagnostic_target_fire_state_ = next_diagnostic_target_fire_state;
+    diagnostic_mission_lifecycle_state_ =
+        next_diagnostic_mission_lifecycle_state;
 
     state_ = replay_->complete()
                  ? RunReplaySessionState::Complete
@@ -576,6 +707,12 @@ std::optional<gameplay::DiagnosticTargetFireState>
 RunReplaySession::diagnostic_target_fire_state() const noexcept
 {
     return diagnostic_target_fire_state_;
+}
+
+std::optional<gameplay::DiagnosticMissionLifecycleState>
+RunReplaySession::diagnostic_mission_lifecycle_state() const noexcept
+{
+    return diagnostic_mission_lifecycle_state_;
 }
 
 std::optional<runtime::RenderTargetRectQ16>

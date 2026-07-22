@@ -11,6 +11,7 @@
 #include "sdl_input_service.h"
 #include "sdl_platform_service.h"
 
+#include "omega/gameplay/diagnostic_mission_lifecycle.h"
 #include "omega/gameplay/diagnostic_proximity_trigger.h"
 #include "omega/gameplay/diagnostic_target_fire.h"
 #include "omega/runtime/asset_service.h"
@@ -86,6 +87,15 @@ public:
     // project diagnostic target/fire reducer state for exact capture/replay validation.
     [[nodiscard]] gameplay::DiagnosticTargetFireState
     diagnostic_target_fire_state() const noexcept;
+    // [game/main thread; no concurrent use] Owned launch-local diagnostic
+    // mission snapshots used only for exact native capture/replay validation.
+    [[nodiscard]] gameplay::DiagnosticMissionLifecycleState
+    diagnostic_mission_lifecycle_state() const noexcept;
+    [[nodiscard]] gameplay::DiagnosticProximityTriggerState
+    diagnostic_proximity_trigger_state() const noexcept;
+    [[nodiscard]] std::optional<simulation::Position3>
+    diagnostic_actor_position() const noexcept;
+    [[nodiscard]] FrontEndState front_end_state() const noexcept;
 
 private:
     friend struct detail::OmegaAppTestAccess;
@@ -138,6 +148,7 @@ private:
     // prior front-end state and session activation unpublished.
     [[nodiscard]] std::expected<void, std::string> ApplyFrontEndCommand(
         FrontEndCommand command);
+    [[nodiscard]] std::expected<void, std::string> DeployDiagnosticMission();
     [[nodiscard]] std::expected<void, std::string> CreateFirstProfile();
     [[nodiscard]] std::expected<void, std::string> CreateFirstCharacter();
     // [game/main thread; no concurrent use] Explicit capability inputs for the
@@ -348,6 +359,10 @@ private:
     // commits only after every fixed step succeeds, survives front-end round trips, and has no GPU
     // or persistence lifetime.
     gameplay::DiagnosticTargetFireState diagnostic_target_fire_state_{};
+    // Project-owned launch-local mission loop. It reports only the synthetic
+    // diagnostic deploy/complete/abort policy and is never persisted.
+    gameplay::DiagnosticMissionLifecycleState
+        diagnostic_mission_lifecycle_state_{};
     // Contextual native playtest controls. Mouse/keyboard actions update these
     // only when DiagnosticPlay was already active at frame input time, so the
     // same physical controls remain menu select/back aliases without leaking a

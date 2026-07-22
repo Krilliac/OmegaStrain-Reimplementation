@@ -314,6 +314,17 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     return state == omega::runtime::FrameSchedulerState{.config = state.config};
 }
 
+[[nodiscard]] bool SameDiagnosticProximityState(
+    const std::optional<omega::gameplay::DiagnosticProximityTriggerState>& left,
+    const std::optional<omega::gameplay::DiagnosticProximityTriggerState>& right) noexcept
+{
+    if (left.has_value() != right.has_value())
+        return false;
+    return !left ||
+           (left->inside == right->inside &&
+               left->objective_complete == right->objective_complete);
+}
+
 [[nodiscard]] bool ReplayFreshCapture(
     omega::app::RunCaptureOutcome&& outcome,
     const omega::app::RunResult capture_result,
@@ -321,6 +332,13 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     const omega::runtime::FrameSchedulerState capture_after,
     const omega::gameplay::DiagnosticTargetFireState
         capture_diagnostic_target_fire_state,
+    const omega::gameplay::DiagnosticMissionLifecycleState
+        capture_diagnostic_mission_lifecycle_state,
+    const omega::gameplay::DiagnosticProximityTriggerState
+        capture_diagnostic_proximity_trigger_state,
+    const std::optional<omega::simulation::Position3>
+        capture_diagnostic_actor_position,
+    const omega::app::FrontEndState capture_front_end_state,
     const std::size_t front_end_total_profile_count,
     const std::uint8_t front_end_visible_profile_slots,
     const std::array<std::uint8_t, omega::app::kFrontEndVisibleProfiles>&
@@ -351,6 +369,8 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     };
     config.enable_debug_target_fire = std::ranges::includes(
         traces->input_trace().actions(), debug_target_fire_actions);
+    config.enable_debug_mission_lifecycle =
+        config.enable_debug_locomotion && config.enable_debug_target_fire;
     if (front_end_total_profile_count > omega::app::kFrontEndMaximumProfiles)
     {
         std::cerr << "runtime capture replay: profile snapshot exceeds the project limit\n";
@@ -427,6 +447,10 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     const auto replay_debug_position = replay.debug_locomotion_position();
     const auto replay_diagnostic_target =
         replay.diagnostic_target_fire_state();
+    const auto replay_diagnostic_proximity =
+        replay.diagnostic_proximity_trigger_state();
+    const auto replay_diagnostic_mission =
+        replay.diagnostic_mission_lifecycle_state();
     const auto replay_front_end = replay.front_end_state();
     if (!scheduler || !simulation || !replay_front_end)
     {
@@ -455,6 +479,41 @@ void PrintRunReplayError(const omega::app::RunReplayError& error)
     if (replay_diagnostic_target != expected_diagnostic_target)
     {
         std::cerr << "runtime capture replay: final diagnostic target states differ\n";
+        return false;
+    }
+    const std::optional<omega::gameplay::DiagnosticProximityTriggerState>
+        expected_diagnostic_proximity = config.enable_debug_locomotion
+        ? std::optional<omega::gameplay::DiagnosticProximityTriggerState>{
+              capture_diagnostic_proximity_trigger_state}
+        : std::nullopt;
+    if (!SameDiagnosticProximityState(
+            replay_diagnostic_proximity, expected_diagnostic_proximity))
+    {
+        std::cerr << "runtime capture replay: final diagnostic proximity states differ\n";
+        return false;
+    }
+    const std::optional<omega::gameplay::DiagnosticMissionLifecycleState>
+        expected_diagnostic_mission = config.enable_debug_mission_lifecycle
+        ? std::optional<omega::gameplay::DiagnosticMissionLifecycleState>{
+              capture_diagnostic_mission_lifecycle_state}
+        : std::nullopt;
+    if (replay_diagnostic_mission != expected_diagnostic_mission)
+    {
+        std::cerr << "runtime capture replay: final diagnostic mission states differ\n";
+        return false;
+    }
+    const std::optional<omega::simulation::Position3>
+        expected_diagnostic_actor_position = config.enable_debug_locomotion
+        ? capture_diagnostic_actor_position
+        : std::nullopt;
+    if (replay_debug_position != expected_diagnostic_actor_position)
+    {
+        std::cerr << "runtime capture replay: final diagnostic actor positions differ\n";
+        return false;
+    }
+    if (*replay_front_end != capture_front_end_state)
+    {
+        std::cerr << "runtime capture replay: final front-end states differ\n";
         return false;
     }
 
@@ -700,7 +759,11 @@ int main(const int argc, char** argv)
         }
         if (!ReplayFreshCapture(std::move(*capture), capture_result,
                 capture_before, capture_after,
-                app->diagnostic_target_fire_state(), startup_profile_count,
+                app->diagnostic_target_fire_state(),
+                app->diagnostic_mission_lifecycle_state(),
+                app->diagnostic_proximity_trigger_state(),
+                app->diagnostic_actor_position(), app->front_end_state(),
+                startup_profile_count,
                 front_end_visible_profile_slots,
                 front_end_visible_character_slots_by_profile,
                 front_end_total_character_counts_by_profile))

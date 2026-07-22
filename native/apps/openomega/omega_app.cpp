@@ -2198,6 +2198,11 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             }
             front_end_state_ = front_end.state;
         }
+        const bool diagnostic_mission_aborted_now =
+            diagnostic_play_input_context &&
+            diagnostic_mission_lifecycle_state_.status ==
+                gameplay::DiagnosticMissionStatus::Active &&
+            front_end_state_.mode != FrontEndMode::DiagnosticPlay;
         const bool simulation_allowed =
             !movie_was_active && FrontEndAllowsSimulation(front_end_state_,
                                      CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
@@ -2355,8 +2360,53 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 next_proximity_trigger_state = trigger_step->state;
             }
         }
+        gameplay::DiagnosticMissionEvent mission_event =
+            gameplay::DiagnosticMissionEvent::None;
+        if (diagnostic_mission_aborted_now)
+        {
+            mission_event = gameplay::DiagnosticMissionEvent::Abort;
+        }
+        else if (diagnostic_mission_lifecycle_state_.status ==
+                     gameplay::DiagnosticMissionStatus::Active &&
+                 !diagnostic_target_fire_state_.target_complete &&
+                 target_fire_step->state.target_complete)
+        {
+            mission_event = gameplay::DiagnosticMissionEvent::Complete;
+        }
+        const auto mission_step =
+            gameplay::AdvanceDiagnosticMissionLifecycle(
+                diagnostic_mission_lifecycle_state_, mission_event);
+        if (!mission_step)
+        {
+            (void)ContainOpeningMovieAudio();
+            jobs_->WaitForIdle();
+            constexpr std::string_view error =
+                "diagnostic mission lifecycle evaluation failed";
+            log_->Error("simulation", error);
+            return RunLoopResult{
+                .result = result,
+                .operational_error = std::string(error),
+                .capture_error = std::nullopt,
+            };
+        }
+
         diagnostic_proximity_trigger_state_ = next_proximity_trigger_state;
         diagnostic_target_fire_state_ = target_fire_step->state;
+        diagnostic_mission_lifecycle_state_ = mission_step->state;
+        if (mission_step->enter_briefing_now &&
+            mission_event == gameplay::DiagnosticMissionEvent::Complete)
+        {
+            if (CurrentFrontEndCapabilities().supports_character_selection)
+            {
+                front_end_state_.mode = FrontEndMode::BriefingRoom;
+                front_end_state_.selected_main_row =
+                    FrontEndMainRow::StartDiagnostic;
+            }
+            else
+            {
+                front_end_state_ = InitialFrontEndState();
+            }
+        }
 
         const simulation::SimulationState simulation_snapshot = simulation_->Snapshot();
         const bool movie_is_active = IsBootSequenceActive(boot_sequence_state_);
@@ -2753,6 +2803,33 @@ bool OmegaApp::ActiveCharacterIsConfirmed() const noexcept
                front_end_character_startup_model_, active_character_id_);
 }
 
+std::expected<void, std::string> OmegaApp::DeployDiagnosticMission()
+{
+    const auto deployed = gameplay::AdvanceDiagnosticMissionLifecycle(
+        diagnostic_mission_lifecycle_state_,
+        gameplay::DiagnosticMissionEvent::Deploy);
+    if (!deployed || !deployed->reset_gameplay_now ||
+        deployed->enter_briefing_now)
+    {
+        return std::unexpected(
+            std::string{"diagnostic mission deploy evaluation failed"});
+    }
+    if (simulation_->ResetPosition(
+            debug_locomotion_entity_, simulation::Position3{}) !=
+        simulation::PositionResetResult::Reset)
+    {
+        return std::unexpected(
+            std::string{"diagnostic actor reset failed"});
+    }
+
+    diagnostic_proximity_trigger_state_ = {};
+    diagnostic_target_fire_state_ = {};
+    diagnostic_mission_lifecycle_state_ = deployed->state;
+    debug_target_held_ = false;
+    debug_fire_pressed_ = false;
+    return {};
+}
+
 std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
     const FrontEndCommand command)
 {
@@ -2849,7 +2926,7 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
             *active_profile_id_, *active_character_id_);
         if (!prepared)
             return std::unexpected(start_failure(prepared.error().code));
-        return {};
+        return DeployDiagnosticMission();
     }
     if (command.type != FrontEndCommandType::SetActiveProfile)
         return {};
@@ -3259,5 +3336,28 @@ std::optional<profiles::CharacterId> OmegaApp::active_character_id() const noexc
 gameplay::DiagnosticTargetFireState OmegaApp::diagnostic_target_fire_state() const noexcept
 {
     return diagnostic_target_fire_state_;
+}
+
+gameplay::DiagnosticMissionLifecycleState
+OmegaApp::diagnostic_mission_lifecycle_state() const noexcept
+{
+    return diagnostic_mission_lifecycle_state_;
+}
+
+gameplay::DiagnosticProximityTriggerState
+OmegaApp::diagnostic_proximity_trigger_state() const noexcept
+{
+    return diagnostic_proximity_trigger_state_;
+}
+
+std::optional<simulation::Position3>
+OmegaApp::diagnostic_actor_position() const noexcept
+{
+    return simulation_->PositionOf(debug_locomotion_entity_);
+}
+
+FrontEndState OmegaApp::front_end_state() const noexcept
+{
+    return front_end_state_;
 }
 } // namespace omega::app

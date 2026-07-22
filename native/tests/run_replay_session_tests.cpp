@@ -84,6 +84,8 @@ using omega::app::RunReplaySession;
 using omega::app::RunReplaySessionConfig;
 using omega::app::RunReplaySessionState;
 using omega::gameplay::DiagnosticProximityTriggerState;
+using omega::gameplay::DiagnosticMissionLifecycleState;
+using omega::gameplay::DiagnosticMissionStatus;
 using omega::gameplay::DiagnosticTargetFireState;
 using omega::runtime::FramePlan;
 using omega::runtime::FrameScheduler;
@@ -362,6 +364,23 @@ struct ScriptedElapsedFrame
     };
 }
 
+[[nodiscard]] RunReplaySessionConfig DiagnosticMissionConfig()
+{
+    RunReplaySessionConfig config = ValidConfig();
+    config.scheduler.max_steps_per_frame = 6U;
+    config.scheduler.max_frame_delta = milliseconds{60};
+    config.enable_debug_locomotion = true;
+    config.enable_debug_target_fire = true;
+    config.enable_debug_mission_lifecycle = true;
+    config.initial_front_end_state = FrontEndState{
+        .mode = FrontEndMode::BriefingRoom,
+        .selected_main_row = FrontEndMainRow::StartDiagnostic,
+    };
+    config.front_end_capabilities.can_start_diagnostic_campaign = true;
+    config.front_end_capabilities.supports_character_selection = true;
+    return config;
+}
+
 [[nodiscard]] RunReplaySession TakeSession(
     std::expected<RunReplaySession, RunReplayError>& created,
     const std::string_view message)
@@ -441,6 +460,13 @@ struct PairObservation
                              };
 }
 
+[[nodiscard]] bool SameDiagnosticMissionLifecycle(
+    const std::optional<DiagnosticMissionLifecycleState>& state,
+    const DiagnosticMissionStatus status) noexcept
+{
+    return state && *state == DiagnosticMissionLifecycleState{.status = status};
+}
+
 [[nodiscard]] bool SameDiagnosticProximityTrigger(
     const std::optional<DiagnosticProximityTriggerState>& left,
     const std::optional<DiagnosticProximityTriggerState>& right) noexcept
@@ -475,6 +501,8 @@ void CheckContractAndTaxonomy()
                                .diagnostic_proximity_trigger_state()));
     static_assert(noexcept(std::declval<const RunReplaySession&>()
                                .diagnostic_target_fire_state()));
+    static_assert(noexcept(std::declval<const RunReplaySession&>()
+                               .diagnostic_mission_lifecycle_state()));
     static_assert(noexcept(std::declval<const RunReplaySession&>()
                                .diagnostic_actor_marker_destination()));
     static_assert(noexcept(
@@ -523,6 +551,10 @@ void CheckContractAndTaxonomy()
         std::optional<DiagnosticTargetFireState>>);
     static_assert(std::is_same_v<
         decltype(std::declval<const RunReplaySession&>()
+                     .diagnostic_mission_lifecycle_state()),
+        std::optional<DiagnosticMissionLifecycleState>>);
+    static_assert(std::is_same_v<
+        decltype(std::declval<const RunReplaySession&>()
                      .diagnostic_actor_marker_destination()),
         std::optional<RenderTargetRectQ16>>);
     static_assert(std::is_same_v<
@@ -544,6 +576,7 @@ void CheckContractAndTaxonomy()
     static_assert(default_config.maximum_entities == 65'536U);
     static_assert(!default_config.enable_debug_locomotion);
     static_assert(!default_config.enable_debug_target_fire);
+    static_assert(!default_config.enable_debug_mission_lifecycle);
     static_assert(!default_config.initial_front_end_state);
     static_assert(default_config.front_end_visible_profile_slots == 0U);
     static_assert(default_config.front_end_total_profile_count == 0U);
@@ -578,6 +611,14 @@ void CheckContractAndTaxonomy()
                       RunReplayErrorCode::DiagnosticProximityTriggerFailed) == 10);
     static_assert(static_cast<int>(
                       RunReplayErrorCode::DiagnosticTargetFireFailed) == 11);
+    static_assert(static_cast<int>(
+                      RunReplayErrorCode::InvalidDiagnosticMissionLifecycleConfig) ==
+                  12);
+    static_assert(static_cast<int>(
+                      RunReplayErrorCode::DiagnosticMissionLifecycleFailed) == 13);
+    static_assert(static_cast<int>(
+                      RunReplayErrorCode::DiagnosticMissionPositionResetFailed) ==
+                  14);
 
     struct ErrorContract
     {
@@ -617,6 +658,16 @@ void CheckContractAndTaxonomy()
         ErrorContract{RunReplayErrorCode::DiagnosticTargetFireFailed,
             "diagnostic-target-fire-failed",
             "run replay diagnostic target fire failed"},
+        ErrorContract{
+            RunReplayErrorCode::InvalidDiagnosticMissionLifecycleConfig,
+            "invalid-diagnostic-mission-lifecycle-config",
+            "run replay diagnostic mission lifecycle configuration is invalid"},
+        ErrorContract{RunReplayErrorCode::DiagnosticMissionLifecycleFailed,
+            "diagnostic-mission-lifecycle-failed",
+            "run replay diagnostic mission lifecycle evaluation failed"},
+        ErrorContract{RunReplayErrorCode::DiagnosticMissionPositionResetFailed,
+            "diagnostic-mission-position-reset-failed",
+            "run replay diagnostic mission actor reset failed"},
     };
     for (const auto& contract : contracts)
     {
@@ -1583,6 +1634,481 @@ void CheckDiagnosticTargetFireReplay()
                   terminal.diagnostic_proximity_trigger_state(), terminal_trigger) &&
               terminal.diagnostic_target_fire_state() == target_before_move,
         "a terminal fire frame preserves exact pointer publication without mutating target, trigger, or position state");
+}
+
+void CheckDiagnosticMissionLifecycleReplay()
+{
+    constexpr std::array<std::uint32_t, 5U> actions{
+        omega::app::kDebugMoveRightAction,
+        omega::app::kFrontEndPrimaryAction,
+        omega::app::kFrontEndCancelAction,
+        omega::app::kDebugFireAction,
+        omega::app::kDebugTargetAction,
+    };
+    constexpr PointerPositionQ16 target_center{
+        .x = 49'152U,
+        .y = 32'768U,
+    };
+
+    const std::span<const nanoseconds> no_elapsed;
+    const auto check_incoherent_config = [&](RunReplaySessionConfig config,
+                                               const std::string_view message)
+    {
+        RunCaptureTracePair pair = BuildPair(actions, 1U, no_elapsed);
+        const PairObservation before = ObservePair(pair);
+        const auto rejected =
+            RunReplaySession::Create(std::move(pair), config);
+        CheckError(rejected, RunReplayOperation::Create,
+            RunReplayErrorCode::InvalidDiagnosticMissionLifecycleConfig,
+            message);
+        Check(ObservePair(pair) == before,
+            "mission-lifecycle configuration rejection preserves the caller's trace pair");
+    };
+
+    const RunReplaySessionConfig coherent_config = DiagnosticMissionConfig();
+    RunReplaySessionConfig incoherent_config = coherent_config;
+    incoherent_config.enable_debug_locomotion = false;
+    check_incoherent_config(incoherent_config,
+        "mission lifecycle rejects a missing locomotion and proximity owner");
+    incoherent_config = coherent_config;
+    incoherent_config.enable_debug_target_fire = false;
+    check_incoherent_config(incoherent_config,
+        "mission lifecycle rejects a missing target/fire owner");
+    incoherent_config = coherent_config;
+    incoherent_config.initial_front_end_state.reset();
+    check_incoherent_config(incoherent_config,
+        "mission lifecycle rejects a missing modal front-end owner");
+    incoherent_config = coherent_config;
+    incoherent_config.initial_front_end_state->mode =
+        static_cast<FrontEndMode>(255U);
+    check_incoherent_config(incoherent_config,
+        "mission lifecycle rejects an invalid modal front-end state");
+    incoherent_config = coherent_config;
+    incoherent_config.front_end_capabilities.can_start_diagnostic_campaign =
+        false;
+    check_incoherent_config(incoherent_config,
+        "mission lifecycle rejects a front end that cannot publish deploy");
+    incoherent_config = coherent_config;
+    incoherent_config.front_end_capabilities.supports_character_selection =
+        false;
+    check_incoherent_config(incoherent_config,
+        "mission lifecycle rejects a front end without the briefing-room route");
+
+    auto ready_created = RunReplaySession::Create(
+        BuildPair(actions, 1U, no_elapsed), coherent_config);
+    RunReplaySession ready = TakeSession(
+        ready_created, "the coherent empty mission replay is created");
+    Check(ready.state() == RunReplaySessionState::Complete &&
+              SameDiagnosticMissionLifecycle(
+                  ready.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Ready),
+        "an enabled empty replay owns one exact ready mission state");
+    const auto ready_complete = ready.Next();
+    CheckError(ready_complete, RunReplayOperation::Next,
+        RunReplayErrorCode::ReplayComplete,
+        "completed mission replay rejects advancement before any lifecycle mutation");
+    Check(SameDiagnosticMissionLifecycle(
+              ready.diagnostic_mission_lifecycle_state(),
+              DiagnosticMissionStatus::Ready),
+        "the replay-complete error preserves the exact ready mission state");
+
+    RunReplaySessionConfig already_deployed_config = coherent_config;
+    already_deployed_config.initial_front_end_state = FrontEndState{};
+    auto already_deployed_created = RunReplaySession::Create(
+        BuildPair(actions, 1U, no_elapsed), already_deployed_config);
+    RunReplaySession already_deployed = TakeSession(already_deployed_created,
+        "the coherent already-deployed empty mission replay is created");
+    Check(already_deployed.state() == RunReplaySessionState::Complete &&
+              SameDiagnosticMissionLifecycle(
+                  already_deployed.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Active),
+        "an enabled replay that begins in DiagnosticPlay owns one exact active mission state");
+
+    const std::array required_gate_frames{
+        ScriptedElapsedFrame{.elapsed = milliseconds{20}},
+    };
+    RunReplaySessionConfig required_gate_config = already_deployed_config;
+    required_gate_config.front_end_capabilities
+        .requires_active_profile_for_diagnostic_play = true;
+    required_gate_config.front_end_capabilities
+        .requires_active_character_for_diagnostic_play = true;
+    auto required_gate_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, required_gate_frames), required_gate_config);
+    RunReplaySession required_gate = TakeSession(required_gate_created,
+        "the confirmation-gated initial DiagnosticPlay replay is created");
+    Check(SameDiagnosticMissionLifecycle(
+              required_gate.diagnostic_mission_lifecycle_state(),
+              DiagnosticMissionStatus::Ready) &&
+              required_gate.front_end_state() == FrontEndState{} &&
+              !required_gate.front_end_active_profile_is_confirmed() &&
+              !required_gate.front_end_active_character_is_confirmed(),
+        "closed confirmation mirrors keep an initial DiagnosticPlay mission ready");
+    const auto required_gate_frame = required_gate.Next();
+    Check(required_gate_frame && required_gate_frame->frame_plan() &&
+              required_gate_frame->frame_plan()->simulation_steps == 0U &&
+              required_gate.front_end_state() ==
+                  omega::app::InitialFrontEndState() &&
+              SameDiagnosticMissionLifecycle(
+                  required_gate.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Ready) &&
+              !required_gate.front_end_active_profile_is_confirmed() &&
+              !required_gate.front_end_active_character_is_confirmed(),
+        "a gated initial DiagnosticPlay frame fails closed without synthesizing a mission abort");
+
+    constexpr std::array deploy_down{
+        InputTransition{.code = 1U, .pressed = true},
+    };
+    constexpr std::array deploy_up_move_target_down{
+        InputTransition{.code = 1U, .pressed = false},
+        InputTransition{.code = 0U, .pressed = true},
+        InputTransition{.code = 4U, .pressed = true},
+    };
+    constexpr std::array move_up_fire_down{
+        InputTransition{.code = 0U, .pressed = false},
+        InputTransition{.code = 3U, .pressed = true},
+    };
+    constexpr std::array objective_controls_up{
+        InputTransition{.code = 3U, .pressed = false},
+        InputTransition{.code = 4U, .pressed = false},
+    };
+    const std::array success_and_redeploy_frames{
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = deploy_down,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = milliseconds{60},
+            .transitions = deploy_up_move_target_down,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = move_up_fire_down,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = objective_controls_up,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = milliseconds{20},
+            .transitions = deploy_down,
+            .pointer_position = target_center,
+        },
+    };
+
+    auto success_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, success_and_redeploy_frames),
+        coherent_config);
+    RunReplaySession success = TakeSession(
+        success_created, "the successful diagnostic mission replay is created");
+    Check(SameDiagnosticMissionLifecycle(
+              success.diagnostic_mission_lifecycle_state(),
+              DiagnosticMissionStatus::Ready) &&
+              success.debug_locomotion_position() == Position3{} &&
+              SameDiagnosticProximityTrigger(
+                  success.diagnostic_proximity_trigger_state(), false, false) &&
+              SameDiagnosticTargetFire(
+                  success.diagnostic_target_fire_state(), false, false),
+        "mission replay begins ready with exact neutral gameplay state");
+
+    const auto deployed = success.Next();
+    Check(deployed && deployed->frame_plan() &&
+              deployed->frame_plan()->simulation_steps == 0U &&
+              deployed->front_end_command().type ==
+                  FrontEndCommandType::StartDiagnosticCampaign &&
+              success.front_end_state() == FrontEndState{} &&
+              success.debug_locomotion_position() == Position3{} &&
+              SameDiagnosticProximityTrigger(
+                  success.diagnostic_proximity_trigger_state(), false, false) &&
+              SameDiagnosticTargetFire(
+                  success.diagnostic_target_fire_state(), false, false) &&
+              SameDiagnosticMissionLifecycle(
+                  success.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Active),
+        "briefing deploy resets actor, proximity, and target as one active mission publication");
+
+    const auto crossed = success.Next();
+    Check(crossed && crossed->frame_plan() &&
+              crossed->frame_plan()->simulation_steps == 6U &&
+              success.debug_locomotion_position() == Position3{.x = 6} &&
+              SameDiagnosticProximityTrigger(
+                  success.diagnostic_proximity_trigger_state(), false, true) &&
+              SameDiagnosticTargetFire(
+                  success.diagnostic_target_fire_state(), false, false) &&
+              SameDiagnosticMissionLifecycle(
+                  success.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Active),
+        "fixed-step crossing completes proximity while the deployed mission remains active");
+
+    const auto completed = success.Next();
+    Check(completed && completed->frame_plan() &&
+              completed->frame_plan()->simulation_steps == 0U &&
+              SameDiagnosticTargetFire(
+                  success.diagnostic_target_fire_state(), false, true) &&
+              SameDiagnosticMissionLifecycle(
+                  success.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Succeeded) &&
+              success.front_end_state() == FrontEndState{
+                  .mode = FrontEndMode::BriefingRoom,
+                  .selected_main_row = FrontEndMainRow::StartDiagnostic,
+              },
+        "a false-to-true target edge succeeds on a zero-step batch and returns to briefing in the same frame");
+
+    const auto succeeded_neutral = success.Next();
+    Check(succeeded_neutral &&
+              SameDiagnosticMissionLifecycle(
+                  success.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Succeeded),
+        "a neutral briefing frame leaves terminal success immutable");
+    const auto redeployed_after_success = success.Next();
+    Check(redeployed_after_success &&
+              redeployed_after_success->frame_plan() &&
+              redeployed_after_success->frame_plan()->simulation_steps == 2U &&
+              redeployed_after_success->front_end_command().type ==
+                  FrontEndCommandType::StartDiagnosticCampaign &&
+              success.front_end_state() == FrontEndState{} &&
+              success.debug_locomotion_position() == Position3{} &&
+              SameDiagnosticProximityTrigger(
+                  success.diagnostic_proximity_trigger_state(), false, false) &&
+              SameDiagnosticTargetFire(
+                  success.diagnostic_target_fire_state(), false, false) &&
+              SameDiagnosticMissionLifecycle(
+                  success.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Active),
+        "redeploy from success atomically restores the mission gameplay origin");
+
+    RunReplaySessionConfig disabled_config = coherent_config;
+    disabled_config.enable_debug_mission_lifecycle = false;
+    const std::span<const ScriptedElapsedFrame> success_prefix{
+        success_and_redeploy_frames.data(), 3U};
+    auto disabled_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, success_prefix), disabled_config);
+    RunReplaySession disabled = TakeSession(disabled_created,
+        "the mission-lifecycle-disabled compatibility replay is created");
+    const auto disabled_deploy = disabled.Next();
+    const auto disabled_crossing = disabled.Next();
+    const auto disabled_hit = disabled.Next();
+    Check(disabled_deploy && disabled_crossing && disabled_hit &&
+              !disabled.diagnostic_mission_lifecycle_state() &&
+              disabled.front_end_state() == FrontEndState{} &&
+              SameDiagnosticTargetFire(
+                  disabled.diagnostic_target_fire_state(), false, true),
+        "the default-disabled option preserves the prior target completion and play-mode behavior");
+
+    constexpr std::array primary_up{
+        InputTransition{.code = 1U, .pressed = false},
+    };
+    const std::array primary_abort_redeploy_frames{
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = deploy_down,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = primary_up,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = deploy_down,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = primary_up,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = deploy_down,
+        },
+    };
+    auto primary_abort_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, primary_abort_redeploy_frames),
+        coherent_config);
+    RunReplaySession primary_abort = TakeSession(primary_abort_created,
+        "the primary-abort mission replay is created");
+    const auto primary_deployed = primary_abort.Next();
+    const auto primary_released = primary_abort.Next();
+    const auto primary_aborted = primary_abort.Next();
+    Check(primary_deployed && primary_released && primary_aborted &&
+              primary_aborted->front_end_command().type ==
+                  FrontEndCommandType::None &&
+              primary_abort.front_end_state() == FrontEndState{
+                  .mode = FrontEndMode::BriefingRoom,
+                  .selected_main_row = FrontEndMainRow::StartDiagnostic,
+              } &&
+              SameDiagnosticMissionLifecycle(
+                  primary_abort.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Failed),
+        "active primary exits play and aborts the mission before completion");
+    const auto failed_neutral = primary_abort.Next();
+    Check(failed_neutral &&
+              SameDiagnosticMissionLifecycle(
+                  primary_abort.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Failed),
+        "a neutral briefing frame leaves terminal failure immutable");
+    const auto redeployed_after_abort = primary_abort.Next();
+    Check(redeployed_after_abort &&
+              redeployed_after_abort->front_end_command().type ==
+                  FrontEndCommandType::StartDiagnosticCampaign &&
+              primary_abort.debug_locomotion_position() == Position3{} &&
+              SameDiagnosticProximityTrigger(
+                  primary_abort.diagnostic_proximity_trigger_state(), false,
+                  false) &&
+              SameDiagnosticTargetFire(
+                  primary_abort.diagnostic_target_fire_state(), false, false) &&
+              SameDiagnosticMissionLifecycle(
+                  primary_abort.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Active),
+        "redeploy from abort resets every gameplay value and starts a fresh active mission");
+
+    constexpr std::array cancel_primary_fire_down{
+        InputTransition{.code = 0U, .pressed = false},
+        InputTransition{.code = 1U, .pressed = true},
+        InputTransition{.code = 2U, .pressed = true},
+        InputTransition{.code = 3U, .pressed = true},
+    };
+    const std::array cancel_precedence_frames{
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = deploy_down,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = milliseconds{60},
+            .transitions = deploy_up_move_target_down,
+            .pointer_position = target_center,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = cancel_primary_fire_down,
+            .pointer_position = target_center,
+        },
+    };
+    auto cancel_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, cancel_precedence_frames), coherent_config);
+    RunReplaySession cancel = TakeSession(
+        cancel_created, "the cancel-precedence mission replay is created");
+    const auto cancel_deployed = cancel.Next();
+    const auto cancel_crossed = cancel.Next();
+    const auto cancel_aborted = cancel.Next();
+    Check(cancel_deployed && cancel_crossed && cancel_aborted &&
+              cancel_aborted->front_end_command().type ==
+                  FrontEndCommandType::None &&
+              cancel_aborted->frame_plan() &&
+              cancel_aborted->frame_plan()->simulation_steps == 0U &&
+              cancel.debug_locomotion_position() == Position3{.x = 6} &&
+              SameDiagnosticProximityTrigger(
+                  cancel.diagnostic_proximity_trigger_state(), false, true) &&
+              SameDiagnosticTargetFire(
+                  cancel.diagnostic_target_fire_state(), false, false) &&
+              SameDiagnosticMissionLifecycle(
+                  cancel.diagnostic_mission_lifecycle_state(),
+                  DiagnosticMissionStatus::Failed) &&
+              cancel.front_end_state() == FrontEndState{
+                  .mode = FrontEndMode::BriefingRoom,
+                  .selected_main_row = FrontEndMainRow::StartDiagnostic,
+              },
+        "cancel wins over simultaneous primary and fire, aborting without a click-through completion");
+
+    constexpr std::array deploy_up_move_down{
+        InputTransition{.code = 1U, .pressed = false},
+        InputTransition{.code = 0U, .pressed = true},
+    };
+    constexpr std::array terminal_cancel{
+        InputTransition{.code = 0U, .pressed = false},
+        InputTransition{.code = 2U, .pressed = true},
+    };
+    const std::array terminal_prefix_frames{
+        ScriptedElapsedFrame{
+            .elapsed = nanoseconds::zero(),
+            .transitions = deploy_down,
+        },
+        ScriptedElapsedFrame{
+            .elapsed = milliseconds{10},
+            .transitions = deploy_up_move_down,
+        },
+    };
+    auto terminal_created = RunReplaySession::Create(
+        BuildScriptedPair(actions, terminal_prefix_frames,
+            TerminalReasons{.host_quit_requested = true}, terminal_cancel),
+        coherent_config);
+    RunReplaySession terminal_source = TakeSession(terminal_created,
+        "the terminal-neutral mission replay is created");
+    const auto terminal_deployed = terminal_source.Next();
+    const auto terminal_moved = terminal_source.Next();
+    const auto mission_before_move =
+        terminal_source.diagnostic_mission_lifecycle_state();
+    const auto position_before_move =
+        terminal_source.debug_locomotion_position();
+    const auto trigger_before_move =
+        terminal_source.diagnostic_proximity_trigger_state();
+    const auto target_before_move =
+        terminal_source.diagnostic_target_fire_state();
+    const auto front_end_before_move = terminal_source.front_end_state();
+    const auto scheduler_before_move = terminal_source.scheduler_state();
+    const auto simulation_before_move = terminal_source.simulation_state();
+    RunReplaySession terminal = std::move(terminal_source);
+    Check(terminal_deployed && terminal_moved &&
+              SameDiagnosticMissionLifecycle(
+                  mission_before_move, DiagnosticMissionStatus::Active) &&
+              position_before_move == Position3{.x = 1} &&
+              terminal_source.state() == RunReplaySessionState::Inert &&
+              !terminal_source.diagnostic_mission_lifecycle_state() &&
+              terminal.diagnostic_mission_lifecycle_state() ==
+                  mission_before_move &&
+              terminal.debug_locomotion_position() == position_before_move &&
+              terminal.front_end_state() == front_end_before_move,
+        "move construction transfers the exact active mission and leaves the source inert");
+    const auto inert_next = terminal_source.Next();
+    CheckError(inert_next, RunReplayOperation::Next,
+        RunReplayErrorCode::InvalidSessionState,
+        "the mission moved-from source reports fixed invalid state");
+    Check(!terminal_source.diagnostic_mission_lifecycle_state(),
+        "invalid advancement cannot repopulate a moved-from mission owner");
+
+    const std::size_t terminal_remaining = terminal.remaining_frames();
+    replay_session_test_allocation::Arm(0U);
+    const auto failed_terminal = terminal.Next();
+    replay_session_test_allocation::Disarm();
+    CheckError(failed_terminal, RunReplayOperation::Next,
+        RunReplayErrorCode::ReplayNextFailed,
+        "a lower terminal replay failure precedes mission mutation",
+        RunCaptureReplayErrorCode::AllocationFailed);
+    Check(terminal.state() == RunReplaySessionState::Ready &&
+              terminal.remaining_frames() == terminal_remaining &&
+              terminal.diagnostic_mission_lifecycle_state() ==
+                  mission_before_move &&
+              terminal.debug_locomotion_position() == position_before_move &&
+              SameDiagnosticProximityTrigger(
+                  terminal.diagnostic_proximity_trigger_state(),
+                  trigger_before_move) &&
+              terminal.diagnostic_target_fire_state() == target_before_move &&
+              terminal.front_end_state() == front_end_before_move &&
+              terminal.scheduler_state() == scheduler_before_move &&
+              SameSimulation(
+                  terminal.simulation_state(), simulation_before_move),
+        "a retryable lower failure preserves every mission-composition owner");
+
+    const auto terminal_frame = terminal.Next();
+    Check(terminal_frame && terminal_frame->terminal_input() &&
+              !terminal_frame->frame_plan() &&
+              terminal_frame->input().WasPressed(
+                  omega::app::kFrontEndCancelAction) &&
+              terminal.state() == RunReplaySessionState::Complete &&
+              terminal.diagnostic_mission_lifecycle_state() ==
+                  mission_before_move &&
+              terminal.debug_locomotion_position() == position_before_move &&
+              SameDiagnosticProximityTrigger(
+                  terminal.diagnostic_proximity_trigger_state(),
+                  trigger_before_move) &&
+              terminal.diagnostic_target_fire_state() == target_before_move &&
+              terminal.front_end_state() == front_end_before_move &&
+              terminal.scheduler_state() == scheduler_before_move &&
+              SameSimulation(
+                  terminal.simulation_state(), simulation_before_move),
+        "terminal cancel input is publication-only and preserves an active mission exactly");
 }
 
 void CheckFrontEndModalGate()
@@ -3365,6 +3891,7 @@ int main()
     CheckDebugLocomotionOptIn();
     CheckDiagnosticProximityTriggerReplay();
     CheckDiagnosticTargetFireReplay();
+    CheckDiagnosticMissionLifecycleReplay();
     CheckFrontEndModalGate();
     CheckFirstProfileCreationReplay();
     CheckDiagnosticPlayGateReplay();

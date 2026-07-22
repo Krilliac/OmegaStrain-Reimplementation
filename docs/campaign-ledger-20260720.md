@@ -190,6 +190,22 @@ frames accept the edge and preserve the same owned state. This closes only a syn
 target-to-hit seam. It supplies no retail target, camera, aim, weapon, projectile, raycast, damage,
 health, combat, AI, owner-corpus result, PCSX2 equivalence, or visual-parity claim.
 
+## Follow-on implementation: E-0120 diagnostic mission lifecycle
+
+The project movement-to-objective-to-target seam is now wrapped in one allocation-free diagnostic
+mission reducer with `Ready`, `Active`, `Succeeded`, and `Failed` states. An accepted BriefingRoom
+deployment resets the positioned actor to the project origin, clears proximity and target state, and
+enters `Active`. A newly latched hit enters `Succeeded` and returns to BriefingRoom in the same
+rendered frame; an explicit direct Primary or Cancel exit from active play enters `Failed` and also
+returns there. The next keyboard-select or menu-LMB deployment resets the seam again without turning
+that edge into a gameplay fire attempt. Fresh replay owns the same optional lifecycle and exact final
+mission, proximity, target, actor-position, and front-end comparison. No gamepad default,
+persistence record, asset, or renderer-resource contract changes. A serialized MSVC Debug build of
+the executable and focused targets is warning-free; focused CTest passes 3/3 and the direct real-host
+app-capture smoke passes. Hosted gates remain pending. This is not a retail mission,
+death, health, timer, debrief, checkpoint, spawn, campaign, inventory, reward, owner-corpus
+observation, or PCSX2-parity claim.
+
 ## Remaining cutscene/menu blockers (honest)
 - Cutscene playback is Windows-only and selected through an external `--opening-movie` path; retail-
   intro discovery from game data is absent. Transition reliability also requires a defined practical

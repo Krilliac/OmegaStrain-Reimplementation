@@ -690,6 +690,13 @@ struct OmegaAppTestAccess final
         app.diagnostic_target_fire_state_ = state;
     }
 
+    [[nodiscard]] static gameplay::DiagnosticMissionLifecycleState
+    DiagnosticMissionLifecycleState(const OmegaApp& app) noexcept
+    {
+        static_assert(noexcept(app.diagnostic_mission_lifecycle_state()));
+        return app.diagnostic_mission_lifecycle_state();
+    }
+
     [[nodiscard]] static runtime::FrameSchedulerState SchedulerSnapshot(
         const OmegaApp& app) noexcept
     {
@@ -3053,6 +3060,8 @@ void CheckDiagnosticSceneMissionActivation(
                        Access::DiagnosticProximityTriggerState(*app), {}) &&
                    Access::DiagnosticTargetFireState(*app) ==
                        omega::gameplay::DiagnosticTargetFireState{} &&
+                   Access::DiagnosticMissionLifecycleState(*app) ==
+                       omega::gameplay::DiagnosticMissionLifecycleState{} &&
                    Access::CurrentFrontEndMeshDrawList(*app).empty(),
             "the validated environment-plus-actor scene and armed objective remain resident but hidden in Profiles");
 
@@ -3117,6 +3126,11 @@ void CheckDiagnosticSceneMissionActivation(
                        Access::DiagnosticProximityTriggerState(*app), {}) &&
                    Access::DiagnosticTargetFireState(*app) ==
                        omega::gameplay::DiagnosticTargetFireState{} &&
+                   Access::DiagnosticMissionLifecycleState(*app).status ==
+                       omega::gameplay::DiagnosticMissionStatus::Active &&
+                   Access::DebugLocomotionPosition(*app) ==
+                       std::optional<omega::simulation::Position3>{
+                           omega::simulation::Position3{}} &&
                    DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
                        Access::DiagnosticSceneOverlayDrawList(*app)),
             "the positioned BriefingRoom mission click records the exact project pointer, publishes environment, actor, and armed objective, and emits no deploy-click activation or fire cue");
@@ -3661,19 +3675,18 @@ void CheckDiagnosticSceneMissionActivation(
         const auto hit_pointer = hit_pair != nullptr
             ? hit_pair->input_trace().PointerAt(0U)
             : std::nullopt;
-        const auto hit_overlay =
-            Access::DiagnosticSceneOverlayDrawList(*app).commands();
         Check(hit_queued && hit && !hit->failure() &&
                   hit->result().planned_simulation_steps == 0U &&
                   hit->result().executed_simulation_steps == 0U &&
                   hit_pointer == kExactTargetPointer &&
+                  Access::FrontEnd(*app).mode ==
+                      omega::app::FrontEndMode::BriefingRoom &&
                   Access::DiagnosticTargetFireState(*app) ==
                       omega::gameplay::DiagnosticTargetFireState{
                           .target_complete = true} &&
-                  hit_overlay.size() == 3U &&
-                  hit_overlay[0].destination == kExactTargetCues[0U] &&
-                  hit_overlay[1].destination == kExactTargetCues[1U] &&
-                  hit_overlay[2].destination == kExactFireCue &&
+                  Access::DiagnosticMissionLifecycleState(*app).status ==
+                      omega::gameplay::DiagnosticMissionStatus::Succeeded &&
+                  Access::CurrentFrontEndMeshDrawList(*app).empty() &&
                   SameTextureResidency(target_flow_gpu_before,
                       Access::GpuSnapshot(*app)) &&
                   Access::GpuSnapshot(*app).meshes ==
@@ -3684,7 +3697,7 @@ void CheckDiagnosticSceneMissionActivation(
                       trigger_persistence_records_before &&
                   Access::PersistenceLogicalValueBytes(*app) ==
                       trigger_persistence_bytes_before,
-            "an exact indexed RMB plus LMB hit removes the target on its hit frame while retaining target bars then fire without resource or persistence mutation");
+            "an exact indexed RMB plus LMB hit completes the synthetic mission and returns to BriefingRoom in the same rendered frame without resource or persistence mutation");
         Check(append_target_flow_capture(hit),
             "the exact completed hit remains contiguous in the target-flow trace");
 
@@ -3710,8 +3723,12 @@ void CheckDiagnosticSceneMissionActivation(
                   live_completed_target ==
                       omega::gameplay::DiagnosticTargetFireState{
                           .target_complete = true} &&
-                  Access::DiagnosticSceneOverlayDrawList(*app).empty(),
-            "the zero-step hit release preserves both launch-local completions and removes all transient indexed overlays");
+                  Access::DiagnosticMissionLifecycleState(*app).status ==
+                      omega::gameplay::DiagnosticMissionStatus::Succeeded &&
+                  Access::FrontEnd(*app).mode ==
+                      omega::app::FrontEndMode::BriefingRoom &&
+                  Access::CurrentFrontEndMeshDrawList(*app).empty(),
+            "the zero-step hit release preserves the completed diagnostic result in BriefingRoom");
         Check(append_target_flow_capture(hit_release),
             "the hit release completes the contiguous target-flow trace");
 
@@ -3772,25 +3789,6 @@ void CheckDiagnosticSceneMissionActivation(
         Check(completed_target_replay_matches,
             "one fresh replay of the exact contiguous live crossing, releases, miss, and hit reproduces the completed proximity and target states");
 
-        const omega::app::GpuHostSnapshot before_return = Access::GpuSnapshot(*app);
-        const bool returned = PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value();
-        const omega::app::GpuHostSnapshot after_return = Access::GpuSnapshot(*app);
-        Check(returned &&
-                  Access::FrontEnd(*app).mode ==
-                      omega::app::FrontEndMode::BriefingRoom &&
-                  after_return.mesh_submissions == before_return.mesh_submissions &&
-                   after_return.successful_mesh_draws == before_return.successful_mesh_draws &&
-                   Access::CurrentFrontEndMeshDrawList(*app).empty() &&
-                   SameProximityTriggerState(
-                       Access::DiagnosticProximityTriggerState(*app),
-                       {.inside = false, .objective_complete = true}) &&
-                   Access::DiagnosticTargetFireState(*app) ==
-                       omega::gameplay::DiagnosticTargetFireState{
-                           .target_complete = true},
-            "the DiagnosticPlay menu edge returns to BriefingRoom before packet selection while preserving both launch-local completions");
-        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
-            "the diagnostic-scene return edge releases in BriefingRoom");
-
         const omega::app::GpuHostSnapshot round_trip_gpu_before =
             Access::GpuSnapshot(*app);
         const bool reentered =
@@ -3806,29 +3804,75 @@ void CheckDiagnosticSceneMissionActivation(
                   Access::FrontEnd(*app).mode ==
                       omega::app::FrontEndMode::DiagnosticPlay &&
                   SameProximityTriggerState(
-                      Access::DiagnosticProximityTriggerState(*app),
-                      {.inside = false, .objective_complete = true}) &&
+                      Access::DiagnosticProximityTriggerState(*app), {}) &&
                   Access::DiagnosticTargetFireState(*app) ==
-                      omega::gameplay::DiagnosticTargetFireState{
-                          .target_complete = true} &&
-                  Access::DiagnosticSceneOverlayDrawList(*app).empty() &&
-                  Access::CurrentFrontEndDrawList(*app).empty() &&
+                      omega::gameplay::DiagnosticTargetFireState{} &&
+                  Access::DiagnosticMissionLifecycleState(*app).status ==
+                      omega::gameplay::DiagnosticMissionStatus::Active &&
+                  Access::DebugLocomotionPosition(*app) ==
+                      std::optional<omega::simulation::Position3>{
+                          omega::simulation::Position3{}} &&
+                  Access::DiagnosticSceneOverlayDrawList(*app).commands().size() ==
+                      1U &&
+                  Access::DiagnosticSceneOverlayDrawList(*app)
+                          .commands()[0]
+                          .destination == *kObjectiveDestination &&
+                  DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                      Access::DiagnosticSceneOverlayDrawList(*app)) &&
                   SameTextureResidency(
                       round_trip_gpu_before, round_trip_gpu_after) &&
                   round_trip_gpu_after.meshes == round_trip_gpu_before.meshes,
-            "a zero-step BriefingRoom redeploy preserves both completed launch-local states, keeps objective and target markers absent, and uploads no resources");
+            "a zero-step BriefingRoom redeploy resets mission, actor, objective, and target state without leaking the select key into gameplay or uploading resources");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value() &&
                   PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
                   Access::FrontEnd(*app).mode ==
                       omega::app::FrontEndMode::BriefingRoom &&
                   SameProximityTriggerState(
-                      Access::DiagnosticProximityTriggerState(*app),
-                      {.inside = false, .objective_complete = true}) &&
+                      Access::DiagnosticProximityTriggerState(*app), {}) &&
                   Access::DiagnosticTargetFireState(*app) ==
-                      omega::gameplay::DiagnosticTargetFireState{
-                          .target_complete = true} &&
+                      omega::gameplay::DiagnosticTargetFireState{} &&
+                  Access::DiagnosticMissionLifecycleState(*app).status ==
+                      omega::gameplay::DiagnosticMissionStatus::Failed &&
+                  Access::DebugLocomotionPosition(*app) ==
+                      std::optional<omega::simulation::Position3>{
+                          omega::simulation::Position3{}} &&
                   PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
-            "the completed objective and target remain latched across a full play-briefing-play-briefing round trip");
+            "an explicit DiagnosticPlay primary abort records failure and returns to BriefingRoom without changing the freshly reset gameplay state");
+
+        const omega::app::GpuHostSnapshot mouse_redeploy_gpu_before =
+            Access::GpuSnapshot(*app);
+        const bool mouse_redeploy_queued =
+            PushMouseButton(SDL_BUTTON_LEFT, true, app_window->id,
+                exact_target_x, exact_target_y) &&
+            Access::ArmNextRunElapsed(
+                *app, std::chrono::nanoseconds::zero());
+        auto mouse_redeploy = app->RunWithCapture(1);
+        const omega::app::GpuHostSnapshot mouse_redeploy_gpu_after =
+            Access::GpuSnapshot(*app);
+        Check(mouse_redeploy_queued && mouse_redeploy &&
+                  !mouse_redeploy->failure() &&
+                  mouse_redeploy->result().planned_simulation_steps == 0U &&
+                  mouse_redeploy->result().executed_simulation_steps == 0U &&
+                  Access::FrontEnd(*app).mode ==
+                      omega::app::FrontEndMode::DiagnosticPlay &&
+                  Access::DiagnosticMissionLifecycleState(*app).status ==
+                      omega::gameplay::DiagnosticMissionStatus::Active &&
+                  SameProximityTriggerState(
+                      Access::DiagnosticProximityTriggerState(*app), {}) &&
+                  Access::DiagnosticTargetFireState(*app) ==
+                      omega::gameplay::DiagnosticTargetFireState{} &&
+                  Access::DebugLocomotionPosition(*app) ==
+                      std::optional<omega::simulation::Position3>{
+                          omega::simulation::Position3{}} &&
+                  SameTextureResidency(
+                      mouse_redeploy_gpu_before, mouse_redeploy_gpu_after) &&
+                  mouse_redeploy_gpu_after.meshes ==
+                      mouse_redeploy_gpu_before.meshes,
+            "a BriefingRoom left click redeploys after failure without becoming a same-frame fire attempt or reallocating GPU resources");
+        Check(PushMouseButton(SDL_BUTTON_LEFT, false, app_window->id,
+                  exact_target_x, exact_target_y) &&
+                  app->Run(1).has_value(),
+            "the mouse-first redeploy edge releases in DiagnosticPlay");
 
         const omega::app::GpuHostSnapshot before_release = Access::GpuSnapshot(*app);
         Access::ReleaseDiagnosticScenePresentation(*app);
@@ -5004,6 +5048,8 @@ void CheckComposedGeneratedMenuAcceptance(
               stale_play->result().planned_simulation_steps == 0U &&
               stale_play->result().executed_simulation_steps == 0U &&
               Access::FrontEnd(*app) == kMainStart &&
+              Access::DiagnosticMissionLifecycleState(*app).status ==
+                  omega::gameplay::DiagnosticMissionStatus::Failed &&
               Access::ActiveProfile(*app) == profile_id &&
               Access::PersistedConfirmedProfile(*app) == profile_id &&
               Access::ActiveCharacter(*app) == character_id &&
