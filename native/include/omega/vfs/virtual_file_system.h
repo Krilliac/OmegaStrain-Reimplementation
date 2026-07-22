@@ -34,6 +34,12 @@ public:
     [[nodiscard]] std::expected<void, std::string> MountDirectory(
         const std::filesystem::path& root);
 
+    // [game thread, before mount freeze] Indexes one read-only, 2048-byte-sector ISO9660 image.
+    // Only the primary volume descriptor is used; Joliet, Rock Ridge, and multi-extent files are
+    // intentionally unsupported. Newer mounts override older mounts.
+    [[nodiscard]] std::expected<void, std::string> MountIso9660(
+        const std::filesystem::path& image_path);
+
     // [game thread, before mount freeze] Exposes archive entries below virtual_root.
     [[nodiscard]] std::expected<void, std::string> MountHog(
         std::string_view virtual_root, const std::filesystem::path& archive_path);

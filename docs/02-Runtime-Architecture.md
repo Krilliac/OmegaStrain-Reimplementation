@@ -66,8 +66,11 @@ injection validates app composition, GPU/audio/input integration, modal schedule
 transition, cleanup, and log redaction while deliberately bypassing source inspection, production
 H.262/PSS decoding, and Media Foundation lifetime.
 
-`GameDataService` is the implemented startup boundary. It owns its VFS, freezes mounts during
-`Open()`, and returns only canonical owned IR. It resolves each manifest cell HOG and its unique COL
+`GameDataService` is the implemented startup boundary. It accepts either an extracted directory or
+an owner-selected regular `.iso`, owns its VFS, freezes mounts during `Open()`, and returns only
+canonical owned IR. The ISO path is a bounded read-only ISO9660 primary-volume adapter; it does not
+interpret executable code and does not implement Joliet or Rock Ridge. It resolves each manifest
+cell HOG and its unique COL
 member into one `SpatialMeshIR`, and separately resolves the unique VUM member into one semantic
 `MaterialCatalogIR`, both in manifest order and cardinality. HOG objects, byte spans, and retail
 offsets remain local to each call. The catalog names retain no assigned role, and no COL triangle,
@@ -227,7 +230,7 @@ handles fail closed at resident lookup.
 There is no current file watcher or live-reload implementation. A future research/SDK path may
 hot-reload decoded assets, project-owned scripts, and mission compatibility tables at frame
 boundaries. Platform, renderer, input device/event pump, audio device, and network transport remain
-non-hot-reloadable initially. The validated retail-data root and its frozen mount table,
+non-hot-reloadable initially. The validated retail-data source and its frozen mount table,
 `SimulationWorld`, its `EntityRegistry`, and direct `ComponentStore<T>` members also remain
 non-hot-reloadable. Entity IDs may be copied as plain data, but registry/component storage and
 borrowed component references never cross a reloadable boundary. No vtable pointer crosses a
@@ -310,7 +313,7 @@ composition service, and no lower layer depends upward on it.
 
 The current native build targets express the same direction:
 
-- `omega_core`: HOG indexing, VFS, and generic bounded infrastructure;
+- `omega_core`: HOG and ISO9660 indexing, VFS, and generic bounded infrastructure;
 - `omega_persistence`: the project-owned transactional save database, with no emulator or retail
   format dependency;
 - `omega_profiles`: bounded, versioned profile metadata over `omega_persistence`, with no implicit

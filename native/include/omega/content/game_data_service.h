@@ -61,6 +61,8 @@ struct GameDataError
 
 struct GameDataServiceConfig
 {
+    // Owner-supplied extracted-data directory or regular .iso image. The source remains outside
+    // project storage and is mounted read-only.
     std::filesystem::path root;
     // Bound archive input/copy workspace independently from semantic DecodeLimits scratch.
     std::uint64_t maximum_system_config_bytes = 4096;
@@ -72,14 +74,14 @@ struct GameDataServiceConfig
     asset::DecodeLimits decode_limits{.maximum_input_bytes = 72ULL * 1024ULL * 1024ULL};
 };
 
-// Non-hot-reloadable data-root service. OmegaApp is the sole owner; future AssetService instances
+// Non-hot-reloadable game-data service. OmegaApp is the sole owner; future AssetService instances
 // receive a non-owning reference. The mounted VFS is immutable after Open(), so concurrent level
 // bootstrap reads do not mutate shared state.
 class GameDataService final
 {
 public:
-    // [game thread] Validates and freezes one owner-supplied NTSC-U retail data tree. Failure
-    // diagnostics never interpolate the supplied root or lower-level host filesystem details.
+    // [game thread] Validates and freezes one owner-supplied NTSC-U retail directory or ISO9660
+    // image. Failure diagnostics never interpolate the source or lower-level host details.
     [[nodiscard]] static std::expected<GameDataService, GameDataError> Open(
         GameDataServiceConfig config);
 
