@@ -1,4 +1,4 @@
-# ADR 0007: Project-owned model, skeleton, skin, clip, and pose IR
+# ADR 0008: Project-owned model, skeleton, skin, clip, and pose IR
 
 - Status: accepted
 - Date: 2026-07-22
