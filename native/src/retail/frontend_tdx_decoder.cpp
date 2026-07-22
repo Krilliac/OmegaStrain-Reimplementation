@@ -35,6 +35,12 @@ struct ParsedPacket
     std::uint32_t data_reference = 0;
 };
 
+enum class StoredTransferCountRule
+{
+    PayloadQwords,
+    TwicePayloadQwords,
+};
+
 [[nodiscard]] asset::DecodeError Error(
     const asset::DecodeErrorCode code, std::string message,
     const std::optional<std::uint64_t> byte_offset = std::nullopt)
@@ -128,7 +134,8 @@ struct ParsedPacket
     const std::span<const std::byte> block, const std::uint64_t block_file_offset,
     const std::uint32_t object_offset, const std::uint16_t expected_buffer_width,
     const std::uint16_t expected_width, const std::uint16_t expected_height,
-    const std::uint64_t expected_payload_bytes)
+    const std::uint64_t expected_payload_bytes,
+    const StoredTransferCountRule stored_transfer_count_rule)
 {
     const std::uint64_t packet_file_offset = block_file_offset + object_offset;
     if (object_offset > block.size() || kTransferPacketBytes > block.size() - object_offset)
@@ -203,14 +210,44 @@ struct ParsedPacket
         return std::unexpected(Error(asset::DecodeErrorCode::Overflow,
                                      "frontend TDX upload qword count overflows its packet",
                                      packet_file_offset));
-    const std::uint32_t qword_count = static_cast<std::uint32_t>(qword_count64);
-    const std::uint32_t gif_low = ReadU32(packet, 0x40);
-    if ((gif_low & 0x7FFFU) != qword_count || (gif_low & 0xFFFF0000U) != 0 ||
-        ReadU32(packet, 0x44) != 0x08000000U || ReadU64(packet, 0x48) != 0)
-        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-                                     "frontend TDX GIF IMAGE tag is invalid",
+    // The stored count is an archive-record convention, not the replayed
+    // payload extent. Indexed-4 primary records use the observed doubled
+    // value; indexed-8 primary records and every palette use payload qwords.
+    std::uint64_t stored_transfer_count64 = qword_count64;
+    if (stored_transfer_count_rule == StoredTransferCountRule::TwicePayloadQwords &&
+        !Multiply(stored_transfer_count64, 2U, stored_transfer_count64))
+        return std::unexpected(Error(asset::DecodeErrorCode::Overflow,
+                                     "frontend TDX stored transfer count overflows",
                                      packet_file_offset + 0x40U));
-    if (ReadU32(packet, 0x50) != (0x30000000U | qword_count) || ReadU64(packet, 0x58) != 0)
+    if (stored_transfer_count64 > 0x7FFFU)
+        return std::unexpected(Error(asset::DecodeErrorCode::Overflow,
+                                     "frontend TDX upload count overflows its stored IMAGE field",
+                                     packet_file_offset + 0x40U));
+    const std::uint32_t stored_transfer_count =
+        static_cast<std::uint32_t>(stored_transfer_count64);
+    const std::uint32_t gif_low = ReadU32(packet, 0x40);
+    if ((gif_low & 0x7FFFU) != stored_transfer_count)
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                     "frontend TDX stored IMAGE count is invalid",
+                                     packet_file_offset + 0x40U));
+    if ((gif_low & 0x8000U) != 0)
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                     "frontend TDX stored IMAGE EOP field is nonzero",
+                                     packet_file_offset + 0x41U));
+    if ((gif_low & 0xFFFF0000U) != 0)
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                     "frontend TDX GIF IMAGE reserved fields are nonzero",
+                                     packet_file_offset + 0x42U));
+    if (ReadU32(packet, 0x44) != 0x08000000U)
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                     "frontend TDX GIF IMAGE mode fields are invalid",
+                                     packet_file_offset + 0x44U));
+    if (ReadU64(packet, 0x48) != 0)
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                     "frontend TDX GIF IMAGE register payload is nonzero",
+                                     packet_file_offset + 0x48U));
+    if (ReadU32(packet, 0x50) != (0x30000000U | stored_transfer_count) ||
+        ReadU64(packet, 0x58) != 0)
         return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
                                      "frontend TDX DMA REF tag is invalid",
                                      packet_file_offset + 0x50U));
@@ -515,12 +552,16 @@ asset::DecodeResult<DecodedFrontEndTdx> DecodeFrontEndTdx(const std::span<const 
 
     auto primary_packet = ParsePsmct32UploadPacket(block, kHeaderBytes, kPrimaryObjectOffset,
                                                    expected_texture_width / 2U, upload_width,
-                                                   upload_height, primary_payload_bytes);
+                                                   upload_height, primary_payload_bytes,
+                                                   indexed4
+                                                       ? StoredTransferCountRule::TwicePayloadQwords
+                                                       : StoredTransferCountRule::PayloadQwords);
     if (!primary_packet)
         return std::unexpected(primary_packet.error());
     auto palette_packet =
         ParsePsmct32UploadPacket(block, kHeaderBytes, kPaletteObjectOffset, 1U, palette_width,
-                                 palette_height, palette_payload_bytes);
+                                 palette_height, palette_payload_bytes,
+                                 StoredTransferCountRule::PayloadQwords);
     if (!palette_packet)
         return std::unexpected(palette_packet.error());
     if (primary_packet->data_reference != 0U || palette_packet->data_reference != 0U)
