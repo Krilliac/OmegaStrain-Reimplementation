@@ -28,6 +28,28 @@ constexpr std::string_view kExpectedBootExecutable = "SCUS_972.64";
 constexpr std::string_view kExpectedBootValue = "CDROM0:\\SCUS_972.64;1";
 constexpr std::size_t kMaximumLevelCodeBytes = 32;
 
+[[nodiscard]] bool HasIsoExtension(const std::filesystem::path& path)
+{
+    const std::string extension = path.extension().string();
+    if (extension.size() != 4 || extension.front() != '.')
+        return false;
+    constexpr std::string_view expected = "ISO";
+    for (std::size_t index = 0; index < expected.size(); ++index)
+    {
+        const unsigned char value = static_cast<unsigned char>(extension[index + 1]);
+        if (value >= 'a' && value <= 'z')
+        {
+            if (static_cast<char>(value - ('a' - 'A')) != expected[index])
+                return false;
+        }
+        else if (static_cast<char>(value) != expected[index])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 struct SourceIdentityToken final
 {
 };
@@ -696,10 +718,20 @@ std::expected<GameDataService, GameDataError> GameDataService::Open(
 
     auto impl = std::make_unique<Impl>();
     impl->config = std::move(config);
-    auto mounted = impl->files.MountDirectory(impl->config.root);
+    std::error_code source_error;
+    const auto source_status = std::filesystem::status(impl->config.root, source_error);
+    if (source_error)
+        return std::unexpected(Error(GameDataErrorCode::MountFailed,
+            "unable to inspect game-data source"));
+
+    std::expected<void, std::string> mounted = std::unexpected("unsupported game-data source");
+    if (std::filesystem::is_directory(source_status))
+        mounted = impl->files.MountDirectory(impl->config.root);
+    else if (std::filesystem::is_regular_file(source_status) && HasIsoExtension(impl->config.root))
+        mounted = impl->files.MountIso9660(impl->config.root);
     if (!mounted)
         return std::unexpected(Error(GameDataErrorCode::MountFailed,
-            "unable to mount game-data root"));
+            "unable to mount game-data source"));
     impl->files.Freeze();
 
     if (!impl->files.Contains("SYSTEM.CNF"))
