@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <limits>
 #include <optional>
 #include <string>
@@ -216,11 +217,20 @@ public:
   }
 
   [[nodiscard]] asset::DecodeResult<void> Skip(const std::uint64_t amount) {
-    if (amount > static_cast<std::uint64_t>(bytes_.size() - offset_))
-      return std::unexpected(Error(
-          asset::DecodeErrorCode::Truncated,
-          "frontend counted field reaches past the input", bytes_.size()));
+    auto available = CheckAvailable(amount, offset_);
+    if (!available)
+      return available;
     offset_ += static_cast<std::size_t>(amount);
+    return {};
+  }
+
+  [[nodiscard]] asset::DecodeResult<void>
+  CheckAvailable(const std::uint64_t amount,
+                 const std::uint64_t byte_offset) const {
+    if (amount > static_cast<std::uint64_t>(bytes_.size() - offset_))
+      return std::unexpected(
+          Error(asset::DecodeErrorCode::Truncated,
+                "frontend counted field reaches past the input", byte_offset));
     return {};
   }
 
@@ -283,6 +293,62 @@ CheckVectorCapacity(Reader &reader, const std::uint64_t count,
                                  "frontend vector storage size overflows",
                                  count_offset));
   return reader.CheckOutput(bytes, count_offset);
+}
+
+template <typename Value>
+[[nodiscard]] asset::DecodeResult<void>
+PrepareOwnedVector(Reader &reader, const std::uint64_t count,
+                   const std::uint64_t source_stride,
+                   const std::uint64_t count_offset) {
+  auto items = reader.ConsumeItems(count, count_offset);
+  if (!items)
+    return items;
+  std::uint64_t source_bytes = 0;
+  if (!Multiply(count, source_stride, source_bytes))
+    return std::unexpected(Error(asset::DecodeErrorCode::Overflow,
+                                 "frontend source-vector size overflows",
+                                 count_offset));
+  auto available = reader.CheckAvailable(source_bytes, count_offset);
+  if (!available)
+    return available;
+  std::uint64_t output_bytes = 0;
+  if (!Multiply(count, sizeof(Value), output_bytes))
+    return std::unexpected(Error(asset::DecodeErrorCode::Overflow,
+                                 "frontend owned-vector size overflows",
+                                 count_offset));
+  return reader.ConsumeOutput(output_bytes, count_offset);
+}
+
+[[nodiscard]] asset::DecodeResult<float> ReadFiniteF32(Reader &reader,
+                                                       const char *field) {
+  const std::uint64_t value_offset = reader.offset();
+  auto value = reader.ReadF32();
+  if (!value)
+    return std::unexpected(value.error());
+  if (!std::isfinite(*value))
+    return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                 std::string(field) + " is not finite",
+                                 value_offset));
+  return *value;
+}
+
+[[nodiscard]] asset::DecodeResult<std::uint8_t>
+QuantizeColorChannel(const float value, const std::uint64_t value_offset) {
+  if (!std::isfinite(value))
+    return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                 "IE color channel is not finite",
+                                 value_offset));
+  if (value < 0.0F || value > 1.0F)
+    return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                 "IE color channel is outside [0,1]",
+                                 value_offset));
+
+  // The retail parser multiplies a normalized channel by 255 and uses the
+  // R5900 CVT.W.S conversion, whose fixed rule is rounding toward zero. A
+  // double holds the exact product of a binary32 value and 255, avoiding any
+  // dependence on the host floating-point rounding mode.
+  const double scaled = static_cast<double>(value) * 255.0;
+  return static_cast<std::uint8_t>(static_cast<std::uint32_t>(scaled));
 }
 
 [[nodiscard]] asset::DecodeResult<asset::FrontendWidgetIR>
@@ -484,24 +550,139 @@ ParseIeNode(Reader &reader, const std::uint64_t depth,
   if (!aligned)
     return std::unexpected(aligned.error());
   for (float &value : node.transform_values) {
-    auto decoded = reader.ReadF32();
+    auto decoded = ReadFiniteF32(reader, "IE affine transform coefficient");
     if (!decoded)
       return std::unexpected(decoded.error());
     value = *decoded;
   }
 
-  constexpr std::array<std::uint64_t, 4> fixed_stream_strides{12, 8, 16, 36};
-  std::array<std::uint32_t, 4> fixed_stream_counts{};
-  for (std::size_t index = 0; index < fixed_stream_strides.size(); ++index) {
-    const std::uint64_t count_offset = reader.offset();
-    auto count = reader.ReadU32();
-    if (!count)
-      return std::unexpected(count.error());
-    fixed_stream_counts[index] = *count;
-    auto skipped =
-        reader.SkipItems(*count, fixed_stream_strides[index], count_offset);
-    if (!skipped)
-      return std::unexpected(skipped.error());
+  const std::uint64_t position_count_offset = reader.offset();
+  auto position_count = reader.ReadU32();
+  if (!position_count)
+    return std::unexpected(position_count.error());
+  auto prepared = PrepareOwnedVector<asset::Float3IR>(
+      reader, *position_count, 12, position_count_offset);
+  if (!prepared)
+    return std::unexpected(prepared.error());
+  node.positions.reserve(*position_count);
+  for (std::uint32_t index = 0; index < *position_count; ++index) {
+    asset::Float3IR position;
+    auto x = ReadFiniteF32(reader, "IE position component");
+    if (!x)
+      return std::unexpected(x.error());
+    auto y = ReadFiniteF32(reader, "IE position component");
+    if (!y)
+      return std::unexpected(y.error());
+    auto z = ReadFiniteF32(reader, "IE position component");
+    if (!z)
+      return std::unexpected(z.error());
+    position.x = *x;
+    position.y = *y;
+    position.z = *z;
+    node.positions.push_back(position);
+  }
+
+  const std::uint64_t uv_count_offset = reader.offset();
+  auto uv_count = reader.ReadU32();
+  if (!uv_count)
+    return std::unexpected(uv_count.error());
+  prepared = PrepareOwnedVector<asset::FrontendUvIR>(reader, *uv_count, 8,
+                                                     uv_count_offset);
+  if (!prepared)
+    return std::unexpected(prepared.error());
+  node.uvs.reserve(*uv_count);
+  for (std::uint32_t index = 0; index < *uv_count; ++index) {
+    asset::FrontendUvIR uv;
+    auto u = ReadFiniteF32(reader, "IE UV component");
+    if (!u)
+      return std::unexpected(u.error());
+    auto v = ReadFiniteF32(reader, "IE UV component");
+    if (!v)
+      return std::unexpected(v.error());
+    uv.u = *u;
+    uv.v = *v;
+    node.uvs.push_back(uv);
+  }
+
+  const std::uint64_t color_count_offset = reader.offset();
+  auto color_count = reader.ReadU32();
+  if (!color_count)
+    return std::unexpected(color_count.error());
+  prepared = PrepareOwnedVector<asset::FrontendColorRgba8IR>(
+      reader, *color_count, 16, color_count_offset);
+  if (!prepared)
+    return std::unexpected(prepared.error());
+  node.colors.reserve(*color_count);
+  for (std::uint32_t index = 0; index < *color_count; ++index) {
+    std::array<std::uint8_t, 4> channels{};
+    for (std::uint8_t &channel : channels) {
+      const std::uint64_t channel_offset = reader.offset();
+      auto value = reader.ReadF32();
+      if (!value)
+        return std::unexpected(value.error());
+      auto quantized = QuantizeColorChannel(*value, channel_offset);
+      if (!quantized)
+        return std::unexpected(quantized.error());
+      channel = *quantized;
+    }
+    node.colors.push_back(asset::FrontendColorRgba8IR{
+        .red = channels[0],
+        .green = channels[1],
+        .blue = channels[2],
+        .alpha = channels[3],
+    });
+  }
+
+  const std::uint64_t triangle_count_offset = reader.offset();
+  auto triangle_count = reader.ReadU32();
+  if (!triangle_count)
+    return std::unexpected(triangle_count.error());
+  prepared = PrepareOwnedVector<asset::FrontendTriangleIR>(
+      reader, *triangle_count, 36, triangle_count_offset);
+  if (!prepared)
+    return std::unexpected(prepared.error());
+  node.triangles.reserve(*triangle_count);
+  for (std::uint32_t triangle_index = 0; triangle_index < *triangle_count;
+       ++triangle_index) {
+    std::array<std::uint32_t, 9> source_indices{};
+    std::array<std::uint64_t, 9> source_offsets{};
+    for (std::size_t index = 0; index < source_indices.size(); ++index) {
+      source_offsets[index] = reader.offset();
+      auto source_index = reader.ReadU32();
+      if (!source_index)
+        return std::unexpected(source_index.error());
+      source_indices[index] = *source_index;
+      if (*source_index > std::numeric_limits<std::uint16_t>::max())
+        return std::unexpected(Error(
+            asset::DecodeErrorCode::Malformed,
+            "IE triangle index cannot be represented as an unsigned 16-bit "
+            "value",
+            source_offsets[index]));
+    }
+
+    asset::FrontendTriangleIR triangle;
+    for (std::size_t corner = 0; corner < 3; ++corner) {
+      if (source_indices[corner] >= *position_count)
+        return std::unexpected(
+            Error(asset::DecodeErrorCode::Malformed,
+                  "IE triangle position index is out of bounds",
+                  source_offsets[corner]));
+      if (source_indices[corner + 3U] >= *uv_count)
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                     "IE triangle UV index is out of bounds",
+                                     source_offsets[corner + 3U]));
+      if (source_indices[corner + 6U] >= *color_count)
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                                     "IE triangle color index is out of bounds",
+                                     source_offsets[corner + 6U]));
+      triangle.position_indices[corner] =
+          static_cast<std::uint16_t>(source_indices[corner]);
+      triangle.uv_indices[corner] =
+          static_cast<std::uint16_t>(source_indices[corner + 3U]);
+      triangle.color_indices[corner] =
+          static_cast<std::uint16_t>(source_indices[corner + 6U]);
+    }
+    node.triangles.push_back(triangle);
   }
 
   const std::uint64_t track_count_offset = reader.offset();
@@ -525,7 +706,7 @@ ParseIeNode(Reader &reader, const std::uint64_t depth,
     if (!entry_count)
       return std::unexpected(entry_count.error());
     if (*kind == kVertexTrack) {
-      if (*entry_count != fixed_stream_counts[0])
+      if (*entry_count != *position_count)
         return std::unexpected(
             Error(asset::DecodeErrorCode::Malformed,
                   "IE vertex-track target count contradicts its fixed stream",
