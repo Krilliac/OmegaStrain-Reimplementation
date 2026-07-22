@@ -130,8 +130,8 @@ private:
         ReadbackBlitsForTesting(const runtime::RenderFramePacket& packet);
 
     // [main/render thread, test access only] Returns sixty-four owned row-major pixels from a
-    // temporary synthetic 8x8 RGBA8 target after consuming only the packet's indexed mesh list.
-    // Production counters and resource residency remain unchanged.
+    // temporary synthetic 8x8 RGBA8 target after the packet's indexed mesh pass and ordered texture
+    // overlays. Production counters and resource residency remain unchanged.
     [[nodiscard]] std::expected<
         std::array<runtime::RenderClearColorRgba8, 64U>, std::string>
         ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet);

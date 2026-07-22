@@ -4,6 +4,7 @@
 #include "run_replay_session.h"
 
 #include "omega/asset/level_ir.h"
+#include "omega/asset/scene_ir.h"
 #include "omega/content/game_data_service.h"
 #include "omega/content/level_texture_store.h"
 #include "omega/runtime/config_service.h"
@@ -49,6 +50,14 @@ struct SdlGpuHostTestAccess final
     }
 };
 
+struct DiagnosticScenePresentationProbe final
+{
+    std::array<runtime::RenderMeshHandle,
+        runtime::kMaximumRenderMeshDrawsPerFrame> mesh_handles{};
+    std::size_t mesh_count = 0U;
+    runtime::RenderMeshDrawList draw_list;
+};
+
 struct OmegaAppTestAccess final
 {
     [[nodiscard]] static std::expected<OmegaApp, std::string> Create(
@@ -89,6 +98,21 @@ struct OmegaAppTestAccess final
             std::move(content),
             std::make_unique<NativePersistence>(std::move(persistence)),
             debug_device, texture_config);
+    }
+
+    [[nodiscard]] static std::expected<DiagnosticScenePresentationProbe, std::string>
+    BuildDiagnosticScenePresentation(
+        SdlGpuHost& host, const asset::SceneIR& scene)
+    {
+        auto built = OmegaApp::BuildDiagnosticScenePresentation(host, scene);
+        if (!built)
+            return std::unexpected(std::move(built.error()));
+        const auto& presentation = **built;
+        return DiagnosticScenePresentationProbe{
+            .mesh_handles = presentation.mesh_handles,
+            .mesh_count = presentation.mesh_count,
+            .draw_list = presentation.draw_list,
+        };
     }
 
     [[nodiscard]] static std::expected<void, std::string> ApplyFrontEndCommand(
@@ -1070,6 +1094,181 @@ void InstallSyntheticSpatialTriangle(
             },
         },
     };
+}
+
+[[nodiscard]] omega::asset::RenderMeshIR MakePresentationTriangle(
+    const float x_offset)
+{
+    return omega::asset::RenderMeshIR{
+        .positions = {
+            {.x = x_offset + 0.0F, .y = 0.0F, .z = 0.0F},
+            {.x = x_offset + 1.0F, .y = 0.0F, .z = 0.0F},
+            {.x = x_offset + 0.0F, .y = 1.0F, .z = 0.0F},
+        },
+        .triangle_indices = {0U, 1U, 2U},
+    };
+}
+
+void CheckDiagnosticScenePresentationTransactions()
+{
+    using Access = omega::app::detail::OmegaAppTestAccess;
+    constexpr omega::asset::Matrix4x4IR camera{
+        .row_major = {
+            2.0F, 0.0F, 0.0F, 1.0F,
+            0.0F, 3.0F, 0.0F, -2.0F,
+            0.0F, 0.0F, 1.0F, 0.0F,
+            0.0F, 0.0F, 0.0F, 1.0F,
+        },
+    };
+    constexpr omega::asset::Matrix4x4IR local{
+        .row_major = {
+            1.0F, 0.0F, 0.0F, 4.0F,
+            0.0F, 1.0F, 0.0F, 5.0F,
+            0.0F, 0.0F, 1.0F, 0.0F,
+            0.0F, 0.0F, 0.0F, 1.0F,
+        },
+    };
+    constexpr omega::asset::Matrix4x4IR camera_times_local{
+        .row_major = {
+            2.0F, 0.0F, 0.0F, 9.0F,
+            0.0F, 3.0F, 0.0F, 13.0F,
+            0.0F, 0.0F, 1.0F, 0.0F,
+            0.0F, 0.0F, 0.0F, 1.0F,
+        },
+    };
+    omega::asset::SceneIR scene;
+    scene.render_meshes = {
+        MakePresentationTriangle(0.0F),
+        MakePresentationTriangle(2.0F),
+    };
+    scene.mesh_instances = {
+        omega::asset::SceneMeshInstanceIR{
+            .render_mesh_index = 1U,
+            .local_to_world = local,
+        },
+        omega::asset::SceneMeshInstanceIR{
+            .render_mesh_index = 0U,
+            .local_to_world = omega::asset::kIdentityMatrix4x4IR,
+        },
+    };
+    scene.camera.world_to_clip = camera;
+
+    auto created_platform = omega::app::SdlPlatformService::Create();
+    Check(created_platform.has_value(),
+        "the scene-presentation transaction platform initializes");
+    if (!created_platform)
+        return;
+    auto platform = std::move(*created_platform);
+
+    {
+        auto created_host = omega::app::SdlGpuHost::Create(platform, false,
+            omega::runtime::RenderTexturePoolConfig{
+                .slot_capacity = 1U,
+                .maximum_resident_logical_bytes = 4U,
+            },
+            omega::runtime::RenderMeshPoolConfig{
+                .slot_capacity = 2U,
+                .maximum_resident_positions = 6U,
+                .maximum_resident_triangle_indices = 6U,
+                .maximum_resident_logical_bytes = 96U,
+            });
+        Check(created_host.has_value(),
+            "the two-slot scene-presentation host initializes");
+        if (created_host)
+        {
+            auto host = std::move(*created_host);
+            auto built = Access::BuildDiagnosticScenePresentation(host, scene);
+            const omega::app::GpuHostSnapshot resident = host.Snapshot();
+            const auto commands = built
+                ? built->draw_list.commands()
+                : std::span<const omega::runtime::RenderMeshDrawCommand>{};
+            Check(built && built->mesh_count == 2U && commands.size() == 2U &&
+                      built->mesh_handles[0].valid() &&
+                      built->mesh_handles[1].valid() &&
+                      built->mesh_handles[0] != built->mesh_handles[1] &&
+                      commands[0].mesh == built->mesh_handles[1] &&
+                      commands[0].object_to_clip == camera_times_local &&
+                      commands[1].mesh == built->mesh_handles[0] &&
+                      commands[1].object_to_clip == camera &&
+                      resident.successful_mesh_uploads == 2U &&
+                      resident.successful_mesh_upload_logical_bytes == 96U &&
+                      resident.successful_mesh_releases == 0U &&
+                      resident.meshes.slot_capacity == 2U &&
+                      resident.meshes.free_slots == 0U &&
+                      resident.meshes.reserved_slots == 0U &&
+                      resident.meshes.resident_slots == 2U &&
+                      resident.meshes.retired_slots == 0U &&
+                      resident.meshes.reserved_positions == 0U &&
+                      resident.meshes.resident_positions == 6U &&
+                      resident.meshes.reserved_triangle_indices == 0U &&
+                      resident.meshes.resident_triangle_indices == 6U &&
+                      resident.meshes.reserved_logical_bytes == 0U &&
+                      resident.meshes.resident_logical_bytes == 96U,
+                "two meshes retain exact generations and compose world-to-clip times local-to-world in instance order");
+            if (built)
+            {
+                built->draw_list = {};
+                auto released_second =
+                    host.ReleaseRenderMesh(built->mesh_handles[1]);
+                auto released_first =
+                    host.ReleaseRenderMesh(built->mesh_handles[0]);
+                const omega::app::GpuHostSnapshot released = host.Snapshot();
+                Check(released_second && released_first &&
+                          released.successful_mesh_releases == 2U &&
+                          released.meshes.slot_capacity == 2U &&
+                          released.meshes.free_slots == 2U &&
+                          released.meshes.reserved_slots == 0U &&
+                          released.meshes.resident_slots == 0U &&
+                          released.meshes.retired_slots == 0U &&
+                          released.meshes.reserved_positions == 0U &&
+                          released.meshes.resident_positions == 0U &&
+                          released.meshes.reserved_triangle_indices == 0U &&
+                          released.meshes.resident_triangle_indices == 0U &&
+                          released.meshes.reserved_logical_bytes == 0U &&
+                          released.meshes.resident_logical_bytes == 0U,
+                    "the successful multi-mesh presentation releases both exact generations");
+            }
+        }
+    }
+
+    {
+        auto created_host = omega::app::SdlGpuHost::Create(platform, false,
+            omega::runtime::RenderTexturePoolConfig{
+                .slot_capacity = 1U,
+                .maximum_resident_logical_bytes = 4U,
+            },
+            omega::runtime::RenderMeshPoolConfig{
+                .slot_capacity = 1U,
+                .maximum_resident_positions = 6U,
+                .maximum_resident_triangle_indices = 6U,
+                .maximum_resident_logical_bytes = 96U,
+            });
+        Check(created_host.has_value(),
+            "the one-slot rollback host initializes");
+        if (created_host)
+        {
+            auto host = std::move(*created_host);
+            auto rejected = Access::BuildDiagnosticScenePresentation(host, scene);
+            const omega::app::GpuHostSnapshot rolled_back = host.Snapshot();
+            Check(!rejected && rejected.error() ==
+                      "diagnostic scene mesh upload failed: render mesh reserve: slot-capacity-exceeded" &&
+                      rolled_back.successful_mesh_uploads == 1U &&
+                      rolled_back.successful_mesh_upload_logical_bytes == 48U &&
+                      rolled_back.successful_mesh_releases == 1U &&
+                      rolled_back.meshes.slot_capacity == 1U &&
+                      rolled_back.meshes.free_slots == 1U &&
+                      rolled_back.meshes.reserved_slots == 0U &&
+                      rolled_back.meshes.resident_slots == 0U &&
+                      rolled_back.meshes.retired_slots == 0U &&
+                      rolled_back.meshes.reserved_positions == 0U &&
+                      rolled_back.meshes.resident_positions == 0U &&
+                      rolled_back.meshes.reserved_triangle_indices == 0U &&
+                      rolled_back.meshes.resident_triangle_indices == 0U &&
+                      rolled_back.meshes.reserved_logical_bytes == 0U &&
+                      rolled_back.meshes.resident_logical_bytes == 0U,
+                "a forced second upload failure releases the exact successful prefix with zero residual residency");
+        }
+    }
 }
 
 [[nodiscard]] std::expected<omega::runtime::ContentStartupState, std::string>
@@ -3569,6 +3768,8 @@ int main()
         settings.frame.simulation_step * 2;
     settings.max_input_events_per_frame =
         omega::runtime::InputTracker::kMaxEventsPerFrameLimit;
+
+    CheckDiagnosticScenePresentationTransactions();
 
     // Keep the intentionally broad acceptance executable while giving each scenario group its own
     // Debug stack frame. MSVC /Od otherwise reserves every OmegaApp/expected local in one main
