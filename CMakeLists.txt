@@ -162,6 +162,16 @@ target_include_directories(omega_content PUBLIC native/include)
 target_link_libraries(omega_content PUBLIC omega_assets PRIVATE omega_core omega_retail_formats)
 target_compile_features(omega_content PUBLIC cxx_std_23)
 
+add_library(omega_frontend_presentation STATIC
+    native/src/frontend_presentation/retail_title_compositor.cpp
+)
+target_include_directories(omega_frontend_presentation PUBLIC native/include)
+target_link_libraries(omega_frontend_presentation
+    PUBLIC omega_frontend
+    PRIVATE omega_content
+)
+target_compile_features(omega_frontend_presentation PUBLIC cxx_std_23)
+
 add_library(omega_runtime STATIC
     native/src/runtime/asset_service.cpp
     native/src/runtime/canonical_level_render_pages.cpp
@@ -3035,6 +3045,36 @@ if(BUILD_TESTING)
     add_test(NAME omega_front_end_screen_bundle_tests
         COMMAND omega_front_end_screen_bundle_tests)
     set_tests_properties(omega_front_end_screen_bundle_tests PROPERTIES TIMEOUT 20)
+
+    add_executable(omega_frontend_presentation_tests
+        native/tests/frontend_presentation_tests.cpp
+    )
+    target_link_libraries(omega_frontend_presentation_tests PRIVATE
+        omega_frontend_presentation
+        omega_content
+    )
+    target_compile_features(omega_frontend_presentation_tests PRIVATE cxx_std_23)
+    if(MSVC)
+        target_compile_options(omega_frontend_presentation_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_frontend_presentation_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_frontend_presentation_tests
+        COMMAND omega_frontend_presentation_tests)
+    set_tests_properties(omega_frontend_presentation_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_lpd_envelope_decoder_tests
         native/tests/lpd_envelope_decoder_tests.cpp

@@ -266,6 +266,14 @@ _RETAIL_EDGES = frozenset({"omega_retail_formats", "omega_assets", "omega_core"}
 _FRONTEND_TEXT_EDGES = frozenset(
     {"omega_frontend_text", "omega_retail_formats"}
 )
+_FRONTEND_PRESENTATION_EDGES = frozenset(
+    {
+        "omega_frontend_presentation",
+        "omega_content",
+        "omega_frontend",
+        "omega_frontend_text",
+    }
+)
 _CONTENT_EDGES = frozenset(
     {"omega_content", "omega_retail_formats", "omega_assets", "omega_core"}
 )
@@ -298,6 +306,18 @@ _APP_EDGES = frozenset(
 MODULE_RULES = (
     ModuleRule("native/apps/openomega/sdl_", "omega_sdl_backend", _SDL_EDGES),
     ModuleRule("native/apps/openomega/", "openomega", _APP_EDGES),
+    ModuleRule(
+        "native/include/omega/frontend_presentation/",
+        "omega_frontend_presentation",
+        _FRONTEND_PRESENTATION_EDGES,
+        platform_neutral=True,
+    ),
+    ModuleRule(
+        "native/src/frontend_presentation/",
+        "omega_frontend_presentation",
+        _FRONTEND_PRESENTATION_EDGES,
+        platform_neutral=True,
+    ),
     ModuleRule(
         "native/include/omega/frontend/",
         "omega_frontend",
@@ -499,6 +519,7 @@ EXACT_MODULE_RULES = {
 }
 
 PROJECT_HEADER_MODULES = (
+    ("omega/frontend_presentation/", "omega_frontend_presentation"),
     ("omega/frontend/", "omega_frontend"),
     ("omega/gameplay/", "omega_gameplay"),
     ("omega/profiles/", "omega_profiles"),

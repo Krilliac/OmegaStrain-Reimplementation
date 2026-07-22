@@ -334,6 +334,10 @@ The current native build targets express the same direction:
 - `omega_assets`: canonical owned IR values and decode contracts;
 - `omega_frontend`: stateless, platform-neutral front-end composition math over owned
   `omega_assets` values, with no renderer, filesystem, service, or host dependency;
+- `omega_frontend_presentation`: a stateless, platform-neutral all-or-error composition boundary
+  from an immutable retail screen bundle to one owned canonical RGBA8 frame. Its initial subset
+  accepts only results invariant to unresolved projection, sampling, draw-order, text, animation,
+  action, and output-alpha rules; required unsupported semantics reject the whole frame;
 - `omega_media`: bounded MPEG/program-stream and owned decoded-media values. Its current
   Media-Foundation-named public header and `platform_code` error field are transitional internal
   contracts, not promoted SDK APIs, even though Windows SDK types remain hidden;
@@ -353,6 +357,12 @@ The current native build targets express the same direction:
   and
 - `omega_app_host`: the runtime composition leaf joining app core, media, persistence, simulation,
   runtime, and SDL before the `openomega` executable.
+
+The initial `omega_frontend_presentation` entry point deliberately has no clock or mutable screen
+state. An animated retail screen cannot pass that entry point. A later live-presentation contract
+must take explicit per-widget-instance timeline and game-state inputs, retain each binding's owning
+visual scope, and consume proven projection and texture sampling/alpha metadata. It must not share
+mutable timeline state between widgets merely because their immutable visual resource is shared.
 
 The Windows prelaunch process is deliberately outside the game composition graph.
 `openomega_launcher.exe` owns only owner-data selection, validation, the default-off gamepad
