@@ -1,9 +1,6 @@
 #pragma once
 
 #include "omega/asset/decode.h"
-#include "omega/asset/skas_text_envelope_ir.h"
-#include "omega/retail/ska_container_descriptor.h"
-#include "omega/retail/skm_container_descriptor.h"
 #include "omega/vfs/virtual_file_system.h"
 
 #include <cstddef>
@@ -12,78 +9,124 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace omega::content
 {
-// Fixed authoring ceiling on candidates per DiscoverModelMembers call. This bounds the caller's
-// own candidate list; it is not an observation about how many SKM/SKA/SKAS members exist in any
-// tracked archive.
+// Project-owned, tighten-only operation ceilings. They bound the whole discovery call; callers may
+// lower but cannot widen them through ModelMemberDiscoveryLimits.
 inline constexpr std::size_t kMaximumModelMemberCandidates = 4096;
+inline constexpr std::uint64_t kMaximumModelMemberReadBytes = 512ULL * 1024ULL * 1024ULL;
+inline constexpr std::uint64_t kMaximumModelMemberOutputBytes = 64ULL * 1024ULL * 1024ULL;
+inline constexpr std::uint64_t kMaximumModelMemberPathBytes = 16ULL * 1024ULL * 1024ULL;
+inline constexpr std::uint64_t kMaximumModelMemberItems = 1ULL << 20U;
+inline constexpr std::uint64_t kMaximumModelMemberReadBytesPerCandidate =
+    64ULL * 1024ULL * 1024ULL;
 
-enum class ModelMemberKind : std::uint8_t
+struct ModelMemberDiscoveryLimits
 {
-    Skm,
-    Ska,
-    Skas,
+    std::size_t maximum_candidates = kMaximumModelMemberCandidates;
+    std::uint64_t maximum_total_read_bytes = kMaximumModelMemberReadBytes;
+    // Retained result storage plus cumulative logical decoder output produced during this call.
+    std::uint64_t maximum_total_output_bytes = kMaximumModelMemberOutputBytes;
+    std::uint64_t maximum_total_path_bytes = kMaximumModelMemberPathBytes;
+    // Retained result items plus cumulative decoder items produced during this call.
+    std::uint64_t maximum_total_items = kMaximumModelMemberItems;
+    std::uint64_t maximum_read_bytes_per_candidate =
+        kMaximumModelMemberReadBytesPerCandidate;
+    // When present, every field only tightens that format decoder's ordinary defaults. SKAS keeps
+    // its wider ordinary string default when this is absent.
+    std::optional<asset::DecodeLimits> decoder_limits;
 };
 
 enum class ModelMemberErrorCode : std::uint8_t
 {
     TooManyCandidates,
+    LimitExceeded,
     InvalidGamePath,
     UnrecognizedSuffix,
     ReadFailed,
     DecodeFailed,
 };
 
+// Path-free decoder failure summary. Retail error messages and VFS diagnostics stay internal.
+struct ModelMemberDecodeFailure
+{
+    asset::DecodeErrorCode code = asset::DecodeErrorCode::Malformed;
+    std::optional<std::uint64_t> byte_offset;
+
+    bool operator==(const ModelMemberDecodeFailure&) const = default;
+};
+
 struct ModelMemberError
 {
     ModelMemberErrorCode code = ModelMemberErrorCode::ReadFailed;
-    // Populated only when code == DecodeFailed; the underlying decoder's own typed error.
-    std::optional<asset::DecodeError> decode_error;
-    // Path-free, generic diagnostic text. Never echoes a VirtualFileSystem diagnostic or a host
-    // filesystem path, matching the discipline GameDataError documents for the same reason.
-    std::string message;
+    std::optional<ModelMemberDecodeFailure> decode_failure;
+
+    bool operator==(const ModelMemberError&) const = default;
 };
 
-// Exactly one member is populated, matching kind. No relationship between SKM, SKA, and SKAS is
-// claimed by grouping them here; this type only lets one caller-supplied candidate list route
-// each member to its own already-existing passive/structural decoder.
-struct ModelMemberDescriptor
+// Project-owned passive summaries. They intentionally retain no retail descriptor types, source
+// payload bytes, inferred model semantics, or host paths.
+struct SkmMemberSummary
 {
-    ModelMemberKind kind = ModelMemberKind::Skm;
-    std::optional<retail::SkmContainerDescriptor> skm;
-    std::optional<retail::SkaContainerDescriptor> ska;
-    std::optional<asset::SkasTextEnvelopeIR> skas;
+    std::uint8_t format_version = 0;
+    std::uint32_t chunk_count = 0;
+    std::uint64_t observed_logical_bytes = 0;
+    std::uint64_t input_bytes = 0;
+
+    bool operator==(const SkmMemberSummary&) const = default;
 };
+
+struct SkaMemberSummary
+{
+    std::uint32_t format_version = 0;
+    std::uint32_t observed_word_0x04 = 0;
+    std::uint32_t observed_word_0x08 = 0;
+    std::uint32_t observed_word_0x10 = 0;
+    std::uint64_t observed_logical_bytes = 0;
+    std::uint64_t input_bytes = 0;
+
+    bool operator==(const SkaMemberSummary&) const = default;
+};
+
+struct SkasMemberSummary
+{
+    std::uint32_t line_count = 0;
+    std::uint32_t blank_line_count = 0;
+    std::uint32_t single_colon_line_count = 0;
+    std::uint32_t padding_bytes = 0;
+    std::uint64_t logical_text_bytes = 0;
+    std::uint64_t input_bytes = 0;
+
+    bool operator==(const SkasMemberSummary&) const = default;
+};
+
+using ModelMemberSummary = std::variant<SkmMemberSummary, SkaMemberSummary, SkasMemberSummary>;
 
 struct ModelMemberResult
 {
-    // The caller-supplied candidate string, unmodified. It is an already game-relative path, not
-    // an owner host filesystem path.
-    std::string game_path;
-    std::expected<ModelMemberDescriptor, ModelMemberError> outcome;
+    // Stable correlation without echoing an invalid candidate. A normalized path is retained only
+    // after NormalizeGamePath succeeds and the operation path/output budgets can own it.
+    std::size_t candidate_index = 0;
+    std::optional<std::string> normalized_game_path;
+    std::expected<ModelMemberSummary, ModelMemberError> outcome;
+
+    bool operator==(const ModelMemberResult&) const = default;
 };
 
-// [any worker thread after vfs.Freeze(); thread-safe, reentrant] Resolves each caller-supplied
-// candidate game path in source order through the frozen VFS, classifies it by its normalized
-// .SKM/.SKA/.SKAS suffix, and routes it to the matching existing passive/structural decoder
-// (InspectSkmContainer/InspectSkaContainer/DecodeSkasTextEnvelope). It assigns no retail role,
-// naming rule, or selection policy to any path; the caller supplies the exact candidate set and
-// its order, and every candidate produces exactly one ModelMemberResult in that same order. A
-// per-candidate read or decode failure does not stop or reorder the remaining candidates.
+// [any worker thread after file_system.Freeze(); thread-safe, reentrant] Resolves caller-supplied
+// candidates in source order through the frozen VFS. Each valid normalized .SKM/.SKA/.SKAS path is
+// routed to its existing passive/structural decoder and reduced to a project-owned summary. Every
+// candidate produces one indexed result unless the call-wide retained-result preflight itself
+// fails. Per-candidate failures remain path-free and do not reorder later candidates.
 //
-// When limits is not supplied, each candidate uses its own decoder's ordinary default limits
-// (including SKAS's widened default string budget) rather than one shared value that could
-// silently under-budget a different format. When limits is supplied, every candidate uses it
-// uniformly; the caller is then responsible for a budget wide enough for every format it expects
-// to encounter.
-//
-// This function depends only on VirtualFileSystem and the retail SKM/SKA/SKAS decoders; it does
-// not depend on or call into GameDataService or any level-composition type.
+// Every ModelMemberDiscoveryLimits field is clamped to its fixed ceiling. Each decoder limit is
+// also clamped to that format's ordinary default. A read is capped by the per-candidate ceiling,
+// the effective decoder input ceiling, and the remaining operation read budget before allocation.
 [[nodiscard]] std::expected<std::vector<ModelMemberResult>, ModelMemberError> DiscoverModelMembers(
-    const vfs::VirtualFileSystem& vfs, std::span<const std::string> candidate_game_paths,
-    std::optional<asset::DecodeLimits> limits = std::nullopt,
-    std::uint64_t maximum_read_bytes = vfs::kDefaultMaximumReadBytes);
+    const vfs::VirtualFileSystem& file_system,
+    std::span<const std::string> candidate_game_paths,
+    ModelMemberDiscoveryLimits limits = {});
 } // namespace omega::content
