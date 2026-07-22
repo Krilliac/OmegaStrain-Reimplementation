@@ -1,6 +1,7 @@
 #pragma once
 
 #include "omega/runtime/render_draw_list.h"
+#include "omega/runtime/render_mesh_draw_list.h"
 
 #include <chrono>
 #include <cstdint>
@@ -47,6 +48,10 @@ struct RenderFramePacket
     // Owned fixed command value. Commands do not pin texture generations; the current synchronous
     // caller keeps every referenced texture resident through consumption.
     RenderDrawList draw_list;
+    // Owned fixed indexed-mesh command value. It defaults empty so callers which publish only the
+    // existing clear/texture presentation retain exactly that behavior. Commands do not pin mesh
+    // generations; the synchronous caller keeps every referenced mesh resident through consumption.
+    RenderMeshDrawList mesh_draw_list;
 };
 
 static_assert(std::is_trivially_copyable_v<RenderFramePacket>);

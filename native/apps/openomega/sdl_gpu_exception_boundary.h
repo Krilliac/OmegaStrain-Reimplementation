@@ -17,6 +17,11 @@ inline constexpr SdlGpuExceptionMessages kReleaseTextureExceptionMessages{
     .unexpected_failure = "render texture release failed unexpectedly",
 };
 
+inline constexpr SdlGpuExceptionMessages kReleaseMeshExceptionMessages{
+    .allocation_failure = "render mesh release error allocation failed",
+    .unexpected_failure = "render mesh release failed unexpectedly",
+};
+
 inline constexpr SdlGpuExceptionMessages kWaitForIdleExceptionMessages{
     .allocation_failure = "SDL GPU idle wait error allocation failed",
     .unexpected_failure = "SDL GPU idle wait failed unexpectedly",

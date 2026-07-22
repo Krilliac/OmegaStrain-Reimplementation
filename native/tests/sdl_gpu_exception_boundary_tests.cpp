@@ -67,6 +67,9 @@ int main() {
   CheckBoundary(omega::app::detail::kReleaseTextureExceptionMessages,
                 "render texture release error allocation failed",
                 "render texture release failed unexpectedly", failures);
+  CheckBoundary(omega::app::detail::kReleaseMeshExceptionMessages,
+                "render mesh release error allocation failed",
+                "render mesh release failed unexpectedly", failures);
   CheckBoundary(omega::app::detail::kWaitForIdleExceptionMessages,
                 "SDL GPU idle wait error allocation failed",
                 "SDL GPU idle wait failed unexpectedly", failures);

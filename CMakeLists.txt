@@ -32,7 +32,7 @@ set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT Embedded)
 
 option(OMEGA_BUILD_RUNTIME "Build the OpenOmega native host shell" ON)
 option(OMEGA_RUN_GPU_SMOKE_TEST
-    "Register the hardware/display-dependent SDL GPU smoke with CTest"
+    "Register the hardware/display-dependent SDL GPU smoke tests with CTest"
     OFF
 )
 
@@ -422,7 +422,13 @@ if(OMEGA_BUILD_RUNTIME)
         native/apps/openomega/sdl_platform_service.cpp
         native/apps/openomega/startup_failure_dialog.cpp
     )
-    target_include_directories(omega_sdl_backend PUBLIC native/apps/openomega)
+    target_include_directories(omega_sdl_backend
+        PUBLIC native/apps/openomega
+        # The pinned SDL source includes portable compiled forms of its permissively licensed
+        # testgpu position/color shader. OpenOmega consumes those build-time headers directly so
+        # the executable needs no runtime shader compiler or external shader files.
+        PRIVATE "${SDL3_SOURCE_DIR}/test"
+    )
     target_link_libraries(omega_sdl_backend
         PUBLIC
             SDL3::SDL3
@@ -2063,6 +2069,41 @@ if(BUILD_TESTING)
         if(OMEGA_RUN_GPU_SMOKE_TEST)
             add_test(NAME omega_sdl_gpu_texture_smoke COMMAND omega_sdl_gpu_texture_smoke)
             set_tests_properties(omega_sdl_gpu_texture_smoke PROPERTIES
+                TIMEOUT 15
+                RUN_SERIAL TRUE
+                LABELS "gpu;integration"
+            )
+        endif()
+
+        add_executable(omega_sdl_gpu_mesh_smoke
+            native/tests/sdl_gpu_mesh_smoke.cpp
+        )
+        target_link_libraries(omega_sdl_gpu_mesh_smoke
+            PRIVATE
+                omega_sdl_backend
+                omega_runtime
+        )
+        if(MSVC)
+            target_compile_options(omega_sdl_gpu_mesh_smoke PRIVATE
+                /W4
+                /WX
+                /permissive-
+                /Zc:__cplusplus
+                /Zc:preprocessor
+                /utf-8
+            )
+        else()
+            target_compile_options(omega_sdl_gpu_mesh_smoke PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Werror
+                -Wno-missing-field-initializers
+            )
+        endif()
+        if(OMEGA_RUN_GPU_SMOKE_TEST)
+            add_test(NAME omega_sdl_gpu_mesh_smoke COMMAND omega_sdl_gpu_mesh_smoke)
+            set_tests_properties(omega_sdl_gpu_mesh_smoke PROPERTIES
                 TIMEOUT 15
                 RUN_SERIAL TRUE
                 LABELS "gpu;integration"
