@@ -4,7 +4,11 @@
 #include "omega/asset/source_locator.h"
 #include "omega/debug/subsystem_entry_break.h"
 #include "omega/retail/col_spatial_mesh_decoder.h"
+#include "omega/retail/fnt_v3_decoder.h"
+#include "omega/retail/frontend_document_decoder.h"
+#include "omega/retail/frontend_tdx_decoder.h"
 #include "omega/retail/pop_level_manifest_decoder.h"
+#include "omega/retail/retail_string_table_decoder.h"
 #include "omega/retail/vum_material_catalog_decoder.h"
 #include "omega/vfs/virtual_file_system.h"
 
@@ -13,6 +17,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -29,6 +35,47 @@ constexpr std::string_view kExpectedBootValue = "CDROM0:\\SCUS_972.64;1";
 constexpr std::string_view kOpeningMovieArchiveGamePath = "ZMEDIA/ZMOVIES.HOG";
 constexpr std::string_view kOpeningMovieArchiveMountRoot = "OPENING_MOVIE_ARCHIVE";
 constexpr std::size_t kMaximumLevelCodeBytes = 32;
+constexpr std::string_view kFrontEndArchiveGamePath = "GAMEDATA/FRONTEND/NTSC.HOG";
+constexpr std::string_view kFontArchiveGamePath = "GAMEDATA/COMMON/FONTS.HOG";
+constexpr std::string_view kStringTableGamePath = "GAMEDATA/COMMON/STRINGS.DAT";
+constexpr std::uint64_t kFrontEndMaximumAggregateInputBytes = 64ULL * 1024ULL * 1024ULL;
+constexpr std::uint64_t kFrontEndMaximumAggregateOutputBytes = 128ULL * 1024ULL * 1024ULL;
+constexpr std::uint64_t kFrontEndMaximumAggregateScratchBytes = 128ULL * 1024ULL * 1024ULL;
+constexpr std::uint64_t kFrontEndMaximumAggregateItems = 64ULL * 1024ULL * 1024ULL;
+constexpr std::uint32_t kFrontEndMaximumNestingDepth = 16U;
+
+struct FrontEndRoute final
+{
+    std::string_view archive_member;
+    std::string_view gui_member;
+    std::string_view visual_member;
+};
+
+[[nodiscard]] std::optional<FrontEndRoute> RouteFor(const FrontEndScreenKey key) noexcept
+{
+    switch (key)
+    {
+    case FrontEndScreenKey::Title:
+        return FrontEndRoute{
+            .archive_member = "TITLESCR.HOG",
+            .gui_member = "TITLESCR.GUI",
+            .visual_member = "TITLESCR.IE",
+        };
+    case FrontEndScreenKey::CreateAgent:
+        return FrontEndRoute{
+            .archive_member = "AGENTNEW.HOG",
+            .gui_member = "AGENTNEW.GUI",
+            .visual_member = "AGENTNEW.IE",
+        };
+    case FrontEndScreenKey::LoadAgent:
+        return FrontEndRoute{
+            .archive_member = "AGENTOPN.HOG",
+            .gui_member = "AGENTOPN.GUI",
+            .visual_member = "AGENTOPN.IE",
+        };
+    }
+    return std::nullopt;
+}
 
 [[nodiscard]] bool HasIsoExtension(const std::filesystem::path& path)
 {
@@ -389,6 +436,86 @@ private:
     std::uint64_t peak_scratch_bytes_ = 0;
 };
 
+class FrontEndLoadBudget final
+{
+public:
+    [[nodiscard]] static asset::DecodeResult<FrontEndLoadBudget> Create(
+        const asset::DecodeLimits caller_limits)
+    {
+        asset::DecodeLimits limits{
+            .maximum_input_bytes = std::min(caller_limits.maximum_input_bytes,
+                kFrontEndMaximumAggregateInputBytes),
+            .maximum_output_bytes = std::min(caller_limits.maximum_output_bytes,
+                kFrontEndMaximumAggregateOutputBytes),
+            .maximum_scratch_bytes = std::min(caller_limits.maximum_scratch_bytes,
+                kFrontEndMaximumAggregateScratchBytes),
+            .maximum_items = std::min(caller_limits.maximum_items,
+                kFrontEndMaximumAggregateItems),
+            .maximum_string_bytes = std::min(caller_limits.maximum_string_bytes,
+                retail::kFrontendMaximumStringBytes),
+            .maximum_nesting_depth = std::min(caller_limits.maximum_nesting_depth,
+                kFrontEndMaximumNestingDepth),
+        };
+        FrontEndLoadBudget budget(limits);
+        auto bundle = budget.Commit(0U, 1U, sizeof(FrontEndScreenBundle), 0U,
+            "front-end bundle");
+        if (!bundle)
+            return std::unexpected(bundle.error());
+        return budget;
+    }
+
+    [[nodiscard]] asset::DecodeResult<asset::DecodeLimits> ChildLimits(
+        const std::uint32_t container_depth) const
+    {
+        if (container_depth > limits_.maximum_nesting_depth)
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                "front-end route exceeds the nesting-depth limit"));
+        }
+        return asset::DecodeLimits{
+            .maximum_input_bytes = remaining_input_bytes_,
+            .maximum_output_bytes = remaining_output_bytes_,
+            .maximum_scratch_bytes = remaining_scratch_bytes_,
+            .maximum_items = remaining_items_,
+            .maximum_string_bytes = limits_.maximum_string_bytes,
+            .maximum_nesting_depth = limits_.maximum_nesting_depth - container_depth,
+        };
+    }
+
+    [[nodiscard]] asset::DecodeResult<void> Commit(const std::uint64_t input_bytes,
+        const std::uint64_t item_count, const std::uint64_t output_bytes,
+        const std::uint64_t scratch_bytes, const std::string_view description)
+    {
+        if (input_bytes > remaining_input_bytes_ || item_count > remaining_items_ ||
+            output_bytes > remaining_output_bytes_ || scratch_bytes > remaining_scratch_bytes_)
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                std::string(description) + " exceeded the shared front-end operation budget"));
+        }
+        remaining_input_bytes_ -= input_bytes;
+        remaining_items_ -= item_count;
+        remaining_output_bytes_ -= output_bytes;
+        remaining_scratch_bytes_ -= scratch_bytes;
+        return {};
+    }
+
+private:
+    explicit FrontEndLoadBudget(const asset::DecodeLimits limits) noexcept
+        : limits_(limits),
+          remaining_input_bytes_(limits.maximum_input_bytes),
+          remaining_output_bytes_(limits.maximum_output_bytes),
+          remaining_scratch_bytes_(limits.maximum_scratch_bytes),
+          remaining_items_(limits.maximum_items)
+    {
+    }
+
+    asset::DecodeLimits limits_;
+    std::uint64_t remaining_input_bytes_ = 0;
+    std::uint64_t remaining_output_bytes_ = 0;
+    std::uint64_t remaining_scratch_bytes_ = 0;
+    std::uint64_t remaining_items_ = 0;
+};
+
 [[nodiscard]] asset::DecodeResult<void> PreflightArchiveDirectory(
     const std::span<const std::byte> bytes, LevelDecodeBudget& budget,
     const std::string_view description)
@@ -502,6 +629,213 @@ using ArchiveDirectory = std::unordered_map<std::string, const archive::HogEntry
     if (!scratch)
         return std::unexpected(scratch.error());
     return BuildArchiveDirectory(archive, limits);
+}
+
+[[nodiscard]] asset::DecodeResult<void> CommitFrontEndArchiveInput(
+    const std::span<const std::byte> bytes, FrontEndLoadBudget& budget,
+    const std::string_view description)
+{
+    const std::uint64_t directory_items = bytes.size() >= 8U ? ReadU32(bytes, 4U) : 0U;
+    return budget.Commit(bytes.size(), directory_items, 0U, 0U, description);
+}
+
+[[nodiscard]] asset::DecodeResult<ArchiveDirectory> BuildFrontEndArchiveDirectory(
+    const archive::HogArchive& archive, const asset::DecodeLimits limits,
+    FrontEndLoadBudget& budget, const std::string_view description)
+{
+    auto workspace = DirectoryWorkspaceUpperBound(archive, limits);
+    if (!workspace)
+        return std::unexpected(workspace.error());
+    auto committed = budget.Commit(0U, 0U, 0U, *workspace, description);
+    if (!committed)
+        return std::unexpected(committed.error());
+    return BuildArchiveDirectory(archive, limits);
+}
+
+[[nodiscard]] asset::DecodeResult<std::string> NormalizeFrontEndDependency(
+    const std::string_view reference, const std::string_view required_suffix,
+    const bool append_missing_suffix, const asset::DecodeLimits limits)
+{
+    auto normalized = NormalizeArchiveName(reference, limits);
+    if (!normalized)
+        return std::unexpected(normalized.error());
+    if (normalized->find('/') != std::string::npos)
+    {
+        return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+            "front-end dependency is not a leaf archive member"));
+    }
+    if (normalized->ends_with(required_suffix))
+        return normalized;
+    if (!append_missing_suffix || normalized->find('.') != std::string::npos)
+    {
+        return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+            "front-end dependency has an unsupported member suffix"));
+    }
+    std::uint64_t extended_size = 0;
+    if (!Add(normalized->size(), required_suffix.size(), extended_size))
+    {
+        return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+            "front-end dependency name size overflows"));
+    }
+    if (extended_size > limits.maximum_string_bytes)
+    {
+        return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+            "front-end dependency name exceeds the string limit"));
+    }
+    normalized->append(required_suffix);
+    return normalized;
+}
+
+using FrontEndDependencySet = std::set<std::string, std::less<>>;
+
+[[nodiscard]] asset::DecodeResult<void> CollectFrontEndTextureReferences(
+    const asset::FrontendVisualNodeIR& node, FrontEndDependencySet& references,
+    const asset::DecodeLimits limits)
+{
+    if (node.texture_member)
+    {
+        auto normalized = NormalizeFrontEndDependency(
+            *node.texture_member, ".TDX", false, limits);
+        if (!normalized)
+            return std::unexpected(normalized.error());
+        references.insert(std::move(*normalized));
+    }
+    for (const auto& child : node.children)
+    {
+        auto collected = CollectFrontEndTextureReferences(child, references, limits);
+        if (!collected)
+            return collected;
+    }
+    return {};
+}
+
+[[nodiscard]] asset::DecodeResult<void> CollectFrontEndFontReferences(
+    const asset::FrontendWidgetIR& node, FrontEndDependencySet& references,
+    const asset::DecodeLimits limits)
+{
+    if (node.font_reference)
+    {
+        auto normalized = NormalizeFrontEndDependency(
+            *node.font_reference, ".FNT", true, limits);
+        if (!normalized)
+            return std::unexpected(normalized.error());
+        references.insert(std::move(*normalized));
+    }
+    for (const auto& child : node.children)
+    {
+        auto collected = CollectFrontEndFontReferences(child, references, limits);
+        if (!collected)
+            return collected;
+    }
+    return {};
+}
+
+[[nodiscard]] asset::DecodeResult<void> CommitFrontEndDependencySet(
+    const FrontEndDependencySet& references, FrontEndLoadBudget& budget,
+    const std::string_view description)
+{
+    constexpr std::uint64_t node_overhead = sizeof(std::string) + 3U * sizeof(void*);
+    std::uint64_t scratch_bytes = sizeof(FrontEndDependencySet);
+    for (const auto& reference : references)
+    {
+        if (!Add(scratch_bytes, node_overhead, scratch_bytes) ||
+            !Add(scratch_bytes, reference.size(), scratch_bytes))
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "front-end dependency workspace size overflows"));
+        }
+    }
+    return budget.Commit(0U, references.size(), 0U, scratch_bytes, description);
+}
+
+[[nodiscard]] asset::DecodeResult<const archive::HogEntry*> FindFrontEndDependency(
+    const ArchiveDirectory& directory, const std::string& normalized_name)
+{
+    const auto match = directory.find(normalized_name);
+    if (match == directory.end())
+    {
+        return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+            "front-end dependency does not resolve"));
+    }
+    return match->second;
+}
+
+[[nodiscard]] asset::DecodeResult<std::uint64_t> FntLogicalOutputBytes(
+    const retail::FntV3IR& font)
+{
+    std::uint64_t glyph_bytes = 0;
+    std::uint64_t output_bytes = sizeof(retail::FntV3IR);
+    if (!Multiply(font.glyphs.size(), sizeof(retail::FntV3GlyphIR), glyph_bytes) ||
+        !Add(output_bytes, glyph_bytes, output_bytes) ||
+        !Add(output_bytes, font.atlas_reference.size(), output_bytes))
+    {
+        return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+            "front-end font output size overflows"));
+    }
+    return output_bytes;
+}
+
+[[nodiscard]] asset::DecodeResult<std::uint64_t> StringTableLogicalOutputBytes(
+    const retail::RetailStringTableIR& table)
+{
+    std::uint64_t entry_bytes = 0;
+    std::uint64_t output_bytes = sizeof(retail::RetailStringTableIR);
+    if (!Multiply(table.entries.size(), sizeof(retail::RetailStringEntryIR), entry_bytes) ||
+        !Add(output_bytes, entry_bytes, output_bytes))
+    {
+        return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+            "front-end string-table output size overflows"));
+    }
+    for (const auto& entry : table.entries)
+    {
+        if (!Add(output_bytes, entry.key.size(), output_bytes) ||
+            !Add(output_bytes, entry.value.size(), output_bytes))
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "front-end string-table output size overflows"));
+        }
+    }
+    return output_bytes;
+}
+
+[[nodiscard]] asset::DecodeResult<void> ValidateFrontEndTextReferences(
+    const asset::FrontendWidgetIR& node, const retail::RetailStringTableIR& strings)
+{
+    if (node.text_reference && !node.text_reference->empty() &&
+        node.text_reference->front() == '$')
+    {
+        if (node.text_reference->size() == 1U)
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+                "front-end localized text reference has an empty key"));
+        }
+        if ((*node.text_reference)[1U] != '$' &&
+            strings.Find(std::string_view(*node.text_reference).substr(1U)) == nullptr)
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::InvalidReference,
+                "front-end localized text reference does not resolve"));
+        }
+    }
+    for (const auto& child : node.children)
+    {
+        auto validated = ValidateFrontEndTextReferences(child, strings);
+        if (!validated)
+            return validated;
+    }
+    return {};
+}
+
+template <typename Map>
+[[nodiscard]] asset::DecodeResult<std::uint64_t> FrontEndMapEntryOutputBytes(
+    const std::string_view normalized_name)
+{
+    std::uint64_t output_bytes = sizeof(typename Map::value_type);
+    if (!Add(output_bytes, normalized_name.size(), output_bytes))
+    {
+        return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+            "front-end dependency output size overflows"));
+    }
+    return output_bytes;
 }
 
 [[nodiscard]] asset::DecodeResult<const archive::HogEntry*> FindArchiveEntry(
@@ -817,6 +1151,471 @@ GameDataService::LoadOpeningMovieSource(const std::string_view member_name) cons
                 "opening movie source exceeds the input limit")));
     }
     return std::move(*source);
+}
+
+std::expected<FrontEndScreenBundle, GameDataError>
+GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
+{
+    const auto route = RouteFor(key);
+    if (!route)
+    {
+        return std::unexpected(Error(GameDataErrorCode::InvalidConfiguration,
+            "unknown front-end screen key"));
+    }
+    if (!impl_)
+    {
+        return std::unexpected(Error(GameDataErrorCode::ForeignService,
+            "game-data service has no mounted source"));
+    }
+
+    auto created_budget = FrontEndLoadBudget::Create(impl_->config.front_end_decode_limits);
+    if (!created_budget)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to create front-end operation", created_budget.error()));
+    }
+    FrontEndLoadBudget budget = std::move(*created_budget);
+
+    const auto read_direct = [this, &budget](const std::string_view game_path,
+                                 const std::uint64_t family_maximum_bytes)
+        -> std::expected<std::vector<std::byte>, GameDataError> {
+        auto limits = budget.ChildLimits(0U);
+        if (!limits)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to read canonical front-end data", limits.error()));
+        }
+        if (!impl_->files.Contains(game_path))
+        {
+            return std::unexpected(Error(GameDataErrorCode::MissingRequiredFile,
+                "canonical front-end data is unavailable"));
+        }
+        auto file_size = impl_->files.FileSize(game_path);
+        if (!file_size)
+        {
+            return std::unexpected(Error(GameDataErrorCode::ReadFailed,
+                "unable to read canonical front-end data"));
+        }
+        const std::uint64_t maximum_bytes = std::min({family_maximum_bytes,
+            impl_->config.maximum_data_hog_bytes, limits->maximum_input_bytes});
+        if (*file_size > maximum_bytes)
+        {
+            return std::unexpected(DecodeFailure("unable to read canonical front-end data",
+                AssetError(asset::DecodeErrorCode::LimitExceeded,
+                    "canonical front-end file exceeds the operation input limit")));
+        }
+
+        auto resolved = ResolveSourceLocator(source_binding(), asset::SourceLocator{
+            .game_path = std::string(game_path),
+        }, *limits);
+        if (!resolved)
+            return std::unexpected(resolved.error());
+        return std::move(resolved->terminal_bytes);
+    };
+
+    auto front_end_bytes = read_direct(
+        kFrontEndArchiveGamePath, kFrontEndMaximumAggregateInputBytes);
+    if (!front_end_bytes)
+        return std::unexpected(front_end_bytes.error());
+    auto archive_limits = budget.ChildLimits(0U);
+    if (!archive_limits)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to load front-end archive", archive_limits.error()));
+    }
+    auto front_end_input = CommitFrontEndArchiveInput(
+        *front_end_bytes, budget, "front-end archive");
+    if (!front_end_input)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to load front-end archive", front_end_input.error()));
+    }
+    auto front_end_archive = archive::HogArchive::FromBytes(std::move(*front_end_bytes));
+    if (!front_end_archive)
+    {
+        return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+            "canonical front-end archive is malformed"));
+    }
+    auto front_end_directory = BuildFrontEndArchiveDirectory(
+        *front_end_archive, *archive_limits, budget, "front-end archive directory");
+    if (!front_end_directory)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to index front-end archive", front_end_directory.error()));
+    }
+
+    auto screen_entry = FindArchiveEntry(
+        *front_end_directory, route->archive_member, *archive_limits);
+    if (!screen_entry)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to resolve front-end screen archive", screen_entry.error()));
+    }
+    const auto screen_bytes = front_end_archive->payload(**screen_entry);
+    auto screen_size = ValidateNestedArchiveSize(screen_bytes,
+        impl_->config.maximum_nested_hog_bytes, "front-end screen archive");
+    if (!screen_size)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to load front-end screen archive", screen_size.error()));
+    }
+    auto screen_limits = budget.ChildLimits(1U);
+    if (!screen_limits)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to load front-end screen archive", screen_limits.error()));
+    }
+    auto screen_copy = budget.Commit(
+        0U, 0U, 0U, screen_bytes.size(), "front-end screen archive copy");
+    if (!screen_copy)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to load front-end screen archive", screen_copy.error()));
+    }
+    auto screen_input = CommitFrontEndArchiveInput(
+        screen_bytes, budget, "front-end screen archive");
+    if (!screen_input)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to load front-end screen archive", screen_input.error()));
+    }
+    auto screen_archive = archive::HogArchive::FromSpan(
+        screen_bytes, impl_->config.maximum_nested_hog_bytes);
+    if (!screen_archive)
+    {
+        return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+            "canonical front-end screen archive is malformed"));
+    }
+    auto screen_directory = BuildFrontEndArchiveDirectory(
+        *screen_archive, *screen_limits, budget, "front-end screen archive directory");
+    if (!screen_directory)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to index front-end screen archive", screen_directory.error()));
+    }
+
+    auto gui_entry = FindArchiveEntry(*screen_directory, route->gui_member, *screen_limits);
+    auto visual_entry = FindArchiveEntry(
+        *screen_directory, route->visual_member, *screen_limits);
+    if (!gui_entry || !visual_entry)
+    {
+        const asset::DecodeError error = !gui_entry ? gui_entry.error() : visual_entry.error();
+        return std::unexpected(DecodeFailure(
+            "front-end screen document is unavailable", error));
+    }
+
+    const auto gui_bytes = screen_archive->payload(**gui_entry);
+    auto gui = retail::DecodeGuiFrontendMeasured(gui_bytes, *screen_limits);
+    if (!gui)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to decode canonical front-end GUI", gui.error()));
+    }
+    auto gui_commit = budget.Commit(gui_bytes.size(), gui->decoded_items,
+        gui->logical_output_bytes, 0U, "front-end GUI");
+    if (!gui_commit)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to decode canonical front-end GUI", gui_commit.error()));
+    }
+
+    screen_limits = budget.ChildLimits(1U);
+    if (!screen_limits)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to decode canonical front-end visual document", screen_limits.error()));
+    }
+    const auto visual_bytes = screen_archive->payload(**visual_entry);
+    auto visual = retail::DecodeIeFrontendMeasured(visual_bytes, *screen_limits);
+    if (!visual)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to decode canonical front-end visual document", visual.error()));
+    }
+    auto visual_commit = budget.Commit(visual_bytes.size(), visual->decoded_items,
+        visual->logical_output_bytes, 0U, "front-end visual document");
+    if (!visual_commit)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to decode canonical front-end visual document", visual_commit.error()));
+    }
+
+    FrontEndDependencySet texture_references;
+    FrontEndDependencySet font_references;
+    auto reference_limits = budget.ChildLimits(1U);
+    if (!reference_limits)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to collect front-end dependencies", reference_limits.error()));
+    }
+    auto textures_collected = CollectFrontEndTextureReferences(
+        visual->document.root, texture_references, *reference_limits);
+    auto fonts_collected = CollectFrontEndFontReferences(
+        gui->document.root, font_references, *reference_limits);
+    if (!textures_collected || !fonts_collected)
+    {
+        const asset::DecodeError error = !textures_collected
+            ? textures_collected.error()
+            : fonts_collected.error();
+        return std::unexpected(DecodeFailure(
+            "unable to collect front-end dependencies", error));
+    }
+    auto texture_set_commit = CommitFrontEndDependencySet(
+        texture_references, budget, "front-end texture references");
+    auto font_set_commit = CommitFrontEndDependencySet(
+        font_references, budget, "front-end font references");
+    if (!texture_set_commit || !font_set_commit)
+    {
+        const asset::DecodeError error = !texture_set_commit
+            ? texture_set_commit.error()
+            : font_set_commit.error();
+        return std::unexpected(DecodeFailure(
+            "unable to collect front-end dependencies", error));
+    }
+
+    FrontEndScreenBundle::TextureMap screen_textures;
+    for (const auto& reference : texture_references)
+    {
+        auto entry = FindFrontEndDependency(*screen_directory, reference);
+        if (!entry)
+        {
+            return std::unexpected(DecodeFailure(
+                "front-end texture is unavailable", entry.error()));
+        }
+        auto texture_limits = budget.ChildLimits(1U);
+        if (!texture_limits)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to decode front-end texture", texture_limits.error()));
+        }
+        const auto bytes = screen_archive->payload(**entry);
+        auto decoded = retail::DecodeFrontEndTdx(bytes, *texture_limits);
+        if (!decoded)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to decode front-end texture", decoded.error()));
+        }
+        auto entry_output = FrontEndMapEntryOutputBytes<
+            FrontEndScreenBundle::TextureMap>(reference);
+        if (!entry_output)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to retain front-end texture", entry_output.error()));
+        }
+        std::uint64_t combined_output = 0;
+        if (!Add(decoded->logical_output_bytes, *entry_output, combined_output))
+        {
+            return std::unexpected(DecodeFailure("unable to retain front-end texture",
+                AssetError(asset::DecodeErrorCode::Overflow,
+                    "front-end texture output size overflows")));
+        }
+        auto texture_commit = budget.Commit(bytes.size(), decoded->decoded_items,
+            combined_output, decoded->peak_scratch_bytes, "front-end texture");
+        if (!texture_commit)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to retain front-end texture", texture_commit.error()));
+        }
+        screen_textures.emplace(reference, std::move(decoded->image));
+    }
+
+    FrontEndScreenBundle::FontMap fonts;
+    FrontEndScreenBundle::TextureMap font_atlases;
+    FrontEndDependencySet atlas_references;
+    if (!font_references.empty())
+    {
+        auto font_archive_bytes = read_direct(
+            kFontArchiveGamePath, kFrontEndMaximumAggregateInputBytes);
+        if (!font_archive_bytes)
+            return std::unexpected(font_archive_bytes.error());
+        auto font_limits = budget.ChildLimits(0U);
+        if (!font_limits)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to load front-end font archive", font_limits.error()));
+        }
+        auto font_archive_input = CommitFrontEndArchiveInput(
+            *font_archive_bytes, budget, "front-end font archive");
+        if (!font_archive_input)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to load front-end font archive", font_archive_input.error()));
+        }
+        auto font_archive = archive::HogArchive::FromBytes(std::move(*font_archive_bytes));
+        if (!font_archive)
+        {
+            return std::unexpected(Error(GameDataErrorCode::MalformedArchive,
+                "canonical front-end font archive is malformed"));
+        }
+        auto font_directory = BuildFrontEndArchiveDirectory(
+            *font_archive, *font_limits, budget, "front-end font archive directory");
+        if (!font_directory)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to index front-end font archive", font_directory.error()));
+        }
+
+        for (const auto& reference : font_references)
+        {
+            auto entry = FindFrontEndDependency(*font_directory, reference);
+            if (!entry)
+            {
+                return std::unexpected(DecodeFailure(
+                    "front-end font is unavailable", entry.error()));
+            }
+            auto decoder_limits = budget.ChildLimits(0U);
+            if (!decoder_limits)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to decode front-end font", decoder_limits.error()));
+            }
+            const auto bytes = font_archive->payload(**entry);
+            auto decoded = retail::DecodeFntV3(bytes, *decoder_limits);
+            if (!decoded)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to decode front-end font", decoded.error()));
+            }
+            auto atlas_name = NormalizeFrontEndDependency(
+                decoded->atlas_reference, ".TDX", false, *decoder_limits);
+            if (!atlas_name)
+            {
+                return std::unexpected(DecodeFailure(
+                    "front-end font atlas reference is invalid", atlas_name.error()));
+            }
+            atlas_references.insert(std::move(*atlas_name));
+
+            auto font_output = FntLogicalOutputBytes(*decoded);
+            auto entry_output = FrontEndMapEntryOutputBytes<
+                FrontEndScreenBundle::FontMap>(reference);
+            if (!font_output || !entry_output)
+            {
+                const asset::DecodeError error = !font_output
+                    ? font_output.error()
+                    : entry_output.error();
+                return std::unexpected(DecodeFailure(
+                    "unable to retain front-end font", error));
+            }
+            std::uint64_t combined_output = 0;
+            if (!Add(*font_output, *entry_output, combined_output))
+            {
+                return std::unexpected(DecodeFailure("unable to retain front-end font",
+                    AssetError(asset::DecodeErrorCode::Overflow,
+                        "front-end font output size overflows")));
+            }
+            auto font_commit = budget.Commit(bytes.size(),
+                1U + decoded->glyphs.size(), combined_output, 0U, "front-end font");
+            if (!font_commit)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to retain front-end font", font_commit.error()));
+            }
+            fonts.emplace(reference, std::move(*decoded));
+        }
+
+        auto atlas_set_commit = CommitFrontEndDependencySet(
+            atlas_references, budget, "front-end font atlas references");
+        if (!atlas_set_commit)
+        {
+            return std::unexpected(DecodeFailure(
+                "unable to collect front-end font atlases", atlas_set_commit.error()));
+        }
+        for (const auto& reference : atlas_references)
+        {
+            auto entry = FindFrontEndDependency(*font_directory, reference);
+            if (!entry)
+            {
+                return std::unexpected(DecodeFailure(
+                    "front-end font atlas is unavailable", entry.error()));
+            }
+            auto decoder_limits = budget.ChildLimits(0U);
+            if (!decoder_limits)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to decode front-end font atlas", decoder_limits.error()));
+            }
+            const auto bytes = font_archive->payload(**entry);
+            auto decoded = retail::DecodeFrontEndTdx(bytes, *decoder_limits);
+            if (!decoded)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to decode front-end font atlas", decoded.error()));
+            }
+            auto entry_output = FrontEndMapEntryOutputBytes<
+                FrontEndScreenBundle::TextureMap>(reference);
+            if (!entry_output)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to retain front-end font atlas", entry_output.error()));
+            }
+            std::uint64_t combined_output = 0;
+            if (!Add(decoded->logical_output_bytes, *entry_output, combined_output))
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to retain front-end font atlas",
+                    AssetError(asset::DecodeErrorCode::Overflow,
+                        "front-end font-atlas output size overflows")));
+            }
+            auto atlas_commit = budget.Commit(bytes.size(), decoded->decoded_items,
+                combined_output, decoded->peak_scratch_bytes, "front-end font atlas");
+            if (!atlas_commit)
+            {
+                return std::unexpected(DecodeFailure(
+                    "unable to retain front-end font atlas", atlas_commit.error()));
+            }
+            font_atlases.emplace(reference, std::move(decoded->image));
+        }
+    }
+
+    auto string_bytes = read_direct(
+        kStringTableGamePath, retail::kRetailStringTableMaximumInputBytes);
+    if (!string_bytes)
+        return std::unexpected(string_bytes.error());
+    auto string_limits = budget.ChildLimits(0U);
+    if (!string_limits)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to decode front-end string table", string_limits.error()));
+    }
+    auto strings = retail::DecodeRetailStringTable(*string_bytes, *string_limits);
+    if (!strings)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to decode front-end string table", strings.error()));
+    }
+    auto text_references = ValidateFrontEndTextReferences(gui->document.root, *strings);
+    if (!text_references)
+    {
+        return std::unexpected(DecodeFailure(
+            "front-end localized text is unavailable", text_references.error()));
+    }
+    auto string_output = StringTableLogicalOutputBytes(*strings);
+    std::uint64_t string_scratch = 0;
+    if (!Multiply(strings->entries.size(), 5U * sizeof(std::uint64_t), string_scratch))
+    {
+        return std::unexpected(DecodeFailure("unable to retain front-end string table",
+            AssetError(asset::DecodeErrorCode::Overflow,
+                "front-end string-table scratch size overflows")));
+    }
+    if (!string_output)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to retain front-end string table", string_output.error()));
+    }
+    auto string_commit = budget.Commit(string_bytes->size(),
+        1U + strings->entries.size(), *string_output, string_scratch,
+        "front-end string table");
+    if (!string_commit)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to retain front-end string table", string_commit.error()));
+    }
+
+    RetailFrontEndPresentationCapability capability{
+        RetailFrontEndPresentationCapability::ConstructionKey{}};
+    return FrontEndScreenBundle(key, std::move(gui->document),
+        std::move(visual->document), std::move(screen_textures), std::move(fonts),
+        std::move(font_atlases), std::move(*strings), std::move(capability));
 }
 
 GameDataService::SourceBinding GameDataService::source_binding() const noexcept
