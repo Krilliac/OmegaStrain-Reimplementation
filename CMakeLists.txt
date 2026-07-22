@@ -145,6 +145,7 @@ target_compile_features(omega_content PUBLIC cxx_std_23)
 add_library(omega_runtime STATIC
     native/src/runtime/asset_service.cpp
     native/src/runtime/canonical_level_scene.cpp
+    native/src/runtime/canonical_level_scene_materials.cpp
     native/src/runtime/diagnostic_actor_scene.cpp
     native/src/runtime/level_texture_topology_preview.cpp
     native/src/runtime/config_service.cpp
@@ -2168,6 +2169,32 @@ if(BUILD_TESTING)
     add_test(NAME omega_canonical_level_scene_tests
         COMMAND omega_canonical_level_scene_tests)
     set_tests_properties(omega_canonical_level_scene_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_canonical_level_scene_materials_tests
+        native/tests/canonical_level_scene_materials_tests.cpp
+    )
+    target_link_libraries(omega_canonical_level_scene_materials_tests PRIVATE omega_runtime)
+    if(MSVC)
+        target_compile_options(omega_canonical_level_scene_materials_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_canonical_level_scene_materials_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_canonical_level_scene_materials_tests
+        COMMAND omega_canonical_level_scene_materials_tests)
+    set_tests_properties(omega_canonical_level_scene_materials_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_scene_structure_snapshot_tests
         native/tests/scene_structure_snapshot_tests.cpp
