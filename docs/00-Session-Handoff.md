@@ -1764,6 +1764,23 @@ behavioral parity.
 Still unclaimed: a private metadata-only native owner-corpus acceptance run, retail opcode/type/event
 semantics, runtime consumption, or behavioral parity.
 
+## Native spatial scene application integration (E-0113, 2026-07-21)
+
+- `OmegaApp` builds the bounded project-owned spatial diagnostic `SceneIR` once when canonical
+  `LevelContentIR` is present, transactionally uploads its complete mesh set, and retains fixed
+  generation-safe mesh and draw-list values for the app lifetime.
+- Profiles, Characters, BriefingRoom, Controls, AssetTopology, opening-movie, keyboard/mouse, and
+  opt-in gamepad behavior are unchanged. Only `DiagnosticPlay` publishes mesh commands. The opaque
+  diagnostic base is withheld on that path so the mesh is visible, while the existing actor,
+  target, and fire texture cues remain overlays.
+- Generated-fixture app coverage proves the real profile -> character -> BriefingRoom -> mission
+  activation path submits one indexed triangle only after activation, suppresses it again on return,
+  rejects non-finite geometry with a fixed path-free startup error, and explicitly restores zero
+  mesh residency before host teardown.
+
+Still unclaimed: retail world placement, camera, visibility, materials, lighting, collision use,
+draw order, owner-corpus geometry publication, or PCSX2/native visual parity.
+
 ## Private PCSX2 producer readiness (E-0099, 2026-07-20)
 
 - A separately maintained local branch based on official PCSX2

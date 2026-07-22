@@ -303,6 +303,29 @@ struct OmegaAppTestAccess final
         return app.diagnostic_actor_draw_list_;
     }
 
+    [[nodiscard]] static const runtime::RenderDrawList&
+    DiagnosticSceneOverlayDrawList(const OmegaApp& app) noexcept
+    {
+        return app.diagnostic_scene_overlay_draw_list_;
+    }
+
+    [[nodiscard]] static const runtime::RenderMeshDrawList&
+    DiagnosticSceneMeshDrawList(const OmegaApp& app) noexcept
+    {
+        return app.diagnostic_scene_presentation_.draw_list;
+    }
+
+    [[nodiscard]] static runtime::RenderMeshDrawList CurrentFrontEndMeshDrawList(
+        const OmegaApp& app) noexcept
+    {
+        return app.CurrentFrontEndMeshDrawList();
+    }
+
+    static void ReleaseDiagnosticScenePresentation(OmegaApp& app) noexcept
+    {
+        app.ReleaseDiagnosticScenePresentation();
+    }
+
     [[nodiscard]] static const std::array<runtime::RenderDrawList,
         kFrontEndMainRowCount>& FrontEndMainDrawLists(
         const OmegaApp& app) noexcept
@@ -1022,6 +1045,25 @@ BuildLevelContentStartupState(const GeneratedLevelContentTree& tree)
         },
     });
     return state;
+}
+
+void InstallSyntheticSpatialTriangle(
+    omega::runtime::ContentStartupState& state)
+{
+    if (!state.level_content)
+        return;
+    state.level_content->spatial.terrain_cells = {
+        omega::asset::SpatialMeshIR{
+            .vertices = {
+                {.x = 0.0F, .y = 0.0F, .z = 0.0F},
+                {.x = 1.0F, .y = 0.0F, .z = 0.0F},
+                {.x = 0.0F, .y = 1.0F, .z = 0.0F},
+            },
+            .triangles = {
+                {.vertex_indices = {0U, 1U, 2U}},
+            },
+        },
+    };
 }
 
 [[nodiscard]] std::expected<omega::runtime::ContentStartupState, std::string>
@@ -2117,6 +2159,196 @@ void CheckDiagnosticCampaignStart(
             "character-owned checkpoint capacity failure preserves the Briefing Room, both active identities, database totals, and exact GPU state");
         Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
             "the rejected capacity diagnostic-start edge releases");
+    }
+}
+
+void CheckDiagnosticSceneMissionActivation(
+    const GeneratedLevelContentTree& tree,
+    const omega::runtime::RuntimeSettings& settings)
+{
+    using Access = omega::app::detail::OmegaAppTestAccess;
+    const auto profile_id = omega::profiles::ProfileId::Parse(
+        "00000000000000000000000000000021");
+    const auto character_id = omega::profiles::CharacterId::Parse(
+        "00000000000000000000000000000022");
+    const std::filesystem::path database_root =
+        tree.root() / "native-diagnostic-scene-mission";
+    Check(profile_id && character_id,
+        "the synthetic diagnostic-scene profile and character IDs parse");
+    if (!profile_id || !character_id)
+        return;
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(database_root);
+        Check(persistence.has_value(),
+            "the diagnostic-scene mission database bootstraps");
+        if (!persistence)
+            return;
+        const auto profile_created = persistence->profiles().Create(
+            *profile_id,
+            omega::profiles::ProfileMetadata{
+                .display_name = "scene",
+                .created_unix_milliseconds = 1U,
+                .modified_unix_milliseconds = 1U,
+            });
+        const auto profile_confirmed =
+            persistence->ConfirmActiveProfile(*profile_id);
+        const auto character_created = persistence->characters().Create(
+            *profile_id, *character_id,
+            omega::profiles::CharacterMetadata{
+                .display_name = "mesh",
+                .created_unix_milliseconds = 2U,
+                .modified_unix_milliseconds = 2U,
+            });
+        const auto character_confirmed =
+            persistence->ConfirmActiveCharacter(*profile_id, *character_id);
+        Check(profile_created && profile_confirmed && character_created &&
+                  character_confirmed,
+            "the diagnostic-scene mission owns one confirmed profile and character");
+        if (!profile_created || !profile_confirmed || !character_created ||
+            !character_confirmed)
+            return;
+    }
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(database_root);
+        auto config = omega::runtime::ParseConfigText("");
+        auto content = BuildLevelContentStartupState(tree);
+        Check(persistence && config && content,
+            "the diagnostic-scene mission startup aggregate is ready");
+        if (!persistence || !config || !content)
+            return;
+        InstallSyntheticSpatialTriangle(*content);
+
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            std::move(*content), std::move(*persistence), false);
+        Check(app.has_value(),
+            "OmegaApp transactionally uploads the synthetic canonical spatial scene");
+        if (!app)
+            return;
+
+        const omega::app::GpuHostSnapshot initial_gpu = Access::GpuSnapshot(*app);
+        const auto scene_commands = Access::DiagnosticSceneMeshDrawList(*app).commands();
+        const auto scene_overlay = Access::DiagnosticSceneOverlayDrawList(*app).commands();
+        Check(initial_gpu.successful_mesh_uploads == 1U &&
+                  initial_gpu.successful_mesh_upload_logical_bytes == 48U &&
+                  initial_gpu.successful_mesh_releases == 0U &&
+                  initial_gpu.meshes.slot_capacity == 64U &&
+                  initial_gpu.meshes.free_slots == 63U &&
+                  initial_gpu.meshes.reserved_slots == 0U &&
+                  initial_gpu.meshes.resident_slots == 1U &&
+                  initial_gpu.meshes.resident_positions == 3U &&
+                  initial_gpu.meshes.resident_triangle_indices == 3U &&
+                  initial_gpu.meshes.resident_logical_bytes == 48U,
+            "startup owns one exact 48-byte indexed spatial mesh with no partial reservation");
+        Check(scene_commands.size() == 1U && scene_commands[0].mesh.valid() &&
+                  scene_commands[0].object_to_clip ==
+                      omega::asset::kIdentityMatrix4x4IR &&
+                  scene_commands[0].color ==
+                      omega::runtime::RenderMeshColorRgba8{
+                          .red = 112U,
+                          .green = 220U,
+                          .blue = 255U,
+                          .alpha = 255U,
+                      } &&
+                  scene_commands[0].raster_mode ==
+                      omega::runtime::RenderMeshRasterMode::Fill &&
+                  scene_overlay.size() == 1U &&
+                  scene_overlay[0].texture ==
+                      Access::DiagnosticActorMarkerTexture(*app) &&
+                  Access::CurrentFrontEndMeshDrawList(*app).empty(),
+            "the validated scene packet composes camera times instance and remains hidden in Profiles");
+
+        const bool reached_briefing =
+            PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
+            PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value() &&
+            PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value() &&
+            PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value();
+        const omega::app::GpuHostSnapshot briefing_gpu = Access::GpuSnapshot(*app);
+        Check(reached_briefing &&
+                  Access::FrontEnd(*app).mode ==
+                      omega::app::FrontEndMode::BriefingRoom &&
+                  briefing_gpu.mesh_submissions == 0U &&
+                  briefing_gpu.successful_mesh_draws == 0U &&
+                  briefing_gpu.meshes == initial_gpu.meshes &&
+                  Access::CurrentFrontEndMeshDrawList(*app).empty(),
+            "profile and character selection reach BriefingRoom without submitting the resident scene");
+        if (!reached_briefing)
+            return;
+
+        const bool pressed = PushMouseButton(SDL_BUTTON_LEFT, true);
+        auto started = app->RunWithCapture(1);
+        const omega::app::GpuHostSnapshot play_gpu = Access::GpuSnapshot(*app);
+        Check(pressed && started && !started->failure() &&
+                  Access::FrontEnd(*app).mode ==
+                      omega::app::FrontEndMode::DiagnosticPlay &&
+                  play_gpu.meshes == briefing_gpu.meshes &&
+                  play_gpu.successful_mesh_uploads ==
+                      briefing_gpu.successful_mesh_uploads &&
+                  play_gpu.successful_mesh_releases ==
+                      briefing_gpu.successful_mesh_releases &&
+                  play_gpu.frame_submissions == briefing_gpu.frame_submissions + 1U &&
+                  play_gpu.blit_submissions == briefing_gpu.blit_submissions + 1U &&
+                  play_gpu.successful_blit_draws ==
+                      briefing_gpu.successful_blit_draws + 1U &&
+                  play_gpu.mesh_submissions == briefing_gpu.mesh_submissions + 1U &&
+                  play_gpu.successful_mesh_draws ==
+                      briefing_gpu.successful_mesh_draws + 1U &&
+                  Access::CurrentFrontEndMeshDrawList(*app).size() == 1U &&
+                  DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
+                      Access::DiagnosticSceneOverlayDrawList(*app)),
+            "BriefingRoom mission activation publishes one indexed draw with the existing actor overlay and no deploy-click fire cue");
+
+        Check(PushMouseButton(SDL_BUTTON_LEFT, false) && app->Run(1).has_value(),
+            "the diagnostic-scene mission click releases in DiagnosticPlay");
+        const omega::app::GpuHostSnapshot before_return = Access::GpuSnapshot(*app);
+        const bool returned = PushKey(SDL_SCANCODE_F1, true) && app->Run(1).has_value();
+        const omega::app::GpuHostSnapshot after_return = Access::GpuSnapshot(*app);
+        Check(returned &&
+                  Access::FrontEnd(*app).mode ==
+                      omega::app::FrontEndMode::BriefingRoom &&
+                  after_return.mesh_submissions == before_return.mesh_submissions &&
+                  after_return.successful_mesh_draws == before_return.successful_mesh_draws &&
+                  Access::CurrentFrontEndMeshDrawList(*app).empty(),
+            "the DiagnosticPlay menu edge returns to BriefingRoom before packet selection and suppresses the scene");
+        Check(PushKey(SDL_SCANCODE_F1, false) && app->Run(1).has_value(),
+            "the diagnostic-scene return edge releases in BriefingRoom");
+
+        const omega::app::GpuHostSnapshot before_release = Access::GpuSnapshot(*app);
+        Access::ReleaseDiagnosticScenePresentation(*app);
+        const omega::app::GpuHostSnapshot after_release = Access::GpuSnapshot(*app);
+        Check(after_release.successful_mesh_releases ==
+                  before_release.successful_mesh_releases + 1U &&
+                  after_release.meshes.free_slots ==
+                      after_release.meshes.slot_capacity &&
+                  after_release.meshes.reserved_slots == 0U &&
+                  after_release.meshes.resident_slots == 0U &&
+                  after_release.meshes.resident_positions == 0U &&
+                  after_release.meshes.resident_triangle_indices == 0U &&
+                  after_release.meshes.resident_logical_bytes == 0U &&
+                  Access::DiagnosticSceneMeshDrawList(*app).empty() &&
+                  Access::CurrentFrontEndMeshDrawList(*app).empty(),
+            "explicit scene teardown clears commands before releasing the exact resident generation");
+    }
+
+    auto invalid_config = omega::runtime::ParseConfigText("");
+    auto invalid_content = BuildLevelContentStartupState(tree);
+    Check(invalid_config && invalid_content,
+        "the non-finite diagnostic-scene rejection fixture is ready");
+    if (invalid_config && invalid_content)
+    {
+        InstallSyntheticSpatialTriangle(*invalid_content);
+        invalid_content->level_content->spatial.terrain_cells[0].vertices[0].x =
+            std::numeric_limits<float>::infinity();
+        const SDL_InitFlags before = SDL_WasInit(0);
+        auto rejected = Access::Create(std::move(*invalid_config), settings,
+            std::move(*invalid_content), false);
+        constexpr std::string_view exact_error =
+            "spatial diagnostic scene: spatial diagnostic scene requires finite vertex coordinates";
+        Check(!rejected && rejected.error() == exact_error &&
+                  rejected.error().find(tree.root().string()) == std::string::npos &&
+                  SDL_WasInit(0) == before,
+            "invalid spatial geometry fails closed with a fixed path-free diagnostic before SDL startup");
     }
 }
 
@@ -3436,6 +3668,7 @@ int main()
         CheckExplicitFirstProfileCreation(generated_content.root(), settings);
         CheckActiveProfileConfirmation(generated_content.root(), settings);
         CheckDiagnosticCampaignStart(generated_content.root(), settings);
+        CheckDiagnosticSceneMissionActivation(generated_content, settings);
         CheckComposedGeneratedMenuAcceptance(generated_content.root(), settings);
 
         const std::filesystem::path profile_database_root =

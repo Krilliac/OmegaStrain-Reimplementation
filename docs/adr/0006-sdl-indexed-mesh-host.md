@@ -31,6 +31,14 @@ are separate lazily created pipelines. Existing texture blits then run in their 
 as an overlay. The host converts ADR 0005 row-major matrices to the column-major storage consumed by
 the shader at the SDL boundary.
 
+When canonical `LevelContentIR` is present, `OmegaApp` now invokes
+`BuildSpatialDiagnosticScene` exactly once during startup. It validates scene instance indices and
+camera-times-instance matrices, transactionally uploads the complete mesh set, and owns one fixed
+validated draw list. Only `DiagnosticPlay` copies that list into a frame packet. Its texture list
+keeps the existing actor, targeting, and firing cues but omits the opaque full-screen diagnostic
+base so indexed geometry remains visible; every menu/card list is unchanged. Shutdown clears mesh
+commands and explicitly releases generations in reverse upload order before host teardown.
+
 The shader is SDL's position/color `testgpu` shader in the DXIL, SPIR-V, and MSL forms shipped in the
 exact permissively licensed SDL revision already pinned by CMake. Those generated headers are
 consumed at build time from the fetched SDL source; OpenOmega adds no runtime shader compiler or
@@ -42,8 +50,9 @@ external shader payload. SDL objects and shader representations remain private t
   yet select blending; the current shader writes alpha one.
 - There is no depth attachment, material, texture sampling, lighting, skinning, visibility,
   occlusion, or retail draw-order claim. Source-order opaque draws are the entire current policy.
-- The app does not upload a `SceneIR` aggregate implicitly. A thin overload borrows one owned
-  `RenderMeshIR`; scene instance selection and matrix composition remain explicit caller work.
+- `SdlGpuHost` does not upload a `SceneIR` aggregate implicitly. Its thin overload still borrows
+  one owned `RenderMeshIR`; `OmegaApp` is the explicit caller that selects instances and composes
+  matrices for the startup diagnostic scene.
 - All upload, draw, wait, and release methods are main/render-thread operations. Handles retain no
   SDL pointer and do not pin a generation beyond synchronous packet consumption.
 - Committed tests use synthetic project-authored triangles only. Proprietary inputs, paths,
@@ -56,9 +65,15 @@ external shader payload. SDL objects and shader representations remain private t
 - Pool and draw-list tests continue to enforce finite positions and matrices, complete triangles,
   in-range indices, bounded capacity, exact pool identity, and generation reuse.
 - An opt-in SDL GPU smoke uploads one synthetic `SceneIR` mesh, reads an actual indexed fill draw
-  back from an 8-by-8 RGBA8 target, exercises fill and wireframe swapchain submissions, rejects a
-  stale generation before submission, verifies generation-safe slot reuse, and ends with no
-  resident mesh resources.
+  back from an 8-by-8 RGBA8 target, then applies unequal scales plus translation and requires every
+  colored pixel to land in the expected quadrant. This makes row/column storage regressions
+  observable. The smoke also exercises fill and wireframe swapchain submissions, rejects a stale
+  generation before submission, verifies generation-safe slot reuse, and ends with no resident mesh
+  resources.
+- The app capture smoke uses only a generated triangle and proves Profiles, Characters, and
+  BriefingRoom submit no mesh; mission activation submits exactly one mesh plus the existing actor
+  overlay; return to BriefingRoom suppresses the mesh; and explicit teardown restores zero mesh
+  residency. A non-finite scene fails before SDL with a fixed path-free diagnostic.
 
 ## Consequences
 
