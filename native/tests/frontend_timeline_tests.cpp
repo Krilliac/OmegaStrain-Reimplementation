@@ -127,7 +127,7 @@ void TestIndependentOwnedInstancesAndFourTrackFamilies() {
             first_evaluation->opacity_track_resolved &&
             first_evaluation->uv_offset_u_track_resolved &&
             first_evaluation->uv_offset_v_track_resolved,
-        "one exact-key evaluation resolves all four retained track families");
+        "one boundary evaluation resolves all four retained track families");
   Check(first.positions()[0] == Float3IR{.x = 10.0F, .y = 20.0F, .z = 30.0F} &&
             first.positions()[1] ==
                 Float3IR{.x = -10.0F, .y = -20.0F, .z = -30.0F} &&
@@ -161,7 +161,7 @@ void TestIndependentOwnedInstancesAndFourTrackFamilies() {
         "a clone owns its state after source-resource destruction");
 }
 
-void TestExactBoundariesAndLiveTickContract() {
+void TestClampedLinearInterpolationAndLiveTickContract() {
   const auto resource = MakeAnimatedResource();
   auto created = presentation::CloneRetailFrontendVisualInstance(resource);
   Check(created.has_value(), "boundary fixture clones");
@@ -174,54 +174,99 @@ void TestExactBoundariesAndLiveTickContract() {
             {.live_tick = 100U, .authored_timeline_tick = 0.0F})
             .has_value(),
         "the first exact key evaluates");
-  const auto first_boundary = instance;
-
-  CheckError(presentation::EvaluateRetailFrontendTimeline(
-                 instance, resource,
-                 {.live_tick = 101U, .authored_timeline_tick = 15.0F}),
-             RetailFrontendTimelineError::UnsupportedInterpolation,
-             "a between-key tick fails closed without guessed interpolation");
-  Check(instance == first_boundary,
-        "unsupported interpolation publishes no partial successor");
-
-  CheckError(
-      presentation::EvaluateRetailFrontendTimeline(
-          instance, resource,
-          {.live_tick = 101U, .authored_timeline_tick = -1.0F}),
-      RetailFrontendTimelineError::TickOutsideTrackRange,
-      "a tick before the established key range is distinct from interpolation");
-  CheckError(presentation::EvaluateRetailFrontendTimeline(
-                 instance, resource,
-                 {.live_tick = 101U, .authored_timeline_tick = 31.0F}),
-             RetailFrontendTimelineError::TickOutsideTrackRange,
-             "a tick after the established key range fails closed");
-  Check(instance == first_boundary,
-        "out-of-range ticks leave the complete state unchanged");
+  Check(presentation::EvaluateRetailFrontendTimeline(
+            instance, resource,
+            {.live_tick = 101U, .authored_timeline_tick = 15.0F})
+            .has_value() &&
+            instance.positions()[0] ==
+                Float3IR{.x = 25.0F, .y = 35.0F, .z = 45.0F} &&
+            instance.positions()[1] ==
+                Float3IR{.x = -25.0F, .y = -35.0F, .z = -45.0F} &&
+            instance.opacity() == 0.625F &&
+            instance.uv_offset_u() == 0.25F &&
+            instance.uv_offset_v() == -0.25F,
+        "a between-key tick linearly interpolates scalar and vertex channels");
 
   Check(presentation::EvaluateRetailFrontendTimeline(
             instance, resource,
-            {.live_tick = 100U, .authored_timeline_tick = 0.0F})
+            {.live_tick = 102U, .authored_timeline_tick = -1.0F})
+            .has_value() &&
+            instance.positions()[0] ==
+                Float3IR{.x = 10.0F, .y = 20.0F, .z = 30.0F} &&
+            instance.opacity() == 1.0F,
+        "a tick before the authored range clamps to the first key");
+  Check(presentation::EvaluateRetailFrontendTimeline(
+            instance, resource,
+            {.live_tick = 103U, .authored_timeline_tick = 31.0F})
+            .has_value() &&
+            instance.positions()[0] ==
+                Float3IR{.x = 40.0F, .y = 50.0F, .z = 60.0F} &&
+            instance.opacity() == 0.25F,
+        "a tick after the authored range clamps to the last key");
+  const auto clamped_boundary = instance;
+
+  Check(presentation::EvaluateRetailFrontendTimeline(
+            instance, resource,
+            {.live_tick = 103U, .authored_timeline_tick = 31.0F})
             .has_value(),
         "repeating one identical live/authored input is deterministic");
   CheckError(presentation::EvaluateRetailFrontendTimeline(
                  instance, resource,
-                 {.live_tick = 100U, .authored_timeline_tick = 30.0F}),
+                 {.live_tick = 103U, .authored_timeline_tick = 30.0F}),
              RetailFrontendTimelineError::InconsistentLiveTick,
              "one live tick cannot be rebound to a different authored tick");
   CheckError(presentation::EvaluateRetailFrontendTimeline(
                  instance, resource,
-                 {.live_tick = 99U, .authored_timeline_tick = 0.0F}),
+                 {.live_tick = 102U, .authored_timeline_tick = 0.0F}),
              RetailFrontendTimelineError::NonMonotonicLiveTick,
              "live tick regression is categorical");
   CheckError(
       presentation::EvaluateRetailFrontendTimeline(
           instance, resource,
-          {.live_tick = 101U,
+          {.live_tick = 104U,
            .authored_timeline_tick = std::numeric_limits<float>::infinity()}),
       RetailFrontendTimelineError::NonFiniteValue,
       "a nonfinite authored tick is rejected before evaluation");
-  Check(instance == first_boundary,
+  Check(instance == clamped_boundary,
         "all invalid clock inputs preserve the prior state");
+
+  FrontendVisualNodeIR interior_key_resource;
+  interior_key_resource.animation_tracks.emplace_back(
+      FrontendScalarAnimationTrackIR{
+          .target = FrontendScalarAnimationTarget::Opacity,
+          .keys = {
+              {.timeline_tick = 0.0F, .value = 0.25F},
+              {.timeline_tick = 10.0F, .value = 0.75F},
+              {.timeline_tick = 20.0F, .value = 0.5F},
+          },
+      });
+  auto interior_instance =
+      presentation::CloneRetailFrontendVisualInstance(interior_key_resource);
+  Check(interior_instance &&
+            presentation::EvaluateRetailFrontendTimeline(
+                *interior_instance, interior_key_resource,
+                {.live_tick = 1U, .authored_timeline_tick = 10.0F}) &&
+            interior_instance->opacity() == 0.75F,
+        "an exact interior key publishes its authored value without blending");
+
+  FrontendVisualNodeIR single_key_resource;
+  single_key_resource.animation_tracks.emplace_back(
+      FrontendScalarAnimationTrackIR{
+          .target = FrontendScalarAnimationTarget::Opacity,
+          .keys = {{.timeline_tick = 4.0F, .value = 0.375F}},
+      });
+  auto single_key_instance =
+      presentation::CloneRetailFrontendVisualInstance(single_key_resource);
+  Check(single_key_instance &&
+            presentation::EvaluateRetailFrontendTimeline(
+                *single_key_instance, single_key_resource,
+                {.live_tick = 1U, .authored_timeline_tick = -100.0F}) &&
+            single_key_instance->opacity() == 0.375F &&
+            presentation::EvaluateRetailFrontendTimeline(
+                *single_key_instance, single_key_resource,
+                {.live_tick = 2U, .authored_timeline_tick = 100.0F}) &&
+            single_key_instance->opacity() == 0.375F,
+        "a one-key track clamps to its sole authored value on both sides");
 }
 
 void TestMalformedAmbiguousAndLimitedResources() {
@@ -388,17 +433,19 @@ void TestResourceMismatchAndTransactionalFailure() {
       "a state cannot be rebound to a differently shaped visual resource");
   Check(instance == prior, "resource mismatch publishes no state");
 
-  auto late_failure = resource;
+  auto differing_ranges = resource;
   auto &opacity = std::get<FrontendScalarAnimationTrackIR>(
-      late_failure.animation_tracks[1]);
+      differing_ranges.animation_tracks[1]);
   opacity.keys[1].timeline_tick = 20.0F;
-  CheckError(presentation::EvaluateRetailFrontendTimeline(
-                 instance, late_failure,
-                 {.live_tick = 9U, .authored_timeline_tick = 30.0F}),
-             RetailFrontendTimelineError::TickOutsideTrackRange,
-             "a later scalar failure rejects earlier resolved vertex work");
-  Check(instance == prior,
-        "a later-track failure cannot publish a partial vertex successor");
+  const auto clamped = presentation::EvaluateRetailFrontendTimeline(
+      instance, differing_ranges,
+      {.live_tick = 9U, .authored_timeline_tick = 25.0F});
+  Check(clamped && instance.positions()[0] ==
+                       Float3IR{.x = 35.0F, .y = 45.0F, .z = 55.0F} &&
+            instance.opacity() == 0.25F,
+        "each track clamps against its own authored key range");
+  Check(instance != prior,
+        "a complete clamped evaluation publishes one atomic successor");
 }
 
 void TestExplicitTitleAvailability() {
@@ -474,7 +521,7 @@ void TestExplicitTitleAvailability() {
 
 int main() {
   TestIndependentOwnedInstancesAndFourTrackFamilies();
-  TestExactBoundariesAndLiveTickContract();
+  TestClampedLinearInterpolationAndLiveTickContract();
   TestMalformedAmbiguousAndLimitedResources();
   TestResourceMismatchAndTransactionalFailure();
   TestExplicitTitleAvailability();

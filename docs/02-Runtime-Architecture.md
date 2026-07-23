@@ -366,13 +366,14 @@ must take explicit per-widget-instance timeline and game-state inputs, retain ea
 visual scope, and consume proven projection and texture sampling/alpha metadata. It must not share
 mutable timeline state between widgets merely because their immutable visual resource is shared.
 
-The platform-neutral timeline value boundary now supplies the first part of that contract without
+The E-0122 platform-neutral timeline value boundary supplies the first part of that contract without
 widening the static compositor. Each widget instance owns an independent clone of its visual
 positions plus separately resolved opacity and U/V-offset channels; it never owns or mutates the
 immutable visual resource. The caller supplies both a live tick and an asset-authored timeline tick,
-and no rate or conversion between those clocks is inferred. Evaluation supports exact keys for the
-retained VERTEX, OPACITY, UVOFF_U, and UVOFF_V families and transactionally rejects between-key or
-out-of-range ticks. Interpolation, applying scalar channels to colors or UVs, wake/focus action
+and no rate or conversion between those clocks is inferred. Evaluation applies the established
+clamped-linear rule to the retained VERTEX, OPACITY, UVOFF_U, and UVOFF_V families: before/after the
+authored range it holds the first/last key, and inside the range it interpolates adjacent scalar
+values or vertex components. Applying scalar channels to colors or UVs, wake/focus action
 dispatch, visual-lane ordering, and resource traversal remain unsupported. A separate pure Title
 state reducer consumes explicit create-agent availability, saved-profile availability, and focus
 request; indeterminate availability or a request for a disabled control fails closed, while absence
