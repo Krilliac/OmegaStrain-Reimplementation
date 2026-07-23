@@ -66,6 +66,20 @@ namespace
     return std::isfinite(result);
 }
 
+[[nodiscard]] bool SumFitsFiniteFloat(
+    const double left, const double right) noexcept
+{
+    constexpr double maximum =
+        static_cast<double>(std::numeric_limits<float>::max());
+    if (!std::isfinite(left) || !std::isfinite(right))
+        return false;
+    if (left > 0.0 && right > 0.0 && maximum - left < right)
+        return false;
+    if (left < 0.0 && right < 0.0 && maximum + left < -right)
+        return false;
+    return true;
+}
+
 [[nodiscard]] double Coefficient(
     const AffineTransform12& transform, const std::size_t column, const std::size_t row) noexcept
 {
@@ -89,6 +103,34 @@ std::expected<Point2F, CompositorMathError> GuiToCanonicalRaster(
     Point2F result;
     if (!TryNarrowFinite(static_cast<double>(gui_position.x) + 320.0, result.x) ||
         !TryNarrowFinite(224.0 - static_cast<double>(gui_position.y), result.y))
+    {
+        return std::unexpected(CompositorMathError::NonFiniteResult);
+    }
+    return result;
+}
+
+std::expected<InterfaceElementProjection, CompositorMathError>
+ProjectInterfaceElementPoint(const asset::Float3IR& world_point) noexcept
+{
+    if (!IsFinite(world_point))
+        return std::unexpected(CompositorMathError::NonFiniteInput);
+
+    const double world_x = static_cast<double>(world_point.x);
+    const double world_y = static_cast<double>(world_point.y);
+    const double negated_world_z = -static_cast<double>(world_point.z);
+    if (!SumFitsFiniteFloat(world_x, 320.0) ||
+        !SumFitsFiniteFloat(negated_world_z, 224.0))
+    {
+        return std::unexpected(CompositorMathError::NonFiniteResult);
+    }
+
+    InterfaceElementProjection result;
+    const double raster_x = 320.0 + world_x;
+    const double raster_y = 224.0 + negated_world_z;
+    const double depth_rank = 1.0 - (world_y + 1.0) / 1000.0;
+    if (!TryNarrowFinite(raster_x, result.raster_position.x) ||
+        !TryNarrowFinite(raster_y, result.raster_position.y) ||
+        !TryNarrowFinite(depth_rank, result.depth_rank))
     {
         return std::unexpected(CompositorMathError::NonFiniteResult);
     }

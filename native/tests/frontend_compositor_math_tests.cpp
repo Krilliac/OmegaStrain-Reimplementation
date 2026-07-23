@@ -52,6 +52,7 @@ int main()
 {
     using omega::frontend::AffineTransform12;
     using omega::frontend::CompositorMathError;
+    using omega::frontend::InterfaceElementProjection;
     using omega::frontend::Point2F;
     using omega::frontend::RgbF;
     using omega::frontend::RgbaF;
@@ -60,6 +61,10 @@ int main()
 
     static_assert(std::is_same_v<decltype(omega::frontend::GuiToCanonicalRaster({})), PointResult>);
     static_assert(noexcept(omega::frontend::GuiToCanonicalRaster({})));
+    static_assert(std::is_same_v<
+                  decltype(omega::frontend::ProjectInterfaceElementPoint({})),
+                  std::expected<InterfaceElementProjection, CompositorMathError>>);
+    static_assert(noexcept(omega::frontend::ProjectInterfaceElementPoint({})));
     static_assert(noexcept(omega::frontend::TransformPoint({}, {})));
     static_assert(noexcept(omega::frontend::ComposeAffineTransforms({}, {})));
     static_assert(noexcept(omega::frontend::TransformUv({}, {}, {})));
@@ -86,10 +91,50 @@ int main()
     Check(!rejected_gui && rejected_gui.error() == CompositorMathError::NonFiniteInput,
           "GUI mapping rejects non-finite input");
 
+    const auto projected = omega::frontend::ProjectInterfaceElementPoint(
+        {.x = 7.0F, .y = 99.0F, .z = -3.0F});
+    Check(projected && projected->raster_position == Point2F{327.0F, 227.0F} &&
+              Near(projected->depth_rank, 0.9F),
+          "IE projection uses world X/Z for raster position and world Y for depth");
+    const auto nearer = omega::frontend::ProjectInterfaceElementPoint(
+        {.x = 7.0F, .y = -1.0F, .z = -3.0F});
+    Check(nearer && projected &&
+              nearer->raster_position == projected->raster_position &&
+              Near(nearer->depth_rank, 1.0F) &&
+              nearer->depth_rank > projected->depth_rank,
+          "varying only world Y changes larger-is-nearer depth without moving raster XY");
+    const auto outside_raster = omega::frontend::ProjectInterfaceElementPoint(
+        {.x = 400.0F, .y = 0.0F, .z = -300.0F});
+    Check(outside_raster &&
+              outside_raster->raster_position == Point2F{720.0F, 524.0F},
+          "IE projection does not invent canonical-raster clipping");
+
+    const auto nonfinite_y = omega::frontend::ProjectInterfaceElementPoint(
+        {.x = 0.0F,
+         .y = std::numeric_limits<float>::quiet_NaN(),
+         .z = 0.0F});
+    Check(!nonfinite_y && nonfinite_y.error() == CompositorMathError::NonFiniteInput,
+          "IE projection rejects non-finite depth-axis input");
+    const auto nonfinite_z = omega::frontend::ProjectInterfaceElementPoint(
+        {.x = 0.0F,
+         .y = 0.0F,
+         .z = std::numeric_limits<float>::infinity()});
+    Check(!nonfinite_z && nonfinite_z.error() == CompositorMathError::NonFiniteInput,
+          "IE projection rejects non-finite screen-axis input");
+    const auto projection_overflow = omega::frontend::ProjectInterfaceElementPoint(
+        {.x = std::numeric_limits<float>::max(), .y = 0.0F, .z = 0.0F});
+    Check(!projection_overflow &&
+              projection_overflow.error() == CompositorMathError::NonFiniteResult,
+          "IE projection rejects a widened raster result outside finite float range");
+
     const auto bridged = omega::frontend::TransformPoint(
         omega::frontend::kInterfaceElementAxisBridge, {7.0F, -3.0F, 0.0F});
     Check(bridged && Near(*bridged, {7.0F, 0.0F, -2.0F}),
           "the fixed IE bridge maps (x,y,0) to (x,0,y+1)");
+    const auto bridged_nonzero_z = omega::frontend::TransformPoint(
+        omega::frontend::kInterfaceElementAxisBridge, {7.0F, -3.0F, 11.0F});
+    Check(bridged_nonzero_z && Near(*bridged_nonzero_z, {7.0F, 11.0F, -2.0F}),
+          "the fixed IE bridge moves source Z onto the bridged screen-Y axis");
     const auto rejected_point = omega::frontend::TransformPoint(
         omega::frontend::kIdentityAffineTransform12,
         {std::numeric_limits<float>::infinity(), 0.0F, 0.0F});

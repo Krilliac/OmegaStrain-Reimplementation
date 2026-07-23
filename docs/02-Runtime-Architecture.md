@@ -425,6 +425,18 @@ and publishes no partial frame. This
 stage still assigns no asset-Z projection, hierarchy transform, IE-versus-GUI lane order, text
 interleave, live action dispatch, GS intermediate quantization, or visual-parity claim.
 
+E-0125 supplies a separate, allocation-free projection for an already-world-transformed retail
+interface-element point `q`. It maps `q.x` and `q.z` to canonical raster position
+`(320 + q.x, 224 - q.z)` and maps `q.y + 1` to the normalized larger-is-nearer depth rank
+`1 - (q.y + 1) / 1000`. The corresponding fixed axis bridge maps `(x, y, z)` to
+`(x, z, y + 1)`; direct GUI-coordinate mapping remains a distinct contract. The projection helper
+rejects non-finite input and finite-float overflow but deliberately performs no clipping or exact GS
+integer, fixed-point, or unsigned quantization. The current static Title subset separately requires
+the projected raster position and depth to remain in its accepted bounds, continues to accept only
+identity hierarchy transforms and canonical full-frame coverage, and publishes no partial frame on
+failure. This narrow correction establishes no general hierarchy traversal, IE-versus-GUI lane
+order, complete Title compositor, owner-corpus rendered result, PCSX2 equivalence, or visual parity.
+
 The Windows prelaunch process is deliberately outside the game composition graph.
 `openomega_launcher.exe` owns only owner-data selection, validation, the default-off gamepad
 preference, and starting its adjacent `openomega.exe`. It does not link profiles, gameplay,
