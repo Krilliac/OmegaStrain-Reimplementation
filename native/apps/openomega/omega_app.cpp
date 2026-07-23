@@ -1784,12 +1784,13 @@ bool OmegaApp::FinishOpeningMovieFrontEndTransition(
 
 OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
 
-std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
+std::expected<RunResult, std::string> OmegaApp::Run(
+    const int frame_limit, const int screenshot_frame)
 {
     auto first_elapsed_override =
         std::exchange(next_run_elapsed_override_for_testing_, std::nullopt);
-    RunLoopResult loop =
-        RunLoop(frame_limit, nullptr, std::move(first_elapsed_override));
+    RunLoopResult loop = RunLoop(
+        frame_limit, nullptr, std::move(first_elapsed_override), screenshot_frame);
     if (loop.operational_error)
         return std::unexpected(std::move(*loop.operational_error));
     return loop.result;
@@ -1884,7 +1885,8 @@ std::expected<RunCaptureOutcome, std::string> OmegaApp::RunWithCapture(
 
 OmegaApp::RunLoopResult OmegaApp::RunLoop(
     const int frame_limit, runtime::RunCaptureSession* const capture_session,
-    std::optional<std::chrono::nanoseconds> first_elapsed_override)
+    std::optional<std::chrono::nanoseconds> first_elapsed_override,
+    const int screenshot_frame)
 {
     using Clock = std::chrono::steady_clock;
 
@@ -2557,7 +2559,11 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 .capture_error = std::nullopt,
             };
         }
-        if (events.screenshot_requested)
+        const bool headless_screenshot_frame =
+            screenshot_frame > 0 &&
+            *next_rendered_frame_count ==
+                static_cast<decltype(*next_rendered_frame_count)>(screenshot_frame);
+        if (events.screenshot_requested || headless_screenshot_frame)
         {
             auto screenshot_pixels = host_->CaptureFrameRgba8(render_packet);
             if (!screenshot_pixels)

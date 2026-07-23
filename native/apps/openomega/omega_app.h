@@ -74,8 +74,12 @@ public:
     OmegaApp(const OmegaApp&) = delete;
     OmegaApp& operator=(const OmegaApp&) = delete;
 
-    // [game/main/render thread]
-    [[nodiscard]] std::expected<RunResult, std::string> Run(int frame_limit);
+    // [game/main/render thread] screenshot_frame, when positive, writes one
+    // headless BMP of the frame at that 1-based rendered index to the platform
+    // screenshots directory, using the same capture path as the interactive
+    // screenshot key. A non-positive value disables headless capture.
+    [[nodiscard]] std::expected<RunResult, std::string> Run(
+        int frame_limit, int screenshot_frame = -1);
 
     // [game/main/render thread] Runs one finite diagnostic capture. Pre-loop validation and
     // backing-allocation failures return unexpected without mutating app services; operational
@@ -141,7 +145,8 @@ private:
 
     [[nodiscard]] RunLoopResult RunLoop(
         int frame_limit, runtime::RunCaptureSession* capture_session,
-        std::optional<std::chrono::nanoseconds> first_elapsed_override);
+        std::optional<std::chrono::nanoseconds> first_elapsed_override,
+        int screenshot_frame = -1);
     [[nodiscard]] bool ContainOpeningMovieAudio() noexcept;
     [[nodiscard]] static OpeningMovieAudioFaultCounters OpeningMovieAudioFaultCountersOf(
         const AudioServiceSnapshot& snapshot) noexcept;

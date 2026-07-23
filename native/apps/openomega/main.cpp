@@ -829,7 +829,7 @@ int main(const int argc, char** argv)
         return EXIT_SUCCESS;
     }
 
-    auto run = app->Run(options->frame_limit);
+    auto run = app->Run(options->frame_limit, options->screenshot_frame);
     if (!run)
     {
         std::cerr << "runtime loop: " << run.error() << '\n';
