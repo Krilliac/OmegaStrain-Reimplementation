@@ -146,6 +146,17 @@ asset::DecodeResult<VumRenderPayloadDescriptor> InspectVumRenderPayload(
             ? source_index
             : source_index - layout->target_count;
         const std::size_t pair_index = static_cast<std::size_t>(normalized_index / 2U);
+        // ValidateVumPayloadLayout already proved metadata_record_count == pair_count*2 +
+        // target_count and that the T-block occupies exactly target_count contiguous source
+        // indices, which together make pair_index < pair_count for every non-T source_index --
+        // but this file re-derives that mapping independently rather than consuming it
+        // directly. This check is a release-mode backstop against that cross-file
+        // correspondence ever drifting, failing typed instead of writing out of bounds.
+        if (pair_index >= result.pairs.size())
+        {
+            return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                "VUM render-payload metadata index does not map to a valid pair", record_offset));
+        }
         auto& pair = result.pairs[pair_index];
         if (normalized_index % 2U == 0)
         {
@@ -170,6 +181,19 @@ asset::DecodeResult<VumRenderPayloadDescriptor> InspectVumRenderPayload(
         const std::uint32_t end = index + 1U < result.pairs.size()
             ? result.pairs[index + 1U].middle_payload_bytes
             : layout->final_payload_begin;
+        // begin/end (for every pair but the last) are raw Q-payload offsets this file's own
+        // first pass above read directly from the input, not re-validated here against
+        // bytes.size() or checked to be increasing. ValidateVumPayloadLayout already proved
+        // both properties on its own independent traversal of the same bytes (see the
+        // analogous check in vum_layout_internal.cpp's ValidateMiddlePayloadReferences), but
+        // this file does not consult that proof directly. Re-check locally before using
+        // begin/end as read offsets, so a future divergence between the two files' traversals
+        // fails typed instead of reading out of bounds or underflowing `end - begin`.
+        if (end < begin || end > bytes.size())
+        {
+            return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                "VUM render-payload pair boundary is out of order or out of range", begin));
+        }
         const std::uint32_t span_bytes = end - begin;
         auto& pair = result.pairs[index];
         pair.middle_payload_bytes = span_bytes;
@@ -178,6 +202,13 @@ asset::DecodeResult<VumRenderPayloadDescriptor> InspectVumRenderPayload(
             pair.middle_payload_final_reference_offsets[0] =
                 detail::ReadVumU32(bytes, begin + 4U) - layout->final_payload_begin;
             continue;
+        }
+        if (span_bytes < 0xF4U + 4U)
+        {
+            return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+                "VUM render-payload grouped middle-payload span cannot hold its reference "
+                "offsets",
+                begin));
         }
         pair.middle_payload_structural_group_count =
             static_cast<std::uint8_t>((span_bytes - 32U) / 224U);
