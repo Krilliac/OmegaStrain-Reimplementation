@@ -1190,6 +1190,25 @@ int main()
         omega::asset::DecodeErrorCode::LimitExceeded,
         "caller-tightened aggregate item limits cannot be reset by child decoders");
 
+    // GS local-memory scratch is a PEAK (transient, reused-per-texture) bound,
+    // not a cumulative pool. A screen composing more than one texture must decode
+    // with only a single 4 MiB GS workspace of scratch headroom; the prior code
+    // summed each texture's 4 MiB peak and so falsely exhausted the budget after
+    // enough textures, which broke multi-texture screens such as the Command
+    // Center hub. The synthetic Title screen composes a primary and a shared-scope
+    // texture, so a 4 MiB scratch ceiling proves the peak (not summed) semantics.
+    omega::asset::DecodeLimits peak_scratch_limits{
+        .maximum_input_bytes = 64ULL * 1024ULL * 1024ULL,
+        .maximum_output_bytes = 128ULL * 1024ULL * 1024ULL,
+        .maximum_scratch_bytes = 4ULL * 1024ULL * 1024ULL,
+        .maximum_items = 64ULL * 1024ULL * 1024ULL,
+        .maximum_string_bytes = 4096U,
+        .maximum_nesting_depth = 16U,
+    };
+    Check(Load(root, FrontEndScreenKey::Title, peak_scratch_limits).has_value(),
+        "a multi-texture screen decodes within a single GS-workspace scratch "
+        "budget: transient scratch is peak, not summed per texture");
+
     if (const auto private_data = PrivateRetailDataPath())
     {
         auto service = omega::content::GameDataService::Open(
