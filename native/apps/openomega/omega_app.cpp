@@ -2968,7 +2968,16 @@ void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
     // bundle into per-mode textures and draw lists, so authorizing the gate by
     // default would present an empty screen. Keep this behind an env guard until
     // that lands; see docs/08-Retail-Front-End-Presentation-Scope.md.
-    if (std::getenv("OPENOMEGA_ENABLE_RETAIL_FRONT_END") == nullptr)
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const char* const retail_front_end_opt_in =
+        std::getenv("OPENOMEGA_ENABLE_RETAIL_FRONT_END");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    if (retail_front_end_opt_in == nullptr)
         return;
 
     if (!content_ || !content_->game_data.has_value())
