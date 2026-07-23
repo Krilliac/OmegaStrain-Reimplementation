@@ -3256,7 +3256,8 @@ void OmegaApp::ComposeRetailScreenPresentation(
                 std::to_string(diagnostics.fonts_missing) + " layout_fail=" +
                 std::to_string(diagnostics.text_layouts_failed) + " glyph_quads=" +
                 std::to_string(diagnostics.glyph_quads_emitted) + " anim_nodes=" +
-                std::to_string(diagnostics.animated_nodes) + " total_tris=" +
+                std::to_string(diagnostics.animated_nodes) + " ring_tris=" +
+                std::to_string(diagnostics.mission_ring_triangles) + " total_tris=" +
                 std::to_string(diagnostics.total_triangles) + " frame=" +
                 std::to_string(diagnostics.frame_width) + "x" +
                 std::to_string(diagnostics.frame_height));

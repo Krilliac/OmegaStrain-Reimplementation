@@ -1,4 +1,5 @@
 #include "omega/frontend_presentation/retail_front_end_frame.h"
+#include "omega/frontend_presentation/retail_mission_ring.h"
 
 #include "omega/frontend_presentation/retail_front_end_nav.h"
 
@@ -10,6 +11,8 @@
 #include "omega/retail/fnt_v3_decoder.h"
 #include "omega/retail/retail_string_table_decoder.h"
 
+#include <algorithm>
+#include <cmath>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -581,6 +584,56 @@ int main()
         Check(static_tick0.has_value() && static_tick20.has_value() &&
                   static_tick0->pixels == static_tick20->pixels,
             "a screen with no animation tracks is tick-invariant");
+    }
+
+    {
+        // Gap B Slice A: the Command Center mission-ring producer emits a
+        // non-empty band of finite, non-degenerate triangles; a null texture
+        // yields the untextured fallback; and the perspective projection seats a
+        // wider-than-tall ellipse over the frame centre.
+        std::vector<omega::frontend::presentation::RetailFrontEndRasterTriangle>
+            ring;
+        omega::frontend::presentation::AppendRetailMissionRingTriangles(nullptr,
+            ring);
+        Check(!ring.empty(), "mission ring emits triangles");
+        bool finite_non_degenerate = true;
+        bool all_untextured = true;
+        float min_x = 1.0e9F;
+        float max_x = -1.0e9F;
+        float min_y = 1.0e9F;
+        float max_y = -1.0e9F;
+        for (const auto& triangle : ring)
+        {
+            if (triangle.texture != nullptr)
+                all_untextured = false;
+            const double ax = static_cast<double>(triangle.vertices[0U].x);
+            const double ay = static_cast<double>(triangle.vertices[0U].y);
+            const double bx = static_cast<double>(triangle.vertices[1U].x);
+            const double by = static_cast<double>(triangle.vertices[1U].y);
+            const double cx = static_cast<double>(triangle.vertices[2U].x);
+            const double cy = static_cast<double>(triangle.vertices[2U].y);
+            const double area2 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+            if (!std::isfinite(area2) || area2 == 0.0)
+                finite_non_degenerate = false;
+            for (const auto& vertex : triangle.vertices)
+            {
+                if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y))
+                    finite_non_degenerate = false;
+                min_x = std::min(min_x, vertex.x);
+                max_x = std::max(max_x, vertex.x);
+                min_y = std::min(min_y, vertex.y);
+                max_y = std::max(max_y, vertex.y);
+            }
+        }
+        Check(finite_non_degenerate,
+            "mission ring triangles are finite and non-degenerate");
+        Check(all_untextured,
+            "a null ring texture yields untextured triangles");
+        Check((max_x - min_x) > (max_y - min_y),
+            "mission ring projects to a wider-than-tall ellipse");
+        Check(min_x < 320.0F && max_x > 320.0F && min_y < 246.0F &&
+                  max_y > 246.0F,
+            "mission ring spans the frame centre");
     }
 
     if (failures != 0)

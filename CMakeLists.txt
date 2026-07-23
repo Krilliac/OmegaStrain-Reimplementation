@@ -172,6 +172,7 @@ add_library(omega_frontend_presentation STATIC
     native/src/frontend_presentation/retail_frontend_cpu_raster.cpp
     native/src/frontend_presentation/retail_presentation_requirements.cpp
     native/src/frontend_presentation/retail_root_visual_layer.cpp
+    native/src/frontend_presentation/retail_mission_ring.cpp
     native/src/frontend_presentation/retail_front_end_frame.cpp
     native/src/frontend_presentation/retail_frontend_timeline.cpp
     native/src/frontend_presentation/retail_frontend_texture_sampler.cpp

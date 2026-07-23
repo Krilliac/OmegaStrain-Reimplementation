@@ -53,6 +53,7 @@ struct RetailFrontEndFrameDiagnostics final
     std::uint32_t text_layouts_failed = 0U;
     std::uint32_t glyph_quads_emitted = 0U;
     std::uint32_t animated_nodes = 0U;
+    std::uint32_t mission_ring_triangles = 0U;
     std::uint32_t total_triangles = 0U;
     std::uint32_t frame_width = 0U;
     std::uint32_t frame_height = 0U;

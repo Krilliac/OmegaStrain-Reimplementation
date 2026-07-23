@@ -4,6 +4,7 @@
 #include "omega/content/front_end_screen_bundle.h"
 #include "omega/frontend/compositor_math.h"
 #include "omega/frontend_presentation/retail_frontend_timeline.h"
+#include "omega/frontend_presentation/retail_mission_ring.h"
 #include "omega/frontend_text/text_layout.h"
 
 #include <array>
@@ -518,6 +519,22 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
         AppendGuiTextTriangles(bundle, child, depth + 1U, selected_identifier,
             force_visible_group, diag, out);
 }
+
+// Finds a texture by member name across all of the bundle's visual scopes
+// (FindTexture is case-insensitive). Used to locate the Command Center ring
+// surface (DPAD_COMMANDCENTER.TDX), which lives in a shell scope rather than a
+// GUI-bound resource. Returns nullptr if absent (the ring then draws untextured).
+[[nodiscard]] const content::FrontEndTextureBinding* FindBundleTexture(
+    const content::FrontEndScreenBundle& bundle,
+    const std::string_view member) noexcept
+{
+    for (const auto& [scope_name, scope] : bundle.visual_scopes())
+    {
+        if (const auto* const texture = scope.FindTexture(member))
+            return texture;
+    }
+    return nullptr;
+}
 } // namespace
 
 RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
@@ -567,6 +584,18 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
     std::vector<RetailFrontEndRasterTriangle> triangles;
     try
     {
+        // Command Center 3D mission-ring backdrop (Gap B Slice A, project-authored
+        // approximation). Appended FIRST so its submission ordinals are lowest and
+        // the 2D shell/text draw over it. Only the hub gets a ring; other screens
+        // are unchanged. Fail-soft: a missing texture draws an untextured ring.
+        if (bundle.key() == content::FrontEndScreenKey::CommandCenter)
+        {
+            AppendRetailMissionRingTriangles(
+                FindBundleTexture(bundle, "DPAD_COMMANDCENTER.TDX"), triangles);
+            if (diagnostics != nullptr)
+                diagnostics->mission_ring_triangles =
+                    static_cast<std::uint32_t>(triangles.size());
+        }
         AppendVisualNodeTriangles(*scope, *root_visual, initial_world, 0U,
             animation_tick, diagnostics, triangles);
         // Phase 2 GUI text pass. Glyph quads are appended AFTER all IE geometry
