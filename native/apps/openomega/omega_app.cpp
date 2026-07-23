@@ -183,6 +183,43 @@ OmegaApp::BuildDiagnosticScenePresentation(
         presentation->mesh_handles[presentation->mesh_count++] = *uploaded;
     }
 
+    // Gap-A textured level slice: upload one procedural "dev grid" albedo texture
+    // and bind it to every environment mesh. The mesh pixel shader triplanar-maps
+    // it from world position, so no per-vertex UVs are needed here. This is a
+    // documented STAND-IN texture that proves the in-house textured mesh pipeline
+    // end to end; binding the real per-material level TDX textures
+    // (LevelTextureStore) with real per-vertex UVs (VUM visual decode, Path B) is
+    // the fidelity follow-up. Fail-soft: an upload miss leaves the level flat.
+    {
+        constexpr std::uint32_t kTextureExtent = 128U;
+        std::vector<std::uint8_t> pixels(
+            static_cast<std::size_t>(kTextureExtent) * kTextureExtent * 4U, 0U);
+        for (std::uint32_t y = 0U; y < kTextureExtent; ++y)
+        {
+            for (std::uint32_t x = 0U; x < kTextureExtent; ++x)
+            {
+                const bool grid_line = (x % 16U == 0U) || (y % 16U == 0U);
+                const bool checker = (((x / 16U) + (y / 16U)) % 2U) == 0U;
+                const std::uint8_t base = checker ? 225U : 165U;
+                const std::uint8_t value = grid_line ? 70U : base;
+                const std::size_t offset =
+                    (static_cast<std::size_t>(y) * kTextureExtent + x) * 4U;
+                pixels[offset + 0U] = value;
+                pixels[offset + 1U] = static_cast<std::uint8_t>(value * 7U / 8U);
+                pixels[offset + 2U] = static_cast<std::uint8_t>(value * 11U / 16U);
+                pixels[offset + 3U] = 255U;
+            }
+        }
+        auto uploaded_texture =
+            host.UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+                .width = kTextureExtent,
+                .height = kTextureExtent,
+                .pixels = std::as_bytes(std::span<const std::uint8_t>(pixels)),
+            });
+        if (uploaded_texture)
+            presentation->environment_texture = *uploaded_texture;
+    }
+
     std::array<runtime::RenderMeshDrawCommand,
         runtime::kMaximumRenderMeshDrawsPerFrame> commands{};
     for (std::size_t instance_index = 0U;
@@ -200,6 +237,7 @@ OmegaApp::BuildDiagnosticScenePresentation(
                 .alpha = 255U,
             },
             .raster_mode = runtime::RenderMeshRasterMode::Fill,
+            .texture = presentation->environment_texture,
         };
     }
     auto created_environment_draw_list = runtime::RenderMeshDrawList::Create(

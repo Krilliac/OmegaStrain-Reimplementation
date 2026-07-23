@@ -285,6 +285,9 @@ private:
         std::size_t mesh_count = 0U;
         std::size_t environment_command_count = 0U;
         runtime::RenderMeshHandle actor_mesh_handle;
+        // Albedo texture bound to the environment meshes (Gap-A textured level
+        // slice). A default handle leaves the environment flat-shaded.
+        runtime::RenderTextureHandle environment_texture{};
         asset::SceneCameraIR camera;
         runtime::RenderMeshDrawList environment_draw_list;
         runtime::RenderMeshDrawList draw_list;

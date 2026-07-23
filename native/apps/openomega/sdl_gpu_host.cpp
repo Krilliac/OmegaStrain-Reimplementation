@@ -21,6 +21,15 @@
 #include <testgpu/cube.vert.msl.h>
 #include <testgpu/cube.vert.spv.h>
 
+// In-house textured mesh shaders (Gap-A / gameplay Slice 1). DXIL only: this is
+// the format the SDL GPU D3D12 backend consumes on Windows. Authored HLSL under
+// native/apps/openomega/shaders/, compiled to DXIL by tools/compile_shaders.ps1,
+// committed as these headers so the build needs no shader compiler. On backends
+// without DXIL (MSL/SPIRV) the textured pipeline is simply not created and mesh
+// draws fall back to the flat solid-color pipeline (fail-soft).
+#include "shaders/mesh_textured.frag.dxil.h"
+#include "shaders/mesh_textured.vert.dxil.h"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -486,6 +495,9 @@ struct ResolvedMeshDraw
     SDL_GPUBuffer* positions = nullptr;
     SDL_GPUBuffer* triangle_indices = nullptr;
     std::uint32_t triangle_index_count = 0U;
+    // Resolved backend albedo texture, or nullptr when the draw has no (valid)
+    // texture -> the flat solid-color pipeline is used for that draw.
+    SDL_GPUTexture* texture = nullptr;
 };
 
 static_assert(sizeof(asset::Float3IR) == sizeof(float) * 3U);
@@ -569,6 +581,30 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
         return std::unexpected(SdlError(vertex ? "render mesh vertex shader create"
                                                 : "render mesh fragment shader create"));
     return shader;
+}
+
+// Loads the in-house textured mesh shader. DXIL only (see the header include
+// note); returns nullptr fail-soft on any other backend or on create failure so
+// the caller keeps the flat pipeline. The fragment shader binds one texture +
+// sampler in SDL GPU fragment space2; the vertex shader keeps the same one
+// uniform buffer (object_to_clip) and vertex layout as the flat mesh shader.
+[[nodiscard]] SDL_GPUShader* CreateTexturedMeshShader(
+    SDL_GPUDevice* device, const bool vertex) noexcept
+{
+    const SDL_GPUShaderFormat supported = SDL_GetGPUShaderFormats(device);
+    if ((supported & SDL_GPU_SHADERFORMAT_DXIL) == 0U)
+        return nullptr;
+    SDL_GPUShaderCreateInfo create_info{};
+    create_info.format = SDL_GPU_SHADERFORMAT_DXIL;
+    create_info.code = vertex ? mesh_textured_vert_dxil : mesh_textured_frag_dxil;
+    create_info.code_size =
+        vertex ? mesh_textured_vert_dxil_len : mesh_textured_frag_dxil_len;
+    create_info.entrypoint = "main";
+    create_info.stage =
+        vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+    create_info.num_uniform_buffers = vertex ? 1U : 0U;
+    create_info.num_samplers = vertex ? 0U : 1U;
+    return SDL_CreateGPUShader(device, &create_info);
 }
 
 [[nodiscard]] SDL_GPUGraphicsPipeline* CreateMeshPipeline(SDL_GPUDevice* device,
@@ -665,7 +701,8 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
     const std::span<const runtime::RenderMeshDrawCommand> draw_commands,
     const std::span<const ResolvedMeshDraw> resolved_draws,
     SDL_GPUBuffer* color_buffer, SDL_GPUGraphicsPipeline* fill_pipeline,
-    SDL_GPUGraphicsPipeline* wireframe_pipeline) noexcept
+    SDL_GPUGraphicsPipeline* wireframe_pipeline,
+    SDL_GPUGraphicsPipeline* textured_pipeline, SDL_GPUSampler* sampler) noexcept
 {
     SDL_GPUColorTargetInfo target{};
     target.texture = destination;
@@ -684,11 +721,27 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
         SDL_PushGPUVertexUniformData(
             commands, 0U, matrix.data(), static_cast<std::uint32_t>(sizeof(matrix)));
 
+        // A Fill draw with a resolved texture uses the textured pipeline (which
+        // samples the bound texture with in-shader triplanar mapping); every
+        // other case keeps the flat solid-color fill/wireframe pipeline.
+        const bool use_textured =
+            draw.raster_mode == runtime::RenderMeshRasterMode::Fill &&
+            resolved.texture != nullptr && textured_pipeline != nullptr &&
+            sampler != nullptr;
         SDL_GPUGraphicsPipeline* pipeline =
-            draw.raster_mode == runtime::RenderMeshRasterMode::Fill
-                ? fill_pipeline
-                : wireframe_pipeline;
+            use_textured ? textured_pipeline
+                         : (draw.raster_mode == runtime::RenderMeshRasterMode::Fill
+                                   ? fill_pipeline
+                                   : wireframe_pipeline);
         SDL_BindGPUGraphicsPipeline(pass, pipeline);
+        if (use_textured)
+        {
+            const SDL_GPUTextureSamplerBinding texture_binding{
+                .texture = resolved.texture,
+                .sampler = sampler,
+            };
+            SDL_BindGPUFragmentSamplers(pass, 0U, &texture_binding, 1U);
+        }
         const std::array vertex_bindings{
             SDL_GPUBufferBinding{
                 .buffer = resolved.positions,
@@ -823,6 +876,16 @@ struct SdlGpuHost::Impl
                 SDL_ReleaseGPUGraphicsPipeline(device, mesh_wireframe_pipeline);
                 mesh_wireframe_pipeline = nullptr;
             }
+            if (mesh_textured_pipeline != nullptr)
+            {
+                SDL_ReleaseGPUGraphicsPipeline(device, mesh_textured_pipeline);
+                mesh_textured_pipeline = nullptr;
+            }
+            if (mesh_sampler != nullptr)
+            {
+                SDL_ReleaseGPUSampler(device, mesh_sampler);
+                mesh_sampler = nullptr;
+            }
             if (window_claimed && window != nullptr)
                 SDL_ReleaseWindowFromGPUDevice(device, window);
             SDL_DestroyGPUDevice(device);
@@ -844,6 +907,10 @@ struct SdlGpuHost::Impl
     SDL_GPUBuffer* mesh_color_buffer = nullptr;
     SDL_GPUGraphicsPipeline* mesh_fill_pipeline = nullptr;
     SDL_GPUGraphicsPipeline* mesh_wireframe_pipeline = nullptr;
+    // Textured fill variant + its sampler. Null when the backend has no DXIL
+    // (see CreateTexturedMeshShader) -> textured draws fall back to flat fill.
+    SDL_GPUGraphicsPipeline* mesh_textured_pipeline = nullptr;
+    SDL_GPUSampler* mesh_sampler = nullptr;
     SDL_GPUTextureFormat mesh_pipeline_format = SDL_GPU_TEXTUREFORMAT_INVALID;
     std::string driver;
     std::uint64_t successful_uploads = 0U;
@@ -863,6 +930,23 @@ struct SdlGpuHost::Impl
     std::uint64_t mesh_submissions = 0U;
     std::uint64_t successful_mesh_draws = 0U;
     std::uint64_t rejected_nondefault_mesh_handles = 0U;
+
+    // Resolves an optional mesh-draw albedo texture handle to its backend
+    // texture. Fail-soft: a default/invalid handle or any pool/slot miss returns
+    // nullptr, so the draw uses the flat pipeline rather than failing the frame.
+    [[nodiscard]] SDL_GPUTexture* ResolveTextureSlot(
+        const runtime::RenderTextureHandle& handle) noexcept
+    {
+        if (!handle.valid())
+            return nullptr;
+        auto metadata = texture_pool.Get(handle);
+        if (!metadata)
+            return nullptr;
+        const std::uint32_t slot_index = metadata->handle.slot_index;
+        if (slot_index >= texture_slots.size())
+            return nullptr;
+        return texture_slots[slot_index];
+    }
 
     [[nodiscard]] std::expected<void, std::string> EnsureMeshPipelines(
         SDL_GPUTextureFormat target_format, bool need_fill, bool need_wireframe);
@@ -932,7 +1016,43 @@ std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
         }
         PipelineGuard wireframe_guard(device, new_wireframe);
 
-        if (!same_format && (mesh_fill_pipeline != nullptr || mesh_wireframe_pipeline != nullptr))
+        // Textured fill variant (Gap-A). Fail-soft: if the backend has no DXIL
+        // textured shader or pipeline creation fails, new_textured stays null and
+        // textured draws fall back to the flat fill pipeline. Tied to the fill
+        // pipeline lifetime since it is format-dependent.
+        SDL_GPUGraphicsPipeline* new_textured = nullptr;
+        if (create_fill)
+        {
+            SDL_GPUShader* textured_vertex = CreateTexturedMeshShader(device, true);
+            SDL_GPUShader* textured_fragment = CreateTexturedMeshShader(device, false);
+            if (textured_vertex != nullptr && textured_fragment != nullptr)
+            {
+                new_textured = CreateMeshPipeline(device, textured_vertex,
+                    textured_fragment, target_format, SDL_GPU_FILLMODE_FILL);
+            }
+            if (textured_vertex != nullptr)
+                SDL_ReleaseGPUShader(device, textured_vertex);
+            if (textured_fragment != nullptr)
+                SDL_ReleaseGPUShader(device, textured_fragment);
+        }
+        PipelineGuard textured_guard(device, new_textured);
+
+        // Format-independent linear/repeat sampler, created once.
+        if (mesh_sampler == nullptr)
+        {
+            const SDL_GPUSamplerCreateInfo sampler_info{
+                .min_filter = SDL_GPU_FILTER_LINEAR,
+                .mag_filter = SDL_GPU_FILTER_LINEAR,
+                .mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR,
+                .address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
+                .address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
+                .address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
+            };
+            mesh_sampler = SDL_CreateGPUSampler(device, &sampler_info);
+        }
+
+        if (!same_format && (mesh_fill_pipeline != nullptr || mesh_wireframe_pipeline != nullptr ||
+                                mesh_textured_pipeline != nullptr))
         {
             if (!SDL_WaitForGPUIdle(device))
                 return std::unexpected(SdlError("render mesh pipeline format transition idle wait"));
@@ -940,8 +1060,11 @@ std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
                 SDL_ReleaseGPUGraphicsPipeline(device, mesh_fill_pipeline);
             if (mesh_wireframe_pipeline != nullptr)
                 SDL_ReleaseGPUGraphicsPipeline(device, mesh_wireframe_pipeline);
+            if (mesh_textured_pipeline != nullptr)
+                SDL_ReleaseGPUGraphicsPipeline(device, mesh_textured_pipeline);
             mesh_fill_pipeline = nullptr;
             mesh_wireframe_pipeline = nullptr;
+            mesh_textured_pipeline = nullptr;
         }
 
         if (new_fill != nullptr)
@@ -953,6 +1076,11 @@ std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
         {
             mesh_wireframe_pipeline = new_wireframe;
             wireframe_guard.Dismiss();
+        }
+        if (new_textured != nullptr)
+        {
+            mesh_textured_pipeline = new_textured;
+            textured_guard.Dismiss();
         }
         mesh_pipeline_format = target_format;
     }
@@ -1964,6 +2092,7 @@ SdlGpuHost::ReadbackFrameRgba8(const runtime::RenderFramePacket& packet,
                 .positions = mesh.positions,
                 .triangle_indices = mesh.triangle_indices,
                 .triangle_index_count = mesh.triangle_index_count,
+                .texture = impl_->ResolveTextureSlot(draw.texture),
             };
             colors[index] = ToMeshColor(draw.color);
             switch (draw.raster_mode)
@@ -2162,7 +2291,8 @@ SdlGpuHost::ReadbackFrameRgba8(const runtime::RenderFramePacket& packet,
                   std::span<const ResolvedMeshDraw>{
                       resolved_draws.data(), mesh_draws.size()},
                   impl_->mesh_color_buffer, impl_->mesh_fill_pipeline,
-                  impl_->mesh_wireframe_pipeline);
+                  impl_->mesh_wireframe_pipeline, impl_->mesh_textured_pipeline,
+                  impl_->mesh_sampler);
         if (!recorded_target)
         {
             SetSdlErrorBounded(post_acquire_error, "mesh readback render-pass begin");
@@ -2360,6 +2490,7 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
                 .positions = mesh.positions,
                 .triangle_indices = mesh.triangle_indices,
                 .triangle_index_count = mesh.triangle_index_count,
+                .texture = impl_->ResolveTextureSlot(draw.texture),
             };
             mesh_colors[index] = ToMeshColor(draw.color);
             switch (draw.raster_mode)
@@ -2535,7 +2666,9 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
                                                        mesh_draws.size()},
                                                    impl_->mesh_color_buffer,
                                                    impl_->mesh_fill_pipeline,
-                                                   impl_->mesh_wireframe_pipeline);
+                                                   impl_->mesh_wireframe_pipeline,
+                                                   impl_->mesh_textured_pipeline,
+                                                   impl_->mesh_sampler);
             if (!recorded_target)
             {
                 SetSdlErrorBounded(post_acquire_error, "SDL_BeginGPURenderPass");

@@ -77,6 +77,30 @@ void CheckError(const std::expected<Value, RenderMeshDrawListError>& result,
     };
 }
 
+void CheckOptionalTexture()
+{
+    // The default draw command carries an invalid texture handle, selecting the
+    // flat pipeline; a valid handle round-trips through the draw list unchanged
+    // so the textured mesh pipeline can be selected per draw (Gap-A slice).
+    Check(!RenderMeshDrawCommand{}.texture.valid(),
+        "a default mesh draw command has no (flat) texture");
+
+    RenderMeshDrawCommand textured = Command(0U);
+    textured.texture = omega::runtime::RenderTextureHandle{
+        .pool_identity = 3U,
+        .generation = 5U,
+        .slot_index = 9U,
+    };
+    Check(textured.texture.valid(), "an assigned texture handle is valid");
+
+    const std::array<RenderMeshDrawCommand, 1U> caller{textured};
+    auto created = RenderMeshDrawList::Create(caller);
+    Check(created && created->size() == 1U &&
+              created->commands()[0].texture == textured.texture &&
+              created->commands()[0] == textured,
+        "a textured mesh draw command round-trips its texture handle");
+}
+
 void CheckContractAndErrors()
 {
     static_assert(sizeof(RenderMeshColorRgba8) == 4U);
@@ -222,6 +246,7 @@ int main()
     CheckContractAndErrors();
     CheckCapacityOwnershipAndZeroTail();
     CheckValidation();
+    CheckOptionalTexture();
     if (failures == 0)
         std::cout << "omega_render_mesh_draw_list_tests: all checks passed\n";
     return failures == 0 ? 0 : 1;
