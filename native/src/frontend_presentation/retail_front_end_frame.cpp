@@ -369,8 +369,13 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
         }
         else
         {
-            // Fail-soft: draw the de-sigiled reference rather than nothing.
-            text = lookup_key;
+            // A "$name" reference with no entry in the static string table is
+            // runtime-filled dynamic content (mission names, live agent/rank
+            // stats, chat) that a static screen render does not have. Render
+            // NOTHING for it -- drawing the raw key here overlaps the screen's
+            // real static labels (e.g. the Command Center hub's 38 dynamic
+            // placeholders piling onto MODIFY AGENT / MEDALS / OMEGA STRAIN).
+            // text stays empty -> no glyphs emitted below; children still recurse.
             if (diag != nullptr)
                 ++diag->strings_missing;
         }
