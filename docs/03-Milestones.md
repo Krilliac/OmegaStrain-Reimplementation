@@ -341,14 +341,20 @@ corrected; hosted CI and owner-input validation remain pending. Grounded layer/t
 ordering, text encoding and
 interleave, action lifecycle, animation selection/application, the retail menu, visual parity, and
 PCSX2 equivalence remain unproven.
-The branch-local `OMEGAFRPHASE0002` Python evidence contract separates an ignored private normalized
-trace from a categorical aggregate-only public report. It validates anonymous site binding,
-single-lane lifecycle nesting, immutable submission context, global chronology, exact draw
-disposition/membership, terminal completeness, and an explicit private phase/scene/front-end
-capture-domain join. Both reducers require a verified selected-site-map and capture-domain assembly,
-not a bare parsed fragment. It has no evidence ID in this branch. No independent C++ mirror, PCSX2
-producer, owner capture, or canonical-IR consumer exists yet; widget/visual descendant order, text
-interleave, action lifecycle, and animation timing remain unproven.
+E-0128 records the implementation-only `OMEGAFRPHASE0002` evidence contract. It separates an ignored
+private normalized trace from a categorical aggregate-only public report and validates anonymous
+site binding, single-lane lifecycle nesting, immutable submission context, global chronology, exact
+draw disposition/membership, terminal completeness, and an explicit private
+phase/scene/front-end capture-domain join. Both reducers require a verified selected-site-map and
+capture-domain assembly, not a bare parsed fragment. A standalone test-only C++ target independently
+encodes the generated v2 model and compares its owned output with the exact 495-byte fixture; a
+shared ASCII contract makes its magic, header/table metadata, fixture size, and twenty immutable
+hard limits mechanically comparable with the Python contract tests. The target has no OpenOmega
+library dependency or shipping/runtime edge. Its local C++ compilation and execution remain pending
+until preflight permits a serialized build. No `OMEGAFRPHASE0002` PCSX2 producer, owner capture,
+canonical-IR consumer, runtime binding, or ordering conclusion exists; widget/visual descendant
+order, text interleave, action lifecycle, animation timing, retail semantics, visual parity, and
+PCSX2 equivalence remain unproven.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
