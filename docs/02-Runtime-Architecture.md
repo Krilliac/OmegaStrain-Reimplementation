@@ -483,9 +483,9 @@ E-0127 therefore supplies only a bounded blocker inventory for the next evidence
 establishes no grounded layer ordering, retail text encoding, text/geometry interleave, action
 lifecycle, animation timing/application, retail frame, menu, visual parity, or PCSX2 equivalence.
 
-The branch-local `OMEGAFRPHASE0002` evidence contract remains outside the runtime composition graph.
-Its normalized detailed trace is private-only; a separate public reducer emits fixed completeness
-and policy categories plus bounded aggregate counts. The private validator retains anonymous static
+The E-0128 `OMEGAFRPHASE0002` evidence contract remains outside the runtime composition graph. Its
+normalized detailed trace is private-only; a separate public reducer emits fixed completeness and
+policy categories plus bounded aggregate counts. The private validator retains anonymous static
 site bindings, strict single-lane lifecycle intervals, immutable submission-time context, global
 event/submission/final-draw chronology, exact draw disposition/membership, terminal state, and
 discovered-versus-retained frame/table reconciliation. Both reducers require the selected private
@@ -494,10 +494,19 @@ must join phase, scene, and front-end artifacts explicitly; matching dense draw 
 insufficient.
 The format and limits are fully described in `analysis/formats/FRONTEND-PHASE.md`.
 
-No C++ producer-wire mirror, PCSX2 producer, owner capture, canonical-IR consumer, `OmegaApp`
-integration, or rendering-path integration exists yet. The contract supplies evidence machinery
-only. Widget/visual descendant order, text interleave, action lifecycle, and animation timing remain
-unproven until a complete private capture agrees with independent static call-flow evidence.
+The standalone `omega_frontend_phase_wire_contract_tests` target independently encodes the generated
+version-2 model and compares its owned output with the exact tracked fixture. A shared ASCII
+synthetic contract makes the magic, header/table metadata, fixture size, and immutable hard limits
+mechanically comparable from C++ and Python. This target has no OpenOmega library dependency,
+exported header, shipping edge, decoder, canonical-IR type, runtime consumer, or owner-data
+integration. Its local C++ compilation and execution remain pending until the host preflight permits
+a serialized build.
+
+No `OMEGAFRPHASE0002` PCSX2 producer, owner capture, canonical-IR consumer, `OmegaApp` integration,
+or rendering-path integration exists yet. The contract and test-only mirror supply evidence
+machinery only. Widget/visual descendant order, text interleave, action lifecycle, and animation
+timing remain unproven until a complete private capture agrees with independent static call-flow
+evidence.
 
 The Windows prelaunch process is deliberately outside the game composition graph.
 `openomega_launcher.exe` owns only owner-data selection, validation, the default-off gamepad

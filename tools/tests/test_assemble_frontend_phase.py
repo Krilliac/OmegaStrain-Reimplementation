@@ -25,6 +25,13 @@ FIXTURE = (
     / "frontend_phase_v2"
     / "synthetic-producer.hex"
 )
+CONTRACT = (
+    REPOSITORY_ROOT
+    / "analysis"
+    / "fixtures"
+    / "frontend_phase_v2"
+    / "synthetic-contract.txt"
+)
 SPEC = importlib.util.spec_from_file_location("assemble_frontend_phase", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 assembler = importlib.util.module_from_spec(SPEC)
@@ -58,6 +65,56 @@ class _Builder:
 
 def _default_counts() -> tuple[int, ...]:
     return (2, 2, 4, 3, 3, 3)
+
+
+def expected_wire_contract() -> bytes:
+    counts = _default_counts()
+    offset = assembler._HEADER_BYTES
+    offsets: list[tuple[str, int]] = []
+    for name, count, width in zip(
+        ("sites", "invocations", "events", "submissions", "draws", "memberships"),
+        counts,
+        assembler._ROW_WIDTHS,
+        strict=True,
+    ):
+        offsets.append((name, offset))
+        offset += count * width
+
+    def enum_values(enum_type: type[assembler.IntEnum]) -> str:
+        return ",".join(f"{item.name}:{int(item)}" for item in enum_type)
+
+    failure_statuses = (
+        assembler.TerminalStatus.TelemetryOverflow,
+        assembler.TerminalStatus.TelemetryDropped,
+        assembler.TerminalStatus.VmReset,
+        assembler.TerminalStatus.SavestateDiscontinuity,
+        assembler.TerminalStatus.QueueExhausted,
+        assembler.TerminalStatus.OutputFailure,
+        assembler.TerminalStatus.InternalFailure,
+    )
+    failure_precedence = ",".join(
+        f"{status.name}:{counter}"
+        for status, counter in zip(
+            failure_statuses, assembler._FAILURE_COUNTER_NAMES, strict=True
+        )
+    )
+    lines = [
+        "schema=openomega-frontend-phase-wire-contract-v1",
+        f"magic={assembler.FRAGMENT_MAGIC.decode('ascii')}",
+        f"version={assembler.FRAGMENT_VERSION}",
+        f"fixture_bytes={offset}",
+        f"header_bytes={assembler._HEADER_BYTES}",
+        "row_widths=" + ",".join(str(width) for width in assembler._ROW_WIDTHS),
+        *(f"offset.{name}={value}" for name, value in offsets),
+        f"offset.end={offset}",
+        f"enum.terminal_status={enum_values(assembler.TerminalStatus)}",
+        f"enum.commit_state={enum_values(assembler.CommitState)}",
+        f"enum.event_kind={enum_values(assembler.EventKind)}",
+        f"enum.draw_disposition={enum_values(assembler.DrawDisposition)}",
+        f"failure_counter_precedence={failure_precedence}",
+        *(f"limit.{name}={value}" for name, value in assembler.HARD_LIMITS.items()),
+    ]
+    return ("\n".join(lines) + "\n").encode("ascii")
 
 
 def build_valid_fragment(
@@ -365,6 +422,13 @@ class PhaseFragmentParserTests(unittest.TestCase):
         self.assertEqual(encoded[-1:], b"\n")
         self.assertNotIn(b"\r", encoded)
         self.assertEqual(bytes.fromhex(encoded.decode("ascii")), self.raw)
+
+    def test_checked_in_ascii_contract_matches_parser_constants(self) -> None:
+        encoded = CONTRACT.read_bytes()
+        self.assertEqual(encoded[-1:], b"\n")
+        self.assertNotIn(b"\r", encoded)
+        self.assertEqual(len(assembler.HARD_LIMITS), 20)
+        self.assertEqual(encoded, expected_wire_contract())
 
     def test_wire_contains_only_neutral_binary_ordinals(self) -> None:
         for forbidden in (

@@ -827,6 +827,35 @@ if(BUILD_TESTING)
     )
     set_tests_properties(omega_scene_fragment_wire_contract_tests PROPERTIES TIMEOUT 10)
 
+    # Independent, test-only C++ construction of the generated front-end phase
+    # wire vector. It deliberately links no shipping OpenOmega target.
+    add_executable(omega_frontend_phase_wire_contract_tests
+        native/tests/frontend_phase_wire_contract_tests.cpp
+    )
+    if(MSVC)
+        target_compile_options(omega_frontend_phase_wire_contract_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_frontend_phase_wire_contract_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+        )
+    endif()
+    add_test(NAME omega_frontend_phase_wire_contract_tests
+        COMMAND omega_frontend_phase_wire_contract_tests
+            "${CMAKE_CURRENT_SOURCE_DIR}/analysis/fixtures/frontend_phase_v2/synthetic-producer.hex"
+            "${CMAKE_CURRENT_SOURCE_DIR}/analysis/fixtures/frontend_phase_v2/synthetic-contract.txt"
+    )
+    set_tests_properties(omega_frontend_phase_wire_contract_tests PROPERTIES TIMEOUT 10)
+
     if(WIN32)
         unset(OMEGA_LAUNCH_TEST_POWERSHELL CACHE)
         unset(OMEGA_LAUNCH_TEST_POWERSHELL)
