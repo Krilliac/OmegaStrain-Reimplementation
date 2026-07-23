@@ -327,6 +327,20 @@ authorize retail presentation. A private categorical smoke rejected all three co
 layers or composition inputs are required, and how any such layers are ordered, remain unproven. No
 frame or proprietary identity was retained. This advances bounded composition plumbing but does not
 complete the retail menu, Title flow, character creation, or M2 visual parity.
+E-0127 adds a bounded requirements inspector that reduces each validated Title, CreateAgent, or
+LoadAgent bundle to owned anonymous aggregate counts of structural candidate kinds and an explicit
+set of unresolved presentation blockers. A separate diagnostic classifies static visual geometry
+only under the project-owned canonical scan-conversion kernel and evaluates aggregate
+project-raster coverage only when all required facts are resolved. Neither the structural census
+nor coverage diagnostic emits an ordered candidate list, identity, pixels, frame, or capability;
+traversal order is not draw order, and project-raster coverage is not retail GS coverage. Focused
+MSVC targets completed with zero warnings or errors, focused CTest passed 3/3, full CTest passed
+110/110, tooling passed 395/395, Python compile-all passed, the native-dependency gate passed 389
+files, and both ledger gates passed 127 records. Independent review's limit-boundary gap was
+corrected; hosted CI and owner-input validation remain pending. Grounded layer/text/animation
+ordering, text encoding and
+interleave, action lifecycle, animation selection/application, the retail menu, visual parity, and
+PCSX2 equivalence remain unproven.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-

@@ -458,6 +458,31 @@ source-order or depth-first traversal. Widget/visual descendant order, text inte
 lifecycle, live-to-authored animation timing, and full retail-menu presentation remain blocked on
 independent evidence.
 
+E-0127 adds a separate requirements inspector rather than widening either the compositor or the
+retail-presentation capability. `InspectRetailPresentationRequirements` synchronously borrows a
+capability-bearing Title, CreateAgent, or LoadAgent bundle and reduces its retained widget and
+visual structures to owned anonymous aggregate counts for visual geometry, text, unresolved
+widgets, and unresolved bindings. It also reports an explicit set of unresolved requirements such
+as parent visibility, candidate ordering, visual/widget lane merge, text encoding/layout/interleave,
+action lifecycle, animation selection/application, coverage, binding, texture, depth, and geometry
+policy. No candidate identity or ordered candidate list escapes, and traversal order is never
+treated as draw or layer order.
+
+The inspector's projected-geometry census is a deliberately separate project diagnostic. It uses
+the established affine composition, interface-element projection, and canonical project
+scan-conversion kernel only to classify each static visual candidate and, when every required fact
+is resolved, its aggregate project-raster union. Indeterminate results preserve unresolved
+visibility, animation, binding, transform, projection, geometry, depth, or texture facts rather
+than converting them into guessed coverage. Project-raster coverage is not retail GS coverage and
+does not establish opacity, text interleave, ordering, or a complete presentation. The owned report
+contains no views, identifiers, strings, paths, hashes, payload values, pixels, rectangles, frame,
+or capability. Caller-tightenable work and allocation limits remain below immutable hard ceilings,
+and terminal limit or allocation failure returns no partial report.
+
+E-0127 therefore supplies only a bounded blocker inventory for the next evidence campaign. It
+establishes no grounded layer ordering, retail text encoding, text/geometry interleave, action
+lifecycle, animation timing/application, retail frame, menu, visual parity, or PCSX2 equivalence.
+
 The Windows prelaunch process is deliberately outside the game composition graph.
 `openomega_launcher.exe` owns only owner-data selection, validation, the default-off gamepad
 preference, and starting its adjacent `openomega.exe`. It does not link profiles, gameplay,
