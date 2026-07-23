@@ -1,195 +1,289 @@
-# Bounded front-end phase/draw attribution fragment
+# Private front-end phase trace and public categorical reducer
 
-Status: contract and Python tooling only. This repository defines and validates
-the public wire contract and its sanitized output. No producer implements this
-format yet: a separately queued private PCSX2-side lane owns any future
-producer/emitter, is not present in this repository, and must not be inferred
-from this document. No C++ mirror test exists yet (see "Deferred" below).
+Status: Python contract and generated fixture only. No C++ wire mirror, PCSX2
+producer, owner capture, or runtime consumer exists yet.
 
-This document defines the public clean-room boundary implemented by
-`tools/assemble_frontend_phase.py`. Binary inputs are research artifacts and
-must remain outside version control. Only canonical sanitized JSON produced by
-this tool may be considered for promotion, after an ordinary public-tree
-review.
+`tools/assemble_frontend_phase.py` validates the fixed-width
+`OMEGAFRPHASE0002` research envelope. The envelope and its normalized detailed
+trace are private intermediates. They belong only at explicitly selected,
+ignored destinations. They are not evidence-ledger artifacts and must not be
+committed after an owner-data run.
 
-## Purpose
+The separate public report contains only fixed completeness/policy categories
+and bounded aggregate record counts. It contains no invocation forest, site,
+event, submission, membership, frame sequence, capture-domain value, digest,
+path, address, symbol, name, asset identity, or payload byte.
 
-`omega-frontend-trace-v1` (`docs/05-Frontend-Trace-Contract.md`) aggregates
-same-frame observation sites and loses chronological lane, text, and tick
-order. `scene-fragment-v1` (`SCENE-FRAGMENT.md`, this directory) preserves
-final anonymous GS draw order and record-to-draw membership edges, but has no
-join to any front-end call/interval structure. Neither existing contract can
-answer "which named front-end phase (a widget, visual, text, or action
-lifecycle interval) was open when the vertices behind finalized draw N were
-submitted?" `OMEGAFRPHASE0001` is a narrow, phase-only fragment that answers
-only that question, so the two existing contracts remain byte-identical and
-unaffected.
+This machinery never establishes ownership, visibility, occlusion, glyph or
+asset identity, pixel contribution, causality, retail semantics, or an
+ordering rule. A complete private trace is only eligible for comparison with
+independent static call-flow evidence. Observation never auto-promotes into
+canonical semantics.
 
-This fragment never proves ownership, visibility, occlusion, glyph identity,
-asset identity, pixel contribution, or causality. An edge from an interval to
-a draw means only that at least one primitive in that finalized draw used a
-vertex accepted from a packet produced while that interval was open. Turning a
-repeat-stable set of these edges into a canonical submission/lifecycle
-ordering rule additionally requires independent static call-flow evidence in
-agreement; observations from this fragment never auto-promote into canonical
-semantics on their own. This document defines only the wire contract and its
-bounded validator.
+## Private inputs and joins
 
-## Input envelope
+The tool consumes three kinds of private input:
 
-The observer emits a little-endian, fixed-width `OMEGAFRPHASE0001` envelope.
-Version 1 begins with the 16-byte magic, a `u32` version, a 32-byte nonzero
-runtime-configuration SHA-256 (the same repeatability-gate role as
-`scene-fragment-v1`'s digest), and four `u32` table counts. The tables follow
-in this exact order:
+1. one reference phase fragment and optionally up to seven distinct stored
+   copies used only for byte-for-byte repeat comparison;
+2. a separately selected private site-map binding; and
+3. a separately selected private capture-domain manifest.
 
-| Table | Row width | Maximum rows | Retained meaning |
-|---|---:|---:|---|
-| invocations | 20 | 4,096 | Dense ID, frame, parent invocation, enter/exit event references |
-| events | 17 | 8,192 | Dense ID, frame, owning invocation, Enter/Exit kind, reserved |
-| draws | 13 | 32,768 | Dense final-draw ID, frame, submitted/skipped, reserved |
-| phase/draw edges | 8 | 131,072 | Enter-event reference, final-draw reference |
-
-The parser caps the whole fragment at 4 MiB, calculates the sole possible
-length from the table counts before allocating row state, rejects trailing
-data, and validates dense IDs, cross-table references, monotonic frame and
-draw order, and reserved-must-be-zero padding. `draws` reuses
-`scene-fragment-v1`'s own per-capture draw and edge capacity (32,768 /
-131,072) because both fragments describe the same underlying producer-side
-dense final-draw-finalization ordinal domain (`GSState::FlushPrim`,
-`OmegaSceneTrace::OnGsDraw`, and `OmegaSceneTraceModel::Model::FinalizeGsDraw`
-in the pre-audited native observer seams); this is a shared-domain
-convenience, not a claim that the two fragments share a capture or a file.
-
-### Invocation rows
-
-`{id, frame, parent_invocation, enter_event, exit_event}`, all `u32`.
-
-- `id` is dense and one-based (row position plus one).
-- `frame` is the capture-relative frame the invocation entered on, 1 through
-  600, non-decreasing across the table.
-- `parent_invocation` is `0` for a root invocation, or a dense ID strictly
-  less than `id` — a forest, never a cycle or a forward reference.
-- `enter_event` and `exit_event` are both required dense event IDs with
-  `enter_event < exit_event`. A deferred cross-table pass (below) requires the
-  referenced events to name this same invocation with the matching Enter/Exit
-  kind, and requires this row's `frame` to equal its enter event's `frame`.
-
-### Event rows
-
-`{id, frame, invocation, closed_kind, reserved}` — four `u32` fields with one
-`u8 closed_kind` ahead of the trailing `u32 reserved`.
-
-- `id` is dense and one-based; because events are this fragment's only
-  cross-referenced monotonic sequence, this dense ID also serves as that
-  monotonic sequence number.
-- `frame` is bounded as above and non-decreasing across the table.
-- `invocation` is a dense one-based reference into the invocation table.
-- `closed_kind` is exactly `0` (Enter) or `1` (Exit).
-- `reserved` must be exactly `0`. It carries no meaning in version 1 and
-  exists only so a future version can widen this row without changing its
-  width; a nonzero value is rejected rather than silently ignored.
-
-Because invocation and event rows reference each other, the parser reads both
-tables fully before cross-checking them. That deferred pass requires every
-invocation's `enter_event`/`exit_event` to resolve to event rows naming that
-invocation with the matching kind, and requires every invocation's `frame` to
-equal its enter event's `frame`. Given the exact event-count-is-twice-
-invocation-count precondition above, this per-invocation check alone already
-forces a bijection between invocations and the events they claim: no fixed
-event row can validly name two different invocations, and the count leaves no
-room for a spare row, so every event is automatically exactly one invocation's
-`enter_event` or `exit_event` with no orphan and no double claim. This is a
-consequence of the two checks above, not a separately tracked totality pass.
-
-### Draw rows
-
-`{dense_final_draw_id, frame, submitted_or_skipped, reserved}`.
-
-- `dense_final_draw_id` is dense and one-based, in the same producer-side
-  finalization-ordinal domain described above and in `SCENE-FRAGMENT.md`.
-- `frame` is bounded and non-decreasing as above.
-- `submitted_or_skipped` is exactly `0` (submitted) or `1` (skipped — for
-  example a forced renderer-neutral flush placeholder). It is completeness
-  bookkeeping only and asserts no visibility or pixel contribution.
-- `reserved` must be exactly `0`, for the same forward-compatibility reason as
-  the event table.
-
-### Phase/draw edge rows
-
-`{event, draw}`, both `u32` dense references.
-
-- `event` must reference an Enter-kind event row. Attribution is fixed at
-  packet-submission time, when only the interval's Enter boundary is already
-  known; the fragment never labels a packet with the interval active at the
-  later draw-finalization time, so an edge can never reference an Exit event.
-- `draw` is a dense reference into the draw table.
-- Rows are producer-ordered: `draw` is non-decreasing across the table, and
-  each `(event, draw)` pair is unique. At least one edge row must be present;
-  a fragment with none establishes no attribution and is rejected as vacuous.
-
-## Anonymous attribution boundary
-
-The fragment carries no invocation name, source location, symbol, address, or
-string of any kind. A consumer can recover only: (1) the anonymous invocation
-forest shape, from `parent_invocation` links; and (2) which anonymous
-invocation ordinal was open, if any, when a given finalized draw's
-contributing vertices were produced, from the sanitized edge list. It does not
-recover which draws contributed to which glyph, action, or widget, and it does
-not recover an ordering relationship between two invocations that never share
-an edge to a common draw.
-
-When more than one fragment is supplied, every input must be byte-identical,
-exactly as in `scene-fragment-v1`: a repeatability gate, not a multi-capture
-merge rule. Version 1 has no public cross-fragment identity with which to
-concatenate independent captures safely.
-
-## Sanitized observation v1
-
-Output is canonical ASCII JSON followed by one LF. Its sole shape is
-explicitly non-semantic:
+The site-map binding has the exact private JSON shape:
 
 ```json
-{"schema":"openomega-sanitized-frontend-phase-observation-v1","invocation_parents":[0,1],"draw_count":2,"skipped_draw_count":0,"phase_draw_edges":[[1,1],[2,1],[2,2]]}
+{"schema":"openomega-private-frontend-site-map-binding-v1","runtime_config_digest":"<64 lower-hex>","site_map_digest":"<64 lower-hex>","site_count":2}
 ```
 
-- `invocation_parents` is the complete dense array of `parent_invocation`
-  values (`0` for a root), in dense-ID order.
-- `draw_count` and `skipped_draw_count` are the total and skipped-only draw
-  row counts.
-- `phase_draw_edges` lists `[invocation_ordinal, draw_ordinal]` pairs, sorted
-  by draw then invocation, with the raw `event` ID replaced by its owning
-  invocation's ordinal — narrowing the wire fragment's event-level detail down
-  to the only unit this contract calls meaningful.
+The binding contains only the consistency values and neutral dense site count
+needed by this validator. A producer's actual static locator-to-ordinal map is
+owner-private and outside this format. The fragment's runtime-configuration
+and site-map values must match the selected binding exactly. These digests are
+consistency/deduplication aids only; they are not authentication, an
+immutability proof, or evidence of semantic identity.
 
-The sample values above illustrate shape only. The document contains no
-runtime-configuration digest, fragment digest, raw event ordinal, frame
-number, draw disposition, source identity, memory or instruction provenance,
-address, packet, register, raw payload, file path, executable identifier, or
-retail identifier.
+The capture-domain manifest has the exact private JSON shape:
 
-## Deferred
+```json
+{"schema":"openomega-private-capture-domain-manifest-v1","phase_capture_domain":"<64 lower-hex>","scene_capture_domain":"<64 lower-hex>","frontend_capture_domain":"<64 lower-hex>"}
+```
 
-No C++ mirror test (compare `native/tests/scene_fragment_wire_contract_tests.cpp`)
-exists yet for this contract; that requires a build-capable session and is not
-claimed here. Until it exists, "mechanical mirroring" is one-sided: only the
-Python parser, its generated fixture, and its own unit tests are verified this
-session. No PCSX2-side producer for this format exists in any lane's tree yet,
-and this document does not claim otherwise.
+All three values must equal each other and the phase fragment's private
+capture-domain value. Similar dense final-draw ordinals never authorize a
+cross-artifact join. The future phase, scene, and front-end producers must
+copy one capture-domain value from the same committed capture transaction.
+The current scene/front-end contracts and producer branches do not yet carry
+that field, so a real three-artifact join remains blocked.
+
+## Version 2 envelope
+
+All integers are little-endian. The header is:
+
+| Field | Width |
+| --- | ---: |
+| magic `OMEGAFRPHASE0002` | 16 |
+| version `2` | 4 |
+| private capture-domain consistency value | 32 |
+| runtime-configuration consistency digest | 32 |
+| private site-map consistency digest | 32 |
+| retained frame count | 4 |
+| terminal status | 4 |
+| commit state | 4 |
+| seven failure-accounting counters | 28 |
+| six discovered table counts | 24 |
+| six retained/table counts | 24 |
+
+The six tables follow in this order:
+
+| Table | Row | Width | Hard maximum |
+| --- | --- | ---: | ---: |
+| sites | `{ordinal}` | 4 | 4,096 |
+| invocations | `{ordinal, site, lane, parent, enter_event, exit_event}` | 24 | 4,096 |
+| events | `{ordinal, sequence, frame, invocation, kind:u8, reserved}` | 21 | 8,192 |
+| submissions | `{ordinal, sequence, frame, invocation, primitive_begin, primitive_count}` | 24 | 131,072 |
+| draws | `{ordinal, sequence, frame, disposition:u8, reserved}` | 17 | 32,768 |
+| memberships | `{submission, draw}` | 8 | 131,072 |
+
+The header's retained counts are the physical row counts and determine the
+only accepted byte length. Trailing bytes are rejected. Every identifier is a
+dense one-based ordinal. The tracked fixture contains neutral ordinals and
+project-generated consistency values only; it contains no source address,
+symbol, name, locator, or retail identity.
+
+### Site and invocation rows
+
+`invocation.site` is a required reference to the bounded anonymous site table.
+Unknown sites stay anonymous and unknown. Version 2 admits exactly one lane,
+encoded as `lane = 0`; any other value is rejected. A root has `parent = 0`.
+A child must name the invocation at the top of the one admitted lifecycle
+stack and its parent must be an earlier dense ordinal.
+
+Each invocation names exactly one Enter and one Exit event. The event count
+must equal twice the invocation count. Cross-checking rejects orphan events,
+double claims, missing lifecycle boundaries, crossings, and a nonempty stack
+at termination. Parent/child intervals must satisfy:
+
+```text
+parent.enter < child.enter < child.exit < parent.exit
+```
+
+### Global chronology
+
+Events, submissions, and finalized draws each carry a monotonic sequence in
+one shared producer domain. The union must be exactly dense from one through
+the number of retained temporal rows. A duplicate or gap is rejected.
+Chronology is retained only in the private trace.
+
+Event frames, submission frames, and draw frames must fall within the retained
+frame count. An attributed submission must occur strictly between its named
+invocation's Enter and Exit sequence and within that interval's frame range.
+The producer records the immutable invocation context at submission time; a
+consumer must never infer it from mutable "current phase" state at later draw
+finalization.
+
+Submission primitive ranges begin at zero and are exactly contiguous in
+submission order. They preserve within-draw producer chronology without
+sorting invocation ordinals or using traversal order.
+
+### Draw disposition and membership
+
+Each submission appears in exactly one membership row. Memberships are
+strictly ordered by `(draw, submission)`. A submitted draw has at least one
+membership. A skipped draw has none. Every member submission precedes its
+final draw in the global sequence, and the draw frame cannot precede either
+the submission frame or invocation entry frame.
+
+The private model retains every submitted/skipped disposition and membership.
+The public reducer emits only total submitted, skipped, and membership record
+counts.
+
+### Terminal state and reconciliation
+
+Terminal status is exactly one of:
+
+- `Complete`
+- `TelemetryOverflow`
+- `TelemetryDropped`
+- `VmReset`
+- `SavestateDiscontinuity`
+- `QueueExhausted`
+- `ProducerAborted`
+- `OutputFailure`
+- `InternalFailure`
+
+Commit state is exactly `Committed` or `Aborted`. `Complete` requires
+`Committed`, zero failure counters, and exact equality between all discovered
+and retained table counts. Every incomplete category requires `Aborted`.
+Nonzero failure counters use the fixed precedence shown above; the terminal
+status must match the first nonzero counter. `ProducerAborted` has no failure
+counter. Discovered counts may never be less than retained counts.
+
+An incomplete fragment may still be structurally inspected and written to an
+explicit private sink, but `ordering_evidence_valid` is false and its public
+policy is `IncompleteCapture`. It cannot support an ordering conclusion.
+Complete captures with no submission records have public policy
+`NoOrderingEvidence`. Complete captures with submissions have policy
+`PrivateReviewRequired`, which still requires independent static evidence.
+
+## Output separation
+
+### Explicit private trace
+
+`--private-output FILE` is the only CLI route that writes
+`openomega-private-frontend-phase-trace-v2`. It retains:
+
+- private capture/configuration/site-map consistency values;
+- frame count and terminal commit/abort reconciliation;
+- anonymous site and invocation ordinals;
+- exact lifecycle, submission, and final-draw chronology;
+- submission primitive ranges;
+- draw dispositions; and
+- submission-to-draw memberships.
+
+The option must point to an ignored private destination. It is absent by
+default. If the resolved destination is inside this repository, the CLI
+accepts it only under `/private/`, `/runtime/`, or `/analysis/output/`, which
+are explicit repository ignore roots; a destination outside the repository is
+accepted as the caller-selected private sink. Private output is ASCII JSON
+with one LF and is capped during streaming encoding before write.
+If the destination resolves inside this repository, it must fall under
+`private/`, `runtime/`, or `analysis/output/`; any other in-repository path is
+refused before any input is read or any file is written. A destination that
+resolves outside this repository is accepted unconditionally, since this
+module has no tracked tree to check it against there.
+
+### Default public report
+
+`openomega-public-frontend-phase-report-v1` contains exactly:
+
+- a fixed terminal-status category;
+- `Complete` or `Incomplete`;
+- `PrivateReviewRequired`, `NoOrderingEvidence`, or `IncompleteCapture`; and
+- eight fixed aggregate count rows.
+
+It contains no private relation or identity and is byte-deterministic for the
+same validated model. A public report is not automatically suitable for the
+evidence ledger; it still requires ordinary public-tree review and cannot
+upgrade hypotheses.
+
+## Limits and I/O behavior
+
+Every capacity can be tightened through `PhaseLimits`; CLI callers may repeat
+`--limit NAME=VALUE`. No value may exceed its immutable hard ceiling:
+
+| Capacity | Hard ceiling |
+| --- | ---: |
+| one fragment | 4 MiB |
+| all fragment copies | 32 MiB |
+| fragment copies | 8 |
+| one private manifest | 64 KiB |
+| one manifest string | 256 bytes |
+| frames | 600 |
+| sites | 4,096 |
+| lifecycle nesting | 256 |
+| invocations | 4,096 |
+| events | 8,192 |
+| submissions | 131,072 |
+| draws | 32,768 |
+| memberships | 131,072 |
+| failure accounting | 131,072 |
+| logical lookup work | 1,048,576 |
+| logical parser scratch | 16 MiB |
+| private output | 16 MiB |
+| public aggregate rows | 8 |
+| public output | 4 KiB |
+
+The parser checks calculated wire size, logical scratch, and logical lookup
+work before table allocation. A path-based run snapshots the reference bytes,
+checks file identity/size/timestamp before and after the bounded read, verifies
+the caller-supplied SHA-256 over exactly the captured bytes, and parses only
+that immutable snapshot. Each repeat must be a different stored file and is
+stream-compared against the reference without being parsed or retained.
+In-memory repeat verification similarly rejects two references to the same
+byte object.
+
+SHA-256 here is only a caller-selected consistency guard. Because parsing
+starts only after the exact snapshot digest is verified, bytes cannot be
+consumed by the parser before that check. Manifest reads are also converted to
+one immutable bounded snapshot before parsing.
+
+Outputs use exclusive create and exact write accounting. Existing files are
+never overwritten. A short or failed output is left in place; the tool never
+unlinks by pathname after a failure. Ordinary stdout/stderr diagnostics are
+fixed and contain no path or exception text. An explicitly incomplete capture
+writes its requested reports, returns exit status 2, and cannot be mistaken
+for valid ordering evidence.
 
 ## Usage
 
 ```text
 python -I -E -s -S -B tools/assemble_frontend_phase.py \
-  --expected-sha256 <64-hex-digest> \
-  --output <new-phase-observation.json> \
-  <fragment> [<repeat-fragment> ...]
+  --site-map-binding <ignored-private-binding.json> \
+  --capture-manifest <ignored-private-capture-manifest.json> \
+  --expected-sha256 <64-hex-consistency-value> \
+  --public-output <new-public-report.json> \
+  [--private-output <new-ignored-private-trace.json>] \
+  [--limit NAME=VALUE ...] \
+  <fragment> [<distinct-repeat-copy> ...]
 ```
 
-Isolated Python startup is required so user-site, `sitecustomize`, and
-`PYTHONPATH` code cannot run before private inputs are handled. The output
-path is opened exclusively and is never overwritten. A failed or short write
-is left in place rather than unlinked by a racy pathname; retry with a fresh
-path after inspecting or explicitly removing that file. Success and failure
-diagnostics are fixed strings so private paths or parser details cannot be
-echoed into logs.
+Isolated Python startup prevents user-site, `sitecustomize`, and `PYTHONPATH`
+code from running before private inputs are handled.
+
+## Mandatory next blocker
+
+The generated Python builder, parser, and checked-in fixture are not
+independent producer evidence. Before any owner capture:
+
+1. a C++ producer-wire mirror test must independently emit the exact fixture
+   bytes and exercise every field/ceiling;
+2. the PCSX2 producer must preserve immutable submission-time context and
+   terminal reconciliation;
+3. the scene and front-end artifacts must gain the shared capture-domain
+   field and the private combined validator must be exercised across all
+   three artifacts; and
+4. the resulting private trace must agree with independent static call-flow
+   evidence before any narrow ordering policy is proposed.
+
+No producer, owner capture, named phase, grounded layer/text/animation order,
+retail menu, frame parity, or PCSX2 equivalence is claimed here.
