@@ -1,7 +1,9 @@
 #include "omega/retail/skl_container_descriptor.h"
 
 #include <limits>
+#include <new>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -321,11 +323,25 @@ asset::DecodeResult<SklContainerDescriptor> InspectSklContainer(
                                       : ObservedExtentRelation::Exact,
         },
     };
-    descriptor.records.reserve(static_cast<std::size_t>(summary->record_count));
-    auto construction = ScanRecords(bytes, logical_end,
-        [&descriptor](const SklRecordDescriptor& record) { descriptor.records.push_back(record); });
-    if (!construction)
-        return std::unexpected(construction.error());
+    // Reserve/push_back can throw under memory pressure even though `summary->record_count`
+    // is already bounded by kMaximumRecordCount; contain that here rather than let it escape
+    // this DecodeResult-typed boundary as a raw exception.
+    try
+    {
+        descriptor.records.reserve(static_cast<std::size_t>(summary->record_count));
+        auto construction = ScanRecords(bytes, logical_end,
+            [&descriptor](const SklRecordDescriptor& record) { descriptor.records.push_back(record); });
+        if (!construction)
+            return std::unexpected(construction.error());
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded, "SKL allocation"));
+    }
+    catch (const std::length_error&)
+    {
+        return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded, "SKL length"));
+    }
 
     return descriptor;
 }
