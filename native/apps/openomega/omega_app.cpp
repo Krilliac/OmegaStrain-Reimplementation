@@ -17,6 +17,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -1888,6 +1889,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
     using Clock = std::chrono::steady_clock;
 
     log_->Info("runtime", "entering native host loop");
+    LoadRetailFrontEndBundleIfEnabled();
     RunResult result;
     bool running = true;
     auto previous_frame = Clock::now();
@@ -2938,11 +2940,66 @@ OmegaApp::AuthorizeCurrentFrontEndPresentation() const noexcept
             presentation_mode_, front_end_presentation_.provenance);
     }
 
-    // The retail FNT/GUI/IE and display-conversion decoders are intentionally
-    // not guessed here. Their future owned presentation must carry the
-    // GameDataService-minted retail capability through this exact seam.
+    // Retail presentation is authorized only through a GameDataService-minted
+    // capability carried by the owned Title screen bundle. That bundle is loaded
+    // once, on first host-loop entry, and only under the experimental guard (see
+    // LoadRetailFrontEndBundleIfEnabled and docs/08). Until the retail compositor
+    // (Gap B) can render it, default launches leave the bundle empty and this
+    // gate stays fail-closed rather than authorizing an unrenderable screen.
+    if (retail_front_end_bundle_)
+    {
+        return runtime::AuthorizeFrontEndPresentation(
+            presentation_mode_, retail_front_end_bundle_->presentation_capability());
+    }
     return runtime::AuthorizeFrontEndPresentation(
         presentation_mode_, std::nullopt);
+}
+
+void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
+{
+    if (retail_front_end_bundle_attempted_)
+        return;
+    retail_front_end_bundle_attempted_ = true;
+
+    if (presentation_mode_ != runtime::FrontEndPresentationMode::RetailRequired)
+        return;
+
+    // Experimental opt-in. The retail compositor (Gap B) does not yet turn a
+    // bundle into per-mode textures and draw lists, so authorizing the gate by
+    // default would present an empty screen. Keep this behind an env guard until
+    // that lands; see docs/08-Retail-Front-End-Presentation-Scope.md.
+    if (std::getenv("OPENOMEGA_ENABLE_RETAIL_FRONT_END") == nullptr)
+        return;
+
+    if (!content_ || !content_->game_data.has_value())
+    {
+        log_->Warning("presentation",
+            "retail front-end bundle requested but the game data service is unavailable");
+        return;
+    }
+
+    // LoadFrontEndScreen reports domain failures through its expected error
+    // channel, but is not declared noexcept; contain any allocation/decoder
+    // exception here so this loader keeps its noexcept contract and stays
+    // fail-closed (empty bundle, unavailable gate) rather than terminating.
+    try
+    {
+        auto bundle = content_->game_data->LoadFrontEndScreen(
+            content::FrontEndScreenKey::Title);
+        if (!bundle)
+        {
+            // The decoder path already emits a specific stderr diagnostic; keep
+            // the seam's own message host-path free and non-fabricated.
+            log_->Error("presentation", "retail front-end Title bundle load failed");
+            return;
+        }
+        retail_front_end_bundle_ = std::move(*bundle);
+        log_->Info("presentation", "retail front-end Title bundle loaded (experimental)");
+    }
+    catch (...)
+    {
+        log_->Error("presentation", "retail front-end Title bundle load raised an exception");
+    }
 }
 
 std::expected<void, std::string> OmegaApp::DeployDiagnosticMission()

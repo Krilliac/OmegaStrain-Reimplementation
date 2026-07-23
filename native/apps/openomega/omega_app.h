@@ -11,6 +11,7 @@
 #include "sdl_input_service.h"
 #include "sdl_platform_service.h"
 
+#include "omega/content/front_end_screen_bundle.h"
 #include "omega/gameplay/diagnostic_mission_lifecycle.h"
 #include "omega/gameplay/diagnostic_proximity_trigger.h"
 #include "omega/gameplay/diagnostic_target_fire.h"
@@ -179,6 +180,15 @@ private:
     [[nodiscard]] std::expected<void,
         runtime::FrontEndPresentationGateError>
     AuthorizeCurrentFrontEndPresentation() const noexcept;
+    // [game/main thread; no concurrent use] Gap A of the retail front-end
+    // wiring (docs/08). One-time, on first host-loop entry: in RetailRequired
+    // mode, when the OPENOMEGA_ENABLE_RETAIL_FRONT_END guard is set, loads the
+    // GameDataService-minted Title screen bundle so the gate can authorize on
+    // its retail capability. Guarded off by default because the retail
+    // compositor (Gap B) does not yet render the bundle; until then default
+    // launches stay fail-closed. Never throws: a failure just leaves the bundle
+    // empty and the gate unavailable.
+    void LoadRetailFrontEndBundleIfEnabled() noexcept;
     // [game/main/render thread; no concurrent use] Atomically rebuilds fixed CPU
     // texture fallback/overlay commands and, when a scene is resident, the
     // environment-plus-actor mesh commands for the final post-step position.
@@ -360,6 +370,13 @@ private:
     // project-authored presentation owned below.
     runtime::FrontEndPresentationMode presentation_mode_ =
         runtime::FrontEndPresentationMode::RetailRequired;
+    // Experimental retail front-end presentation source (Gap A, docs/08).
+    // Populated at most once by LoadRetailFrontEndBundleIfEnabled(); empty on
+    // default launches so the retail gate stays fail-closed until the compositor
+    // (Gap B) can render it. std::optional default-constructs to empty, so no
+    // constructor/move changes are required (the move constructor is defaulted).
+    std::optional<content::FrontEndScreenBundle> retail_front_end_bundle_;
+    bool retail_front_end_bundle_attempted_ = false;
     FrontEndStartupModel front_end_startup_model_{};
     FrontEndCharacterStartupModel front_end_character_startup_model_{};
     std::optional<CharacterPresentation> character_presentation_;
