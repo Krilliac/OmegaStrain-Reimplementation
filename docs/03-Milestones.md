@@ -317,6 +317,16 @@ cover exact and mixed-case lookup, missing member, absent and malformed optional
 and malformed owned-source failure opening Profiles without profile mutation or movie resources.
 No automatic member, discovery, enumeration, or fallback is implemented; that decision remains
 blocked on private owner-side observation. Private inputs are not committed, logged, or named.
+E-0126 adds a renderer-neutral `RootVisualOwnGeometryOnly` adapter for the validated Title,
+CreateAgent, and LoadAgent bundles. It renders only the parentless root visual's own static
+triangles through the established transform, projection, scoped texture, sampler, and CPU-raster
+boundaries. It rejects root text, actions, animation, triangle overlap, incomplete canonical
+coverage, and transparent output; descendants are deliberately omitted and the result cannot
+authorize retail presentation. A private categorical smoke rejected all three configured routes as
+`IncompleteCoverage`, confirming only that the root visual alone is insufficient. Which additional
+layers or composition inputs are required, and how any such layers are ordered, remain unproven. No
+frame or proprietary identity was retained. This advances bounded composition plumbing but does not
+complete the retail menu, Title flow, character creation, or M2 visual parity.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-

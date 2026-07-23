@@ -437,6 +437,27 @@ identity hierarchy transforms and canonical full-frame coverage, and publishes n
 failure. This narrow correction establishes no general hierarchy traversal, IE-versus-GUI lane
 order, complete Title compositor, owner-corpus rendered result, PCSX2 equivalence, or visual parity.
 
+E-0126 adds a sibling root-visual reconnaissance adapter without widening the retail-presentation
+capability. `ComposeRetailRootVisualLayer` synchronously borrows a validated Title, CreateAgent, or
+LoadAgent `FrontEndScreenBundle`, resolves only the visible parentless Container root's binding, and
+renders only that visual resource's own static triangles. The adapter composes the established
+binding and visual transforms, applies E-0125 projection, resolves an optional texture only in the
+visual's exact owning scope, and delegates ordered pixels to the established sampler and E-0123 CPU
+raster. It explicitly omits widget descendants and visual descendants and rejects root text,
+actions, and animation. Because no triangle order is inferred, a separate exact screen-space
+preflight rejects any covered-pixel overlap, requires every canonical pixel to be covered once, and
+requires the final owned frame to be fully opaque. Caller-tightenable geometry, covered-sample,
+intermediate, raster-scratch, and output limits remain beneath fixed hard ceilings; all failures are
+typed and identity-free, no input view escapes, and success is tagged
+`RootVisualOwnGeometryOnly`, which cannot authorize retail presentation.
+
+A separate private owner-data smoke returned the categorical `IncompleteCoverage` outcome for all
+three configured screen routes and emitted no frame, payload, path, member identity, or private
+value. That negative result confirms the root alone is insufficient. It does not justify a guessed
+source-order or depth-first traversal. Widget/visual descendant order, text interleave, action
+lifecycle, live-to-authored animation timing, and full retail-menu presentation remain blocked on
+independent evidence.
+
 The Windows prelaunch process is deliberately outside the game composition graph.
 `openomega_launcher.exe` owns only owner-data selection, validation, the default-off gamepad
 preference, and starting its adjacent `openomega.exe`. It does not link profiles, gameplay,

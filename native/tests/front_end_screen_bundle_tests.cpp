@@ -1,4 +1,5 @@
 #include "omega/content/game_data_service.h"
+#include "omega/frontend_presentation/retail_root_visual_layer.h"
 
 #include <array>
 #include <bit>
@@ -36,6 +37,61 @@ void Check(const bool condition, const std::string_view message)
         std::cerr << "FAILED: " << message << '\n';
         ++failures;
     }
+}
+
+[[nodiscard]] constexpr std::string_view RootLayerErrorToken(
+    const omega::frontend::presentation::RetailRootVisualLayerError error) noexcept
+{
+    using Error =
+        omega::frontend::presentation::RetailRootVisualLayerError;
+    switch (error)
+    {
+    case Error::InvalidRetailCapability:
+        return "invalid-retail-capability";
+    case Error::InvalidLimits:
+        return "invalid-limits";
+    case Error::LimitExceeded:
+        return "limit-exceeded";
+    case Error::UnsupportedRootWidget:
+        return "unsupported-root-widget";
+    case Error::UnsupportedRootText:
+        return "unsupported-root-text";
+    case Error::UnsupportedRootAction:
+        return "unsupported-root-action";
+    case Error::MissingRootVisualBinding:
+        return "missing-root-visual-binding";
+    case Error::UnsupportedRootVisualHierarchy:
+        return "unsupported-root-visual-hierarchy";
+    case Error::UnsupportedRootAnimation:
+        return "unsupported-root-animation";
+    case Error::MissingTextureBinding:
+        return "missing-texture-binding";
+    case Error::InvalidGeometry:
+        return "invalid-geometry";
+    case Error::NonFiniteInput:
+        return "non-finite-input";
+    case Error::TransformFailure:
+        return "transform-failure";
+    case Error::ProjectionFailure:
+        return "projection-failure";
+    case Error::DegenerateGeometry:
+        return "degenerate-geometry";
+    case Error::OverlappingCoverage:
+        return "overlapping-coverage";
+    case Error::IncompleteCoverage:
+        return "incomplete-coverage";
+    case Error::TextureSamplingFailure:
+        return "texture-sampling-failure";
+    case Error::RasterizationFailure:
+        return "rasterization-failure";
+    case Error::TransparentOutput:
+        return "transparent-output";
+    case Error::ArithmeticFailure:
+        return "arithmetic-failure";
+    case Error::AllocationFailure:
+        return "allocation-failure";
+    }
+    return "internal-unknown-error-category";
 }
 
 [[nodiscard]] std::optional<std::filesystem::path> PrivateRetailDataPath()
@@ -1214,6 +1270,22 @@ int main()
                 Check(default_font != nullptr &&
                           loaded->ResolveFontAtlas(*default_font) != nullptr,
                     "the owner-supplied default font resolves its metadata-bearing atlas");
+                const auto first_root_layer =
+                    omega::frontend::presentation::ComposeRetailRootVisualLayer(
+                        *loaded);
+                const auto repeated_root_layer =
+                    omega::frontend::presentation::ComposeRetailRootVisualLayer(
+                        *loaded);
+                Check(first_root_layer == repeated_root_layer,
+                    "the optional owner-supplied root-layer observation is deterministic");
+                if (!first_root_layer)
+                {
+                    std::cerr << "PRIVATE_ROOT_LAYER_V1: route="
+                              << static_cast<unsigned>(screen.key)
+                              << ", outcome="
+                              << RootLayerErrorToken(first_root_layer.error())
+                              << '\n';
+                }
                 if (screen.key == FrontEndScreenKey::LoadAgent)
                 {
                     Check(default_font != nullptr &&
