@@ -4,6 +4,7 @@
 #include <cmath>
 #include <concepts>
 #include <cstddef>
+#include <iterator>
 #include <new>
 #include <utility>
 #include <variant>
@@ -144,22 +145,59 @@ ValidateResource(const asset::FrontendVisualNodeIR &resource,
   return layout;
 }
 
+template <typename Key> struct KeyInterval final {
+  const Key *lower = nullptr;
+  const Key *upper = nullptr;
+  double factor = 0.0;
+};
+
 template <typename Key>
-[[nodiscard]] std::expected<const Key *, RetailFrontendTimelineError>
-FindExactKey(const std::vector<Key> &keys, const float tick) noexcept {
-  if (tick < keys.front().timeline_tick || tick > keys.back().timeline_tick) {
-    return std::unexpected(RetailFrontendTimelineError::TickOutsideTrackRange);
-  }
-  const auto found =
+[[nodiscard]] KeyInterval<Key>
+FindKeyInterval(const std::vector<Key> &keys, const float tick) noexcept {
+  if (tick <= keys.front().timeline_tick)
+    return {.lower = &keys.front(), .upper = &keys.front()};
+  if (tick >= keys.back().timeline_tick)
+    return {.lower = &keys.back(), .upper = &keys.back()};
+
+  const auto upper =
       std::lower_bound(keys.begin(), keys.end(), tick,
                        [](const Key &key, const float requested_tick) {
                          return key.timeline_tick < requested_tick;
                        });
-  if (found == keys.end() || found->timeline_tick != tick) {
-    return std::unexpected(
-        RetailFrontendTimelineError::UnsupportedInterpolation);
-  }
-  return &*found;
+  if (upper->timeline_tick == tick)
+    return {.lower = &*upper, .upper = &*upper};
+  const auto lower = std::prev(upper);
+  const double lower_tick = static_cast<double>(lower->timeline_tick);
+  const double upper_tick = static_cast<double>(upper->timeline_tick);
+  return {
+      .lower = &*lower,
+      .upper = &*upper,
+      .factor = (static_cast<double>(tick) - lower_tick) /
+                (upper_tick - lower_tick),
+  };
+}
+
+[[nodiscard]] float InterpolateScalar(
+    const KeyInterval<asset::FrontendScalarAnimationKeyIR> interval) noexcept {
+  const double lower = static_cast<double>(interval.lower->value);
+  const double upper = static_cast<double>(interval.upper->value);
+  return static_cast<float>(lower + (upper - lower) * interval.factor);
+}
+
+[[nodiscard]] asset::Float3IR InterpolatePosition(
+    const KeyInterval<asset::FrontendVertexAnimationKeyIR> interval) noexcept {
+  const auto component = [factor = interval.factor](const float lower,
+                                                     const float upper) {
+    return static_cast<float>(static_cast<double>(lower) +
+                              (static_cast<double>(upper) -
+                               static_cast<double>(lower)) *
+                                  factor);
+  };
+  return {
+      .x = component(interval.lower->position.x, interval.upper->position.x),
+      .y = component(interval.lower->position.y, interval.upper->position.y),
+      .z = component(interval.lower->position.z, interval.upper->position.z),
+  };
 }
 
 [[nodiscard]] std::expected<bool, RetailTitleStateError>
@@ -240,11 +278,10 @@ RetailFrontendTimelineEvaluationResult EvaluateRetailFrontendTimeline(
             std::get_if<asset::FrontendVertexAnimationTrackIR>(&variant)) {
       for (std::size_t index = 0U; index < vertex->position_subtracks.size();
            ++index) {
-        const auto key = FindExactKey(vertex->position_subtracks[index].keys,
-                                      input.authored_timeline_tick);
-        if (!key)
-          return std::unexpected(key.error());
-        positions[index] = (*key)->position;
+        const auto interval =
+            FindKeyInterval(vertex->position_subtracks[index].keys,
+                            input.authored_timeline_tick);
+        positions[index] = InterpolatePosition(interval);
       }
       evaluation.vertex_track_resolved = true;
       evaluation.evaluated_position_count =
@@ -254,20 +291,20 @@ RetailFrontendTimelineEvaluationResult EvaluateRetailFrontendTimeline(
 
     const auto &scalar =
         std::get<asset::FrontendScalarAnimationTrackIR>(variant);
-    const auto key = FindExactKey(scalar.keys, input.authored_timeline_tick);
-    if (!key)
-      return std::unexpected(key.error());
+    const auto interval =
+        FindKeyInterval(scalar.keys, input.authored_timeline_tick);
+    const float value = InterpolateScalar(interval);
     switch (scalar.target) {
     case asset::FrontendScalarAnimationTarget::Opacity:
-      opacity = (*key)->value;
+      opacity = value;
       evaluation.opacity_track_resolved = true;
       break;
     case asset::FrontendScalarAnimationTarget::UvOffsetU:
-      uv_offset_u = (*key)->value;
+      uv_offset_u = value;
       evaluation.uv_offset_u_track_resolved = true;
       break;
     case asset::FrontendScalarAnimationTarget::UvOffsetV:
-      uv_offset_v = (*key)->value;
+      uv_offset_v = value;
       evaluation.uv_offset_v_track_resolved = true;
       break;
     default:

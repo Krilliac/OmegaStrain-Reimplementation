@@ -41,6 +41,8 @@ enum class RetailFrontendTimelineError : std::uint8_t {
   NonFiniteValue,
   NonMonotonicKeys,
   AmbiguousTrackTarget,
+  // Retained for source/ordinal compatibility with the earlier exact-key
+  // evaluator. The established clamped-linear path no longer emits these.
   TickOutsideTrackRange,
   UnsupportedInterpolation,
   NonMonotonicLiveTick,
@@ -141,10 +143,11 @@ CloneRetailFrontendVisualInstance(
     RetailFrontendTimelineLimits limits = {}) noexcept;
 
 // [any thread for distinct instances; externally synchronized per instance]
-// Evaluates only exact authored keys. A between-key tick is categorically
-// unsupported until interpolation is independently established. Evaluation is
-// transactional: every track resolves into temporary owned state before the
-// instance is changed, so an error can never publish a partial successor.
+// Evaluates the established retail timeline rule: clamp to the first/last key
+// outside the authored range and linearly interpolate adjacent keys inside it.
+// Vertex positions are interpolated componentwise. Evaluation is transactional:
+// every track resolves into temporary owned state before the instance is
+// changed, so an error can never publish a partial successor.
 [[nodiscard]] RetailFrontendTimelineEvaluationResult
 EvaluateRetailFrontendTimeline(
     RetailFrontendVisualInstanceState &instance,
