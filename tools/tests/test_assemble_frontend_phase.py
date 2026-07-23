@@ -34,7 +34,8 @@ SPEC.loader.exec_module(assembler)
 
 _CAPTURE_DOMAIN = bytes(range(1, 33))
 _RUNTIME_CONFIG = bytes(range(33, 65))
-_SITE_MAP_DIGEST = bytes(range(65, 97))
+_SYNTHETIC_SITE_MAP = b"OpenOmega synthetic anonymous site map v1\n1\n2\n"
+_SITE_MAP_DIGEST = hashlib.sha256(_SYNTHETIC_SITE_MAP).digest()
 
 
 class _Builder:
@@ -86,6 +87,7 @@ def build_valid_fragment(
     builder.blob(_CAPTURE_DOMAIN, "capture_domain")
     builder.blob(_RUNTIME_CONFIG, "runtime_config")
     builder.blob(_SITE_MAP_DIGEST, "site_map_digest")
+    builder.u32(3, "discovered_frame_count")
     builder.u32(3, "frame_count")
     builder.u32(status, "terminal.status")
     builder.u32(commit_state, "terminal.commit")
@@ -166,6 +168,29 @@ def build_valid_fragment(
     return bytes(builder.output), builder.offsets
 
 
+def build_empty_complete_fragment() -> bytes:
+    counts = (2, 0, 0, 0, 0, 0)
+    builder = _Builder()
+    builder.blob(assembler.FRAGMENT_MAGIC, "magic")
+    builder.u32(assembler.FRAGMENT_VERSION, "version")
+    builder.blob(_CAPTURE_DOMAIN, "capture_domain")
+    builder.blob(_RUNTIME_CONFIG, "runtime_config")
+    builder.blob(_SITE_MAP_DIGEST, "site_map_digest")
+    builder.u32(1, "discovered_frame_count")
+    builder.u32(1, "frame_count")
+    builder.u32(int(assembler.TerminalStatus.Complete), "terminal.status")
+    builder.u32(int(assembler.CommitState.Committed), "terminal.commit")
+    for index in range(7):
+        builder.u32(0, f"failure.{index}")
+    for index, value in enumerate(counts):
+        builder.u32(value, f"discovered.{index}")
+    for index, value in enumerate(counts):
+        builder.u32(value, f"count.{index}")
+    builder.u32(1, "site.0.id")
+    builder.u32(2, "site.1.id")
+    return bytes(builder.output)
+
+
 def clone_bytes(raw: bytes) -> bytes:
     result = bytes(bytearray(raw))
     assert result is not raw
@@ -241,11 +266,12 @@ def assembled_model(
     raw: bytes | None = None,
     *,
     limits: assembler.PhaseLimits = assembler.DEFAULT_LIMITS,
-) -> assembler.ParsedPhaseFragment:
+) -> assembler.VerifiedPhaseAssembly:
     if raw is None:
         raw, _ = build_valid_fragment()
     return assembler.assemble_phase_model(
         [raw],
+        site_map_bytes=_SYNTHETIC_SITE_MAP,
         site_map_binding=site_binding(),
         capture_manifest=capture_manifest(),
         expected_fragment_sha256=hashlib.sha256(raw).hexdigest(),
@@ -261,14 +287,16 @@ def run_main(args: list[str]) -> tuple[int, str, str]:
     return code, output.getvalue(), errors.getvalue()
 
 
-def write_cli_inputs(directory: Path, raw: bytes) -> tuple[Path, Path, Path]:
+def write_cli_inputs(directory: Path, raw: bytes) -> tuple[Path, Path, Path, Path]:
     fragment = directory / "input.part"
+    site_map = directory / "site-map.private"
     binding = directory / "site-binding.json"
     manifest = directory / "capture-manifest.json"
     fragment.write_bytes(raw)
+    site_map.write_bytes(_SYNTHETIC_SITE_MAP)
     binding.write_bytes(site_binding_bytes())
     manifest.write_bytes(capture_manifest_bytes())
-    return fragment, binding, manifest
+    return fragment, site_map, binding, manifest
 
 
 def cli_args(
@@ -277,8 +305,10 @@ def cli_args(
     *,
     private: bool = False,
 ) -> list[str]:
-    fragment, binding, manifest = write_cli_inputs(directory, raw)
+    fragment, site_map, binding, manifest = write_cli_inputs(directory, raw)
     args = [
+        "--site-map",
+        str(site_map),
         "--site-map-binding",
         str(binding),
         "--capture-manifest",
@@ -289,7 +319,9 @@ def cli_args(
         str(directory / "public.json"),
     ]
     if private:
-        args += ["--private-output", str(directory / "private.json")]
+        private_root = directory / "private"
+        private_root.mkdir(exist_ok=True)
+        args += ["--private-output", str(private_root / "private.json")]
     args.append(str(fragment))
     return args
 
@@ -309,7 +341,7 @@ class PhaseFragmentParserTests(unittest.TestCase):
 
     def test_valid_fragment_retains_private_chronology_and_dispositions(self) -> None:
         model = assembler.parse_phase_fragment(self.raw)
-        self.assertTrue(model.ordering_evidence_valid)
+        self.assertTrue(model.terminal_capture_complete)
         self.assertEqual(model.capture_domain, _CAPTURE_DOMAIN)
         self.assertEqual([row.site for row in model.invocations], [1, 2])
         self.assertEqual([row.sequence for row in model.events], [1, 2, 6, 9])
@@ -400,7 +432,15 @@ class PhaseFragmentParserTests(unittest.TestCase):
         self.assert_invalid(mutate_u32(self.raw, self.offsets["event.2.kind"], 0))
         self.assert_invalid(mutate_u32(self.raw, self.offsets["event.1.sequence"], 1))
 
+    def test_wrong_double_claimed_and_orphan_lifecycle_boundaries_fail_closed(self) -> None:
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.0.enter"], 2))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.1.enter"], 1))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.1.invocation"], 1))
+
     def test_submission_must_use_immutable_active_invocation_context(self) -> None:
+        self.assert_invalid(
+            mutate_u32(self.raw, self.offsets["submission.0.invocation"], 1)
+        )
         self.assert_invalid(
             mutate_u32(self.raw, self.offsets["submission.2.invocation"], 2)
         )
@@ -409,6 +449,26 @@ class PhaseFragmentParserTests(unittest.TestCase):
         )
         self.assert_invalid(
             mutate_u32(self.raw, self.offsets["submission.0.primitive_count"], 0)
+        )
+
+    def test_primitive_exclusive_end_accepts_two_to_32_and_rejects_overflow(self) -> None:
+        exact = mutate_many_u32(
+            self.raw,
+            (
+                (self.offsets["submission.0.primitive_count"], 0xFFFFFFFD),
+                (self.offsets["submission.1.primitive_begin"], 0xFFFFFFFD),
+                (self.offsets["submission.1.primitive_count"], 1),
+                (self.offsets["submission.2.primitive_begin"], 0xFFFFFFFE),
+                (self.offsets["submission.2.primitive_count"], 2),
+            ),
+        )
+        assembler.parse_phase_fragment(exact)
+        self.assert_invalid(
+            mutate_u32(
+                exact,
+                self.offsets["submission.2.primitive_count"],
+                3,
+            )
         )
 
     def test_draw_must_follow_every_attributed_submission(self) -> None:
@@ -436,6 +496,15 @@ class PhaseFragmentParserTests(unittest.TestCase):
         self.assert_invalid(mutate_u32(self.raw, self.offsets["draw.2.sequence"], 11))
         self.assert_invalid(mutate_u32(self.raw, self.offsets["draw.2.sequence"], 9))
 
+    def test_unified_frame_chronology_rejects_event_submission_and_draw_regression(self) -> None:
+        for field in (
+            "event.2.frame",
+            "submission.2.frame",
+            "draw.2.frame",
+        ):
+            with self.subTest(field=field):
+                self.assert_invalid(mutate_u32(self.raw, self.offsets[field], 1))
+
     def test_membership_is_total_unique_ordered_and_disposition_consistent(self) -> None:
         self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.2.submission"], 2))
         self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.1.submission"], 1))
@@ -454,6 +523,12 @@ class PhaseFragmentParserTests(unittest.TestCase):
         )
         self.assert_invalid(mutate_u32(self.raw, self.offsets["failure.0"], 1))
         self.assert_invalid(mutate_u32(self.raw, self.offsets["discovered.3"], 4))
+        self.assert_invalid(
+            mutate_u32(self.raw, self.offsets["discovered_frame_count"], 4)
+        )
+        self.assert_invalid(
+            mutate_u32(self.raw, self.offsets["discovered_frame_count"], 2)
+        )
         self.assert_invalid(mutate_u32(self.raw, self.offsets["frame_count"], 0))
 
     def test_every_incomplete_terminal_category_is_retained_and_invalidates_evidence(self) -> None:
@@ -475,12 +550,28 @@ class PhaseFragmentParserTests(unittest.TestCase):
             with self.subTest(status=status.name):
                 model = assembler.parse_phase_fragment(raw)
                 self.assertIs(model.terminal.status, status)
-                self.assertFalse(model.ordering_evidence_valid)
+                self.assertFalse(model.terminal_capture_complete)
 
         raw, _ = build_valid_fragment(status=int(assembler.TerminalStatus.ProducerAborted))
         model = assembler.parse_phase_fragment(raw)
         self.assertIs(model.terminal.status, assembler.TerminalStatus.ProducerAborted)
-        self.assertFalse(model.ordering_evidence_valid)
+        self.assertFalse(model.terminal_capture_complete)
+
+        dropped_raw, dropped_offsets = build_valid_fragment(
+            status=int(assembler.TerminalStatus.TelemetryDropped),
+            failure_counts=(0, 1, 0, 0, 0, 0, 0),
+            discovered_counts=(2, 2, 4, 4, 3, 3),
+        )
+        dropped_raw = mutate_u32(
+            dropped_raw,
+            dropped_offsets["discovered_frame_count"],
+            4,
+        )
+        dropped = assembler.parse_phase_fragment(dropped_raw)
+        self.assertEqual(dropped.terminal.discovered_frame_count, 4)
+        self.assertEqual(dropped.terminal.retained_frame_count, 3)
+        self.assertEqual(dropped.terminal.discovered_counts[3], 4)
+        self.assertEqual(dropped.terminal.retained_counts[3], 3)
 
     def test_terminal_precedence_and_commit_contradictions_fail_closed(self) -> None:
         raw, _ = build_valid_fragment(
@@ -552,6 +643,7 @@ class PrivateBindingAndAssemblyTests(unittest.TestCase):
                 with self.assertRaises(assembler.PhaseAssemblyError):
                     assembler.assemble_phase_model(
                         [self.raw],
+                        site_map_bytes=_SYNTHETIC_SITE_MAP,
                         site_map_binding=binding,
                         capture_manifest=capture_manifest(),
                     )
@@ -564,6 +656,7 @@ class PrivateBindingAndAssemblyTests(unittest.TestCase):
                 with self.assertRaises(assembler.PhaseAssemblyError):
                     assembler.assemble_phase_model(
                         [self.raw],
+                        site_map_bytes=_SYNTHETIC_SITE_MAP,
                         site_map_binding=site_binding(),
                         capture_manifest=manifest,
                     )
@@ -577,6 +670,7 @@ class PrivateBindingAndAssemblyTests(unittest.TestCase):
         ) as parse:
             model = assembler.assemble_phase_model(
                 [self.raw, repeat],
+                site_map_bytes=_SYNTHETIC_SITE_MAP,
                 site_map_binding=site_binding(),
                 capture_manifest=capture_manifest(),
             )
@@ -587,6 +681,7 @@ class PrivateBindingAndAssemblyTests(unittest.TestCase):
         with self.assertRaises(assembler.PhaseAssemblyError):
             assembler.assemble_phase_model(
                 [self.raw, self.raw],
+                site_map_bytes=_SYNTHETIC_SITE_MAP,
                 site_map_binding=site_binding(),
                 capture_manifest=capture_manifest(),
             )
@@ -594,12 +689,14 @@ class PrivateBindingAndAssemblyTests(unittest.TestCase):
         with self.assertRaises(assembler.PhaseAssemblyError):
             assembler.assemble_phase_model(
                 [self.raw, changed],
+                site_map_bytes=_SYNTHETIC_SITE_MAP,
                 site_map_binding=site_binding(),
                 capture_manifest=capture_manifest(),
             )
         with self.assertRaises(assembler.PhaseAssemblyError):
             assembler.assemble_phase_model(
                 [self.raw],
+                site_map_bytes=_SYNTHETIC_SITE_MAP,
                 site_map_binding=site_binding(),
                 capture_manifest=capture_manifest(),
                 expected_fragment_sha256="0" * 64,
@@ -609,10 +706,11 @@ class PrivateBindingAndAssemblyTests(unittest.TestCase):
         repeat = clone_bytes(self.raw)
         exact = replace(
             assembler.DEFAULT_LIMITS,
-            total_input_bytes=len(self.raw) * 2,
+            total_input_bytes=len(_SYNTHETIC_SITE_MAP) + len(self.raw) * 2,
         )
         assembler.assemble_phase_model(
             [self.raw, repeat],
+            site_map_bytes=_SYNTHETIC_SITE_MAP,
             site_map_binding=site_binding(),
             capture_manifest=capture_manifest(),
             limits=exact,
@@ -620,15 +718,37 @@ class PrivateBindingAndAssemblyTests(unittest.TestCase):
         with self.assertRaises(assembler.PhaseAssemblyError):
             assembler.assemble_phase_model(
                 [self.raw, repeat],
+                site_map_bytes=_SYNTHETIC_SITE_MAP,
                 site_map_binding=site_binding(),
                 capture_manifest=capture_manifest(),
-                limits=replace(exact, total_input_bytes=len(self.raw) * 2 - 1),
+                limits=replace(
+                    exact,
+                    total_input_bytes=len(_SYNTHETIC_SITE_MAP) + len(self.raw) * 2 - 1,
+                ),
             )
+
+    def test_fragment_byte_limit_preflights_every_copy_before_hash_or_parse(self) -> None:
+        limits = replace(assembler.DEFAULT_LIMITS, fragment_bytes=len(self.raw) - 1)
+        with (
+            mock.patch.object(assembler.hashlib, "sha256") as sha256,
+            mock.patch.object(assembler, "parse_phase_fragment") as parse,
+            self.assertRaises(assembler.PhaseAssemblyError),
+        ):
+            assembler.assemble_phase_model(
+                [self.raw, clone_bytes(self.raw)],
+                site_map_bytes=_SYNTHETIC_SITE_MAP,
+                site_map_binding=site_binding(),
+                capture_manifest=capture_manifest(),
+                limits=limits,
+            )
+        sha256.assert_not_called()
+        parse.assert_not_called()
 
     def test_fragment_copy_count_accepts_exact_limit_and_rejects_plus_one(self) -> None:
         copies = [clone_bytes(self.raw) for _ in range(8)]
         assembler.assemble_phase_model(
             copies,
+            site_map_bytes=_SYNTHETIC_SITE_MAP,
             site_map_binding=site_binding(),
             capture_manifest=capture_manifest(),
             limits=replace(assembler.DEFAULT_LIMITS, fragments=8),
@@ -636,6 +756,7 @@ class PrivateBindingAndAssemblyTests(unittest.TestCase):
         with self.assertRaises(assembler.PhaseAssemblyError):
             assembler.assemble_phase_model(
                 copies,
+                site_map_bytes=_SYNTHETIC_SITE_MAP,
                 site_map_binding=site_binding(),
                 capture_manifest=capture_manifest(),
                 limits=replace(assembler.DEFAULT_LIMITS, fragments=7),
@@ -647,16 +768,38 @@ class DiagnosticSeparationTests(unittest.TestCase):
         self.raw, _ = build_valid_fragment()
         self.model = assembled_model(self.raw)
 
+    def test_structural_parse_cannot_bypass_private_joins_or_reach_reducers(self) -> None:
+        parsed = assembler.parse_phase_fragment(self.raw)
+        self.assertTrue(parsed.terminal_capture_complete)
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.VerifiedPhaseAssembly(parsed)
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.encode_public_report(parsed)  # type: ignore[arg-type]
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.encode_private_trace(parsed)  # type: ignore[arg-type]
+
     def test_public_report_is_categorical_deterministic_and_relationship_free(self) -> None:
         first = assembler.encode_public_report(self.model)
         second = assembler.encode_public_report(assembled_model(clone_bytes(self.raw)))
         self.assertEqual(first, second)
         document = json.loads(first)
+        self.assertEqual(
+            list(document),
+            ["schema", "terminal_status", "completeness", "policy", "aggregate_counts"],
+        )
         self.assertEqual(document["schema"], assembler.PUBLIC_REPORT_SCHEMA)
         self.assertEqual(document["terminal_status"], "Complete")
         self.assertEqual(document["completeness"], "Complete")
         self.assertEqual(document["policy"], "PrivateReviewRequired")
         self.assertEqual(len(document["aggregate_counts"]), 8)
+        self.assertEqual(
+            [list(row) for row in document["aggregate_counts"]],
+            [["category", "count"]] * 8,
+        )
+        self.assertEqual(
+            [row["category"] for row in document["aggregate_counts"]],
+            list(assembler._PUBLIC_COUNT_CATEGORIES),
+        )
         rendered = first.decode("ascii").lower()
         for forbidden in (
             _CAPTURE_DOMAIN.hex(),
@@ -675,6 +818,41 @@ class DiagnosticSeparationTests(unittest.TestCase):
             self.assertNotIn(forbidden, rendered)
         self.assertNotIn("invocations", document)
         self.assertNotIn("memberships", document)
+
+    def test_same_count_private_identity_and_relationship_changes_reduce_identically(self) -> None:
+        changed_capture = bytes([0xA1]) * 32
+        changed_config = bytes([0xB2]) * 32
+        variant_site_map = b"different synthetic anonymous site map"
+        changed_site_map = hashlib.sha256(variant_site_map).digest()
+        variant = bytearray(self.raw)
+        _, offsets = build_valid_fragment()
+        variant[offsets["capture_domain"] : offsets["capture_domain"] + 32] = changed_capture
+        variant[offsets["runtime_config"] : offsets["runtime_config"] + 32] = changed_config
+        variant[offsets["site_map_digest"] : offsets["site_map_digest"] + 32] = changed_site_map
+        struct.pack_into("<I", variant, offsets["invocation.0.site"], 2)
+        struct.pack_into("<I", variant, offsets["invocation.1.site"], 1)
+        struct.pack_into("<I", variant, offsets["submission.0.primitive_count"], 2)
+        struct.pack_into("<I", variant, offsets["submission.1.primitive_begin"], 2)
+        struct.pack_into("<I", variant, offsets["submission.1.primitive_count"], 3)
+        variant_bytes = bytes(variant)
+        variant_model = assembler.assemble_phase_model(
+            [variant_bytes],
+            site_map_bytes=variant_site_map,
+            site_map_binding=assembler.SiteMapBinding(
+                changed_config, changed_site_map, 2
+            ),
+            capture_manifest=assembler.CaptureDomainManifest(
+                changed_capture, changed_capture, changed_capture
+            ),
+        )
+        self.assertEqual(
+            assembler.encode_public_report(variant_model),
+            assembler.encode_public_report(self.model),
+        )
+        self.assertNotEqual(
+            assembler.encode_private_trace(variant_model),
+            assembler.encode_private_trace(self.model),
+        )
 
     def test_private_trace_retains_disposition_chronology_and_reconciliation(self) -> None:
         document = json.loads(assembler.encode_private_trace(self.model))
@@ -753,6 +931,18 @@ class DiagnosticSeparationTests(unittest.TestCase):
         self.assertFalse(private["ordering_evidence_valid"])
         self.assertEqual(private["terminal"]["failure_counts"]["dropped_records"], 1)
 
+    def test_complete_capture_without_submissions_has_no_ordering_evidence(self) -> None:
+        model = assembled_model(build_empty_complete_fragment())
+        report = json.loads(assembler.encode_public_report(model))
+        self.assertEqual(report["terminal_status"], "Complete")
+        self.assertEqual(report["completeness"], "Complete")
+        self.assertEqual(report["policy"], "NoOrderingEvidence")
+        counts = {
+            row["category"]: row["count"] for row in report["aggregate_counts"]
+        }
+        self.assertEqual(counts["site-records"], 2)
+        self.assertTrue(all(count == 0 for name, count in counts.items() if name != "site-records"))
+
 
 class LimitTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -764,6 +954,102 @@ class LimitTests(unittest.TestCase):
                 assembler.PhaseLimits(**{name: ceiling})
                 with self.assertRaises(assembler.PhaseAssemblyError):
                     assembler.PhaseLimits(**{name: ceiling + 1})
+
+    def test_table_count_boundaries_are_checked_before_row_allocation(self) -> None:
+        def validate(counts: tuple[int, ...]) -> None:
+            raw_size = assembler._HEADER_BYTES + sum(
+                count * width
+                for count, width in zip(counts, assembler._ROW_WIDTHS, strict=True)
+            )
+            assembler._validate_counts(
+                counts,
+                counts,
+                raw_size,
+                assembler.DEFAULT_LIMITS,
+            )
+
+        exact_cases = (
+            (assembler.MAX_SITES, 0, 0, 0, 0, 0),
+            (0, assembler.MAX_INVOCATIONS, assembler.MAX_EVENTS, 0, 0, 0),
+        )
+        for counts in exact_cases:
+            with self.subTest(counts=counts):
+                validate(counts)
+
+        max_admitted_submissions = (
+            assembler.MAX_SCRATCH_BYTES - 65_536
+        ) // 1_024
+        validate((0, 0, 0, max_admitted_submissions, 0, 0))
+        with self.assertRaises(assembler.PhaseFragmentValidationError):
+            validate((0, 0, 0, max_admitted_submissions + 1, 0, 0))
+        max_admitted_draws = (assembler.MAX_SCRATCH_BYTES - 65_536) // 768
+        validate((0, 0, 0, 0, max_admitted_draws, 0))
+        with self.assertRaises(assembler.PhaseFragmentValidationError):
+            validate((0, 0, 0, 0, max_admitted_draws + 1, 0))
+        max_admitted_edges = (assembler.MAX_SCRATCH_BYTES - 65_536) // 512
+        validate((0, 0, 0, 0, 0, max_admitted_edges))
+        with self.assertRaises(assembler.PhaseFragmentValidationError):
+            validate((0, 0, 0, 0, 0, max_admitted_edges + 1))
+
+        for counts in (
+            (assembler.MAX_SITES + 1, 0, 0, 0, 0, 0),
+            (
+                0,
+                assembler.MAX_INVOCATIONS + 1,
+                assembler.MAX_EVENTS + 2,
+                0,
+                0,
+                0,
+            ),
+            (0, 0, 0, 0, assembler.MAX_DRAWS + 1, 0),
+            (0, 0, 0, 0, 0, assembler.MAX_EDGES + 1),
+        ):
+            with self.subTest(counts=counts):
+                with self.assertRaises(assembler.PhaseFragmentValidationError):
+                    validate(counts)
+
+    def test_frame_and_failure_accounting_accept_exact_hard_boundary(self) -> None:
+        frame_bound = mutate_many_u32(
+            self.raw,
+            (
+                (build_valid_fragment()[1]["discovered_frame_count"], assembler.MAX_FRAMES),
+                (build_valid_fragment()[1]["frame_count"], assembler.MAX_FRAMES),
+            ),
+        )
+        assembler.parse_phase_fragment(frame_bound)
+        offsets = build_valid_fragment()[1]
+        with self.assertRaises(assembler.PhaseFragmentValidationError):
+            assembler.parse_phase_fragment(
+                mutate_many_u32(
+                    self.raw,
+                    (
+                        (offsets["discovered_frame_count"], assembler.MAX_FRAMES + 1),
+                        (offsets["frame_count"], assembler.MAX_FRAMES + 1),
+                    ),
+                )
+            )
+
+        failure_raw, failure_offsets = build_valid_fragment(
+            status=int(assembler.TerminalStatus.TelemetryOverflow),
+            failure_counts=(
+                assembler.MAX_FAILURE_RECORDS,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ),
+        )
+        assembler.parse_phase_fragment(failure_raw)
+        with self.assertRaises(assembler.PhaseFragmentValidationError):
+            assembler.parse_phase_fragment(
+                mutate_u32(
+                    failure_raw,
+                    failure_offsets["failure.0"],
+                    assembler.MAX_FAILURE_RECORDS + 1,
+                )
+            )
 
     def test_table_frame_nesting_scratch_and_lookup_limits_tighten(self) -> None:
         counts = _default_counts()
@@ -845,6 +1131,47 @@ class PhaseAssemblerCliTests(unittest.TestCase):
                 self.assertEqual(output, "")
                 self.assertEqual(errors, "Phase fragment processing failed.\n")
 
+    def test_cli_argument_caps_and_limit_grammar_are_exact(self) -> None:
+        base = [
+            "--public-output",
+            "o",
+            "--site-map",
+            "s",
+            "--site-map-binding",
+            "b",
+            "--capture-manifest",
+            "c",
+            "--expected-sha256",
+            "0" * 64,
+            "f",
+            "g",
+        ]
+        exact_count = base[:10] + ["--private-output", "p"]
+        for name, ceiling in assembler.HARD_LIMITS.items():
+            exact_count += ["--limit", f"{name}={ceiling}"]
+        exact_count += [f"f{index}" for index in range(8)]
+        self.assertEqual(len(exact_count), assembler.MAX_CLI_ARGUMENTS)
+        assembler._parse_cli(exact_count)
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler._parse_cli(exact_count + ["one-too-many"])
+
+        byte_base = list(base)
+        used_without_last = sum(len(value.encode("utf-8")) for value in byte_base[:-1])
+        byte_base[-1] = "x" * (assembler.MAX_CLI_ARGUMENT_BYTES - used_without_last)
+        assembler._parse_cli(byte_base)
+        byte_base[-1] += "x"
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler._parse_cli(byte_base)
+
+        for malformed in ("frames", "unknown=1", "frames=x", f"frames={assembler.MAX_FRAMES + 1}"):
+            with self.subTest(malformed=malformed):
+                with self.assertRaises(assembler.PhaseAssemblyError):
+                    assembler._parse_cli(["--limit", malformed, *base])
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler._parse_cli(
+                ["--limit", "frames=1", "--limit", "frames=2", *base]
+            )
+
     def test_default_writes_only_public_and_private_sink_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as first_dir, tempfile.TemporaryDirectory() as second_dir:
             first = Path(first_dir)
@@ -854,17 +1181,76 @@ class PhaseAssemblerCliTests(unittest.TestCase):
             self.assertTrue((first / "public.json").is_file())
             self.assertFalse((first / "private.json").exists())
 
-            code, stdout, stderr = run_main(cli_args(second, self.raw, private=True))
+            with mock.patch.object(assembler, "_REPOSITORY_ROOT", second):
+                code, stdout, stderr = run_main(cli_args(second, self.raw, private=True))
             self.assertEqual((code, stdout, stderr), (0, "Phase fragment processing succeeded.\n", ""))
-            self.assertTrue((second / "private.json").is_file())
+            self.assertTrue((second / "private" / "private.json").is_file())
             self.assertEqual(
                 (first / "public.json").read_bytes(),
                 (second / "public.json").read_bytes(),
             )
 
+    def test_private_output_failure_cannot_leave_a_successful_public_commit_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = cli_args(root, self.raw, private=True)
+            private_path = Path(args[args.index("--private-output") + 1])
+            private_path.write_bytes(b"preexisting private sentinel")
+            with mock.patch.object(assembler, "_REPOSITORY_ROOT", root):
+                code, stdout, stderr = run_main(args)
+            self.assertEqual(
+                (code, stdout, stderr),
+                (1, "", "Phase fragment processing failed.\n"),
+            )
+            self.assertEqual(private_path.read_bytes(), b"preexisting private sentinel")
+            self.assertFalse((root / "public.json").exists())
+
+    def test_cli_requires_selected_site_map_to_match_private_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = cli_args(root, self.raw)
+            site_map_index = args.index("--site-map") + 1
+            Path(args[site_map_index]).write_bytes(b"different synthetic map")
+            code, stdout, stderr = run_main(args)
+            self.assertEqual(
+                (code, stdout, stderr),
+                (1, "", "Phase fragment processing failed.\n"),
+            )
+            self.assertFalse((root / "public.json").exists())
+
+    def test_cli_total_input_limit_counts_manifests_site_map_and_fragment(self) -> None:
+        auxiliary_size = (
+            len(site_binding_bytes())
+            + len(capture_manifest_bytes())
+            + len(_SYNTHETIC_SITE_MAP)
+        )
+        exact_size = auxiliary_size + len(self.raw)
+        with tempfile.TemporaryDirectory() as exact_dir:
+            root = Path(exact_dir)
+            args = cli_args(root, self.raw)
+            args[0:0] = ["--limit", f"total_input_bytes={exact_size}"]
+            code, stdout, stderr = run_main(args)
+            self.assertEqual(
+                (code, stdout, stderr),
+                (0, "Phase fragment processing succeeded.\n", ""),
+            )
+        with tempfile.TemporaryDirectory() as short_dir:
+            root = Path(short_dir)
+            args = cli_args(root, self.raw)
+            args[0:0] = ["--limit", f"total_input_bytes={exact_size - 1}"]
+            code, stdout, stderr = run_main(args)
+            self.assertEqual(
+                (code, stdout, stderr),
+                (1, "", "Phase fragment processing failed.\n"),
+            )
+            self.assertFalse((root / "public.json").exists())
+
     def test_private_output_path_must_resolve_to_a_recognized_ignored_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            assembler._validate_private_output_path(str(Path(directory) / "outside.json"))
+            with self.assertRaises(assembler.PhaseAssemblyError):
+                assembler._validate_private_output_path(
+                    str(Path(directory) / "outside.json")
+                )
         assembler._validate_private_output_path(
             str(REPOSITORY_ROOT / "private" / "example.json")
         )
@@ -901,7 +1287,8 @@ class PhaseAssemblerCliTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            code, stdout, stderr = run_main(cli_args(root, raw, private=True))
+            with mock.patch.object(assembler, "_REPOSITORY_ROOT", root):
+                code, stdout, stderr = run_main(cli_args(root, raw, private=True))
             self.assertEqual(code, 2)
             self.assertEqual(stdout, "")
             self.assertEqual(stderr, "Phase capture is incomplete.\n")
@@ -910,7 +1297,9 @@ class PhaseAssemblerCliTests(unittest.TestCase):
                 "QueueExhausted",
             )
             self.assertFalse(
-                json.loads((root / "private.json").read_bytes())["ordering_evidence_valid"]
+                json.loads((root / "private" / "private.json").read_bytes())[
+                    "ordering_evidence_valid"
+                ]
             )
 
     def test_path_repeats_stream_compare_distinct_files_and_reject_same_file(self) -> None:
@@ -918,8 +1307,10 @@ class PhaseAssemblerCliTests(unittest.TestCase):
             root = Path(directory)
             first = root / "first.part"
             second = root / "second.part"
+            selected_site_map = root / "site-map.private"
             first.write_bytes(self.raw)
             second.write_bytes(self.raw)
+            selected_site_map.write_bytes(_SYNTHETIC_SITE_MAP)
             with mock.patch.object(
                 assembler,
                 "parse_phase_fragment",
@@ -927,6 +1318,7 @@ class PhaseAssemblerCliTests(unittest.TestCase):
             ) as parse:
                 model = assembler.assemble_phase_paths(
                     [str(first), str(second)],
+                    site_map_path=str(selected_site_map),
                     site_map_binding=site_binding(),
                     capture_manifest=capture_manifest(),
                     expected_fragment_sha256=hashlib.sha256(self.raw).hexdigest(),
@@ -936,6 +1328,7 @@ class PhaseAssemblerCliTests(unittest.TestCase):
             with self.assertRaises(assembler.PhaseAssemblyError):
                 assembler.assemble_phase_paths(
                     [str(first), str(first)],
+                    site_map_path=str(selected_site_map),
                     site_map_binding=site_binding(),
                     capture_manifest=capture_manifest(),
                     expected_fragment_sha256=hashlib.sha256(self.raw).hexdigest(),
@@ -944,7 +1337,9 @@ class PhaseAssemblerCliTests(unittest.TestCase):
     def test_path_reference_obeys_total_input_limit_before_parse(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "input.part"
+            selected_site_map = Path(directory) / "site-map.private"
             path.write_bytes(self.raw)
+            selected_site_map.write_bytes(_SYNTHETIC_SITE_MAP)
             with mock.patch.object(
                 assembler,
                 "parse_phase_fragment",
@@ -953,12 +1348,15 @@ class PhaseAssemblerCliTests(unittest.TestCase):
                 with self.assertRaises(assembler.PhaseAssemblyError):
                     assembler.assemble_phase_paths(
                         [str(path)],
+                        site_map_path=str(selected_site_map),
                         site_map_binding=site_binding(),
                         capture_manifest=capture_manifest(),
                         expected_fragment_sha256=hashlib.sha256(self.raw).hexdigest(),
                         limits=replace(
                             assembler.DEFAULT_LIMITS,
-                            total_input_bytes=len(self.raw) - 1,
+                            total_input_bytes=(
+                                len(_SYNTHETIC_SITE_MAP) + len(self.raw) - 1
+                            ),
                         ),
                     )
             parse.assert_not_called()
@@ -985,6 +1383,20 @@ class PhaseAssemblerCliTests(unittest.TestCase):
             ):
                 with self.assertRaises(assembler.PhaseAssemblyError):
                     assembler._read_snapshot(str(path), len(self.raw))
+
+    def test_site_map_stream_digest_obeys_exact_byte_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "site-map.private"
+            path.write_bytes(_SYNTHETIC_SITE_MAP)
+            size, digest = assembler._digest_snapshot(
+                str(path), len(_SYNTHETIC_SITE_MAP)
+            )
+            self.assertEqual(size, len(_SYNTHETIC_SITE_MAP))
+            self.assertEqual(digest, _SITE_MAP_DIGEST.hex())
+            with self.assertRaises(assembler.PhaseAssemblyError):
+                assembler._digest_snapshot(
+                    str(path), len(_SYNTHETIC_SITE_MAP) - 1
+                )
 
     def test_short_output_write_is_left_in_place_without_unlink(self) -> None:
         class ShortWriter:

@@ -2118,13 +2118,15 @@ compose or publish a retail presentation.
   before submissions or invocation entry, membership gaps/double claims, and silent complete-capture
   loss.
 - A separately selected private site-map binding must match the fragment's runtime-configuration and
-  site-map consistency values. A separately selected private capture-domain manifest requires phase,
-  scene, and front-end artifacts to carry one equal capture value; equal dense draw ordinals alone
-  never authorize a join. All digests are consistency/deduplication aids only.
+  site-map consistency values, and the selected site map itself is hashed and joined before either
+  reducer can run. A separately selected private capture-domain manifest requires phase, scene, and
+  front-end artifacts to carry one equal capture value; equal dense draw ordinals alone never
+  authorize a join. All digests are consistency/deduplication aids only.
 - Every input/table/nesting/work/scratch/output capacity is caller-tightenable below an immutable
   ceiling. Path-based repeats must be distinct stored copies, are stream-compared, and only the
-  authenticated immutable reference snapshot is parsed. Private output is opt-in; exact exclusive
-  writes never overwrite or unlink a failed pathname.
+  consistency-checked immutable reference snapshot is parsed. Private output is opt-in, is restricted
+  to repository-known ignored private roots, and exact exclusive writes never overwrite or unlink a
+  failed pathname.
 - The generated v2 fixture and Python tests establish validator/reducer self-consistency only. A
   build-capable session must add an independent C++ producer-wire mirror before any owner capture.
   The scene/front-end artifacts and PCSX2 producer must still implement the shared capture domain and
