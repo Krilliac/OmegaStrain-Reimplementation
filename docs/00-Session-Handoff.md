@@ -2045,6 +2045,39 @@ content, disc image, executable, emulator, or PCSX2 runtime input was accessed.
   is narrow negative evidence that the root visual alone is insufficient, not a reason to infer
   source-order/DFS traversal or claim a retail menu screenshot.
 
+## Retail presentation-requirement census (E-0127, 2026-07-22)
+
+- `InspectRetailPresentationRequirements` is a stateless, synchronous inspection over a borrowed,
+  capability-bearing Title, CreateAgent, or LoadAgent `FrontEndScreenBundle`. It walks the retained
+  widget and visual structures only to produce owned anonymous aggregate counts for visual
+  geometry, text, unresolved widgets, and unresolved bindings, plus an explicit set of unresolved
+  presentation requirements.
+- Candidate counts are not an ordered sequence and traversal order is never promoted to draw or
+  layer order. The output contains no source view, path, name, string, hash, payload value, pixel,
+  rectangle, frame, or retail-presentation capability.
+- A separate visual-geometry diagnostic classifies projected coverage only under the
+  project-owned canonical scan-conversion kernel. Per-candidate and union results may become
+  indeterminate when visibility, binding, transform, projection, geometry, depth, texture, or
+  animation facts are unresolved. Even complete project-raster coverage is not retail GS coverage
+  and cannot establish opacity, text interleave, ordering, or presentation completeness.
+- Caller-tightenable node, depth, candidate, position, animation-track, lookup, identity-work,
+  visit, triangle, covered-sample, scratch, and output limits remain beneath fixed hard ceilings.
+  Limit and allocation failures are terminal and publish no partial census.
+- Generated fixtures exercise all three admitted screen routes, ownership and privacy,
+  disjoint/overlapping candidates, nested transforms and parent visibility, text/actions/all
+  retained animation families, unresolved bindings, invalid/non-finite geometry, incomplete union,
+  and every exposed limit class. Independent review found one boundary-test gap; the corrected tests
+  now admit each exact work budget, reject one below it, and reject every hard ceiling plus one.
+  Serialized focused MSVC Debug targets completed with zero warnings or errors, focused CTest passed
+  3/3, full CTest passed 110/110, tooling passed 395/395, Python compile-all passed, the native
+  dependency gate passed 389 files, and both ledger gates passed 127 records. Hosted CI and
+  owner-input validation remain pending and unclaimed.
+
+This census establishes no grounded layer order, retail text encoding or layout, text/geometry
+interleave, action lifecycle, animation selection or application, retail frame, menu, visual
+parity, or PCSX2 equivalence. It is a blocker inventory for further evidence work, not authority to
+compose or publish a retail presentation.
+
 ## Private PCSX2 producer readiness (E-0099, 2026-07-20)
 
 - A separately maintained local branch based on official PCSX2

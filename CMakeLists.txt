@@ -170,6 +170,7 @@ target_compile_features(omega_content PUBLIC cxx_std_23)
 
 add_library(omega_frontend_presentation STATIC
     native/src/frontend_presentation/retail_frontend_cpu_raster.cpp
+    native/src/frontend_presentation/retail_presentation_requirements.cpp
     native/src/frontend_presentation/retail_root_visual_layer.cpp
     native/src/frontend_presentation/retail_frontend_timeline.cpp
     native/src/frontend_presentation/retail_frontend_texture_sampler.cpp
@@ -3105,6 +3106,38 @@ if(BUILD_TESTING)
     add_test(NAME omega_frontend_presentation_tests
         COMMAND omega_frontend_presentation_tests)
     set_tests_properties(omega_frontend_presentation_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_retail_presentation_requirements_tests
+        native/tests/retail_presentation_requirements_tests.cpp
+    )
+    target_link_libraries(omega_retail_presentation_requirements_tests PRIVATE
+        omega_frontend_presentation
+        omega_content
+    )
+    target_compile_features(omega_retail_presentation_requirements_tests
+        PRIVATE cxx_std_23)
+    if(MSVC)
+        target_compile_options(omega_retail_presentation_requirements_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_retail_presentation_requirements_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_retail_presentation_requirements_tests
+        COMMAND omega_retail_presentation_requirements_tests)
+    set_tests_properties(omega_retail_presentation_requirements_tests
+        PROPERTIES TIMEOUT 10)
 
     add_executable(omega_frontend_timeline_tests
         native/tests/frontend_timeline_tests.cpp
