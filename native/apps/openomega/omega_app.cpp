@@ -3026,8 +3026,43 @@ void OmegaApp::BuildRetailFrontEndPresentationIfPossible() noexcept
     if (!retail_front_end_bundle_ || !host_)
         return;
 
+    frontend::presentation::RetailFrontEndFrameDiagnostics diagnostics;
     const auto frame = frontend::presentation::ComposeRetailFrontEndFrame(
-        *retail_front_end_bundle_);
+        *retail_front_end_bundle_, {}, &diagnostics);
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const char* const frontend_trace = std::getenv("OPENOMEGA_FRONTEND_TRACE");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    if (frontend_trace != nullptr)
+    {
+        // Identity-free aggregate tally (no owner strings/members): a durable,
+        // rebuild-free inspection of which compositor code paths fired.
+        log_->Info("presentation",
+            "frontend-trace nodes=" +
+                std::to_string(diagnostics.visual_nodes_visited) +
+                " ie_tris=" + std::to_string(diagnostics.ie_triangles_emitted) +
+                " skip_oob=" +
+                std::to_string(diagnostics.triangles_skipped_out_of_range) +
+                " skip_nonfinite=" +
+                std::to_string(diagnostics.triangles_skipped_non_finite) +
+                " skip_degenerate=" +
+                std::to_string(diagnostics.triangles_skipped_degenerate) +
+                " text_widgets=" +
+                std::to_string(diagnostics.text_widgets_seen) + " str_ok=" +
+                std::to_string(diagnostics.strings_resolved) + " str_miss=" +
+                std::to_string(diagnostics.strings_missing) + " font_ok=" +
+                std::to_string(diagnostics.fonts_resolved) + " font_miss=" +
+                std::to_string(diagnostics.fonts_missing) + " layout_fail=" +
+                std::to_string(diagnostics.text_layouts_failed) + " glyph_quads=" +
+                std::to_string(diagnostics.glyph_quads_emitted) + " total_tris=" +
+                std::to_string(diagnostics.total_triangles) + " frame=" +
+                std::to_string(diagnostics.frame_width) + "x" +
+                std::to_string(diagnostics.frame_height));
+    }
     if (!frame)
     {
         // Identity-free: the compositor error carries no owner-corpus detail.

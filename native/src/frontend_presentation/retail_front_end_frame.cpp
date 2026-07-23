@@ -3,12 +3,17 @@
 #include "omega/asset/frontend_ir.h"
 #include "omega/content/front_end_screen_bundle.h"
 #include "omega/frontend/compositor_math.h"
+#include "omega/frontend_text/text_layout.h"
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <new>
+#include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace omega::frontend::presentation
@@ -83,6 +88,7 @@ inline constexpr std::uint32_t kMaximumVisualTreeDepth = 64U;
 void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
     const asset::FrontendVisualNodeIR& node,
     const AffineTransform12& parent_world, const std::uint32_t depth,
+    RetailFrontEndFrameDiagnostics* const diag,
     std::vector<RetailFrontEndRasterTriangle>& out)
 {
     if (depth >= kMaximumVisualTreeDepth)
@@ -94,6 +100,8 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
     const auto world = ComposeAffineTransforms(parent_world, local_transform);
     if (!world)
         return;
+    if (diag != nullptr)
+        ++diag->visual_nodes_visited;
 
     // Fail-soft texture resolution within the node's owning scope. A missing or
     // absent texture member draws with vertex colors only.
@@ -119,6 +127,8 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
                 color_index >= node.colors.size())
             {
                 vertices_valid = false;
+                if (diag != nullptr)
+                    ++diag->triangles_skipped_out_of_range;
                 break;
             }
 
@@ -127,12 +137,16 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
             if (!transformed)
             {
                 vertices_valid = false;
+                if (diag != nullptr)
+                    ++diag->triangles_skipped_non_finite;
                 break;
             }
             const auto projected = ProjectInterfaceElementPoint(*transformed);
             if (!projected)
             {
                 vertices_valid = false;
+                if (diag != nullptr)
+                    ++diag->triangles_skipped_non_finite;
                 break;
             }
             // Depth is NOT taken from the projected Z. The retail front end draws
@@ -150,6 +164,8 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
             if (!modulation)
             {
                 vertices_valid = false;
+                if (diag != nullptr)
+                    ++diag->triangles_skipped_non_finite;
                 break;
             }
 
@@ -164,18 +180,223 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
         if (!vertices_valid)
             continue;
         if (!IsRasterizableTriangle(triangle))
+        {
+            if (diag != nullptr)
+                ++diag->triangles_skipped_degenerate;
             continue;
+        }
+        if (diag != nullptr)
+            ++diag->ie_triangles_emitted;
         out.push_back(triangle);
     }
 
     for (const auto& child : node.children)
-        AppendVisualNodeTriangles(scope, child, *world, depth + 1U, out);
+        AppendVisualNodeTriangles(scope, child, *world, depth + 1U, diag, out);
+}
+
+// ---- Phase 2: GUI text pass ----------------------------------------------
+
+[[nodiscard]] frontend::HorizontalTextAlignment MapHorizontalAlignment(
+    const std::optional<asset::FrontendTextAlignment>& alignment) noexcept
+{
+    if (!alignment)
+        return frontend::HorizontalTextAlignment::Left;
+    switch (*alignment)
+    {
+    case asset::FrontendTextAlignment::Right:
+        return frontend::HorizontalTextAlignment::Right;
+    case asset::FrontendTextAlignment::Center:
+        return frontend::HorizontalTextAlignment::Center;
+    case asset::FrontendTextAlignment::Left:
+        break;
+    }
+    return frontend::HorizontalTextAlignment::Left;
+}
+
+// Emits one atlas-textured quad (two triangles) for a laid-out glyph. The glyph
+// rectangle is in canonical GUI space (Y up); GuiToCanonicalRaster bridges each
+// corner to the 640x448 raster (x+320, 224-y). The glyph's atlas UV rectangle
+// (already normalized) maps corner-for-corner. Fail-soft: a corner that will not
+// bridge to a finite raster point drops the whole glyph.
+void AppendGlyphQuad(const frontend::TextGlyphQuad& glyph,
+    const content::FrontEndTextureBinding* const atlas, const RgbaF& color,
+    std::vector<RetailFrontEndRasterTriangle>& out)
+{
+    struct Corner
+    {
+        float gui_x;
+        float gui_y;
+        float u;
+        float v;
+    };
+    const std::array<Corner, 4U> corners{
+        Corner{glyph.left, glyph.top, glyph.uv.u_left, glyph.uv.v_top},
+        Corner{glyph.right, glyph.top, glyph.uv.u_right, glyph.uv.v_top},
+        Corner{glyph.right, glyph.bottom, glyph.uv.u_right, glyph.uv.v_bottom},
+        Corner{glyph.left, glyph.bottom, glyph.uv.u_left, glyph.uv.v_bottom},
+    };
+    std::array<RetailFrontEndRasterVertex, 4U> vertices;
+    for (std::size_t index = 0U; index < corners.size(); ++index)
+    {
+        const auto raster = GuiToCanonicalRaster(
+            Point2F{corners[index].gui_x, corners[index].gui_y});
+        if (!raster)
+            return;
+        vertices[index] = RetailFrontEndRasterVertex{
+            .x = raster->x,
+            .y = raster->y,
+            .depth_rank = 0.0F,
+            .normalized_st = asset::FrontendUvIR{.u = corners[index].u,
+                .v = corners[index].v},
+            .modulation = color,
+        };
+    }
+    // Two triangles: (0,1,2) and (0,2,3). Degenerate glyph boxes are dropped by
+    // the shared rasterizability test, same as IE geometry.
+    const RetailFrontEndRasterTriangle first{
+        .vertices = {vertices[0U], vertices[1U], vertices[2U]},
+        .texture = atlas,
+    };
+    const RetailFrontEndRasterTriangle second{
+        .vertices = {vertices[0U], vertices[2U], vertices[3U]},
+        .texture = atlas,
+    };
+    if (IsRasterizableTriangle(first))
+        out.push_back(first);
+    if (IsRasterizableTriangle(second))
+        out.push_back(second);
+}
+
+// Depth-first over the GUI widget tree. Each visible Text/Button widget carrying
+// a text reference resolves its string (bundle string table, falling back to the
+// reference text itself), its font and font atlas (bundle resolvers), lays the
+// glyphs out with LayoutRetailText inside the widget rectangle, and appends
+// atlas-textured glyph quads. Text is emitted AFTER all IE geometry so the
+// submission-ordinal depth pass makes it draw on top. Fail-soft: a missing
+// string/font/atlas or a failed layout skips that widget, never the screen.
+void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
+    const asset::FrontendWidgetIR& widget, const std::uint32_t depth,
+    RetailFrontEndFrameDiagnostics* const diag,
+    std::vector<RetailFrontEndRasterTriangle>& out)
+{
+    if (depth >= kMaximumVisualTreeDepth)
+        return;
+
+    const bool is_text_widget =
+        widget.kind == asset::FrontendWidgetKind::Text ||
+        widget.kind == asset::FrontendWidgetKind::Button;
+    if (widget.visible && is_text_widget && widget.text_reference)
+    {
+        if (diag != nullptr)
+            ++diag->text_widgets_seen;
+
+        std::string_view text;
+        // Retail localization convention (matches game_data_service's validation):
+        // a widget text reference is a "$name" key; the string-table lookup strips
+        // the leading '$'. RetailStringTableIR::Find lowercases the query to match
+        // the decoder's already-lowercased entry keys.
+        std::string_view lookup_key = *widget.text_reference;
+        if (!lookup_key.empty() && lookup_key.front() == '$')
+            lookup_key.remove_prefix(1U);
+        if (const auto* const entry = bundle.strings().Find(lookup_key))
+        {
+            text = entry->value;
+            if (diag != nullptr)
+                ++diag->strings_resolved;
+        }
+        else
+        {
+            // Fail-soft: draw the de-sigiled reference rather than nothing.
+            text = lookup_key;
+            if (diag != nullptr)
+                ++diag->strings_missing;
+        }
+
+        const retail::FntV3IR* const font =
+            bundle.ResolveFontReference(widget.font_reference);
+        const content::FrontEndTextureBinding* const atlas =
+            font != nullptr ? bundle.ResolveFontAtlas(*font) : nullptr;
+        if (font != nullptr && atlas != nullptr)
+        {
+            if (diag != nullptr)
+                ++diag->fonts_resolved;
+
+            // Retail front-end strings are ASCII; each byte is one codepoint.
+            std::u32string codepoints;
+            try
+            {
+                codepoints.reserve(text.size());
+                for (const unsigned char byte : text)
+                    codepoints.push_back(static_cast<char32_t>(byte));
+            }
+            catch (const std::bad_alloc&)
+            {
+                return;
+            }
+
+            const RgbaF color = widget.text_color
+                ? RgbaF{widget.text_color->red, widget.text_color->green,
+                      widget.text_color->blue, widget.text_color->alpha}
+                : RgbaF{1.0F, 1.0F, 1.0F, 1.0F};
+
+            const frontend::TextLayoutOptions options{
+                .rectangle = {.left = widget.rectangle.left,
+                    .top = widget.rectangle.top,
+                    .width = widget.rectangle.width,
+                    .height = widget.rectangle.height},
+                .atlas_extent = {.width =
+                                     static_cast<float>(atlas->image().width),
+                    .height = static_cast<float>(atlas->image().height)},
+                // Single-line menu labels: one line fills the widget box. The FNT
+                // exposes no proven line-height, so the box height is the step.
+                .line_origin_step = widget.rectangle.height,
+                .horizontal_alignment =
+                    MapHorizontalAlignment(widget.text_alignment),
+                .vertical_alignment = frontend::VerticalTextAlignment::Center,
+                .wrap_mode = frontend::TextWrapMode::ExplicitNewlinesOnly,
+                .ellipsis_mode = frontend::TextEllipsisMode::Disabled,
+                .pair_adjustments = {},
+                .limits = {.maximum_codepoints =
+                               frontend::kMaximumTextLayoutCodepoints,
+                    .maximum_lines = frontend::kMaximumTextLayoutLines,
+                    .maximum_glyphs = frontend::kMaximumTextLayoutGlyphs,
+                    .maximum_pair_adjustments =
+                        frontend::kMaximumTextLayoutPairAdjustments,
+                    .maximum_output_bytes =
+                        frontend::kMaximumTextLayoutOutputBytes},
+            };
+
+            const auto layout = frontend::LayoutRetailText(
+                *font, std::u32string_view(codepoints), options);
+            if (layout)
+            {
+                for (const auto& glyph : layout->glyphs)
+                {
+                    AppendGlyphQuad(glyph, atlas, color, out);
+                    if (diag != nullptr)
+                        ++diag->glyph_quads_emitted;
+                }
+            }
+            else if (diag != nullptr)
+            {
+                ++diag->text_layouts_failed;
+            }
+        }
+        else if (diag != nullptr)
+        {
+            ++diag->fonts_missing;
+        }
+    }
+
+    for (const auto& child : widget.children)
+        AppendGuiTextTriangles(bundle, child, depth + 1U, diag, out);
 }
 } // namespace
 
 RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
     const content::FrontEndScreenBundle& bundle,
-    const RetailFrontEndRasterLimits limits) noexcept
+    const RetailFrontEndRasterLimits limits,
+    RetailFrontEndFrameDiagnostics* const diagnostics) noexcept
 {
     if (!bundle.presentation_capability().valid())
         return std::unexpected(RetailFrontEndFrameError::InvalidRetailCapability);
@@ -218,7 +439,13 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
     try
     {
         AppendVisualNodeTriangles(
-            *scope, *root_visual, initial_world, 0U, triangles);
+            *scope, *root_visual, initial_world, 0U, diagnostics, triangles);
+        // Phase 2 GUI text pass. Glyph quads are appended AFTER all IE geometry
+        // so the submission-ordinal depth pass below ranks them highest and they
+        // draw on top of the screen art. Text is a decoration over a valid IE
+        // screen; it never gates composition.
+        AppendGuiTextTriangles(
+            bundle, bundle.widget_document().root, 0U, diagnostics, triangles);
     }
     catch (const std::bad_alloc&)
     {
@@ -242,10 +469,19 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
             vertex.depth_rank = rank;
     }
 
+    if (diagnostics != nullptr)
+        diagnostics->total_triangles =
+            static_cast<std::uint32_t>(triangles.size());
+
     auto rasterized = RasterizeRetailFrontEndTriangles(
         triangles, RgbaF{0.0F, 0.0F, 0.0F, 1.0F}, limits);
     if (!rasterized)
         return std::unexpected(MapRasterError(rasterized.error()));
+    if (diagnostics != nullptr)
+    {
+        diagnostics->frame_width = rasterized->width;
+        diagnostics->frame_height = rasterized->height;
+    }
     return std::move(*rasterized);
 }
 } // namespace omega::frontend::presentation

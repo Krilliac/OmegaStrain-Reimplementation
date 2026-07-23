@@ -1,9 +1,12 @@
 #include "omega/frontend_presentation/retail_front_end_frame.h"
 
 #include "omega/asset/frontend_ir.h"
+#include "omega/asset/indexed_image_ir.h"
 #include "omega/content/front_end_screen_bundle.h"
 #include "omega/content/retail_front_end_presentation_capability.h"
 #include "omega/frontend/compositor_math.h"
+#include "omega/retail/fnt_v3_decoder.h"
+#include "omega/retail/retail_string_table_decoder.h"
 
 #include <array>
 #include <cstddef>
@@ -55,6 +58,31 @@ struct FrontEndScreenBundleTestAccess final
     {
         return FrontEndScreenBundle(key, std::move(widget_document),
             std::move(primary_scope), std::move(visual_scopes), {}, {}, {},
+            std::move(capability));
+    }
+
+    [[nodiscard]] static FrontEndTextureBinding MakeTextureBinding(
+        asset::IndexedImageIR image,
+        const asset::IndexedImageEncoding sampling_encoding,
+        const FrontEndTextureAlphaMode alpha_mode)
+    {
+        return FrontEndTextureBinding(
+            std::move(image), sampling_encoding, alpha_mode);
+    }
+
+    [[nodiscard]] static FrontEndScreenBundle MakeBundleWithFonts(
+        const FrontEndScreenKey key,
+        asset::FrontendWidgetDocumentIR widget_document,
+        std::string primary_scope,
+        FrontEndScreenBundle::VisualScopeMap visual_scopes,
+        FrontEndScreenBundle::FontMap fonts,
+        FrontEndScreenBundle::TextureMap font_atlases,
+        retail::RetailStringTableIR strings,
+        RetailFrontEndPresentationCapability capability)
+    {
+        return FrontEndScreenBundle(key, std::move(widget_document),
+            std::move(primary_scope), std::move(visual_scopes),
+            std::move(fonts), std::move(font_atlases), std::move(strings),
             std::move(capability));
     }
 };
@@ -189,6 +217,102 @@ void Check(const bool condition, const std::string_view message)
     return {frame.pixels[offset], frame.pixels[offset + 1U],
         frame.pixels[offset + 2U], frame.pixels[offset + 3U]};
 }
+
+// ---- Phase 2 GUI text-pass fixtures --------------------------------------
+using omega::asset::IndexedImageEncoding;
+using omega::asset::IndexedImageIR;
+using omega::asset::RawGsRgba8;
+using omega::content::FrontEndTextureAlphaMode;
+using omega::content::FrontEndTextureBinding;
+using omega::frontend::presentation::RetailFrontEndFrameDiagnostics;
+using omega::retail::FntV3GlyphIR;
+using omega::retail::FntV3IR;
+using omega::retail::RetailStringEntryIR;
+using omega::retail::RetailStringTableIR;
+
+// One glyph per printable ASCII code (index = codepoint - 0x21), each a nonzero
+// atlas UV box. Mirrors the synthetic font in frontend_text_layout_tests.
+[[nodiscard]] FntV3IR MakeFont()
+{
+    FntV3IR font;
+    font.atlas_reference = "SYNTHFNT.TDX";
+    font.raw_byte_16 = 7U;
+    font.raw_byte_17 = 2U;
+    font.space_advance = 3;
+    font.glyphs.resize(0x7EU - 0x21U + 1U);
+    for (auto& glyph : font.glyphs)
+    {
+        glyph = FntV3GlyphIR{
+            .u_left = 0.10F, .u_right = 0.20F, .v_top = 0.10F, .v_bottom = 0.30F};
+    }
+    return font;
+}
+
+// A 256x256 opaque white indexed atlas so any glyph UV samples a visible texel.
+[[nodiscard]] FrontEndTextureBinding MakeFontAtlas()
+{
+    IndexedImageIR image;
+    image.width = 256U;
+    image.height = 256U;
+    image.source_encoding = IndexedImageEncoding::Indexed8;
+    image.indices.assign(
+        static_cast<std::size_t>(image.width) * image.height, 1U);
+    // Indexed8 requires a full 256-entry palette (sampler contract). GS channels
+    // are on a 0..128 scale (128 == 1.0); index 1 (the only one used) is opaque
+    // white, index 0 is transparent, the rest are unused padding.
+    image.palette.assign(256U,
+        RawGsRgba8{.red = 128U, .green = 128U, .blue = 128U, .alpha = 128U});
+    image.palette[0U] = RawGsRgba8{.red = 0U, .green = 0U, .blue = 0U,
+        .alpha = 0U};
+    return FrontEndScreenBundleTestAccess::MakeTextureBinding(std::move(image),
+        IndexedImageEncoding::Indexed8,
+        FrontEndTextureAlphaMode::UsesPaletteAlpha);
+}
+
+// A valid IE root (so composition succeeds) plus a Text widget referencing a
+// string key. When provide_font is false the font/atlas are absent so the text
+// pass must be fail-soft.
+[[nodiscard]] FrontEndScreenBundle MakeTextBundle(const bool provide_font)
+{
+    FrontendVisualNodeIR root_visual = MakeQuad("ROOT_root", 320.0F, 224.0F,
+        FrontendColorRgba8IR{.red = 20U, .green = 40U, .blue = 60U,
+            .alpha = 255U});
+    omega::asset::FrontendVisualDocumentIR document{
+        .root = std::move(root_visual)};
+    auto scope = FrontEndScreenBundleTestAccess::MakeScope(std::move(document),
+        FrontEndVisualScope::ResourceSet{"ROOT_root"},
+        FrontEndVisualScope::TextureMap{});
+    FrontEndScreenBundle::VisualScopeMap scopes;
+    scopes.emplace("TITLE", std::move(scope));
+
+    FrontendWidgetIR root_widget = MakeWidget("ROOT");
+    FrontendWidgetIR label = MakeWidget("LABEL");
+    label.kind = FrontendWidgetKind::Text;
+    label.rectangle = {
+        .left = -60.0F, .top = 40.0F, .width = 120.0F, .height = 40.0F};
+    // "$key" localization reference; the table stores the '$'-stripped key
+    // pre-lowercased (as the decoder does), and Find lowercases the query.
+    label.text_reference = "$MENU_KEY";
+    root_widget.children.push_back(std::move(label));
+
+    FrontEndScreenBundle::FontMap fonts;
+    FrontEndScreenBundle::TextureMap atlases;
+    if (provide_font)
+    {
+        fonts.emplace("DEFAULT.FNT", MakeFont());
+        atlases.emplace("SYNTHFNT.TDX", MakeFontAtlas());
+    }
+    RetailStringTableIR strings;
+    strings.entries.push_back(
+        RetailStringEntryIR{.key = "menu_key", .value = "AB"});
+
+    return FrontEndScreenBundleTestAccess::MakeBundleWithFonts(
+        FrontEndScreenKey::Title,
+        omega::asset::FrontendWidgetDocumentIR{.root = std::move(root_widget)},
+        "TITLE", std::move(scopes), std::move(fonts), std::move(atlases),
+        std::move(strings),
+        RetailFrontEndPresentationCapabilityTestAccess::Make(true));
+}
 } // namespace
 
 int main()
@@ -244,6 +368,41 @@ int main()
         Check(degenerate_center[0U] > 150U && degenerate_center[1U] < 110U &&
                   degenerate_center[2U] < 110U,
             "valid geometry still renders when a degenerate triangle is present");
+    }
+
+    // Phase 2: the GUI text pass emits atlas-textured glyph quads for a Text
+    // widget on top of the IE geometry.
+    {
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto text_composed =
+            ComposeRetailFrontEndFrame(MakeTextBundle(true), {}, &diagnostics);
+        Check(text_composed.has_value(), "text-bearing bundle composes");
+        Check(diagnostics.text_widgets_seen == 1U,
+            "the one Text widget is visited");
+        Check(diagnostics.strings_resolved == 1U,
+            "the widget string key resolves in the string table");
+        Check(diagnostics.fonts_resolved == 1U,
+            "the default font and its atlas resolve");
+        Check(diagnostics.glyph_quads_emitted == 2U,
+            "two glyph quads are laid out for the two-character label");
+        Check(diagnostics.total_triangles > diagnostics.ie_triangles_emitted,
+            "glyph triangles are appended after the IE geometry");
+    }
+
+    // Phase 2 fail-soft: a Text widget whose font is absent skips its glyphs but
+    // never fails the screen.
+    {
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto text_composed =
+            ComposeRetailFrontEndFrame(MakeTextBundle(false), {}, &diagnostics);
+        Check(text_composed.has_value(),
+            "a text widget with no resolvable font still composes the screen");
+        Check(diagnostics.text_widgets_seen == 1U,
+            "the Text widget is still visited without a font");
+        Check(diagnostics.fonts_missing == 1U,
+            "the missing font is counted");
+        Check(diagnostics.glyph_quads_emitted == 0U,
+            "no glyph quads are emitted without a font");
     }
 
     if (failures != 0)

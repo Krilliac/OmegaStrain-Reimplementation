@@ -180,7 +180,7 @@ add_library(omega_frontend_presentation STATIC
 target_include_directories(omega_frontend_presentation PUBLIC native/include)
 target_link_libraries(omega_frontend_presentation
     PUBLIC omega_assets omega_frontend
-    PRIVATE omega_content omega_frontend_triangle_kernel
+    PRIVATE omega_content omega_frontend_triangle_kernel omega_frontend_text
 )
 target_compile_features(omega_frontend_presentation PUBLIC cxx_std_23)
 
