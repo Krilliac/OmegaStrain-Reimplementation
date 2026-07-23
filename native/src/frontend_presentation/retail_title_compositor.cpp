@@ -3,9 +3,7 @@
 #include "omega/content/front_end_screen_bundle.h"
 
 #include <array>
-#include <cmath>
 #include <cstddef>
-#include <limits>
 #include <new>
 #include <string_view>
 
@@ -77,34 +75,23 @@ constexpr std::array<asset::FrontendTriangleIR, 2U> kCanonicalCoverTriangles{
     return true;
 }
 
-[[nodiscard]] std::expected<Point2F, RetailTitleCompositionError> ProjectPosition(
+[[nodiscard]] std::expected<InterfaceElementProjection, RetailTitleCompositionError>
+ProjectPosition(
     const asset::Float3IR& position) noexcept
 {
-    const auto bridged = TransformPoint(kInterfaceElementAxisBridge, position);
-    if (!bridged)
+    const auto projection = ProjectInterfaceElementPoint(position);
+    if (!projection)
         return std::unexpected(RetailTitleCompositionError::ArithmeticOverflow);
-    if (bridged->y != 0.0F)
+    if (projection->depth_rank < 0.0F || projection->depth_rank > 1.0F)
         return std::unexpected(RetailTitleCompositionError::UnsupportedProjection);
-
-    const double gui_y_double = static_cast<double>(bridged->z) - 1.0;
-    constexpr double maximum_float =
-        static_cast<double>(std::numeric_limits<float>::max());
-    if (!std::isfinite(gui_y_double) || gui_y_double < -maximum_float ||
-        gui_y_double > maximum_float)
-    {
-        return std::unexpected(RetailTitleCompositionError::ArithmeticOverflow);
-    }
-
-    const auto raster = GuiToCanonicalRaster(
-        Point2F{bridged->x, static_cast<float>(gui_y_double)});
-    if (!raster)
-        return std::unexpected(RetailTitleCompositionError::ArithmeticOverflow);
-    if (raster->x < 0.0F || raster->x > static_cast<float>(kCanonicalRasterWidth) ||
-        raster->y < 0.0F || raster->y > static_cast<float>(kCanonicalRasterHeight))
+    if (projection->raster_position.x < 0.0F ||
+        projection->raster_position.x > static_cast<float>(kCanonicalRasterWidth) ||
+        projection->raster_position.y < 0.0F ||
+        projection->raster_position.y > static_cast<float>(kCanonicalRasterHeight))
     {
         return std::unexpected(RetailTitleCompositionError::GeometryOutOfBounds);
     }
-    return *raster;
+    return *projection;
 }
 
 [[nodiscard]] bool HasCanonicalIdentifierSuffix(
@@ -206,7 +193,7 @@ RetailTitleCompositionResult ComposeStaticRetailTitle(
         const auto raster = ProjectPosition(visual->positions[index]);
         if (!raster)
             return std::unexpected(raster.error());
-        if (*raster != kCanonicalCoverCorners[index])
+        if (raster->raster_position != kCanonicalCoverCorners[index])
             return std::unexpected(RetailTitleCompositionError::UnsupportedRasterization);
     }
 

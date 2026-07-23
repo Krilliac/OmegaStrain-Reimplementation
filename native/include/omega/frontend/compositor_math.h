@@ -39,6 +39,17 @@ struct RgbaF
     bool operator==(const RgbaF&) const = default;
 };
 
+// Orthographic projection of an already-world-transformed retail interface
+// element point. Depth is a normalized, larger-is-nearer rank; no clipping or
+// GS fixed-point/unsigned quantization is assigned at this boundary.
+struct InterfaceElementProjection final
+{
+    Point2F raster_position{};
+    float depth_rank = 0.0F;
+
+    bool operator==(const InterfaceElementProjection&) const = default;
+};
+
 // The twelve retail coefficients are four column vectors with implied final
 // components 0, 0, 0, and 1. No row-major reinterpretation is permitted.
 struct AffineTransform12
@@ -57,8 +68,8 @@ inline constexpr AffineTransform12 kIdentityAffineTransform12{
     },
 };
 
-// Fixed retail interface-element bridge. Applying it to (x, y, 0) produces
-// (x, 0, y + 1).
+// Fixed retail interface-element bridge. Applying it to (x, y, z) produces
+// (x, z, y + 1).
 inline constexpr AffineTransform12 kInterfaceElementAxisBridge{
     .column_vectors = {
         1.0F, 0.0F, 0.0F,
@@ -79,6 +90,13 @@ enum class CompositorMathError : std::uint8_t
 // 640x448 raster without clipping or applying a host viewport transform.
 [[nodiscard]] std::expected<Point2F, CompositorMathError> GuiToCanonicalRaster(
     Point2F gui_position) noexcept;
+
+// [any thread; reentrant] Projects an already-world-transformed retail
+// interface-element point q into the canonical raster and normalized depth:
+// (320 + q.x, 224 - q.z, 1 - (q.y + 1) / 1000). This does not clip the raster
+// or depth range, or assign exact GS integer/fixed-point quantization.
+[[nodiscard]] std::expected<InterfaceElementProjection, CompositorMathError>
+ProjectInterfaceElementPoint(const asset::Float3IR& world_point) noexcept;
 
 // [any thread; reentrant] Applies one validated column-vector affine transform
 // to an owned point value. No state or input reference is retained.
@@ -124,4 +142,5 @@ enum class CompositorMathError : std::uint8_t
 static_assert(sizeof(omega::frontend::Point2F) == 8U);
 static_assert(sizeof(omega::frontend::RgbF) == 12U);
 static_assert(sizeof(omega::frontend::RgbaF) == 16U);
+static_assert(sizeof(omega::frontend::InterfaceElementProjection) == 12U);
 static_assert(sizeof(omega::frontend::AffineTransform12) == 48U);

@@ -119,10 +119,10 @@ struct Fixture final
         .identifier = "CANVAS_root",
         .transform_values = kIdentityAffineTransform12.column_vectors,
         .positions = {
-            Float3IR{.x = -320.0F, .y = 224.0F, .z = 0.0F},
-            Float3IR{.x = 320.0F, .y = 224.0F, .z = 0.0F},
-            Float3IR{.x = 320.0F, .y = -224.0F, .z = 0.0F},
-            Float3IR{.x = -320.0F, .y = -224.0F, .z = 0.0F},
+            Float3IR{.x = -320.0F, .y = 17.0F, .z = 224.0F},
+            Float3IR{.x = 320.0F, .y = 17.0F, .z = 224.0F},
+            Float3IR{.x = 320.0F, .y = 17.0F, .z = -224.0F},
+            Float3IR{.x = -320.0F, .y = 17.0F, .z = -224.0F},
         },
         .uvs = {{.u = 0.0F, .v = 0.0F}},
         .colors = {{.red = 17U, .green = 34U, .blue = 51U, .alpha = 255U}},
@@ -325,11 +325,18 @@ void TestUnprovenSemanticRejections()
         RetailTitleCompositionError::UnsupportedRasterization,
         "unneeded but noncanonical raster attributes fail closed");
 
-    auto projection = MakeFixture();
-    projection.visual.positions[0].z = 1.0F;
-    CheckError(ComposeStaticRetailTitle(MakeBundle(std::move(projection))),
+    auto varying_depth = MakeFixture();
+    varying_depth.visual.positions[0].y = 99.0F;
+    const auto varying_depth_result =
+        ComposeStaticRetailTitle(MakeBundle(std::move(varying_depth)));
+    Check(varying_depth_result.has_value(),
+        "nonzero and varying source Y supplies depth without changing raster XY");
+
+    auto out_of_range_depth = MakeFixture();
+    out_of_range_depth.visual.positions[0].y = -2.0F;
+    CheckError(ComposeStaticRetailTitle(MakeBundle(std::move(out_of_range_depth))),
         RetailTitleCompositionError::UnsupportedProjection,
-        "nonzero source Z is not silently dropped by the 2D subset");
+        "the static subset fails closed when projected depth leaves the normalized interval");
 
     auto output_alpha = MakeFixture();
     output_alpha.visual.colors[0].alpha = 128U;
@@ -352,13 +359,17 @@ void TestGeometryBoundsOverflowAndCoverage()
         RetailTitleCompositionError::GeometryOutOfBounds,
         "geometry outside the canonical raster fails closed");
 
-    auto overflow = MakeFixture();
-    overflow.widget.binding->transform_values[0] =
-        std::numeric_limits<float>::max();
-    overflow.visual.transform_values[0] = std::numeric_limits<float>::max();
-    CheckError(ComposeStaticRetailTitle(MakeBundle(std::move(overflow))),
+    auto x_overflow = MakeFixture();
+    x_overflow.visual.positions[0].x = std::numeric_limits<float>::max();
+    CheckError(ComposeStaticRetailTitle(MakeBundle(std::move(x_overflow))),
         RetailTitleCompositionError::ArithmeticOverflow,
-        "projection overflow fails closed without allocation");
+        "screen-X projection overflow fails closed without allocation");
+
+    auto z_overflow = MakeFixture();
+    z_overflow.visual.positions[0].z = -std::numeric_limits<float>::max();
+    CheckError(ComposeStaticRetailTitle(MakeBundle(std::move(z_overflow))),
+        RetailTitleCompositionError::ArithmeticOverflow,
+        "screen-Z projection overflow fails closed without allocation");
 
     auto incomplete = MakeFixture();
     incomplete.visual.triangles[1] = incomplete.visual.triangles[0];
