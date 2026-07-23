@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -10,126 +11,165 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPOSITORY_ROOT))
-from tools import assemble_frontend_phase as assembler  # noqa: E402
-
-
-WIRE_FIXTURE = (
+MODULE_PATH = REPOSITORY_ROOT / "tools" / "assemble_frontend_phase.py"
+FIXTURE = (
     REPOSITORY_ROOT
     / "analysis"
     / "fixtures"
-    / "frontend_phase_v1"
+    / "frontend_phase_v2"
     / "synthetic-producer.hex"
 )
-_TEST_CONFIG_DIGEST = hashlib.sha256(b"public synthetic frontend phase configuration").digest()
-_DEFAULT_EDGES = ((1, 1), (2, 1), (2, 2))
+SPEC = importlib.util.spec_from_file_location("assemble_frontend_phase", MODULE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+assembler = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = assembler
+SPEC.loader.exec_module(assembler)
 
 
-class _FragmentBuilder:
+_CAPTURE_DOMAIN = bytes(range(1, 33))
+_RUNTIME_CONFIG = bytes(range(33, 65))
+_SITE_MAP_DIGEST = bytes(range(65, 97))
+
+
+class _Builder:
     def __init__(self) -> None:
         self.output = bytearray()
         self.offsets: dict[str, int] = {}
 
-    def mark(self, name: str) -> None:
+    def blob(self, value: bytes, name: str) -> None:
         self.offsets[name] = len(self.output)
-
-    def raw(self, value: bytes) -> None:
         self.output.extend(value)
 
-    def u8(self, value: int, name: str | None = None) -> None:
-        if name is not None:
-            self.mark(name)
+    def u8(self, value: int, name: str) -> None:
+        self.offsets[name] = len(self.output)
         self.output.extend(struct.pack("<B", value))
 
-    def u32(self, value: int, name: str | None = None) -> None:
-        if name is not None:
-            self.mark(name)
+    def u32(self, value: int, name: str) -> None:
+        self.offsets[name] = len(self.output)
         self.output.extend(struct.pack("<I", value))
+
+
+def _default_counts() -> tuple[int, ...]:
+    return (2, 2, 4, 3, 3, 3)
 
 
 def build_valid_fragment(
     *,
-    digest: bytes = _TEST_CONFIG_DIGEST,
-    edges: tuple[tuple[int, int], ...] = _DEFAULT_EDGES,
+    status: int = int(assembler.TerminalStatus.Complete),
+    commit_state: int | None = None,
+    failure_counts: tuple[int, ...] | None = None,
+    discovered_counts: tuple[int, ...] | None = None,
 ) -> tuple[bytes, dict[str, int]]:
-    """Two invocations (root + nested child), each with an Enter/Exit event
-    pair, two draws, and (by default) three phase/draw edges: the root phase
-    contributes to draw 1, and the nested child phase contributes to both
-    draw 1 and draw 2."""
+    counts = _default_counts()
+    if commit_state is None:
+        commit_state = int(
+            assembler.CommitState.Committed
+            if status == int(assembler.TerminalStatus.Complete)
+            else assembler.CommitState.Aborted
+        )
+    if failure_counts is None:
+        failure_counts = (0,) * 7
+    if discovered_counts is None:
+        discovered_counts = counts
+    if len(failure_counts) != 7 or len(discovered_counts) != 6:
+        raise AssertionError("bad synthetic terminal inputs")
 
-    counts = (
-        2,  # invocations
-        4,  # events
-        2,  # draws
-        len(edges),
-    )
-
-    builder = _FragmentBuilder()
-    builder.raw(assembler.FRAGMENT_MAGIC)
+    builder = _Builder()
+    builder.blob(assembler.FRAGMENT_MAGIC, "magic")
     builder.u32(assembler.FRAGMENT_VERSION, "version")
-    builder.mark("config_digest")
-    builder.raw(digest)
-    for index, count in enumerate(counts):
-        builder.u32(count, f"count.{index}")
+    builder.blob(_CAPTURE_DOMAIN, "capture_domain")
+    builder.blob(_RUNTIME_CONFIG, "runtime_config")
+    builder.blob(_SITE_MAP_DIGEST, "site_map_digest")
+    builder.u32(3, "frame_count")
+    builder.u32(status, "terminal.status")
+    builder.u32(commit_state, "terminal.commit")
+    for index, value in enumerate(failure_counts):
+        builder.u32(value, f"failure.{index}")
+    for index, value in enumerate(discovered_counts):
+        builder.u32(value, f"discovered.{index}")
+    for index, value in enumerate(counts):
+        builder.u32(value, f"count.{index}")
 
-    # Invocation 1: root, spans events 1 (enter) and 4 (exit).
-    builder.u32(1, "invocation.0.id")
-    builder.u32(1, "invocation.0.frame")
-    builder.u32(0, "invocation.0.parent")
-    builder.u32(1, "invocation.0.enter")
-    builder.u32(4, "invocation.0.exit")
+    builder.u32(1, "site.0.id")
+    builder.u32(2, "site.1.id")
 
-    # Invocation 2: nested under 1, spans events 2 (enter) and 3 (exit).
-    builder.u32(2, "invocation.1.id")
-    builder.u32(2, "invocation.1.frame")
-    builder.u32(1, "invocation.1.parent")
-    builder.u32(2, "invocation.1.enter")
-    builder.u32(3, "invocation.1.exit")
+    # Invocation 1 is the root. Invocation 2 is strictly nested.
+    for index, values in enumerate(
+        (
+            (1, 1, 0, 0, 1, 4),
+            (2, 2, 0, 1, 2, 3),
+        )
+    ):
+        for field, value in zip(
+            ("id", "site", "lane", "parent", "enter", "exit"),
+            values,
+            strict=True,
+        ):
+            builder.u32(value, f"invocation.{index}.{field}")
 
-    builder.u32(1, "event.0.id")
-    builder.u32(1, "event.0.frame")
-    builder.u32(1, "event.0.invocation")
-    builder.u8(0, "event.0.closed_kind")
-    builder.u32(0, "event.0.reserved")
+    # Global chronology: enter root, enter child, two submissions, draw,
+    # exit child, root submission, draw, exit root, skipped draw.
+    for index, values in enumerate(
+        (
+            (1, 1, 1, 1, 0, 0),
+            (2, 2, 1, 2, 0, 0),
+            (3, 6, 2, 2, 1, 0),
+            (4, 9, 3, 1, 1, 0),
+        )
+    ):
+        ordinal, sequence, frame, invocation, kind, reserved = values
+        builder.u32(ordinal, f"event.{index}.id")
+        builder.u32(sequence, f"event.{index}.sequence")
+        builder.u32(frame, f"event.{index}.frame")
+        builder.u32(invocation, f"event.{index}.invocation")
+        builder.u8(kind, f"event.{index}.kind")
+        builder.u32(reserved, f"event.{index}.reserved")
 
-    builder.u32(2, "event.1.id")
-    builder.u32(2, "event.1.frame")
-    builder.u32(2, "event.1.invocation")
-    builder.u8(0, "event.1.closed_kind")
-    builder.u32(0, "event.1.reserved")
+    for index, values in enumerate(
+        (
+            (1, 3, 1, 2, 0, 3),
+            (2, 4, 2, 2, 3, 2),
+            (3, 7, 2, 1, 5, 1),
+        )
+    ):
+        for field, value in zip(
+            ("id", "sequence", "frame", "invocation", "primitive_begin", "primitive_count"),
+            values,
+            strict=True,
+        ):
+            builder.u32(value, f"submission.{index}.{field}")
 
-    builder.u32(3, "event.2.id")
-    builder.u32(3, "event.2.frame")
-    builder.u32(2, "event.2.invocation")
-    builder.u8(1, "event.2.closed_kind")
-    builder.u32(0, "event.2.reserved")
+    for index, values in enumerate(
+        (
+            (1, 5, 2, 0, 0),
+            (2, 8, 2, 0, 0),
+            (3, 10, 3, 1, 0),
+        )
+    ):
+        ordinal, sequence, frame, disposition, reserved = values
+        builder.u32(ordinal, f"draw.{index}.id")
+        builder.u32(sequence, f"draw.{index}.sequence")
+        builder.u32(frame, f"draw.{index}.frame")
+        builder.u8(disposition, f"draw.{index}.disposition")
+        builder.u32(reserved, f"draw.{index}.reserved")
 
-    builder.u32(4, "event.3.id")
-    builder.u32(4, "event.3.frame")
-    builder.u32(1, "event.3.invocation")
-    builder.u8(1, "event.3.closed_kind")
-    builder.u32(0, "event.3.reserved")
-
-    builder.u32(1, "draw.0.id")
-    builder.u32(2, "draw.0.frame")
-    builder.u8(0, "draw.0.disposition")
-    builder.u32(0, "draw.0.reserved")
-
-    builder.u32(2, "draw.1.id")
-    builder.u32(3, "draw.1.frame")
-    builder.u8(0, "draw.1.disposition")
-    builder.u32(0, "draw.1.reserved")
-
-    for index, (event, draw) in enumerate(edges):
-        builder.u32(event, f"edge.{index}.event")
+    for index, (submission, draw) in enumerate(((1, 1), (2, 1), (3, 2))):
+        builder.u32(submission, f"edge.{index}.submission")
         builder.u32(draw, f"edge.{index}.draw")
 
     return bytes(builder.output), builder.offsets
+
+
+def clone_bytes(raw: bytes) -> bytes:
+    result = bytes(bytearray(raw))
+    assert result is not raw
+    return result
 
 
 def mutate_u8(raw: bytes, offset: int, value: int) -> bytes:
@@ -144,6 +184,75 @@ def mutate_u32(raw: bytes, offset: int, value: int) -> bytes:
     return bytes(result)
 
 
+def mutate_many_u32(raw: bytes, changes: tuple[tuple[int, int], ...]) -> bytes:
+    result = bytearray(raw)
+    for offset, value in changes:
+        struct.pack_into("<I", result, offset, value)
+    return bytes(result)
+
+
+def site_binding() -> assembler.SiteMapBinding:
+    return assembler.SiteMapBinding(_RUNTIME_CONFIG, _SITE_MAP_DIGEST, 2)
+
+
+def capture_manifest() -> assembler.CaptureDomainManifest:
+    return assembler.CaptureDomainManifest(
+        _CAPTURE_DOMAIN,
+        _CAPTURE_DOMAIN,
+        _CAPTURE_DOMAIN,
+    )
+
+
+def site_binding_bytes() -> bytes:
+    return (
+        json.dumps(
+            {
+                "schema": assembler.SITE_MAP_BINDING_SCHEMA,
+                "runtime_config_digest": _RUNTIME_CONFIG.hex(),
+                "site_map_digest": _SITE_MAP_DIGEST.hex(),
+                "site_count": 2,
+            },
+            separators=(",", ":"),
+        ).encode("ascii")
+        + b"\n"
+    )
+
+
+def capture_manifest_bytes(
+    *,
+    scene: bytes = _CAPTURE_DOMAIN,
+    frontend: bytes = _CAPTURE_DOMAIN,
+) -> bytes:
+    return (
+        json.dumps(
+            {
+                "schema": assembler.CAPTURE_MANIFEST_SCHEMA,
+                "phase_capture_domain": _CAPTURE_DOMAIN.hex(),
+                "scene_capture_domain": scene.hex(),
+                "frontend_capture_domain": frontend.hex(),
+            },
+            separators=(",", ":"),
+        ).encode("ascii")
+        + b"\n"
+    )
+
+
+def assembled_model(
+    raw: bytes | None = None,
+    *,
+    limits: assembler.PhaseLimits = assembler.DEFAULT_LIMITS,
+) -> assembler.ParsedPhaseFragment:
+    if raw is None:
+        raw, _ = build_valid_fragment()
+    return assembler.assemble_phase_model(
+        [raw],
+        site_map_binding=site_binding(),
+        capture_manifest=capture_manifest(),
+        expected_fragment_sha256=hashlib.sha256(raw).hexdigest(),
+        limits=limits,
+    )
+
+
 def run_main(args: list[str]) -> tuple[int, str, str]:
     output = io.StringIO()
     errors = io.StringIO()
@@ -152,243 +261,572 @@ def run_main(args: list[str]) -> tuple[int, str, str]:
     return code, output.getvalue(), errors.getvalue()
 
 
+def write_cli_inputs(directory: Path, raw: bytes) -> tuple[Path, Path, Path]:
+    fragment = directory / "input.part"
+    binding = directory / "site-binding.json"
+    manifest = directory / "capture-manifest.json"
+    fragment.write_bytes(raw)
+    binding.write_bytes(site_binding_bytes())
+    manifest.write_bytes(capture_manifest_bytes())
+    return fragment, binding, manifest
+
+
+def cli_args(
+    directory: Path,
+    raw: bytes,
+    *,
+    private: bool = False,
+) -> list[str]:
+    fragment, binding, manifest = write_cli_inputs(directory, raw)
+    args = [
+        "--site-map-binding",
+        str(binding),
+        "--capture-manifest",
+        str(manifest),
+        "--expected-sha256",
+        hashlib.sha256(raw).hexdigest(),
+        "--public-output",
+        str(directory / "public.json"),
+    ]
+    if private:
+        args += ["--private-output", str(directory / "private.json")]
+    args.append(str(fragment))
+    return args
+
+
 class PhaseFragmentParserTests(unittest.TestCase):
     def setUp(self) -> None:
         self.raw, self.offsets = build_valid_fragment()
 
-    def assert_invalid(self, raw: bytes) -> None:
+    def assert_invalid(
+        self,
+        raw: bytes,
+        *,
+        limits: assembler.PhaseLimits = assembler.DEFAULT_LIMITS,
+    ) -> None:
         with self.assertRaises(assembler.PhaseFragmentValidationError):
-            assembler.parse_phase_fragment(raw)
+            assembler.parse_phase_fragment(raw, limits=limits)
 
-    def test_valid_fragment_parses_and_discards_event_and_draw_detail(self) -> None:
-        parsed = assembler.parse_phase_fragment(self.raw)
-        self.assertEqual(parsed.runtime_config_digest, _TEST_CONFIG_DIGEST)
-        self.assertEqual(parsed.invocation_parents, (0, 1))
-        self.assertEqual(parsed.draw_count, 2)
-        self.assertEqual(parsed.skipped_draw_count, 0)
-        self.assertEqual(parsed.phase_draw_edges, ((1, 1), (2, 1), (2, 2)))
-        self.assertEqual(len(self.raw), 226)
-
-    def test_checked_in_fixture_matches_the_python_reference_builder(self) -> None:
-        encoded = WIRE_FIXTURE.read_bytes()
-        self.assertEqual(encoded[-1:], b"\n")
-        self.assertNotIn(b"\r", encoded)
-        golden = bytes.fromhex(encoded.decode("ascii"))
-        self.assertEqual(golden, self.raw)
+    def test_valid_fragment_retains_private_chronology_and_dispositions(self) -> None:
+        model = assembler.parse_phase_fragment(self.raw)
+        self.assertTrue(model.ordering_evidence_valid)
+        self.assertEqual(model.capture_domain, _CAPTURE_DOMAIN)
+        self.assertEqual([row.site for row in model.invocations], [1, 2])
+        self.assertEqual([row.sequence for row in model.events], [1, 2, 6, 9])
+        self.assertEqual([row.sequence for row in model.submissions], [3, 4, 7])
+        self.assertEqual([row.sequence for row in model.draws], [5, 8, 10])
         self.assertEqual(
-            assembler.parse_phase_fragment(golden).phase_draw_edges,
-            ((1, 1), (2, 1), (2, 2)),
+            [row.disposition for row in model.draws],
+            [
+                assembler.DrawDisposition.Submitted,
+                assembler.DrawDisposition.Submitted,
+                assembler.DrawDisposition.Skipped,
+            ],
+        )
+        self.assertEqual(
+            [(row.submission, row.draw) for row in model.memberships],
+            [(1, 1), (2, 1), (3, 2)],
         )
 
-    def test_magic_version_digest_and_exact_length_fail_closed(self) -> None:
+    def test_checked_in_fixture_matches_reference_builder(self) -> None:
+        encoded = FIXTURE.read_bytes()
+        self.assertEqual(encoded[-1:], b"\n")
+        self.assertNotIn(b"\r", encoded)
+        self.assertEqual(bytes.fromhex(encoded.decode("ascii")), self.raw)
+
+    def test_wire_contains_only_neutral_binary_ordinals(self) -> None:
+        for forbidden in (
+            b"address",
+            b"symbol",
+            b"widget",
+            b"text",
+            b"animation",
+            b"asset",
+            b"path",
+        ):
+            self.assertNotIn(forbidden, self.raw.lower())
+
+    def test_magic_version_consistency_values_and_exact_length_fail_closed(self) -> None:
         self.assert_invalid(b"X" + self.raw[1:])
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["version"], 2))
-        zero_digest = bytearray(self.raw)
-        begin = self.offsets["config_digest"]
-        zero_digest[begin : begin + 32] = bytes(32)
-        self.assert_invalid(bytes(zero_digest))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["version"], 3))
+        for name in ("capture_domain", "runtime_config", "site_map_digest"):
+            changed = bytearray(self.raw)
+            begin = self.offsets[name]
+            changed[begin : begin + 32] = bytes(32)
+            self.assert_invalid(bytes(changed))
         self.assert_invalid(self.raw[:-1])
         self.assert_invalid(self.raw + b"X")
         self.assert_invalid(b"")
-        self.assert_invalid(b" " * (assembler.MAX_FRAGMENT_BYTES + 1))
         with self.assertRaises(assembler.PhaseFragmentValidationError):
             assembler.parse_phase_fragment(bytearray(self.raw))  # type: ignore[arg-type]
 
-    def test_counts_are_bounded_before_rows_are_allocated(self) -> None:
-        too_many_invocations = mutate_u32(
-            self.raw, self.offsets["count.0"], assembler.MAX_INVOCATIONS + 1
-        )
-        self.assert_invalid(too_many_invocations)
-        no_invocations = mutate_u32(self.raw, self.offsets["count.0"], 0)
-        self.assert_invalid(no_invocations)
-        mismatched_events = mutate_u32(self.raw, self.offsets["count.1"], 5)
-        self.assert_invalid(mismatched_events)
-        too_many_edges = mutate_u32(self.raw, self.offsets["count.3"], assembler.MAX_EDGES + 1)
-        self.assert_invalid(too_many_edges)
-
-    def test_invocations_require_dense_ids_bounded_frame_and_valid_parent(self) -> None:
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.0.id"], 2))
-        # Own dense id is 2; a parent of 2 is a self-reference, and anything
-        # greater is a forward reference. Both must fail the same way.
+    def test_dense_site_and_invocation_references_are_enforced(self) -> None:
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["site.0.id"], 2))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.0.site"], 0))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.0.site"], 3))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.1.lane"], 1))
         self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.1.parent"], 2))
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.0.frame"], 0))
-        self.assert_invalid(
-            mutate_u32(self.raw, self.offsets["invocation.0.frame"], assembler.MAX_FRAMES + 1)
-        )
-        # Raising invocation 1's frame above invocation 2's breaks the
-        # non-decreasing rule across the table.
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.0.frame"], 5))
-
-    def test_invocation_enter_exit_must_be_present_and_ordered(self) -> None:
         self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.0.enter"], 0))
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.0.exit"], 0))
-        # Invocation 2's enter (2) and exit (3) are both in-bounds event IDs;
-        # collapsing exit onto enter violates ordering without touching bounds.
         self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.1.exit"], 2))
 
-    def test_events_validate_reference_bounds_kind_and_reserved(self) -> None:
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.0.invocation"], 0))
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.0.invocation"], 3))
-        self.assert_invalid(mutate_u8(self.raw, self.offsets["event.0.closed_kind"], 2))
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.0.reserved"], 1))
+    def test_event_submission_and_draw_fields_are_bounded(self) -> None:
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.0.id"], 2))
         self.assert_invalid(mutate_u32(self.raw, self.offsets["event.0.frame"], 0))
-        self.assert_invalid(
-            mutate_u32(self.raw, self.offsets["event.0.frame"], assembler.MAX_FRAMES + 1)
-        )
-        # Raising event 1's frame above event 2's breaks non-decreasing order.
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.0.frame"], 3))
-
-    def test_cross_check_requires_matching_invocation_kind_and_frame(self) -> None:
-        # Invocation 1's enter (event 1) must name invocation 1 with Enter kind.
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.0.invocation"], 2))
-        self.assert_invalid(mutate_u8(self.raw, self.offsets["event.0.closed_kind"], 1))
-        # Invocation 1's exit (event 4) must name invocation 1 with Exit kind.
-        self.assert_invalid(mutate_u8(self.raw, self.offsets["event.3.closed_kind"], 0))
-        # Invocation 1's own frame (1) must equal its enter event's frame.
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.0.frame"], 2))
-
-    def test_draws_validate_dense_id_frame_disposition_and_reserved(self) -> None:
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.0.invocation"], 0))
+        self.assert_invalid(mutate_u8(self.raw, self.offsets["event.0.kind"], 2))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.0.reserved"], 1))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["submission.0.id"], 2))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["submission.0.frame"], 4))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["submission.0.invocation"], 0))
         self.assert_invalid(mutate_u32(self.raw, self.offsets["draw.0.id"], 2))
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["draw.0.frame"], 0))
-        self.assert_invalid(
-            mutate_u32(self.raw, self.offsets["draw.0.frame"], assembler.MAX_FRAMES + 1)
-        )
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["draw.0.frame"], 5))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["draw.0.frame"], 4))
         self.assert_invalid(mutate_u8(self.raw, self.offsets["draw.0.disposition"], 2))
         self.assert_invalid(mutate_u32(self.raw, self.offsets["draw.0.reserved"], 1))
 
-    def test_edges_require_enter_kind_valid_bounds_order_and_uniqueness(self) -> None:
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.0.event"], 0))
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.0.event"], 5))
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.0.draw"], 0))
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.0.draw"], 3))
-        # Event 4 is invocation 1's Exit event; edges may only name Enter events.
-        self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.0.event"], 4))
+    def test_crossing_lifecycle_is_rejected_even_when_references_are_consistent(self) -> None:
+        crossing = mutate_many_u32(
+            self.raw,
+            (
+                (self.offsets["invocation.0.exit"], 3),
+                (self.offsets["invocation.1.exit"], 4),
+                (self.offsets["event.2.invocation"], 1),
+                (self.offsets["event.3.invocation"], 2),
+            ),
+        )
+        self.assert_invalid(crossing)
 
-        out_of_order, _ = build_valid_fragment(edges=((2, 2), (1, 1)))
-        self.assert_invalid(out_of_order)
-        duplicate, _ = build_valid_fragment(edges=((1, 1), (2, 1), (2, 1)))
-        self.assert_invalid(duplicate)
+    def test_parent_stack_orphan_and_event_sequence_fail_closed(self) -> None:
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["invocation.1.parent"], 0))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.2.kind"], 0))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["event.1.sequence"], 1))
 
-    def test_required_descriptor_tables_cannot_be_empty(self) -> None:
-        # Zero edges (and therefore zero attribution) is rejected at the count
-        # header, matching the other three required tables.
-        empty_counts = mutate_u32(self.raw, self.offsets["count.3"], 0)
-        self.assert_invalid(empty_counts)
+    def test_submission_must_use_immutable_active_invocation_context(self) -> None:
+        self.assert_invalid(
+            mutate_u32(self.raw, self.offsets["submission.2.invocation"], 2)
+        )
+        self.assert_invalid(
+            mutate_u32(self.raw, self.offsets["submission.1.primitive_begin"], 4)
+        )
+        self.assert_invalid(
+            mutate_u32(self.raw, self.offsets["submission.0.primitive_count"], 0)
+        )
+
+    def test_draw_must_follow_every_attributed_submission(self) -> None:
+        changed = mutate_many_u32(
+            self.raw,
+            (
+                (self.offsets["submission.1.sequence"], 5),
+                (self.offsets["draw.0.sequence"], 4),
+            ),
+        )
+        self.assert_invalid(changed)
+
+    def test_draw_frame_cannot_precede_invocation_entry(self) -> None:
+        changed = mutate_many_u32(
+            self.raw,
+            (
+                (self.offsets["event.1.frame"], 2),
+                (self.offsets["submission.0.frame"], 2),
+                (self.offsets["draw.0.frame"], 1),
+            ),
+        )
+        self.assert_invalid(changed)
+
+    def test_global_temporal_sequence_rejects_gaps_and_duplicates(self) -> None:
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["draw.2.sequence"], 11))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["draw.2.sequence"], 9))
+
+    def test_membership_is_total_unique_ordered_and_disposition_consistent(self) -> None:
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.2.submission"], 2))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.1.submission"], 1))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.2.draw"], 1))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["edge.2.draw"], 3))
+        self.assert_invalid(mutate_u8(self.raw, self.offsets["draw.1.disposition"], 1))
+        self.assert_invalid(mutate_u8(self.raw, self.offsets["draw.2.disposition"], 0))
+
+    def test_complete_terminal_requires_commit_zero_failures_and_reconciliation(self) -> None:
+        self.assert_invalid(
+            mutate_u32(
+                self.raw,
+                self.offsets["terminal.commit"],
+                int(assembler.CommitState.Aborted),
+            )
+        )
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["failure.0"], 1))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["discovered.3"], 4))
+        self.assert_invalid(mutate_u32(self.raw, self.offsets["frame_count"], 0))
+
+    def test_every_incomplete_terminal_category_is_retained_and_invalidates_evidence(self) -> None:
+        cases = (
+            (assembler.TerminalStatus.TelemetryOverflow, 0),
+            (assembler.TerminalStatus.TelemetryDropped, 1),
+            (assembler.TerminalStatus.VmReset, 2),
+            (assembler.TerminalStatus.SavestateDiscontinuity, 3),
+            (assembler.TerminalStatus.QueueExhausted, 4),
+            (assembler.TerminalStatus.OutputFailure, 5),
+            (assembler.TerminalStatus.InternalFailure, 6),
+        )
+        for status, counter_index in cases:
+            counters = [0] * 7
+            counters[counter_index] = 1
+            raw, _ = build_valid_fragment(
+                status=int(status), failure_counts=tuple(counters)
+            )
+            with self.subTest(status=status.name):
+                model = assembler.parse_phase_fragment(raw)
+                self.assertIs(model.terminal.status, status)
+                self.assertFalse(model.ordering_evidence_valid)
+
+        raw, _ = build_valid_fragment(status=int(assembler.TerminalStatus.ProducerAborted))
+        model = assembler.parse_phase_fragment(raw)
+        self.assertIs(model.terminal.status, assembler.TerminalStatus.ProducerAborted)
+        self.assertFalse(model.ordering_evidence_valid)
+
+    def test_terminal_precedence_and_commit_contradictions_fail_closed(self) -> None:
+        raw, _ = build_valid_fragment(
+            status=int(assembler.TerminalStatus.TelemetryDropped),
+            failure_counts=(1, 1, 0, 0, 0, 0, 0),
+        )
+        self.assert_invalid(raw)
+        raw, _ = build_valid_fragment(
+            status=int(assembler.TerminalStatus.VmReset),
+            failure_counts=(0, 0, 1, 0, 0, 0, 0),
+            commit_state=int(assembler.CommitState.Committed),
+        )
+        self.assert_invalid(raw)
+        raw, _ = build_valid_fragment(
+            status=int(assembler.TerminalStatus.ProducerAborted),
+            failure_counts=(0, 1, 0, 0, 0, 0, 0),
+        )
+        self.assert_invalid(raw)
 
 
-class PhaseAssemblerTests(unittest.TestCase):
+class PrivateBindingAndAssemblyTests(unittest.TestCase):
     def setUp(self) -> None:
         self.raw, self.offsets = build_valid_fragment()
 
-    def test_single_and_repeat_output_match_expected_document(self) -> None:
-        expected = {
-            "schema": assembler.PHASE_OBSERVATION_SCHEMA,
-            "invocation_parents": [0, 1],
-            "draw_count": 2,
-            "skipped_draw_count": 0,
-            "phase_draw_edges": [[1, 1], [2, 1], [2, 2]],
-        }
-        for fragments in ([self.raw], [self.raw, self.raw]):
-            with self.subTest(fragment_count=len(fragments)):
-                document = assembler.assemble_phase_document(fragments)
-                self.assertEqual(document, expected)
-                self.assertEqual(
-                    assembler.encode_phase_document(document),
-                    json.dumps(
-                        expected,
-                        ensure_ascii=True,
-                        allow_nan=False,
-                        separators=(",", ":"),
-                    ).encode("ascii")
-                    + b"\n",
-                )
-                self.assertNotIn(
-                    _TEST_CONFIG_DIGEST.hex().encode("ascii"),
-                    assembler.encode_phase_document(document),
-                )
-
-    def test_expected_digest_and_repeat_bytes_are_verified_but_never_emitted(self) -> None:
-        expected_hash = hashlib.sha256(self.raw).hexdigest()
-        document = assembler.assemble_phase_document(
-            [self.raw, self.raw],
-            expected_fragment_sha256=expected_hash.upper(),
+    def test_private_binding_documents_are_exact_and_bounded(self) -> None:
+        self.assertEqual(assembler.parse_site_map_binding(site_binding_bytes()), site_binding())
+        self.assertEqual(
+            assembler.parse_site_map_binding(
+                site_binding_bytes(),
+                limits=replace(
+                    assembler.DEFAULT_LIMITS,
+                    manifest_bytes=len(site_binding_bytes()),
+                ),
+            ),
+            site_binding(),
         )
-        rendered = assembler.encode_phase_document(document).decode("ascii")
-        self.assertNotIn(expected_hash, rendered)
-        self.assertNotIn(_TEST_CONFIG_DIGEST.hex(), rendered)
-
+        self.assertEqual(
+            assembler.parse_capture_domain_manifest(capture_manifest_bytes()),
+            capture_manifest(),
+        )
+        duplicate = (
+            b'{"schema":"'
+            + assembler.SITE_MAP_BINDING_SCHEMA.encode("ascii")
+            + b'","schema":"x","runtime_config_digest":"'
+            + _RUNTIME_CONFIG.hex().encode("ascii")
+            + b'","site_map_digest":"'
+            + _SITE_MAP_DIGEST.hex().encode("ascii")
+            + b'","site_count":2}'
+        )
         with self.assertRaises(assembler.PhaseAssemblyError):
-            assembler.assemble_phase_document(
+            assembler.parse_site_map_binding(duplicate)
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.parse_site_map_binding(
+                site_binding_bytes(),
+                limits=replace(
+                    assembler.DEFAULT_LIMITS,
+                    manifest_bytes=len(site_binding_bytes()) - 1,
+                ),
+            )
+
+    def test_site_map_and_capture_domain_joins_fail_closed(self) -> None:
+        wrong = bytes([255]) * 32
+        for binding in (
+            assembler.SiteMapBinding(wrong, _SITE_MAP_DIGEST, 2),
+            assembler.SiteMapBinding(_RUNTIME_CONFIG, wrong, 2),
+            assembler.SiteMapBinding(_RUNTIME_CONFIG, _SITE_MAP_DIGEST, 1),
+        ):
+            with self.subTest(binding=binding):
+                with self.assertRaises(assembler.PhaseAssemblyError):
+                    assembler.assemble_phase_model(
+                        [self.raw],
+                        site_map_binding=binding,
+                        capture_manifest=capture_manifest(),
+                    )
+        for manifest in (
+            assembler.CaptureDomainManifest(wrong, wrong, wrong),
+            assembler.CaptureDomainManifest(_CAPTURE_DOMAIN, wrong, _CAPTURE_DOMAIN),
+            assembler.CaptureDomainManifest(_CAPTURE_DOMAIN, _CAPTURE_DOMAIN, wrong),
+        ):
+            with self.subTest(manifest=manifest):
+                with self.assertRaises(assembler.PhaseAssemblyError):
+                    assembler.assemble_phase_model(
+                        [self.raw],
+                        site_map_binding=site_binding(),
+                        capture_manifest=manifest,
+                    )
+
+    def test_repeat_copies_are_compared_but_reference_is_parsed_once(self) -> None:
+        repeat = clone_bytes(self.raw)
+        with mock.patch.object(
+            assembler,
+            "parse_phase_fragment",
+            wraps=assembler.parse_phase_fragment,
+        ) as parse:
+            model = assembler.assemble_phase_model(
+                [self.raw, repeat],
+                site_map_binding=site_binding(),
+                capture_manifest=capture_manifest(),
+            )
+        self.assertTrue(model.ordering_evidence_valid)
+        parse.assert_called_once()
+
+    def test_same_object_changed_repeat_and_bad_expected_digest_are_rejected(self) -> None:
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.assemble_phase_model(
+                [self.raw, self.raw],
+                site_map_binding=site_binding(),
+                capture_manifest=capture_manifest(),
+            )
+        changed = mutate_u32(self.raw, self.offsets["frame_count"], 2)
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.assemble_phase_model(
+                [self.raw, changed],
+                site_map_binding=site_binding(),
+                capture_manifest=capture_manifest(),
+            )
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.assemble_phase_model(
                 [self.raw],
+                site_map_binding=site_binding(),
+                capture_manifest=capture_manifest(),
                 expected_fragment_sha256="0" * 64,
             )
+
+    def test_total_input_limit_applies_to_independent_repeats(self) -> None:
+        repeat = clone_bytes(self.raw)
+        exact = replace(
+            assembler.DEFAULT_LIMITS,
+            total_input_bytes=len(self.raw) * 2,
+        )
+        assembler.assemble_phase_model(
+            [self.raw, repeat],
+            site_map_binding=site_binding(),
+            capture_manifest=capture_manifest(),
+            limits=exact,
+        )
         with self.assertRaises(assembler.PhaseAssemblyError):
-            assembler.assemble_phase_document(
-                [self.raw],
-                expected_fragment_sha256="bad",
+            assembler.assemble_phase_model(
+                [self.raw, repeat],
+                site_map_binding=site_binding(),
+                capture_manifest=capture_manifest(),
+                limits=replace(exact, total_input_bytes=len(self.raw) * 2 - 1),
             )
 
-        changed = bytearray(self.raw)
-        changed[self.offsets["config_digest"]] ^= 1
+    def test_fragment_copy_count_accepts_exact_limit_and_rejects_plus_one(self) -> None:
+        copies = [clone_bytes(self.raw) for _ in range(8)]
+        assembler.assemble_phase_model(
+            copies,
+            site_map_binding=site_binding(),
+            capture_manifest=capture_manifest(),
+            limits=replace(assembler.DEFAULT_LIMITS, fragments=8),
+        )
         with self.assertRaises(assembler.PhaseAssemblyError):
-            assembler.assemble_phase_document([self.raw, bytes(changed)])
+            assembler.assemble_phase_model(
+                copies,
+                site_map_binding=site_binding(),
+                capture_manifest=capture_manifest(),
+                limits=replace(assembler.DEFAULT_LIMITS, fragments=7),
+            )
 
-    def test_fragment_count_bounds_are_enforced(self) -> None:
-        with self.assertRaises(assembler.PhaseAssemblyError):
-            assembler.assemble_phase_document([])
-        with self.assertRaises(assembler.PhaseAssemblyError):
-            assembler.assemble_phase_document([self.raw] * (assembler.MAX_FRAGMENTS + 1))
 
-    def test_input_collection_requires_immutable_fragment_elements(self) -> None:
-        for value in (self.raw, "not-a-sequence"):
-            with self.subTest(value_type=type(value).__name__):
-                with self.assertRaises(assembler.PhaseAssemblyError):
-                    assembler.assemble_phase_document(value)  # type: ignore[arg-type]
-        with self.assertRaises(assembler.PhaseAssemblyError):
-            assembler.assemble_phase_document([bytearray(self.raw)])  # type: ignore[list-item]
+class DiagnosticSeparationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.raw, _ = build_valid_fragment()
+        self.model = assembled_model(self.raw)
 
-    def test_output_validator_rejects_noncanonical_or_fabricated_values(self) -> None:
-        document = assembler.assemble_phase_document([self.raw])
-        assembler.validate_phase_document(document)
-        for mutation in (
-            {**document, "extra": None},
-            {**document, "schema": "future"},
-            {**document, "invocation_parents": []},
-            {**document, "invocation_parents": [0, 2]},
-            {**document, "draw_count": 0},
-            {**document, "draw_count": True},
-            {**document, "skipped_draw_count": 3},
-            {**document, "phase_draw_edges": []},
-            {**document, "phase_draw_edges": [[1, 1], [1, 1]]},
-            {**document, "phase_draw_edges": [[2, 1], [1, 1]]},
-            {**document, "phase_draw_edges": [[3, 1]]},
-            {**document, "phase_draw_edges": [[1, 3]]},
-            {**document, "phase_draw_edges": [[1, 1, 1]]},
-        ):
-            with self.subTest(mutation=mutation):
-                with self.assertRaises(assembler.PhaseAssemblyError):
-                    assembler.validate_phase_document(mutation)
-
-    def test_output_contains_no_private_provenance_surfaces(self) -> None:
-        document = assembler.assemble_phase_document([self.raw])
-        rendered = assembler.encode_phase_document(document).decode("ascii").lower()
+    def test_public_report_is_categorical_deterministic_and_relationship_free(self) -> None:
+        first = assembler.encode_public_report(self.model)
+        second = assembler.encode_public_report(assembled_model(clone_bytes(self.raw)))
+        self.assertEqual(first, second)
+        document = json.loads(first)
+        self.assertEqual(document["schema"], assembler.PUBLIC_REPORT_SCHEMA)
+        self.assertEqual(document["terminal_status"], "Complete")
+        self.assertEqual(document["completeness"], "Complete")
+        self.assertEqual(document["policy"], "PrivateReviewRequired")
+        self.assertEqual(len(document["aggregate_counts"]), 8)
+        rendered = first.decode("ascii").lower()
         for forbidden in (
+            _CAPTURE_DOMAIN.hex(),
+            _RUNTIME_CONFIG.hex(),
+            _SITE_MAP_DIGEST.hex(),
+            "capture_domain",
             "digest",
-            "hash",
-            "address",
+            "sequence",
             "frame",
-            "event",
-            "offset",
-            "packet",
-            "register",
-            "payload",
-            "provenance",
-            "disc",
-            "executable",
-            "path",
+            "ordinal",
+            "parent",
+            "primitive",
+            "enter_event",
+            "exit_event",
         ):
             self.assertNotIn(forbidden, rendered)
+        self.assertNotIn("invocations", document)
+        self.assertNotIn("memberships", document)
+
+    def test_private_trace_retains_disposition_chronology_and_reconciliation(self) -> None:
+        document = json.loads(assembler.encode_private_trace(self.model))
+        self.assertEqual(document["capture_domain"], _CAPTURE_DOMAIN.hex())
+        self.assertEqual([row["sequence"] for row in document["submissions"]], [3, 4, 7])
+        self.assertEqual(
+            [row["disposition"] for row in document["draws"]],
+            ["Submitted", "Submitted", "Skipped"],
+        )
+        self.assertEqual(
+            document["terminal"]["discovered_counts"],
+            document["terminal"]["retained_counts"],
+        )
+        self.assertTrue(document["ordering_evidence_valid"])
+
+    def test_private_and_public_output_caps_are_exact(self) -> None:
+        private = assembler.encode_private_trace(self.model)
+        public = assembler.encode_public_report(self.model)
+        self.assertEqual(
+            assembler.encode_private_trace(
+                self.model,
+                limits=replace(
+                    assembler.DEFAULT_LIMITS,
+                    private_output_bytes=len(private),
+                ),
+            ),
+            private,
+        )
+        self.assertEqual(
+            assembler.encode_public_report(
+                self.model,
+                limits=replace(
+                    assembler.DEFAULT_LIMITS,
+                    public_output_bytes=len(public),
+                ),
+            ),
+            public,
+        )
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.encode_private_trace(
+                self.model,
+                limits=replace(
+                    assembler.DEFAULT_LIMITS,
+                    private_output_bytes=len(private) - 1,
+                ),
+            )
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.encode_public_report(
+                self.model,
+                limits=replace(
+                    assembler.DEFAULT_LIMITS,
+                    public_output_bytes=len(public) - 1,
+                ),
+            )
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.encode_public_report(
+                self.model,
+                limits=replace(
+                    assembler.DEFAULT_LIMITS,
+                    public_aggregate_rows=7,
+                ),
+            )
+
+    def test_incomplete_trace_reduces_only_to_fixed_public_categories(self) -> None:
+        counters = (0, 1, 0, 0, 0, 0, 0)
+        raw, _ = build_valid_fragment(
+            status=int(assembler.TerminalStatus.TelemetryDropped),
+            failure_counts=counters,
+        )
+        model = assembled_model(raw)
+        report = json.loads(assembler.encode_public_report(model))
+        self.assertEqual(report["terminal_status"], "TelemetryDropped")
+        self.assertEqual(report["completeness"], "Incomplete")
+        self.assertEqual(report["policy"], "IncompleteCapture")
+        private = json.loads(assembler.encode_private_trace(model))
+        self.assertFalse(private["ordering_evidence_valid"])
+        self.assertEqual(private["terminal"]["failure_counts"]["dropped_records"], 1)
+
+
+class LimitTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.raw, _ = build_valid_fragment()
+
+    def test_every_caller_limit_accepts_hard_ceiling_and_rejects_plus_one(self) -> None:
+        for name, ceiling in assembler.HARD_LIMITS.items():
+            with self.subTest(name=name):
+                assembler.PhaseLimits(**{name: ceiling})
+                with self.assertRaises(assembler.PhaseAssemblyError):
+                    assembler.PhaseLimits(**{name: ceiling + 1})
+
+    def test_table_frame_nesting_scratch_and_lookup_limits_tighten(self) -> None:
+        counts = _default_counts()
+        scratch = assembler._logical_scratch_bytes(counts)
+        work = assembler._logical_lookup_work(counts)
+        exact = replace(
+            assembler.DEFAULT_LIMITS,
+            fragment_bytes=len(self.raw),
+            frames=3,
+            sites=2,
+            nesting_depth=2,
+            invocations=2,
+            events=4,
+            submissions=3,
+            draws=3,
+            edges=3,
+            scratch_bytes=scratch,
+            lookup_work=work,
+        )
+        assembler.parse_phase_fragment(self.raw, limits=exact)
+        for field, value in (
+            ("fragment_bytes", len(self.raw) - 1),
+            ("frames", 2),
+            ("sites", 1),
+            ("nesting_depth", 1),
+            ("invocations", 1),
+            ("events", 3),
+            ("submissions", 2),
+            ("draws", 2),
+            ("edges", 2),
+            ("scratch_bytes", scratch - 1),
+            ("lookup_work", work - 1),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(assembler.PhaseFragmentValidationError):
+                    assembler.parse_phase_fragment(
+                        self.raw,
+                        limits=replace(exact, **{field: value}),
+                    )
+
+    def test_failure_accounting_and_string_limits_tighten(self) -> None:
+        raw, _ = build_valid_fragment(
+            status=int(assembler.TerminalStatus.TelemetryDropped),
+            failure_counts=(0, 1, 0, 0, 0, 0, 0),
+        )
+        assembler.parse_phase_fragment(
+            raw,
+            limits=replace(assembler.DEFAULT_LIMITS, failure_records=1),
+        )
+        with self.assertRaises(assembler.PhaseFragmentValidationError):
+            assembler.parse_phase_fragment(
+                raw,
+                limits=replace(assembler.DEFAULT_LIMITS, failure_records=0),
+            )
+        assembler.parse_site_map_binding(
+            site_binding_bytes(),
+            limits=replace(assembler.DEFAULT_LIMITS, string_bytes=64),
+        )
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler.parse_site_map_binding(
+                site_binding_bytes(),
+                limits=replace(assembler.DEFAULT_LIMITS, string_bytes=63),
+            )
 
 
 class PhaseAssemblerCliTests(unittest.TestCase):
@@ -397,18 +835,158 @@ class PhaseAssemblerCliTests(unittest.TestCase):
 
     def test_help_argument_and_fixed_failure_diagnostics(self) -> None:
         for help_argument in ("-h", "--help"):
-            with self.subTest(help_argument=help_argument):
-                code, output, errors = run_main([help_argument])
-                self.assertEqual(code, 0)
-                self.assertEqual(errors, "")
+            code, output, errors = run_main([help_argument])
+            self.assertEqual((code, errors), (0, ""))
+            self.assertIn("--private-output", output)
         for args in ([], ["--unknown"], ["--expected-sha256"]):
             with self.subTest(args=args):
                 code, output, errors = run_main(args)
                 self.assertEqual(code, 1)
                 self.assertEqual(output, "")
-                self.assertEqual(errors, "Phase fragment assembly failed.\n")
+                self.assertEqual(errors, "Phase fragment processing failed.\n")
 
-    def test_short_output_write_is_left_in_place_without_path_unlink(self) -> None:
+    def test_default_writes_only_public_and_private_sink_is_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as first_dir, tempfile.TemporaryDirectory() as second_dir:
+            first = Path(first_dir)
+            second = Path(second_dir)
+            code, stdout, stderr = run_main(cli_args(first, self.raw))
+            self.assertEqual((code, stdout, stderr), (0, "Phase fragment processing succeeded.\n", ""))
+            self.assertTrue((first / "public.json").is_file())
+            self.assertFalse((first / "private.json").exists())
+
+            code, stdout, stderr = run_main(cli_args(second, self.raw, private=True))
+            self.assertEqual((code, stdout, stderr), (0, "Phase fragment processing succeeded.\n", ""))
+            self.assertTrue((second / "private.json").is_file())
+            self.assertEqual(
+                (first / "public.json").read_bytes(),
+                (second / "public.json").read_bytes(),
+            )
+
+    def test_private_output_path_must_resolve_to_a_recognized_ignored_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            assembler._validate_private_output_path(str(Path(directory) / "outside.json"))
+        assembler._validate_private_output_path(
+            str(REPOSITORY_ROOT / "private" / "example.json")
+        )
+        assembler._validate_private_output_path(
+            str(REPOSITORY_ROOT / "analysis" / "output" / "example.json")
+        )
+        with self.assertRaises(assembler.PhaseAssemblyError):
+            assembler._validate_private_output_path(
+                str(REPOSITORY_ROOT / "analysis" / "formats" / "example.json")
+            )
+
+    def test_cli_refuses_a_private_output_path_outside_any_ignored_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = cli_args(root, self.raw)
+            not_ignored = REPOSITORY_ROOT / "analysis" / "formats" / "unsafe-private-output.json"
+            args += ["--private-output", str(not_ignored)]
+            self.assertFalse(not_ignored.exists())
+            try:
+                code, stdout, stderr = run_main(args)
+                self.assertEqual(
+                    (code, stdout, stderr), (1, "", "Phase fragment processing failed.\n")
+                )
+                self.assertFalse(not_ignored.exists())
+                self.assertFalse((root / "public.json").exists())
+            finally:
+                if not_ignored.exists():
+                    not_ignored.unlink()
+
+    def test_incomplete_capture_writes_reports_and_returns_distinct_status(self) -> None:
+        raw, _ = build_valid_fragment(
+            status=int(assembler.TerminalStatus.QueueExhausted),
+            failure_counts=(0, 0, 0, 0, 1, 0, 0),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            code, stdout, stderr = run_main(cli_args(root, raw, private=True))
+            self.assertEqual(code, 2)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "Phase capture is incomplete.\n")
+            self.assertEqual(
+                json.loads((root / "public.json").read_bytes())["terminal_status"],
+                "QueueExhausted",
+            )
+            self.assertFalse(
+                json.loads((root / "private.json").read_bytes())["ordering_evidence_valid"]
+            )
+
+    def test_path_repeats_stream_compare_distinct_files_and_reject_same_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "first.part"
+            second = root / "second.part"
+            first.write_bytes(self.raw)
+            second.write_bytes(self.raw)
+            with mock.patch.object(
+                assembler,
+                "parse_phase_fragment",
+                wraps=assembler.parse_phase_fragment,
+            ) as parse:
+                model = assembler.assemble_phase_paths(
+                    [str(first), str(second)],
+                    site_map_binding=site_binding(),
+                    capture_manifest=capture_manifest(),
+                    expected_fragment_sha256=hashlib.sha256(self.raw).hexdigest(),
+                )
+            self.assertTrue(model.ordering_evidence_valid)
+            parse.assert_called_once()
+            with self.assertRaises(assembler.PhaseAssemblyError):
+                assembler.assemble_phase_paths(
+                    [str(first), str(first)],
+                    site_map_binding=site_binding(),
+                    capture_manifest=capture_manifest(),
+                    expected_fragment_sha256=hashlib.sha256(self.raw).hexdigest(),
+                )
+
+    def test_path_reference_obeys_total_input_limit_before_parse(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "input.part"
+            path.write_bytes(self.raw)
+            with mock.patch.object(
+                assembler,
+                "parse_phase_fragment",
+                wraps=assembler.parse_phase_fragment,
+            ) as parse:
+                with self.assertRaises(assembler.PhaseAssemblyError):
+                    assembler.assemble_phase_paths(
+                        [str(path)],
+                        site_map_binding=site_binding(),
+                        capture_manifest=capture_manifest(),
+                        expected_fragment_sha256=hashlib.sha256(self.raw).hexdigest(),
+                        limits=replace(
+                            assembler.DEFAULT_LIMITS,
+                            total_input_bytes=len(self.raw) - 1,
+                        ),
+                    )
+            parse.assert_not_called()
+
+    def test_mutating_snapshot_is_rejected_before_parse(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "input.part"
+            path.write_bytes(self.raw)
+            real_signature = assembler._fstat_signature
+            calls = 0
+
+            def changing_signature(stream: object) -> tuple[int, int, int, int]:
+                nonlocal calls
+                calls += 1
+                signature = real_signature(stream)
+                if calls == 2:
+                    return signature[:3] + (signature[3] + 1,)
+                return signature
+
+            with mock.patch.object(
+                assembler,
+                "_fstat_signature",
+                side_effect=changing_signature,
+            ):
+                with self.assertRaises(assembler.PhaseAssemblyError):
+                    assembler._read_snapshot(str(path), len(self.raw))
+
+    def test_short_output_write_is_left_in_place_without_unlink(self) -> None:
         class ShortWriter:
             def __enter__(self) -> ShortWriter:
                 return self
@@ -416,8 +994,8 @@ class PhaseAssemblerCliTests(unittest.TestCase):
             def __exit__(self, *_args: object) -> None:
                 return None
 
-            def write(self, payload: bytes) -> int:
-                return max(0, len(payload) - 1)
+            def write(self, payload: object) -> int:
+                return max(0, len(payload) - 1)  # type: ignore[arg-type]
 
             def flush(self) -> None:
                 return None
@@ -429,66 +1007,30 @@ class PhaseAssemblerCliTests(unittest.TestCase):
                 assembler._write_new_file("synthetic-output", b"payload")
         unlink.assert_not_called()
 
-    def test_cli_writes_new_canonical_file_and_refuses_overwrite(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            fragment = Path(directory) / "input.part"
-            output = Path(directory) / "phase.json"
-            fragment.write_bytes(self.raw)
-            args = [
-                "--expected-sha256",
-                hashlib.sha256(self.raw).hexdigest(),
-                "--output",
-                str(output),
-                str(fragment),
-                str(fragment),
-            ]
-            code, stdout, stderr = run_main(args)
-            self.assertEqual(code, 0)
-            self.assertEqual(stdout, "Phase fragment assembly succeeded.\n")
-            self.assertEqual(stderr, "")
-            expected = assembler.encode_phase_document(
-                assembler.assemble_phase_document([self.raw])
-            )
-            self.assertEqual(output.read_bytes(), expected)
-
-            code, stdout, stderr = run_main(args)
-            self.assertEqual(code, 1)
-            self.assertEqual(stdout, "")
-            self.assertEqual(stderr, "Phase fragment assembly failed.\n")
-            self.assertEqual(output.read_bytes(), expected)
-
-    def test_cli_never_echoes_private_paths_or_internal_errors(self) -> None:
+    def test_cli_never_echoes_private_paths_or_exception_text(self) -> None:
         secret = "ZXQ_PRIVATE_PHASE_PATH_731"
         with tempfile.TemporaryDirectory(prefix=secret) as directory:
-            fragment = Path(directory) / f"{secret}.part"
-            output = Path(directory) / "phase.json"
-            fragment.write_bytes(b"not-a-fragment")
-            code, stdout, stderr = run_main(["--output", str(output), str(fragment)])
-        self.assertEqual(code, 1)
-        self.assertEqual(stdout, "")
-        self.assertEqual(stderr, "Phase fragment assembly failed.\n")
+            root = Path(directory)
+            args = cli_args(root, self.raw)
+            Path(args[-1]).write_bytes(b"not-a-fragment")
+            code, stdout, stderr = run_main(args)
+        self.assertEqual((code, stdout, stderr), (1, "", "Phase fragment processing failed.\n"))
         self.assertNotIn(secret, stdout + stderr)
 
         with mock.patch.object(
             assembler,
-            "assemble_phase_document",
+            "assemble_phase_paths",
             side_effect=RuntimeError(f"{secret}: internal private detail"),
         ):
             with tempfile.TemporaryDirectory() as directory:
-                fragment = Path(directory) / "input.part"
-                output = Path(directory) / "phase.json"
-                fragment.write_bytes(self.raw)
-                code, stdout, stderr = run_main(["--output", str(output), str(fragment)])
-        self.assertEqual(code, 1)
-        self.assertEqual(stdout, "")
-        self.assertEqual(stderr, "Phase fragment assembly failed.\n")
+                code, stdout, stderr = run_main(cli_args(Path(directory), self.raw))
+        self.assertEqual((code, stdout, stderr), (1, "", "Phase fragment processing failed.\n"))
         self.assertNotIn(secret, stdout + stderr)
 
-    def test_real_process_runs_in_isolated_mode_from_unrelated_directory(self) -> None:
+    def test_real_process_runs_isolated_and_default_output_is_public_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            fragment = Path(directory) / "input.part"
-            output = Path(directory) / "phase.json"
-            fragment.write_bytes(self.raw)
+            root = Path(directory)
+            args = cli_args(root, self.raw)
             completed = subprocess.run(
                 [
                     sys.executable,
@@ -497,25 +1039,24 @@ class PhaseAssemblerCliTests(unittest.TestCase):
                     "-s",
                     "-S",
                     "-B",
-                    str(REPOSITORY_ROOT / "tools" / "assemble_frontend_phase.py"),
-                    "--output",
-                    str(output),
-                    str(fragment),
+                    str(MODULE_PATH),
+                    *args,
                 ],
                 cwd=directory,
-                env={**os.environ, "PYTHONPATH": str(Path(directory) / "hostile")},
+                env={**os.environ, "PYTHONPATH": str(root / "hostile")},
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=False,
                 timeout=10,
             )
             self.assertEqual(completed.returncode, 0)
-            self.assertEqual(completed.stdout, b"Phase fragment assembly succeeded.\n")
+            self.assertEqual(completed.stdout, b"Phase fragment processing succeeded.\n")
             self.assertEqual(completed.stderr, b"")
             self.assertEqual(
-                json.loads(output.read_text(encoding="ascii"))["schema"],
-                assembler.PHASE_OBSERVATION_SCHEMA,
+                json.loads((root / "public.json").read_bytes())["schema"],
+                assembler.PUBLIC_REPORT_SCHEMA,
             )
+            self.assertFalse((root / "private.json").exists())
 
 
 if __name__ == "__main__":
