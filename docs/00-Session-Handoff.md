@@ -2102,3 +2102,38 @@ compose or publish a retail presentation.
   savestate, private site, fragment, capture, and report data remain outside OpenOmega version
   control. No BIOS, disc, savestate, private observer site, owner input, producer capture, or public
   report was accessed, generated, or validated in E-0099.
+
+## Front-end phase/draw attribution contract and tooling (E-0127, 2026-07-23)
+
+- E-0127 adds the `OMEGAFRPHASE0001` wire contract and its Python-only tooling without touching the
+  existing `frontend-trace-v1` or `scene-fragment-v1` contracts. `analysis/formats/FRONTEND-PHASE.md`
+  defines a little-endian fixed-width envelope of four tables (invocations, events, draws, phase/draw
+  edges) that records only which anonymous front-end call/interval ordinal was open when the vertices
+  behind a finalized GS draw were submitted.
+- `tools/assemble_frontend_phase.py` enforces dense one-based IDs; a forest-shaped
+  `parent_invocation` reference strictly earlier than its own ID; a required Enter/Exit event pair
+  per invocation with `enter_event < exit_event`; an event-count-is-exactly-twice-invocation-count
+  precondition; `reserved`-must-be-zero padding; non-decreasing frame values within each table; and
+  phase/draw edges that reference only Enter-kind events, are non-decreasing by draw, and are unique.
+  A deferred cross-table pass (both tables are read fully first, since invocation and event rows
+  reference each other) requires every invocation's enter/exit events to name that invocation with
+  the matching kind and requires its frame to equal its enter event's frame; given the exact
+  event-count precondition this alone forces a bijection between invocations and their claimed
+  events, so no separate orphan/double-claim totality check is needed or present.
+- The sanitized `openomega-sanitized-frontend-phase-observation-v1` output narrows the wire
+  fragment's event-level detail to an anonymous `invocation_parents` array plus a sorted
+  `phase_draw_edges` list of `[invocation_ordinal, draw_ordinal]` pairs. It carries no frame number,
+  raw event ordinal, runtime-configuration digest, fragment digest, or other identity. Repeat
+  fragments must be byte-identical, mirroring `scene-fragment-v1`'s own repeatability gate.
+- Generated tests cover the valid two-invocation/four-event/two-draw/three-edge fixture, its
+  checked-in `analysis/fixtures/frontend_phase_v1/` hex golden, every magic/version/digest/length/
+  count-header failure, every invocation/event/draw/edge field and cross-table validation failure,
+  output-validator rejection of noncanonical or fabricated documents, absence of private-provenance
+  substrings from sanitized output, and CLI help/failure/overwrite-refusal/no-echo/isolated-process
+  behavior. All 22 new tests and the full 417-test tooling suite pass.
+- This is Python-tooling-only work. No C++ mirror test exists yet (unlike `scene-fragment-v1`'s
+  `native/tests/scene_fragment_wire_contract_tests.cpp`), no PCSX2-side producer exists in any
+  lane's tree, and no MSVC build or CTest ran this session. It establishes no submission/lifecycle
+  ordering rule, no retail semantics, no PCSX2 wiring, and no owner-corpus result. Observations under
+  this contract never auto-promote into canonical semantics on their own and must independently
+  agree with static call-flow evidence before any ordering rule becomes non-defaultable policy.
