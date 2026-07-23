@@ -341,6 +341,14 @@ corrected; hosted CI and owner-input validation remain pending. Grounded layer/t
 ordering, text encoding and
 interleave, action lifecycle, animation selection/application, the retail menu, visual parity, and
 PCSX2 equivalence remain unproven.
+E-0127 adds the `OMEGAFRPHASE0001` phase/draw attribution contract and Python-only tooling
+(`tools/assemble_frontend_phase.py`, `analysis/formats/FRONTEND-PHASE.md`) so a future capture can
+relate an anonymous front-end call-interval ordinal to the finalized draws its contributing vertices
+reached, without touching the existing frontend-trace-v1 or scene-fragment-v1 contracts. No C++
+mirror, PCSX2 producer, or canonical-IR consumer exists yet; this is evidence-gathering machinery
+only, and the widget/visual descendant order, text interleave, action lifecycle, and animation-timing
+questions E-0126 left open remain unproven until repeat-stable runtime evidence under this contract
+agrees with independent static call-flow evidence.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-
