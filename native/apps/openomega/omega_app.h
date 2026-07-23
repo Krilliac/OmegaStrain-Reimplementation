@@ -12,6 +12,7 @@
 #include "sdl_platform_service.h"
 
 #include "omega/content/front_end_screen_bundle.h"
+#include "omega/frontend_presentation/retail_front_end_nav.h"
 #include "omega/gameplay/diagnostic_mission_lifecycle.h"
 #include "omega/gameplay/diagnostic_proximity_trigger.h"
 #include "omega/gameplay/diagnostic_target_fire.h"
@@ -40,6 +41,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace omega::app
 {
@@ -194,14 +196,34 @@ private:
     // launches stay fail-closed. Never throws: a failure just leaves the bundle
     // empty and the gate unavailable.
     void LoadRetailFrontEndBundleIfEnabled() noexcept;
-    // [game/main thread; no concurrent use] Gap B Phase 1 of the retail
-    // front-end (docs/08). Composites the loaded Title bundle's root + immediate
-    // child visuals into one canonical frame, uploads it, and caches a
-    // full-screen blit draw list so retail mode presents real retail pixels
-    // instead of the project-authored menu. Still-frame only (no text/animation
-    // yet). Never throws: a failure just leaves the retail presentation not
-    // ready, so CurrentFrontEndDrawList falls back to the project presentation.
-    void BuildRetailFrontEndPresentationIfPossible() noexcept;
+    // [game/main thread; no concurrent use] Gap B retail front-end (docs/08).
+    // Composites one decoded retail screen bundle into a canonical frame with the
+    // named widget highlighted, uploads it, and caches a full-screen blit draw
+    // list so retail mode presents real retail pixels. Never throws: a failure
+    // leaves the retail presentation as-is (last good frame or project fallback).
+    void ComposeRetailScreenPresentation(
+        const content::FrontEndScreenBundle& bundle,
+        std::string_view selected_identifier) noexcept;
+    // [game/main thread] Returns the cached retail bundle for a screen, lazily
+    // loading+caching it via GameDataService on first use. nullptr if unavailable.
+    [[nodiscard]] const content::FrontEndScreenBundle* RetailBundleForScreen(
+        content::FrontEndScreenKey screen) noexcept;
+    // One selectable retail menu button: its widget identifier and the screen its
+    // Accept routes to (empty for buttons with no target yet, e.g. Options).
+    struct RetailFrontEndButton
+    {
+        std::string identifier;
+        std::optional<content::FrontEndScreenKey> target;
+    };
+    // [game/main thread] Ordered (DFS-preorder) visible Button widgets of a screen.
+    [[nodiscard]] static std::vector<RetailFrontEndButton>
+    RetailScreenSelectableButtons(const content::FrontEndScreenBundle& bundle);
+    // [game/main thread; no concurrent use] Phase 3: steps the retail navigation
+    // from resolved input edges (select move / accept-switch-screen / back) and
+    // recomposes the retail draw list when the navigation state changes. Never
+    // throws.
+    void UpdateRetailFrontEndPresentation(
+        const frontend::presentation::RetailFrontEndNavInput& input) noexcept;
     // [game/main/render thread; no concurrent use] Atomically rebuilds fixed CPU
     // texture fallback/overlay commands and, when a scene is resident, the
     // environment-plus-actor mesh commands for the final post-step position.
@@ -395,6 +417,16 @@ private:
     // lifetime. When not ready, CurrentFrontEndDrawList uses the project path.
     runtime::RenderDrawList retail_front_end_draw_list_;
     bool retail_front_end_ready_ = false;
+    // Gap B Phase 3: retail front-end navigation. The nav state (current screen +
+    // selected button) is stepped each frame from resolved input; the draw list is
+    // recomposed only when it changes. CreateAgent/LoadAgent bundles are lazily
+    // loaded+cached on first navigation to them. This is intentionally separate
+    // from the project ReduceFrontEnd flow so the retail path never fires the
+    // project's persistence commands.
+    frontend::presentation::RetailFrontEndNavState retail_nav_{};
+    std::optional<frontend::presentation::RetailFrontEndNavState> retail_composed_nav_{};
+    std::optional<content::FrontEndScreenBundle> retail_create_agent_bundle_;
+    std::optional<content::FrontEndScreenBundle> retail_load_agent_bundle_;
     FrontEndStartupModel front_end_startup_model_{};
     FrontEndCharacterStartupModel front_end_character_startup_model_{};
     std::optional<CharacterPresentation> character_presentation_;

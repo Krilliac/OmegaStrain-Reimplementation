@@ -274,8 +274,14 @@ void AppendGlyphQuad(const frontend::TextGlyphQuad& glyph,
 // atlas-textured glyph quads. Text is emitted AFTER all IE geometry so the
 // submission-ordinal depth pass makes it draw on top. Fail-soft: a missing
 // string/font/atlas or a failed layout skips that widget, never the screen.
+// Phase-3 selection affordance: the focused menu label is drawn in this colour
+// instead of its authored colour so the player can see the current selection.
+// Project-owned (the retail selected-button visual is not yet reverse-engineered).
+inline constexpr RgbaF kRetailSelectionHighlightColor{1.0F, 0.85F, 0.20F, 1.0F};
+
 void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
     const asset::FrontendWidgetIR& widget, const std::uint32_t depth,
+    const std::string_view selected_identifier,
     RetailFrontEndFrameDiagnostics* const diag,
     std::vector<RetailFrontEndRasterTriangle>& out)
 {
@@ -334,10 +340,14 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
                 return;
             }
 
-            const RgbaF color = widget.text_color
-                ? RgbaF{widget.text_color->red, widget.text_color->green,
-                      widget.text_color->blue, widget.text_color->alpha}
-                : RgbaF{1.0F, 1.0F, 1.0F, 1.0F};
+            const bool is_selected = !selected_identifier.empty() &&
+                widget.identifier == selected_identifier;
+            const RgbaF color = is_selected
+                ? kRetailSelectionHighlightColor
+                : (widget.text_color
+                          ? RgbaF{widget.text_color->red, widget.text_color->green,
+                                widget.text_color->blue, widget.text_color->alpha}
+                          : RgbaF{1.0F, 1.0F, 1.0F, 1.0F});
 
             const frontend::TextLayoutOptions options{
                 .rectangle = {.left = widget.rectangle.left,
@@ -389,14 +399,16 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
     }
 
     for (const auto& child : widget.children)
-        AppendGuiTextTriangles(bundle, child, depth + 1U, diag, out);
+        AppendGuiTextTriangles(
+            bundle, child, depth + 1U, selected_identifier, diag, out);
 }
 } // namespace
 
 RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
     const content::FrontEndScreenBundle& bundle,
     const RetailFrontEndRasterLimits limits,
-    RetailFrontEndFrameDiagnostics* const diagnostics) noexcept
+    RetailFrontEndFrameDiagnostics* const diagnostics,
+    const std::string_view selected_widget_identifier) noexcept
 {
     if (!bundle.presentation_capability().valid())
         return std::unexpected(RetailFrontEndFrameError::InvalidRetailCapability);
@@ -444,8 +456,8 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
         // so the submission-ordinal depth pass below ranks them highest and they
         // draw on top of the screen art. Text is a decoration over a valid IE
         // screen; it never gates composition.
-        AppendGuiTextTriangles(
-            bundle, bundle.widget_document().root, 0U, diagnostics, triangles);
+        AppendGuiTextTriangles(bundle, bundle.widget_document().root, 0U,
+            selected_widget_identifier, diagnostics, triangles);
     }
     catch (const std::bad_alloc&)
     {

@@ -2257,6 +2257,37 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 }
             }
         }
+        else if (presentation_mode_ ==
+                     runtime::FrontEndPresentationMode::RetailRequired &&
+                 retail_front_end_bundle_.has_value())
+        {
+            // Retail front end active: drive the retail navigation (select move /
+            // accept-switch-screen / back) instead of the project reducer, so the
+            // retail path never fires the project's persistence commands. Reuse the
+            // same input-edge resolution the project menu uses (arrows + gamepad).
+            const auto retail_edges = ResolveFrontEndInputEdges(
+                FrontEndMode::Title,
+                FrontEndInputEdges{
+                    .primary_pressed =
+                        input_snapshot.WasPressed(kFrontEndPrimaryAction),
+                    .previous_pressed =
+                        input_snapshot.WasPressed(kFrontEndPreviousAction),
+                    .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
+                    .cancel_pressed =
+                        input_snapshot.WasPressed(kFrontEndCancelAction),
+                },
+                input_snapshot.WasPressed(kDebugMoveLeftAction),
+                input_snapshot.WasPressed(kDebugMoveRightAction),
+                input_snapshot.WasPressed(kDebugFireAction),
+                input_snapshot.WasPressed(kDebugTargetAction));
+            UpdateRetailFrontEndPresentation(
+                frontend::presentation::RetailFrontEndNavInput{
+                    .previous = retail_edges.previous_pressed,
+                    .next = retail_edges.next_pressed,
+                    .accept = retail_edges.primary_pressed,
+                    .back = retail_edges.cancel_pressed,
+                });
+        }
         else
         {
             const FrontEndReduction front_end =
@@ -3018,17 +3049,152 @@ void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
         return;
     }
 
-    BuildRetailFrontEndPresentationIfPossible();
+    // Optional debug start-screen override so a non-Title screen can be composed
+    // and captured headlessly without driving live input. Empty/unknown = Title.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const char* const start_screen = std::getenv("OPENOMEGA_FRONTEND_START_SCREEN");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    if (start_screen != nullptr)
+    {
+        const std::string_view requested(start_screen);
+        if (requested == "createagent")
+            retail_nav_.screen = content::FrontEndScreenKey::CreateAgent;
+        else if (requested == "loadagent")
+            retail_nav_.screen = content::FrontEndScreenKey::LoadAgent;
+    }
+
+    // Compose the initial screen (default selection) through the same recompose
+    // path the host loop uses each frame.
+    UpdateRetailFrontEndPresentation(frontend::presentation::RetailFrontEndNavInput{});
 }
 
-void OmegaApp::BuildRetailFrontEndPresentationIfPossible() noexcept
+const content::FrontEndScreenBundle* OmegaApp::RetailBundleForScreen(
+    const content::FrontEndScreenKey screen) noexcept
 {
-    if (!retail_front_end_bundle_ || !host_)
+    std::optional<content::FrontEndScreenBundle>* slot = nullptr;
+    switch (screen)
+    {
+    case content::FrontEndScreenKey::Title:
+        slot = &retail_front_end_bundle_;
+        break;
+    case content::FrontEndScreenKey::CreateAgent:
+        slot = &retail_create_agent_bundle_;
+        break;
+    case content::FrontEndScreenKey::LoadAgent:
+        slot = &retail_load_agent_bundle_;
+        break;
+    }
+    if (slot == nullptr)
+        return nullptr;
+    if (slot->has_value())
+        return &**slot;
+    if (!content_ || !content_->game_data.has_value())
+        return nullptr;
+    // LoadFrontEndScreen is not noexcept; contain any allocation/decoder throw so
+    // this loader keeps its own noexcept contract and simply reports "no bundle".
+    try
+    {
+        auto bundle = content_->game_data->LoadFrontEndScreen(screen);
+        if (!bundle)
+            return nullptr;
+        *slot = std::move(*bundle);
+        return &**slot;
+    }
+    catch (...)
+    {
+        return nullptr;
+    }
+}
+
+std::vector<OmegaApp::RetailFrontEndButton> OmegaApp::RetailScreenSelectableButtons(
+    const content::FrontEndScreenBundle& bundle)
+{
+    std::vector<RetailFrontEndButton> buttons;
+    const auto visit = [&buttons](const auto& self,
+                           const asset::FrontendWidgetIR& widget) -> void {
+        if (widget.visible &&
+            widget.kind == asset::FrontendWidgetKind::Button)
+        {
+            std::optional<content::FrontEndScreenKey> target;
+            if (widget.identifier == "newagent")
+                target = content::FrontEndScreenKey::CreateAgent;
+            else if (widget.identifier == "loadagent")
+                target = content::FrontEndScreenKey::LoadAgent;
+            buttons.push_back(
+                RetailFrontEndButton{.identifier = widget.identifier, .target = target});
+        }
+        for (const auto& child : widget.children)
+            self(self, child);
+    };
+    visit(visit, bundle.widget_document().root);
+    return buttons;
+}
+
+void OmegaApp::UpdateRetailFrontEndPresentation(
+    const frontend::presentation::RetailFrontEndNavInput& input) noexcept
+{
+    if (presentation_mode_ != runtime::FrontEndPresentationMode::RetailRequired ||
+        !retail_front_end_bundle_ || !host_)
+        return;
+
+    try
+    {
+        // Derive the current screen's selectable buttons to bound navigation and
+        // resolve the selected button's accept target, then step the pure nav.
+        std::uint32_t button_count = 0U;
+        std::optional<content::FrontEndScreenKey> accept_target;
+        if (const auto* const pre = RetailBundleForScreen(retail_nav_.screen))
+        {
+            const auto buttons = RetailScreenSelectableButtons(*pre);
+            button_count = static_cast<std::uint32_t>(buttons.size());
+            if (retail_nav_.selected < buttons.size())
+                accept_target = buttons[retail_nav_.selected].target;
+        }
+        retail_nav_ = frontend::presentation::StepRetailFrontEndNav(
+            retail_nav_, input, button_count, accept_target);
+
+        // Recompose only when the navigation state changed (or nothing composed
+        // yet). Selection moves and screen switches are the only triggers.
+        if (retail_front_end_ready_ && retail_composed_nav_.has_value() &&
+            *retail_composed_nav_ == retail_nav_)
+            return;
+
+        const auto* const bundle = RetailBundleForScreen(retail_nav_.screen);
+        if (bundle == nullptr)
+        {
+            log_->Warning("presentation",
+                "retail front-end screen bundle unavailable; using project fallback");
+            return;
+        }
+        const auto buttons = RetailScreenSelectableButtons(*bundle);
+        std::string_view selected_identifier;
+        if (retail_nav_.selected < buttons.size())
+            selected_identifier = buttons[retail_nav_.selected].identifier;
+
+        ComposeRetailScreenPresentation(*bundle, selected_identifier);
+        retail_composed_nav_ = retail_nav_;
+    }
+    catch (...)
+    {
+        // Fail-soft: keep whatever was last composed (or the project fallback).
+    }
+}
+
+void OmegaApp::ComposeRetailScreenPresentation(
+    const content::FrontEndScreenBundle& bundle,
+    const std::string_view selected_identifier) noexcept
+{
+    if (!host_)
         return;
 
     frontend::presentation::RetailFrontEndFrameDiagnostics diagnostics;
     const auto frame = frontend::presentation::ComposeRetailFrontEndFrame(
-        *retail_front_end_bundle_, {}, &diagnostics);
+        bundle, {}, &diagnostics, selected_identifier);
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 4996)

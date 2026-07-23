@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <string_view>
 
 namespace omega::content
 {
@@ -81,10 +82,17 @@ struct RetailFrontEndFrameDiagnostics final
 // empty screen, an invalid capability/root widget, or a raster limit/allocation
 // failure is a hard error.
 //
+// `selected_widget_identifier` names the currently-focused menu widget (Phase 3
+// navigation): its text is drawn in a distinct highlight colour so the player can
+// see the selection. It is a bounded project-owned affordance (the retail
+// selected-button visual is not yet reverse-engineered); an empty value or an
+// identifier no widget carries simply draws every label in its normal colour.
+//
 // Pure value boundary: borrows the immutable live bundle only for the call and
 // returns owned bytes; no filesystem/service/global/SDL/renderer/cache work.
 [[nodiscard]] RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
     const content::FrontEndScreenBundle& bundle,
     RetailFrontEndRasterLimits limits = {},
-    RetailFrontEndFrameDiagnostics* diagnostics = nullptr) noexcept;
+    RetailFrontEndFrameDiagnostics* diagnostics = nullptr,
+    std::string_view selected_widget_identifier = {}) noexcept;
 } // namespace omega::frontend::presentation

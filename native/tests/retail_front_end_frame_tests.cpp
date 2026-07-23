@@ -1,5 +1,7 @@
 #include "omega/frontend_presentation/retail_front_end_frame.h"
 
+#include "omega/frontend_presentation/retail_front_end_nav.h"
+
 #include "omega/asset/frontend_ir.h"
 #include "omega/asset/indexed_image_ir.h"
 #include "omega/content/front_end_screen_bundle.h"
@@ -12,10 +14,58 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+// Phase 3: pure retail navigation model (compile-time coverage).
+namespace nav_test
+{
+using omega::content::FrontEndScreenKey;
+using omega::frontend::presentation::RetailFrontEndNavInput;
+using omega::frontend::presentation::RetailFrontEndNavState;
+using omega::frontend::presentation::StepRetailFrontEndNav;
+
+// next advances the selection; previous retreats it; both clamp to [0, count).
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 0U},
+                  RetailFrontEndNavInput{.next = true}, 3U, std::nullopt)
+                  .selected == 1U);
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 2U},
+                  RetailFrontEndNavInput{.next = true}, 3U, std::nullopt)
+                  .selected == 2U);
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
+                  RetailFrontEndNavInput{.previous = true}, 3U, std::nullopt)
+                  .selected == 0U);
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 0U},
+                  RetailFrontEndNavInput{.previous = true}, 3U, std::nullopt)
+                  .selected == 0U);
+// Simultaneous previous+next is neutral.
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
+                  RetailFrontEndNavInput{.previous = true, .next = true}, 3U, std::nullopt)
+                  .selected == 1U);
+// Accept on the Title with a routed target switches screen and resets selection.
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 0U},
+                  RetailFrontEndNavInput{.accept = true}, 3U,
+                  FrontEndScreenKey::CreateAgent)
+                  .screen == FrontEndScreenKey::CreateAgent);
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 0U},
+                  RetailFrontEndNavInput{.accept = true}, 3U,
+                  FrontEndScreenKey::CreateAgent)
+                  .selected == 0U);
+// Accept with no target (e.g. Options) stays put.
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 2U},
+                  RetailFrontEndNavInput{.accept = true}, 3U, std::nullopt)
+                  .screen == FrontEndScreenKey::Title);
+// Back leaves a sub-screen for the Title; back on the Title stays.
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::CreateAgent, 0U},
+                  RetailFrontEndNavInput{.back = true}, 1U, std::nullopt)
+                  .screen == FrontEndScreenKey::Title);
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
+                  RetailFrontEndNavInput{.back = true}, 3U, std::nullopt)
+                  .screen == FrontEndScreenKey::Title);
+} // namespace nav_test
 
 // Minimal test-only construction access, mirroring the pattern in
 // frontend_presentation_tests.cpp. Each test executable defines its own copy;
@@ -403,6 +453,27 @@ int main()
             "the missing font is counted");
         Check(diagnostics.glyph_quads_emitted == 0U,
             "no glyph quads are emitted without a font");
+    }
+
+    // Phase 3: naming the selected widget recolors its label, so the composed
+    // frame differs from the unselected compose; an unmatched identifier does not.
+    {
+        const auto unselected =
+            ComposeRetailFrontEndFrame(MakeTextBundle(true), {}, nullptr, {});
+        const auto selected = ComposeRetailFrontEndFrame(
+            MakeTextBundle(true), {}, nullptr, "LABEL");
+        Check(unselected.has_value() && selected.has_value(),
+            "selection-highlight composes with and without a selected widget");
+        if (unselected && selected)
+        {
+            Check(unselected->pixels != selected->pixels,
+                "highlighting the selected label changes the composed pixels");
+        }
+        const auto unmatched = ComposeRetailFrontEndFrame(
+            MakeTextBundle(true), {}, nullptr, "NOT_A_WIDGET");
+        Check(unmatched.has_value() && unselected.has_value() &&
+                  unmatched->pixels == unselected->pixels,
+            "an unmatched selection identifier leaves the frame unchanged");
     }
 
     if (failures != 0)
