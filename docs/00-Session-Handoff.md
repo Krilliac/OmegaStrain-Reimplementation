@@ -2023,6 +2023,28 @@ menu, rendering, gameplay, corpus-result, or PCSX2-equivalence claim. Only track
 and project-generated fixtures were used; no private or owner file, proprietary input, D-drive
 content, disc image, executable, emulator, or PCSX2 runtime input was accessed.
 
+## Retail root-visual reconnaissance layer (E-0126, 2026-07-22)
+
+- `ComposeRetailRootVisualLayer` is a stateless, synchronous adapter over a borrowed validated
+  Title, CreateAgent, or LoadAgent `FrontEndScreenBundle`. It resolves only the visible parentless
+  Container root's binding and renders only that visual resource's own static geometry.
+- It uses the established binding-times-visual transform, interface-element projection, exact-scope
+  optional texture lookup, sampler, screen-space kernel, and ordered CPU raster. It rejects root
+  text, actions, animation, invalid geometry, any covered-pixel overlap, incomplete 640-by-448
+  coverage, and non-opaque output through typed identity-free failures.
+- The owned result is explicitly tagged `RootVisualOwnGeometryOnly`; it carries no retail
+  presentation capability. Widget descendants, visual descendants, text interleave, action
+  lifecycle, and animation application are deliberately omitted rather than assigned guessed
+  behavior.
+- Generated tests cover all three supported routes, textured and untextured success, transforms,
+  exact texture scope and alpha modes, descendant omission, deterministic owned output, malformed
+  geometry, overlap, coverage, opacity, and every exposed limit class. Focused serialized MSVC
+  Debug compilation completed without warnings or errors, and both focused CTest targets passed.
+- A separate private owner-data smoke produced `IncompleteCoverage` for each of the three configured
+  routes. It emitted no frame and no tracked path, member name, hash, payload, or private value. This
+  is narrow negative evidence that the root visual alone is insufficient, not a reason to infer
+  source-order/DFS traversal or claim a retail menu screenshot.
+
 ## Private PCSX2 producer readiness (E-0099, 2026-07-20)
 
 - A separately maintained local branch based on official PCSX2

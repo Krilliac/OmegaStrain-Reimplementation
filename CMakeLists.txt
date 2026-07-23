@@ -170,6 +170,7 @@ target_compile_features(omega_content PUBLIC cxx_std_23)
 
 add_library(omega_frontend_presentation STATIC
     native/src/frontend_presentation/retail_frontend_cpu_raster.cpp
+    native/src/frontend_presentation/retail_root_visual_layer.cpp
     native/src/frontend_presentation/retail_frontend_timeline.cpp
     native/src/frontend_presentation/retail_frontend_texture_sampler.cpp
     native/src/frontend_presentation/retail_title_compositor.cpp
@@ -3048,7 +3049,10 @@ if(BUILD_TESTING)
     add_executable(omega_front_end_screen_bundle_tests
         native/tests/front_end_screen_bundle_tests.cpp
     )
-    target_link_libraries(omega_front_end_screen_bundle_tests PRIVATE omega_content)
+    target_link_libraries(omega_front_end_screen_bundle_tests PRIVATE
+        omega_content
+        omega_frontend_presentation
+    )
     target_compile_features(omega_front_end_screen_bundle_tests PRIVATE cxx_std_23)
     if(MSVC)
         target_compile_options(omega_front_end_screen_bundle_tests PRIVATE
