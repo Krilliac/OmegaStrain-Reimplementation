@@ -1,7 +1,9 @@
 #include "omega/retail/skm_container_descriptor.h"
 
 #include <limits>
+#include <new>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -149,56 +151,70 @@ asset::DecodeResult<SkmContainerDescriptor> InspectSkmContainer(
         .chunk_table_region = {.offset = kFixedHeaderBytes, .size = chunk_table_bytes},
         .aligned_header_region = {.offset = 0, .size = aligned_header_bytes},
     };
-    descriptor.chunks.reserve(chunk_count);
-
+    // Reserve/push_back can throw under memory pressure even though `chunk_count` is already
+    // bounded by kMaximumChunkCount; contain that here rather than let it escape this
+    // DecodeResult-typed boundary as a raw exception.
     std::uint64_t payload_offset = aligned_header_bytes;
-    for (std::uint64_t chunk_index = 0;
-         chunk_index < static_cast<std::uint64_t>(chunk_count); ++chunk_index)
+    try
     {
-        std::uint64_t chunk_record_offset = 0;
-        std::uint64_t relative_record_offset = 0;
-        if (!Multiply(chunk_index, kChunkRecordBytes, relative_record_offset) ||
-            !Add(kFixedHeaderBytes, relative_record_offset, chunk_record_offset))
-        {
-            return std::unexpected(Error(
-                asset::DecodeErrorCode::Overflow, "SKM chunk record offset overflows"));
-        }
+        descriptor.chunks.reserve(chunk_count);
 
-        const auto record_offset = static_cast<std::size_t>(chunk_record_offset);
-        const std::uint8_t qword_count = ReadU8(bytes, record_offset);
-        const std::uint8_t secondary_count = ReadU8(bytes, record_offset + 1);
-        if (qword_count < kMinimumQwordCount || qword_count > kMaximumQwordCount)
+        for (std::uint64_t chunk_index = 0;
+             chunk_index < static_cast<std::uint64_t>(chunk_count); ++chunk_index)
         {
-            return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-                "SKM qword count is outside the observed range", chunk_record_offset));
-        }
-        if (secondary_count < kMinimumSecondaryCount ||
-            secondary_count > kMaximumSecondaryCount)
-        {
-            return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
-                "SKM secondary count is outside the observed range", chunk_record_offset + 1));
-        }
+            std::uint64_t chunk_record_offset = 0;
+            std::uint64_t relative_record_offset = 0;
+            if (!Multiply(chunk_index, kChunkRecordBytes, relative_record_offset) ||
+                !Add(kFixedHeaderBytes, relative_record_offset, chunk_record_offset))
+            {
+                return std::unexpected(Error(
+                    asset::DecodeErrorCode::Overflow, "SKM chunk record offset overflows"));
+            }
 
-        std::uint64_t payload_bytes = 0;
-        std::uint64_t payload_end = 0;
-        if (!Multiply(qword_count, kContainerAlignment, payload_bytes) ||
-            !Add(payload_offset, payload_bytes, payload_end))
-        {
-            return std::unexpected(Error(asset::DecodeErrorCode::Overflow,
-                "SKM payload range overflows", chunk_record_offset));
-        }
-        if (payload_end > bytes.size())
-        {
-            return std::unexpected(Error(asset::DecodeErrorCode::Truncated,
-                "SKM chunk payload is truncated", bytes.size()));
-        }
+            const auto record_offset = static_cast<std::size_t>(chunk_record_offset);
+            const std::uint8_t qword_count = ReadU8(bytes, record_offset);
+            const std::uint8_t secondary_count = ReadU8(bytes, record_offset + 1);
+            if (qword_count < kMinimumQwordCount || qword_count > kMaximumQwordCount)
+            {
+                return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
+                    "SKM qword count is outside the observed range", chunk_record_offset));
+            }
+            if (secondary_count < kMinimumSecondaryCount ||
+                secondary_count > kMaximumSecondaryCount)
+            {
+                return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
+                    "SKM secondary count is outside the observed range", chunk_record_offset + 1));
+            }
 
-        descriptor.chunks.push_back(SkmChunkDescriptor{
-            .qword_count = qword_count,
-            .observed_secondary_count = secondary_count,
-            .payload_region = {.offset = payload_offset, .size = payload_bytes},
-        });
-        payload_offset = payload_end;
+            std::uint64_t payload_bytes = 0;
+            std::uint64_t payload_end = 0;
+            if (!Multiply(qword_count, kContainerAlignment, payload_bytes) ||
+                !Add(payload_offset, payload_bytes, payload_end))
+            {
+                return std::unexpected(Error(asset::DecodeErrorCode::Overflow,
+                    "SKM payload range overflows", chunk_record_offset));
+            }
+            if (payload_end > bytes.size())
+            {
+                return std::unexpected(Error(asset::DecodeErrorCode::Truncated,
+                    "SKM chunk payload is truncated", bytes.size()));
+            }
+
+            descriptor.chunks.push_back(SkmChunkDescriptor{
+                .qword_count = qword_count,
+                .observed_secondary_count = secondary_count,
+                .payload_region = {.offset = payload_offset, .size = payload_bytes},
+            });
+            payload_offset = payload_end;
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded, "SKM allocation"));
+    }
+    catch (const std::length_error&)
+    {
+        return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded, "SKM length"));
     }
 
     if (bytes.size() % kContainerAlignment != 0)
