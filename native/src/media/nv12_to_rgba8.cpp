@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <new>
+#include <stdexcept>
 
 namespace omega::media
 {
@@ -103,9 +104,9 @@ std::expected<Rgba8VideoFrame, std::string> ConvertNv12ToRgba8(
     {
         return std::unexpected("NV12 RGBA8 output allocation failed");
     }
-    catch (...)
+    catch (const std::length_error&)
     {
-        return std::unexpected("NV12 RGBA8 conversion failed unexpectedly");
+        return std::unexpected("NV12 RGBA8 output allocation failed");
     }
 }
 } // namespace omega::media
