@@ -3,6 +3,7 @@
 #include "opening_movie_player.h"
 #include "opening_movie_safety.h"
 #include "run_replay_session.h"
+#include "screenshot_capture.h"
 
 #include "omega/gameplay/debug_locomotion.h"
 #include "omega/debug/subsystem_entry_break.h"
@@ -2553,6 +2554,36 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 .operational_error = rendered.error(),
                 .capture_error = std::nullopt,
             };
+        }
+        if (events.screenshot_requested)
+        {
+            auto screenshot_pixels = host_->CaptureFrameRgba8(render_packet);
+            if (!screenshot_pixels)
+            {
+                // SDL diagnostics can contain host/device identity. Keep the
+                // normal runtime log categorical; detailed debugging remains
+                // available at the host call boundary.
+                log_->Warning("screenshot", "GPU readback failed");
+            }
+            else
+            {
+                auto screenshot = WriteScreenshotBmpToDefaultDirectory(
+                    *screenshot_pixels);
+                if (!screenshot)
+                {
+                    log_->Warning("screenshot",
+                        "private BMP write failed [" +
+                            std::string(ScreenshotErrorCodeName(
+                                screenshot.error())) +
+                            "]");
+                }
+                else
+                {
+                    log_->Info("screenshot",
+                        "saved one private 640x448 BMP in the platform-local "
+                        "OpenOmega screenshots directory");
+                }
+            }
         }
         result.rendered_frames = *next_rendered_frame_count;
         if (movie_is_active)

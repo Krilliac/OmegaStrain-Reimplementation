@@ -62,6 +62,13 @@ namespace
     }
 }
 
+[[nodiscard]] bool IsScreenshotKeyEvent(const SDL_Event& event) noexcept
+{
+    return (event.type == SDL_EVENT_KEY_DOWN ||
+               event.type == SDL_EVENT_KEY_UP) &&
+           event.key.scancode == SDL_SCANCODE_F12;
+}
+
 [[nodiscard]] std::optional<runtime::PointerPositionQ16> TranslatePointerPosition(
     const SDL_WindowID window_id, const float x, const float y) noexcept
 {
@@ -193,7 +200,14 @@ InputPumpResult SdlInputService::PumpEvents(
     SDL_Event event{};
     while (SDL_PollEvent(&event))
     {
-        if ((event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) ||
+        const bool screenshot_key_event = IsScreenshotKeyEvent(event);
+        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+            screenshot_key_event)
+        {
+            result.screenshot_requested = true;
+        }
+        if ((event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+                !screenshot_key_event) ||
             event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
         {
             result.keyboard_or_mouse_pressed = true;
@@ -247,10 +261,14 @@ InputPumpResult SdlInputService::PumpEvents(
             (void)sampled;
         }
 
-        if (const auto translated = TranslateInputEvent(event, impl_->gamepad_id))
+        if (!screenshot_key_event)
         {
-            const auto accepted = input.PushEvent(*translated);
-            (void)accepted;
+            if (const auto translated =
+                    TranslateInputEvent(event, impl_->gamepad_id))
+            {
+                const auto accepted = input.PushEvent(*translated);
+                (void)accepted;
+            }
         }
     }
     return result;

@@ -21,6 +21,11 @@ struct InputPumpResult
     // button press. Releases, key-repeat events, pointer motion, and gamepad
     // events never set this app-layer modal-input signal.
     bool keyboard_or_mouse_pressed = false;
+    // True only for one fresh, non-repeat F12 key-down. The reserved
+    // application command is not forwarded to InputTracker and does not count
+    // as modal keyboard input, so taking a screenshot cannot skip a movie or
+    // activate a menu item.
+    bool screenshot_requested = false;
 };
 
 // Non-hot-reloadable main-thread SDL event owner with opt-in primary-gamepad

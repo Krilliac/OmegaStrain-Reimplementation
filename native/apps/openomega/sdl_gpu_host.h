@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace omega::app
 {
@@ -115,6 +116,14 @@ public:
     [[nodiscard]] std::expected<void, std::string> RenderFrame(
         const runtime::RenderFramePacket& packet);
 
+    // [main/render thread] Counter-neutral synchronous offscreen replay of one
+    // already-validated renderer-neutral packet into the fixed 640x448 RGBA8
+    // screenshot extent. Referenced generations remain caller-retained and
+    // host-resident; only the bounded owned pixel vector escapes.
+    [[nodiscard]] std::expected<
+        std::vector<runtime::RenderClearColorRgba8>, std::string>
+    CaptureFrameRgba8(const runtime::RenderFramePacket& packet);
+
     // [main/render thread] Aggregate-only snapshots; neither exposes a resource identity.
     [[nodiscard]] runtime::RenderTexturePoolSnapshot TextureSnapshot() const noexcept;
     [[nodiscard]] runtime::RenderMeshPoolSnapshot MeshSnapshot() const noexcept;
@@ -143,6 +152,14 @@ private:
     [[nodiscard]] std::expected<
         std::array<runtime::RenderClearColorRgba8, 64U>, std::string>
         ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet);
+
+    // Shared bounded offscreen renderer for production capture and the 8x8
+    // mesh probe. Width/height must be nonzero and no larger than the fixed
+    // production screenshot extent.
+    [[nodiscard]] std::expected<
+        std::vector<runtime::RenderClearColorRgba8>, std::string>
+        ReadbackFrameRgba8(const runtime::RenderFramePacket& packet,
+            std::uint32_t width, std::uint32_t height);
 
     struct Impl;
     explicit SdlGpuHost(std::unique_ptr<Impl> impl) noexcept;

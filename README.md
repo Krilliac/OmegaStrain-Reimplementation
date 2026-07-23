@@ -1498,8 +1498,11 @@ rendering resources.
 The current native controls are keyboard/mouse first. W/A/S/D or the arrow keys navigate and move;
 Return, keypad Enter, or F1 select; Space or LMB selects in menus and fires the synthetic diagnostic
 cue in play; Escape or Backspace cancels; T or held RMB targets in play, with RMB acting as back in
-menus; and F10 quits. Target and fire cues follow the latest valid normalized mouse position and use
-target center when no pointer sample is available. The gamepad subsystem is not initialized by
+menus; F12 writes one fixed 640x448 BMP to the platform-local private OpenOmega screenshots
+directory; and F10 quits. F12 is reserved from logical gameplay/menu input and from the opening
+movie skip signal. Screenshot host paths and pixels are never written to logs or version control.
+Target and fire cues follow the latest valid normalized mouse position and use target center when
+no pointer sample is available. The gamepad subsystem is not initialized by
 default; `--set=input.gamepad_enabled=true` opts into optional button and D-pad aliases. These are
 project-authored diagnostic controls, not a retail input, aiming, or combat map.
 
