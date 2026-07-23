@@ -360,7 +360,8 @@ using omega::retail::RetailStringTableIR;
 // A valid IE root (so composition succeeds) plus a Text widget referencing a
 // string key. When provide_font is false the font/atlas are absent so the text
 // pass must be fail-soft.
-[[nodiscard]] FrontEndScreenBundle MakeTextBundle(const bool provide_font)
+[[nodiscard]] FrontEndScreenBundle MakeTextBundle(const bool provide_font,
+    const bool wrap_in_invisible_group = false)
 {
     FrontendVisualNodeIR root_visual = MakeQuad("ROOT_root", 320.0F, 224.0F,
         FrontendColorRgba8IR{.red = 20U, .green = 40U, .blue = 60U,
@@ -381,7 +382,19 @@ using omega::retail::RetailStringTableIR;
     // "$key" localization reference; the table stores the '$'-stripped key
     // pre-lowercased (as the decoder does), and Find lowercases the query.
     label.text_reference = "$MENU_KEY";
-    root_widget.children.push_back(std::move(label));
+    if (wrap_in_invisible_group)
+    {
+        // Mirror the retail hub's authored-hidden lane groups: a vis=0 container
+        // holding visible labels. The text pass must cull the whole subtree.
+        FrontendWidgetIR hidden_group = MakeWidget("HIDDEN_GROUP");
+        hidden_group.visible = false;
+        hidden_group.children.push_back(std::move(label));
+        root_widget.children.push_back(std::move(hidden_group));
+    }
+    else
+    {
+        root_widget.children.push_back(std::move(label));
+    }
 
     FrontEndScreenBundle::FontMap fonts;
     FrontEndScreenBundle::TextureMap atlases;
@@ -491,6 +504,22 @@ int main()
             "the missing font is counted");
         Check(diagnostics.glyph_quads_emitted == 0U,
             "no glyph quads are emitted without a font");
+    }
+
+    // A not-visible widget culls its entire subtree: a visible label inside a
+    // vis=0 container draws nothing (the retail hub authors its mutually-exclusive
+    // lanes as vis=0 groups; the pre-cull compositor recursed into them and drew
+    // every lane at once). The same label at top level (above) DID emit 2 glyphs.
+    {
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto culled =
+            ComposeRetailFrontEndFrame(MakeTextBundle(true, true), {}, &diagnostics);
+        Check(culled.has_value(),
+            "a bundle with an invisible label group still composes");
+        Check(diagnostics.text_widgets_seen == 0U,
+            "the label inside the invisible group is never visited");
+        Check(diagnostics.glyph_quads_emitted == 0U,
+            "no glyph quads are emitted from an invisible group's subtree");
     }
 
     // Phase 3: naming the selected widget recolors its label, so the composed

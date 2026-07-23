@@ -341,11 +341,42 @@ inline constexpr RgbaF kRetailSelectionHighlightColor{1.0F, 0.85F, 0.20F, 1.0F};
 void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
     const asset::FrontendWidgetIR& widget, const std::uint32_t depth,
     const std::string_view selected_identifier,
+    const std::string_view force_visible_group,
     RetailFrontEndFrameDiagnostics* const diag,
     std::vector<RetailFrontEndRasterTriangle>& out)
 {
     if (depth >= kMaximumVisualTreeDepth)
         return;
+
+    // A widget marked not-visible hides its ENTIRE subtree. The retail Command
+    // Center hub authors its mutually-exclusive lanes -- each sub-option submenu
+    // (personnel/mission/zeus/media_files groups) and the online vs offline nav
+    // bars (onlinebutton_grp with Messages, offlinebutton_grp without) -- as vis=0
+    // container groups it toggles by runtime state. Recursing into an invisible
+    // container drew every lane at once (overlapping submenu labels + doubled nav
+    // hints). Culling the subtree matches the retail default. force_visible_group
+    // re-enables exactly ONE authored-hidden group for a screen's grounded default
+    // state: the hub shows its offline nav bar (offlinebutton_grp), matching the
+    // retail command-center-mission-select DrawDump frame (Previous/Select icons,
+    // single-player offline mode, no Messages lane).
+    if (!widget.visible && widget.identifier != force_visible_group)
+        return;
+
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    static const bool kTreeDump =
+        std::getenv("OPENOMEGA_FRONTEND_TREE_DUMP") != nullptr;
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    if (kTreeDump)
+    {
+        std::fprintf(stderr, "TREEDUMP d=%u kind=%d vis=%d id=%s nchild=%zu\n",
+            depth, static_cast<int>(widget.kind), widget.visible ? 1 : 0,
+            widget.identifier.c_str(), widget.children.size());
+    }
 
     const bool is_text_widget =
         widget.kind == asset::FrontendWidgetKind::Text ||
@@ -484,8 +515,8 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
     }
 
     for (const auto& child : widget.children)
-        AppendGuiTextTriangles(
-            bundle, child, depth + 1U, selected_identifier, diag, out);
+        AppendGuiTextTriangles(bundle, child, depth + 1U, selected_identifier,
+            force_visible_group, diag, out);
 }
 } // namespace
 
@@ -541,9 +572,16 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
         // Phase 2 GUI text pass. Glyph quads are appended AFTER all IE geometry
         // so the submission-ordinal depth pass below ranks them highest and they
         // draw on top of the screen art. Text is a decoration over a valid IE
-        // screen; it never gates composition.
+        // screen; it never gates composition. Invisible (vis=0) widget subtrees
+        // are culled here; the hub re-enables its offline nav group for the
+        // grounded default state (see AppendGuiTextTriangles).
+        const std::string_view force_visible_group =
+            bundle.key() == content::FrontEndScreenKey::CommandCenter
+                ? std::string_view("offlinebutton_grp")
+                : std::string_view();
         AppendGuiTextTriangles(bundle, bundle.widget_document().root, 0U,
-            selected_widget_identifier, diagnostics, triangles);
+            selected_widget_identifier, force_visible_group, diagnostics,
+            triangles);
     }
     catch (const std::bad_alloc&)
     {
