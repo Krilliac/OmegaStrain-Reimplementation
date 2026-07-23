@@ -1,4 +1,5 @@
 #include "sdl_gpu_host.h"
+#include "screenshot_capture.h"
 #include "sdl_platform_service.h"
 
 #include "omega/runtime/render_draw_list.h"
@@ -7,6 +8,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -166,6 +168,20 @@ int main()
             if (host.Snapshot() != before_clear_readbacks)
                 return Fail("clear readback mutated production host state");
         }
+        packet.clear_color = endpoint_clear_colors.front();
+        auto screenshot_readback = host.CaptureFrameRgba8(packet);
+        if (!screenshot_readback ||
+            screenshot_readback->size() != omega::app::kScreenshotPixelCount ||
+            !std::ranges::all_of(*screenshot_readback,
+                [expected = packet.clear_color](
+                    const omega::runtime::RenderClearColorRgba8 pixel) {
+                    return pixel == expected;
+                }))
+        {
+            return Fail("fixed screenshot readback did not preserve the clear-only frame");
+        }
+        if (host.Snapshot() != before_clear_readbacks)
+            return Fail("fixed screenshot readback mutated production host state");
 
         constexpr omega::runtime::RenderTextureBlitCommand readback_rejection_command{
             .texture = omega::runtime::RenderTextureHandle{
@@ -369,6 +385,29 @@ int main()
             return Fail("blit readback probe did not match the exact 4x4 RGBA8 grid");
         if (host.Snapshot() != before_blit_readback)
             return Fail("blit readback probe mutated production host state");
+        auto screenshot_blit_readback = host.CaptureFrameRgba8(packet);
+        if (!screenshot_blit_readback ||
+            screenshot_blit_readback->size() !=
+                omega::app::kScreenshotPixelCount)
+        {
+            return Fail("fixed screenshot blit readback failed");
+        }
+        const auto screenshot_pixel = [&screenshot_blit_readback](
+                                          const std::uint32_t x,
+                                          const std::uint32_t y) {
+            return (*screenshot_blit_readback)[
+                static_cast<std::size_t>(y) * omega::app::kScreenshotWidth + x];
+        };
+        if (screenshot_pixel(0U, 0U) != opaque_black ||
+            screenshot_pixel(80U, 112U) != opaque_red ||
+            screenshot_pixel(560U, 112U) != opaque_green ||
+            screenshot_pixel(400U, 200U) != opaque_blue ||
+            screenshot_pixel(639U, 447U) != opaque_black)
+        {
+            return Fail("fixed screenshot blit readback sampled the wrong composed pixels");
+        }
+        if (host.Snapshot() != before_blit_readback)
+            return Fail("fixed screenshot blit readback mutated production host state");
 
         constexpr std::array<std::byte, 2U * 2U * 4U> updated_probe_pixels{
             static_cast<std::byte>(0xFFU), static_cast<std::byte>(0xFFU),

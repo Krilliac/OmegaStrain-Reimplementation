@@ -55,11 +55,12 @@ constexpr std::uint16_t kGamepadCode =
     return SDL_PushEvent(&event);
 }
 
-[[nodiscard]] bool PushKey(const bool down, const bool repeat = false)
+[[nodiscard]] bool PushKey(const bool down, const bool repeat = false,
+    const SDL_Scancode scancode = SDL_SCANCODE_A)
 {
     SDL_Event event{};
     event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
-    event.key.scancode = SDL_SCANCODE_A;
+    event.key.scancode = scancode;
     event.key.down = down;
     event.key.repeat = repeat;
     return PushEvent(event);
@@ -287,9 +288,44 @@ int main()
             keyboard_mouse_only->PumpEvents(tracker, log);
         const auto repeated_key = tracker.EndFrame();
         Check(!repeated_key_pump.keyboard_or_mouse_pressed &&
+                  !repeated_key_pump.screenshot_requested &&
                   !repeated_key.IsHeld(kKeyboardAction) &&
                   repeated_key.accepted_event_count() == 0U,
             "key repeat is neither a digital edge nor an app-layer modal-input press");
+
+        Check(PushKey(true, false, SDL_SCANCODE_F12),
+            "a fresh F12 key-down enters the default input queue");
+        const auto screenshot_press_pump =
+            keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto screenshot_press = tracker.EndFrame();
+        Check(screenshot_press_pump.screenshot_requested &&
+                  !screenshot_press_pump.keyboard_or_mouse_pressed &&
+                  !screenshot_press_pump.quit_requested &&
+                  screenshot_press.accepted_event_count() == 0U &&
+                  screenshot_press.rejected_event_count() == 0U,
+            "fresh F12 publishes only the reserved screenshot request");
+
+        Check(PushKey(true, true, SDL_SCANCODE_F12),
+            "a repeated F12 key-down enters the default input queue");
+        const auto screenshot_repeat_pump =
+            keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto screenshot_repeat = tracker.EndFrame();
+        Check(!screenshot_repeat_pump.screenshot_requested &&
+                  !screenshot_repeat_pump.keyboard_or_mouse_pressed &&
+                  screenshot_repeat.accepted_event_count() == 0U &&
+                  screenshot_repeat.rejected_event_count() == 0U,
+            "F12 repeat is neither a screenshot request nor ordinary input");
+
+        Check(PushKey(false, false, SDL_SCANCODE_F12),
+            "an F12 release enters the default input queue");
+        const auto screenshot_release_pump =
+            keyboard_mouse_only->PumpEvents(tracker, log);
+        const auto screenshot_release = tracker.EndFrame();
+        Check(!screenshot_release_pump.screenshot_requested &&
+                  !screenshot_release_pump.keyboard_or_mouse_pressed &&
+                  screenshot_release.accepted_event_count() == 0U &&
+                  screenshot_release.rejected_event_count() == 0U,
+            "F12 release remains isolated from the logical input tracker");
 
         Check(PushMouseMotion(pointer_window_id, 200.0F, 150.0F),
             "absolute mouse motion enters the default input queue");

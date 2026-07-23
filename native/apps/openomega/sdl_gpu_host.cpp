@@ -59,6 +59,14 @@ namespace
 }
 
 constexpr std::size_t kPostAcquireErrorCapacity = 512U;
+constexpr std::uint32_t kMaximumFrameReadbackWidth = 640U;
+constexpr std::uint32_t kMaximumFrameReadbackHeight = 448U;
+constexpr std::size_t kMaximumFrameReadbackPixelCount =
+    static_cast<std::size_t>(kMaximumFrameReadbackWidth) *
+    kMaximumFrameReadbackHeight;
+constexpr std::size_t kMaximumFrameReadbackByteCount =
+    kMaximumFrameReadbackPixelCount *
+    sizeof(runtime::RenderClearColorRgba8);
 
 [[nodiscard]] constexpr float RenderColorChannelToFloat(
     const std::uint8_t channel) noexcept
@@ -1912,17 +1920,22 @@ SdlGpuHost::ReadbackBlitsForTesting(const runtime::RenderFramePacket& packet)
     }
 }
 
-std::expected<std::array<runtime::RenderClearColorRgba8, 64U>, std::string>
-SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
+std::expected<std::vector<runtime::RenderClearColorRgba8>, std::string>
+SdlGpuHost::ReadbackFrameRgba8(const runtime::RenderFramePacket& packet,
+    const std::uint32_t width, const std::uint32_t height)
 {
     try
     {
+        if (width == 0U || height == 0U ||
+            width > kMaximumFrameReadbackWidth ||
+            height > kMaximumFrameReadbackHeight)
+        {
+            return std::unexpected("frame readback extent is outside the hard limit");
+        }
         const std::span<const runtime::RenderTextureBlitCommand> texture_draws =
             packet.draw_list.commands();
         const std::span<const runtime::RenderMeshDrawCommand> mesh_draws =
             packet.mesh_draw_list.commands();
-        if (mesh_draws.empty())
-            return std::unexpected("mesh readback requires a nonempty mesh draw list");
 
         std::array<ResolvedMeshDraw,
             runtime::kMaximumRenderMeshDrawsPerFrame> resolved_draws{};
@@ -1967,13 +1980,16 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
         }
 
         constexpr SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-        constexpr std::uint32_t width = 8U;
-        constexpr std::uint32_t height = 8U;
-        constexpr std::size_t pixel_count =
+        const std::size_t pixel_count =
             static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-        constexpr std::size_t byte_count =
+        const std::size_t byte_count =
             pixel_count * sizeof(runtime::RenderClearColorRgba8);
-        static_assert(pixel_count == 64U && byte_count == 256U);
+        if (pixel_count > kMaximumFrameReadbackPixelCount ||
+            byte_count > kMaximumFrameReadbackByteCount ||
+            byte_count > std::numeric_limits<std::uint32_t>::max())
+        {
+            return std::unexpected("frame readback byte count is outside the hard limit");
+        }
 
         std::array<ResolvedTextureBlit,
             runtime::kMaximumRenderTextureBlitsPerFrame> resolved_blits{};
@@ -2035,6 +2051,10 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
                 .filter = mapped_filters[index],
             };
         }
+        // Complete the only output-sized allocation before pipeline/resource
+        // creation or command acquisition. Every post-acquisition operation is
+        // then fixed-capacity and counter-neutral.
+        std::vector<runtime::RenderClearColorRgba8> pixels(pixel_count);
         if (!SDL_GPUTextureSupportsFormat(impl_->device, format,
                 SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET))
         {
@@ -2043,9 +2063,13 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
         }
         if (SDL_GPUTextureFormatTexelBlockSize(format) != 4U)
             return std::unexpected("mesh readback RGBA8 texel size is not four bytes");
-        auto pipelines = impl_->EnsureMeshPipelines(format, need_fill, need_wireframe);
-        if (!pipelines)
-            return std::unexpected(std::move(pipelines.error()));
+        if (!mesh_draws.empty())
+        {
+            auto pipelines =
+                impl_->EnsureMeshPipelines(format, need_fill, need_wireframe);
+            if (!pipelines)
+                return std::unexpected(std::move(pipelines.error()));
+        }
 
         const SDL_GPUTextureCreateInfo texture_info{
             .type = SDL_GPU_TEXTURETYPE_2D,
@@ -2074,23 +2098,35 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
             return std::unexpected(SdlError("mesh readback download transfer-buffer create"));
         TransferBufferGuard download_guard(impl_->device, download);
 
-        const std::size_t color_bytes = mesh_draws.size() * sizeof(MeshColorRgbF);
-        const SDL_GPUTransferBufferCreateInfo color_info{
-            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-            .size = static_cast<std::uint32_t>(color_bytes),
-            .props = 0,
-        };
-        SDL_GPUTransferBuffer* color_transfer =
-            SDL_CreateGPUTransferBuffer(impl_->device, &color_info);
-        if (color_transfer == nullptr)
-            return std::unexpected(SdlError("mesh readback color transfer-buffer create"));
-        TransferBufferGuard color_guard(impl_->device, color_transfer);
-        void* color_map =
-            SDL_MapGPUTransferBuffer(impl_->device, color_transfer, false);
-        if (color_map == nullptr)
-            return std::unexpected(SdlError("mesh readback color transfer-buffer map"));
-        std::memcpy(color_map, colors.data(), color_bytes);
-        SDL_UnmapGPUTransferBuffer(impl_->device, color_transfer);
+        const std::size_t color_bytes =
+            mesh_draws.size() * sizeof(MeshColorRgbF);
+        SDL_GPUTransferBuffer* color_transfer = nullptr;
+        TransferBufferGuard color_guard(impl_->device, nullptr);
+        if (!mesh_draws.empty())
+        {
+            const SDL_GPUTransferBufferCreateInfo color_info{
+                .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+                .size = static_cast<std::uint32_t>(color_bytes),
+                .props = 0,
+            };
+            color_transfer =
+                SDL_CreateGPUTransferBuffer(impl_->device, &color_info);
+            if (color_transfer == nullptr)
+            {
+                return std::unexpected(
+                    SdlError("frame readback color transfer-buffer create"));
+            }
+            color_guard.Reset(color_transfer);
+            void* color_map =
+                SDL_MapGPUTransferBuffer(impl_->device, color_transfer, false);
+            if (color_map == nullptr)
+            {
+                return std::unexpected(
+                    SdlError("frame readback color transfer-buffer map"));
+            }
+            std::memcpy(color_map, colors.data(), color_bytes);
+            SDL_UnmapGPUTransferBuffer(impl_->device, color_transfer);
+        }
 
         std::string post_acquire_error;
         post_acquire_error.reserve(kPostAcquireErrorCapacity);
@@ -2103,8 +2139,10 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
         }
         CommandBufferGuard command_guard(commands);
 
-        if (!RecordMeshColorUpload(commands, color_transfer,
-                impl_->mesh_color_buffer, static_cast<std::uint32_t>(color_bytes)))
+        if (!mesh_draws.empty() &&
+            !RecordMeshColorUpload(commands, color_transfer,
+                impl_->mesh_color_buffer,
+                static_cast<std::uint32_t>(color_bytes)))
         {
             SetSdlErrorBounded(
                 post_acquire_error, "mesh readback color copy-pass begin");
@@ -2116,12 +2154,16 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
             return std::unexpected(std::move(post_acquire_error));
         }
 
-        if (!RecordMeshPass(commands, texture, ToSdlClearColor(packet.clear_color),
-                mesh_draws,
-                std::span<const ResolvedMeshDraw>{
-                    resolved_draws.data(), mesh_draws.size()},
-                impl_->mesh_color_buffer, impl_->mesh_fill_pipeline,
-                impl_->mesh_wireframe_pipeline))
+        const bool recorded_target = mesh_draws.empty()
+            ? RecordClearPass(
+                  commands, texture, ToSdlClearColor(packet.clear_color))
+            : RecordMeshPass(commands, texture,
+                  ToSdlClearColor(packet.clear_color), mesh_draws,
+                  std::span<const ResolvedMeshDraw>{
+                      resolved_draws.data(), mesh_draws.size()},
+                  impl_->mesh_color_buffer, impl_->mesh_fill_pipeline,
+                  impl_->mesh_wireframe_pipeline);
+        if (!recorded_target)
         {
             SetSdlErrorBounded(post_acquire_error, "mesh readback render-pass begin");
             if (!command_guard.Cancel())
@@ -2192,7 +2234,6 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
         }
         TransferBufferMapGuard map_guard(impl_->device, download, mapped);
         const auto* bytes = static_cast<const std::byte*>(mapped);
-        std::array<runtime::RenderClearColorRgba8, pixel_count> pixels{};
         for (std::size_t index = 0U; index < pixels.size(); ++index)
         {
             const std::size_t offset = index * 4U;
@@ -2207,12 +2248,34 @@ SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
     }
     catch (const std::bad_alloc&)
     {
-        return std::unexpected("mesh readback error allocation failed");
+        return std::unexpected("frame readback error allocation failed");
     }
     catch (...)
     {
-        return std::unexpected("mesh readback failed unexpectedly");
+        return std::unexpected("frame readback failed unexpectedly");
     }
+}
+
+std::expected<std::vector<runtime::RenderClearColorRgba8>, std::string>
+SdlGpuHost::CaptureFrameRgba8(const runtime::RenderFramePacket& packet)
+{
+    return ReadbackFrameRgba8(packet, kMaximumFrameReadbackWidth,
+        kMaximumFrameReadbackHeight);
+}
+
+std::expected<std::array<runtime::RenderClearColorRgba8, 64U>, std::string>
+SdlGpuHost::ReadbackMeshesForTesting(const runtime::RenderFramePacket& packet)
+{
+    if (packet.mesh_draw_list.empty())
+        return std::unexpected("mesh readback requires a nonempty mesh draw list");
+    auto pixels = ReadbackFrameRgba8(packet, 8U, 8U);
+    if (!pixels)
+        return std::unexpected(std::move(pixels.error()));
+    if (pixels->size() != 64U)
+        return std::unexpected("mesh readback pixel count invariant failed");
+    std::array<runtime::RenderClearColorRgba8, 64U> fixed_pixels{};
+    std::ranges::copy(*pixels, fixed_pixels.begin());
+    return fixed_pixels;
 }
 
 std::expected<void, std::string> SdlGpuHost::RenderFrame(

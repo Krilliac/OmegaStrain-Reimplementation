@@ -65,8 +65,12 @@ Diagnostic, Profiles, Controls, and Asset Topology rows. Keyboard and mouse prov
 default route: use
 W/A/S/D or the arrow keys to navigate and move; F1, Enter, keypad Enter, Space, or LMB confirms;
 Space or LMB fires in DiagnosticPlay; Escape, Backspace, or RMB returns from a modal screen; T or
-held RMB targets in DiagnosticPlay; and F10 quits. Target and fire cues follow the latest valid
-normalized mouse position and use target center while no pointer sample is available. The SDL
+held RMB targets in DiagnosticPlay; F12 saves the exact current 640x448 frame as a private BMP
+under `%LOCALAPPDATA%\OpenOmega\screenshots`; and F10 quits. Screenshot filenames never replace an
+existing file. F12 is reserved from gameplay/menu input and the opening-movie skip signal;
+screenshot host paths and pixels are never written to logs or version control. Target and fire cues
+follow the latest valid normalized mouse position and use target center while no pointer sample is
+available. The SDL
 gamepad subsystem is not initialized unless `--set=input.gamepad_enabled=true` explicitly opts into
 optional button and D-pad aliases. The empty Profiles and Characters screens can create the fixed
 project-owned `PROFILE 1` and `DIAGNOSTIC CHARACTER` records, persist them transactionally, and

@@ -523,6 +523,7 @@ if(OMEGA_BUILD_RUNTIME)
         native/apps/openomega/opening_movie_safety.cpp
         native/apps/openomega/opening_movie_player.cpp
         native/apps/openomega/omega_app.cpp
+        native/apps/openomega/screenshot_capture.cpp
     )
     target_include_directories(omega_app_host PUBLIC native/apps/openomega)
     target_link_libraries(omega_app_host
@@ -2939,6 +2940,22 @@ if(BUILD_TESTING)
         endif()
         add_test(NAME omega_sdl_input_tests COMMAND omega_sdl_input_tests)
         set_tests_properties(omega_sdl_input_tests PROPERTIES TIMEOUT 15)
+
+        add_executable(omega_screenshot_capture_tests
+            native/tests/screenshot_capture_tests.cpp
+        )
+        target_link_libraries(omega_screenshot_capture_tests
+            PRIVATE omega_app_host)
+        if(MSVC)
+            target_compile_options(omega_screenshot_capture_tests PRIVATE
+                /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+        else()
+            target_compile_options(omega_screenshot_capture_tests PRIVATE
+                -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+        endif()
+        add_test(NAME omega_screenshot_capture_tests
+            COMMAND omega_screenshot_capture_tests)
+        set_tests_properties(omega_screenshot_capture_tests PROPERTIES TIMEOUT 15)
     endif()
 
     if(TARGET omega_launcher_core)
