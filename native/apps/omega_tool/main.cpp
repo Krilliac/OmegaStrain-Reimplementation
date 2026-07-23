@@ -13,6 +13,7 @@
 #include <format>
 #include <iostream>
 #include <limits>
+#include <new>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -359,9 +360,14 @@ int HogVerifyNestedTree(const std::filesystem::path& root)
         ? 0
         : 2;
 }
-} // namespace
-
-int main(const int argc, char** argv)
+// The dispatch body of the former main(). Every dispatch line below implicitly converts a raw
+// argv C-string to std::filesystem::path at the call site (the callee parameter type), which is
+// not guaranteed non-throwing; several of the commands reached here (hog-info,
+// hog-verify-tree, hog-verify-nested-tree, and every pop_commands.cpp verify-tree command) also
+// have no containment boundary of their own, unlike level_texture_commands.cpp/
+// frontend_envelope_commands.cpp/pop_post_terrain_commands.cpp's *VerifyTreeForTesting
+// functions. main() below is this process's true top-level containment boundary.
+int RunMain(const int argc, char** argv)
 {
     if (argc != 3)
     {
@@ -397,4 +403,27 @@ int main(const int argc, char** argv)
 
     PrintUsage();
     return 64;
+}
+} // namespace
+
+int main(const int argc, char** argv)
+{
+    // True top-level containment boundary for this CLI process. Contains any exception left
+    // uncaught by RunMain's dispatch (argv-to-path conversion, or a command's own internal
+    // walk/decode) so a malformed or unusual corpus tree -- exactly what this tool exists to
+    // verify -- produces a typed CLI failure instead of an uncontrolled process abort.
+    try
+    {
+        return RunMain(argc, argv);
+    }
+    catch (const std::bad_alloc&)
+    {
+        std::cerr << "omega_tool: allocation failed\n";
+        return 1;
+    }
+    catch (...)
+    {
+        std::cerr << "omega_tool: internal error\n";
+        return 1;
+    }
 }
