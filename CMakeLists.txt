@@ -172,6 +172,7 @@ add_library(omega_frontend_presentation STATIC
     native/src/frontend_presentation/retail_frontend_cpu_raster.cpp
     native/src/frontend_presentation/retail_presentation_requirements.cpp
     native/src/frontend_presentation/retail_root_visual_layer.cpp
+    native/src/frontend_presentation/retail_front_end_frame.cpp
     native/src/frontend_presentation/retail_frontend_timeline.cpp
     native/src/frontend_presentation/retail_frontend_texture_sampler.cpp
     native/src/frontend_presentation/retail_title_compositor.cpp
@@ -536,6 +537,7 @@ if(OMEGA_BUILD_RUNTIME)
             omega_runtime
             omega_simulation
             omega_sdl_backend
+            omega_frontend_presentation
     )
     target_compile_features(omega_app_host PUBLIC cxx_std_23)
     if(MSVC)
@@ -3135,6 +3137,36 @@ if(BUILD_TESTING)
     add_test(NAME omega_frontend_presentation_tests
         COMMAND omega_frontend_presentation_tests)
     set_tests_properties(omega_frontend_presentation_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_retail_front_end_frame_tests
+        native/tests/retail_front_end_frame_tests.cpp
+    )
+    target_link_libraries(omega_retail_front_end_frame_tests PRIVATE
+        omega_frontend_presentation
+        omega_content
+    )
+    target_compile_features(omega_retail_front_end_frame_tests PRIVATE cxx_std_23)
+    if(MSVC)
+        target_compile_options(omega_retail_front_end_frame_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_retail_front_end_frame_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_retail_front_end_frame_tests
+        COMMAND omega_retail_front_end_frame_tests)
+    set_tests_properties(omega_retail_front_end_frame_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_retail_presentation_requirements_tests
         native/tests/retail_presentation_requirements_tests.cpp

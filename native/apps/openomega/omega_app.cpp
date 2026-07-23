@@ -7,6 +7,7 @@
 
 #include "omega/gameplay/debug_locomotion.h"
 #include "omega/debug/subsystem_entry_break.h"
+#include "omega/frontend_presentation/retail_front_end_frame.h"
 #include "omega/runtime/diagnostic_actor_scene.h"
 #include "omega/runtime/level_texture_topology_preview.h"
 #include "omega/runtime/scene_transform.h"
@@ -3014,7 +3015,74 @@ void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
     catch (...)
     {
         log_->Error("presentation", "retail front-end Title bundle load raised an exception");
+        return;
     }
+
+    BuildRetailFrontEndPresentationIfPossible();
+}
+
+void OmegaApp::BuildRetailFrontEndPresentationIfPossible() noexcept
+{
+    if (!retail_front_end_bundle_ || !host_)
+        return;
+
+    const auto frame = frontend::presentation::ComposeRetailFrontEndFrame(
+        *retail_front_end_bundle_);
+    if (!frame)
+    {
+        // Identity-free: the compositor error carries no owner-corpus detail.
+        // Leave the retail presentation not ready; the gate stays authorized but
+        // CurrentFrontEndDrawList falls back to the project presentation until a
+        // later phase composes this screen.
+        log_->Warning("presentation",
+            "retail front-end Title composition unsupported; using project fallback (error code " +
+                std::to_string(static_cast<unsigned>(frame.error())) + ")");
+        return;
+    }
+
+    auto uploaded = host_->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+        .width = frame->width,
+        .height = frame->height,
+        .pixels = std::as_bytes(std::span<const std::uint8_t>(frame->pixels)),
+    });
+    if (!uploaded)
+    {
+        log_->Warning("presentation",
+            "retail front-end Title texture upload failed; using project fallback");
+        return;
+    }
+
+    constexpr runtime::RenderSourceRectQ16 full_source{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    constexpr runtime::RenderTargetRectQ16 full_target{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    const runtime::RenderTextureBlitCommand command{
+        .texture = *uploaded,
+        .source = full_source,
+        .destination = full_target,
+        .fit_mode = runtime::RenderTextureFitMode::Contain,
+        .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+    };
+    auto draw_list = runtime::RenderDrawList::Create(
+        std::span<const runtime::RenderTextureBlitCommand>{&command, 1U});
+    if (!draw_list)
+    {
+        log_->Warning("presentation",
+            "retail front-end Title draw-list creation failed; using project fallback");
+        return;
+    }
+    retail_front_end_draw_list_ = std::move(*draw_list);
+    retail_front_end_ready_ = true;
+    log_->Info("presentation",
+        "retail front-end Title presentation composited (Gap B Phase 1: static root+children)");
 }
 
 std::expected<void, std::string> OmegaApp::DeployDiagnosticMission()
@@ -3436,6 +3504,15 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
 
 const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcept
 {
+    // Retail presentation (Gap B Phase 1): once the decoded retail screen has been
+    // composited, it IS the whole front end -- a single full-frame blit of the
+    // static Title -- and supersedes every project-authored per-mode draw list.
+    // Built once by BuildRetailFrontEndPresentationIfPossible under the retail
+    // presentation mode + experimental opt-in; until then this falls through to
+    // the project presentation (developer-diagnostics mode never sets it).
+    if (retail_front_end_ready_)
+        return retail_front_end_draw_list_;
+
     const FrontEndView view = BuildFrontEndView(
         front_end_state_, content_stage_, front_end_startup_model_,
         active_profile_id_, front_end_character_startup_model_,

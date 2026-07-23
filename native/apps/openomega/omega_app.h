@@ -194,6 +194,14 @@ private:
     // launches stay fail-closed. Never throws: a failure just leaves the bundle
     // empty and the gate unavailable.
     void LoadRetailFrontEndBundleIfEnabled() noexcept;
+    // [game/main thread; no concurrent use] Gap B Phase 1 of the retail
+    // front-end (docs/08). Composites the loaded Title bundle's root + immediate
+    // child visuals into one canonical frame, uploads it, and caches a
+    // full-screen blit draw list so retail mode presents real retail pixels
+    // instead of the project-authored menu. Still-frame only (no text/animation
+    // yet). Never throws: a failure just leaves the retail presentation not
+    // ready, so CurrentFrontEndDrawList falls back to the project presentation.
+    void BuildRetailFrontEndPresentationIfPossible() noexcept;
     // [game/main/render thread; no concurrent use] Atomically rebuilds fixed CPU
     // texture fallback/overlay commands and, when a scene is resident, the
     // environment-plus-actor mesh commands for the final post-step position.
@@ -382,6 +390,11 @@ private:
     // constructor/move changes are required (the move constructor is defaulted).
     std::optional<content::FrontEndScreenBundle> retail_front_end_bundle_;
     bool retail_front_end_bundle_attempted_ = false;
+    // Gap B Phase 1: cached retail Title presentation. The blit command inside
+    // the draw list borrows a texture handle owned by host_'s pool for host_'s
+    // lifetime. When not ready, CurrentFrontEndDrawList uses the project path.
+    runtime::RenderDrawList retail_front_end_draw_list_;
+    bool retail_front_end_ready_ = false;
     FrontEndStartupModel front_end_startup_model_{};
     FrontEndCharacterStartupModel front_end_character_startup_model_{};
     std::optional<CharacterPresentation> character_presentation_;
