@@ -50,6 +50,11 @@ enum class FrontEndScreenKey
     Title,
     CreateAgent,
     LoadAgent,
+    // Command Center in-game menus. Same GUI/IE/TDX/FNT container format as the
+    // pre-game screens; their <SCREEN>.HOG members live in the same
+    // GAMEDATA/FRONTEND/NTSC.HOG archive.
+    CommandCenter,
+    Equipment,
 };
 
 // Proven GS TCC behavior retained at the content/presentation boundary. This

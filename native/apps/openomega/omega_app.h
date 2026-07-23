@@ -437,6 +437,8 @@ private:
     std::optional<frontend::presentation::RetailFrontEndNavState> retail_composed_nav_{};
     std::optional<content::FrontEndScreenBundle> retail_create_agent_bundle_;
     std::optional<content::FrontEndScreenBundle> retail_load_agent_bundle_;
+    std::optional<content::FrontEndScreenBundle> retail_command_center_bundle_;
+    std::optional<content::FrontEndScreenBundle> retail_equipment_bundle_;
     FrontEndStartupModel front_end_startup_model_{};
     FrontEndCharacterStartupModel front_end_character_startup_model_{};
     std::optional<CharacterPresentation> character_presentation_;

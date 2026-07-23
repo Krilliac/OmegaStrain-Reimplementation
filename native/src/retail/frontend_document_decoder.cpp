@@ -22,6 +22,35 @@ constexpr std::string_view kGuiTextWidget = "GuiTextWidget";
 constexpr std::string_view kGuiButtonWidget = "GuiButtonWidget";
 constexpr std::string_view kGuiCharacterDisplay = "GuiCharacterDisplay";
 constexpr std::string_view kGuiInterfaceDecorator = "GuiInterfaceDecorator";
+
+// Dynamic-content GUI widget factories that carry NO factory-specific fields:
+// on disc they are structurally identical to GuiWidget (common prefix +
+// optional GuiInterfaceDecorator binding + children). Their live content
+// (weapon stats, mission rows, chat text) is filled at runtime and absent from
+// a static screen, so decoding them as Container nodes -- rendering the node's
+// IE binding + children -- is exactly right for a static render. Verified by
+// walking all 56 <SCREEN>.GUI in the retail NTSC.HOG: this mapping parses 50/56
+// screens to valid trailing alignment, including every Command Center 2D menu
+// (CMDCENTR.GUI, EQUIPNT.GUI). GuiTextEditWidget is deliberately excluded: it
+// appends unrecovered factory-specific fields and appears only in text-input
+// screens (none of which are the in-game menu), so it stays UnsupportedVariant.
+constexpr std::array<std::string_view, 16> kContainerFactories{
+    kGuiWidget,           "GuiBitmapWidget",    "GuiTextListWidget",
+    "GuiScrollBarWidget", "GuiSliderWidget",    "GuiTextArrayWidget",
+    "GuiWeaponDisplay",   "GuiWeaponStats",     "GuiMLTextWidget",
+    "GuiMissionList",     "GuiChatWindow",      "GuiSubTitleDisplay",
+    "GuiAgentDisplay",    "GuiQuickChat",       "GuiNetMessageArray",
+    "GuiMissionStatList",
+};
+
+[[nodiscard]] constexpr bool IsContainerFactory(
+    const std::string_view factory) noexcept {
+  for (const std::string_view container : kContainerFactories) {
+    if (factory == container)
+      return true;
+  }
+  return false;
+}
 constexpr std::string_view kVertexTrack = "VERTEX";
 constexpr std::string_view kOpacityTrack = "OPACITY";
 constexpr std::string_view kUvOffsetUTrack = "UVOFF_U";
@@ -389,7 +418,7 @@ ParseGuiNode(Reader &reader, const std::uint64_t depth,
 
   asset::FrontendWidgetIR node;
   bool has_text_record = false;
-  if (*factory == kGuiWidget)
+  if (IsContainerFactory(*factory))
     node.kind = asset::FrontendWidgetKind::Container;
   else if (*factory == kGuiTextWidget) {
     node.kind = asset::FrontendWidgetKind::Text;

@@ -3066,6 +3066,10 @@ void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
             retail_nav_.screen = content::FrontEndScreenKey::CreateAgent;
         else if (requested == "loadagent")
             retail_nav_.screen = content::FrontEndScreenKey::LoadAgent;
+        else if (requested == "commandcenter")
+            retail_nav_.screen = content::FrontEndScreenKey::CommandCenter;
+        else if (requested == "equipment")
+            retail_nav_.screen = content::FrontEndScreenKey::Equipment;
     }
 
     // Compose the initial screen (default selection) through the same recompose
@@ -3088,6 +3092,12 @@ const content::FrontEndScreenBundle* OmegaApp::RetailBundleForScreen(
     case content::FrontEndScreenKey::LoadAgent:
         slot = &retail_load_agent_bundle_;
         break;
+    case content::FrontEndScreenKey::CommandCenter:
+        slot = &retail_command_center_bundle_;
+        break;
+    case content::FrontEndScreenKey::Equipment:
+        slot = &retail_equipment_bundle_;
+        break;
     }
     if (slot == nullptr)
         return nullptr;
@@ -3101,7 +3111,15 @@ const content::FrontEndScreenBundle* OmegaApp::RetailBundleForScreen(
     {
         auto bundle = content_->game_data->LoadFrontEndScreen(screen);
         if (!bundle)
+        {
+            // Identity-free: the GameData error code names a category, not owner
+            // data. Helps distinguish a decode gap from a missing member/scope.
+            log_->Warning("presentation",
+                std::string("retail front-end screen load failed [") +
+                    std::string(content::GameDataErrorCodeName(bundle.error().code)) +
+                    "]");
             return nullptr;
+        }
         *slot = std::move(*bundle);
         return &**slot;
     }

@@ -644,6 +644,47 @@ int main() {
              omega::asset::DecodeErrorCode::UnsupportedVariant,
              "GUI rejects an unsupported decorator family");
 
+  // Gap B Command Center: the dynamic-content GUI factories carry no
+  // factory-specific fields and decode as Container nodes (common prefix +
+  // optional GuiInterfaceDecorator binding + children), which is what a static
+  // render needs. Verified against the real EQUIPNT.GUI/CMDCENTR.GUI.
+  for (const std::string_view container_factory :
+       {std::string_view{"GuiWeaponDisplay"}, std::string_view{"GuiBitmapWidget"},
+        std::string_view{"GuiMissionList"},
+        std::string_view{"GuiScrollBarWidget"}}) {
+    const GuiNodeSpec container_child{
+        .factory = "GuiWidget", .identifier = "cc_child", .decorated = false};
+    const GuiNodeSpec container_root{
+        .factory = container_factory,
+        .identifier = "cc_root",
+        .rectangle = {.left = 0.0F, .top = 0.0F, .width = 8.0F, .height = 8.0F},
+        .decorated = true,
+        .scope_reference = "",
+        .resource_reference = "cc_visual",
+        .transform_values = {1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F,
+                             1.0F, 0.0F, 0.0F, 0.0F},
+        .children = {container_child},
+    };
+    const auto container_decoded =
+        omega::retail::DecodeGuiFrontend(EncodeGuiFixture(container_root).bytes);
+    Check(container_decoded &&
+              container_decoded->root.kind ==
+                  omega::asset::FrontendWidgetKind::Container &&
+              container_decoded->root.binding &&
+              container_decoded->root.binding->resource_reference == "cc_visual" &&
+              container_decoded->root.children.size() == 1U,
+          "container-content GUI factory decodes as a Container with its "
+          "binding and children");
+  }
+  {
+    const GuiNodeSpec edit_root{.factory = "GuiTextEditWidget",
+                                .identifier = "edit",
+                                .decorated = false};
+    CheckError(omega::retail::DecodeGuiFrontend(EncodeGuiFixture(edit_root).bytes),
+               omega::asset::DecodeErrorCode::UnsupportedVariant,
+               "GuiTextEditWidget stays unsupported pending its extra-field RE");
+  }
+
   for (std::size_t index = 0; index < 4U; ++index) {
     bad_gui = gui_fixture.bytes;
     WriteF32(bad_gui, gui_fixture.root_offsets.rectangle + index * 4U,

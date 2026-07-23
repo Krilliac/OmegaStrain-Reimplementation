@@ -79,6 +79,20 @@ struct FrontEndRoute final
             .gui_member = "AGENTOPN.GUI",
             .visual_member = "AGENTOPN.IE",
         };
+    case FrontEndScreenKey::CommandCenter:
+        return FrontEndRoute{
+            .scope = "CMDCENTR",
+            .archive_member = "CMDCENTR.HOG",
+            .gui_member = "CMDCENTR.GUI",
+            .visual_member = "CMDCENTR.IE",
+        };
+    case FrontEndScreenKey::Equipment:
+        return FrontEndRoute{
+            .scope = "EQUIPNT",
+            .archive_member = "EQUIPNT.HOG",
+            .gui_member = "EQUIPNT.GUI",
+            .visual_member = "EQUIPNT.IE",
+        };
     }
     return std::nullopt;
 }
