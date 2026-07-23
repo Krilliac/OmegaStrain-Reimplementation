@@ -1,6 +1,7 @@
 #include "front_end.h"
 
 #include "omega/debug/subsystem_entry_break.h"
+#include "omega/multiplayer/mp_menu.h"
 
 #include <algorithm>
 #include <array>
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <new>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -164,6 +166,28 @@ void DrawLabel(runtime::DebugImage &image, const char (&label)[Size], const std:
 {
     static_assert(Size > 0U);
     DrawText(image, std::string_view(label, Size - 1U), origin_x, origin_y);
+}
+
+// Multiplayer-menu text: uppercases ASCII a-z for the uppercase-only project
+// font and renders ':' (intentionally absent from the shared font/allow-list)
+// as an inline two-dot glyph, so custom IP:port address fields display exactly.
+void DrawMpText(runtime::DebugImage &image, const std::string_view text, const std::uint32_t origin_x,
+                const std::uint32_t origin_y) noexcept
+{
+    for (std::size_t index = 0U; index < text.size(); ++index)
+    {
+        char symbol = text[index];
+        if (symbol >= 'a' && symbol <= 'z')
+            symbol = static_cast<char>(symbol - ('a' - 'A'));
+        const std::uint32_t glyph_x = origin_x + static_cast<std::uint32_t>(index) * kGlyphAdvance;
+        if (symbol == ':')
+        {
+            FillRectangle(image, glyph_x + 1U, origin_y + 1U, glyph_x + 2U, origin_y + 2U, kCyanColor);
+            FillRectangle(image, glyph_x + 1U, origin_y + 3U, glyph_x + 2U, origin_y + 4U, kCyanColor);
+            continue;
+        }
+        DrawGlyph(image, FindGlyph(symbol), glyph_x, origin_y);
+    }
 }
 
 void DrawLabel(runtime::DebugImage &image, const FrontEndLabel &label, const std::uint32_t origin_x,
@@ -618,6 +642,84 @@ runtime::DebugImage BuildProjectFrontEndControlsImage()
     FillRectangle(image, 8U, 54U, 120U, 68U, kSlateColor);
     DrawLabel(image, "LMB/SPACE FIRE", 12U, 55U);
     DrawLabel(image, "T/RMB TARGET", 12U, 62U);
+    return image;
+}
+
+runtime::DebugImage BuildProjectMultiplayerImage(const multiplayer::MpMenuState &state)
+{
+    using multiplayer::MpScreen;
+    runtime::DebugImage image = BuildDiagnosticCardBase();
+
+    std::string_view title = "MULTIPLAYER";
+    switch (state.screen)
+    {
+    case MpScreen::HostGame:
+        title = "HOST GAME";
+        break;
+    case MpScreen::DirectConnect:
+        title = "DIRECT CONNECT";
+        break;
+    case MpScreen::ServerList:
+        title = "SERVER LIST";
+        break;
+    case MpScreen::Root:
+        break;
+    }
+    FillRectangle(image, 4U, 4U, 124U, 13U, kSlateColor);
+    DrawMpText(image, title, 8U, 6U);
+
+    const auto field_text = [&](const std::uint8_t row, const multiplayer::MpTextField &field) -> std::string {
+        std::string value(field.view());
+        if (state.editing && state.selection == row)
+            value.push_back('_'); // caret while editing this field
+        return value;
+    };
+
+    std::array<std::string, 4U> rows{};
+    std::uint8_t row_count = 0U;
+    switch (state.screen)
+    {
+    case MpScreen::Root:
+        rows[0] = "HOST GAME";
+        rows[1] = "DIRECT CONNECT";
+        rows[2] = "SERVER LIST";
+        rows[3] = "BACK";
+        row_count = 4U;
+        break;
+    case MpScreen::HostGame:
+        rows[0] = std::string("MODE ") + std::string(multiplayer::HostModeName(state.host_mode));
+        rows[1] = std::string("NAME ") + field_text(1U, state.server_name);
+        rows[2] = "START HOST";
+        rows[3] = "BACK";
+        row_count = 4U;
+        break;
+    case MpScreen::DirectConnect:
+        rows[0] = std::string("ADDR ") + field_text(0U, state.address);
+        rows[1] = "CONNECT";
+        rows[2] = "BACK";
+        row_count = 3U;
+        break;
+    case MpScreen::ServerList:
+        rows[0] = "LAN GAME 1 JOIN";
+        rows[1] = "REFRESH";
+        rows[2] = "BACK";
+        row_count = 3U;
+        break;
+    }
+
+    for (std::uint8_t row = 0U; row < row_count; ++row)
+    {
+        const std::uint32_t y = 24U + static_cast<std::uint32_t>(row) * 8U;
+        if (row == state.selection)
+        {
+            FillRectangle(image, 6U, y - 1U, 122U, y + 6U, kSlateColor);
+            DrawMpText(image, ">", 7U, y);
+        }
+        DrawMpText(image, rows[row], 12U, y);
+    }
+
+    if (state.screen == MpScreen::ServerList)
+        DrawMpText(image, "NO MASTER SERVER", 12U, 58U);
     return image;
 }
 

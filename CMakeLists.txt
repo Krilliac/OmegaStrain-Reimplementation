@@ -830,6 +830,34 @@ if(BUILD_TESTING)
     )
     set_tests_properties(omega_scene_fragment_wire_contract_tests PROPERTIES TIMEOUT 10)
 
+    # Header-only project multiplayer menu logic (pure reducer + text field +
+    # session-request seam). Links no shipping target.
+    add_executable(omega_mp_menu_tests
+        native/tests/mp_menu_tests.cpp
+    )
+    target_include_directories(omega_mp_menu_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/native/include"
+    )
+    if(MSVC)
+        target_compile_options(omega_mp_menu_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_mp_menu_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+        )
+    endif()
+    add_test(NAME omega_mp_menu_tests COMMAND omega_mp_menu_tests)
+    set_tests_properties(omega_mp_menu_tests PROPERTIES TIMEOUT 10)
+
     # Independent, test-only C++ construction of the generated front-end phase
     # wire vector. It deliberately links no shipping OpenOmega target.
     add_executable(omega_frontend_phase_wire_contract_tests

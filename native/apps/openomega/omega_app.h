@@ -224,6 +224,14 @@ private:
     // throws.
     void UpdateRetailFrontEndPresentation(
         const frontend::presentation::RetailFrontEndNavInput& input) noexcept;
+    // [game/main/render thread] Recomposes the project multiplayer menu overlay
+    // draw list from mp_menu_state_ (uploading a fresh card and releasing the
+    // prior texture). Called only while mp_menu_active_.
+    void UpdateMultiplayerMenuPresentation() noexcept;
+    // [game/main thread] Logs a stub session request (host/connect/join). This is
+    // the seam a future transport layer implements; it performs no networking.
+    void DispatchMultiplayerSessionRequest(
+        const multiplayer::MpSessionRequest& request) noexcept;
     // [game/main/render thread; no concurrent use] Atomically rebuilds fixed CPU
     // texture fallback/overlay commands and, when a scene is resident, the
     // environment-plus-actor mesh commands for the final post-step position.
@@ -442,6 +450,17 @@ private:
     FrontEndStartupModel front_end_startup_model_{};
     FrontEndCharacterStartupModel front_end_character_startup_model_{};
     std::optional<CharacterPresentation> character_presentation_;
+    // Project multiplayer menu overlay (dev-gated by OPENOMEGA_START_SCREEN=
+    // multiplayer, DeveloperDiagnostics only). Self-contained: it steps a pure
+    // MP menu reducer from the same input edges and replaces the front-end draw
+    // list with a project-authored MP card. Session actions are logged stubs; no
+    // networking. Recompose releases the prior texture like the retail path.
+    bool mp_menu_active_ = false;
+    multiplayer::MpMenuState mp_menu_state_{};
+    runtime::RenderDrawList mp_menu_draw_list_;
+    bool mp_menu_ready_ = false;
+    runtime::RenderTextureHandle mp_menu_texture_;
+    bool mp_menu_texture_valid_ = false;
     std::optional<CharacterPresentation> first_character_presentation_;
     // Project-owned app-layer state. It has no renderer, database, or retail-data lifetime.
     FrontEndState front_end_state_;

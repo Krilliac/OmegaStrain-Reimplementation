@@ -1,5 +1,6 @@
 #pragma once
 
+#include "omega/multiplayer/mp_menu.h"
 #include "omega/profiles/character_catalog.h"
 #include "omega/profiles/profile_catalog.h"
 #include "omega/runtime/content_startup.h"
@@ -868,6 +869,12 @@ struct FrontEndView
                                                                       FrontEndCapabilities capabilities = {});
 [[nodiscard]] runtime::DebugImage BuildProjectFrontEndDiagnosticPlayImage();
 [[nodiscard]] runtime::DebugImage BuildProjectFrontEndControlsImage();
+
+// [any thread; reentrant] Renders the current project multiplayer menu screen
+// (Host Game / Direct Connect / Server List) into a fully owned RGBA8 card,
+// including the selected-row marker and any editing caret. Project-authored;
+// consumes no retail asset or network state.
+[[nodiscard]] runtime::DebugImage BuildProjectMultiplayerImage(const multiplayer::MpMenuState &state);
 
 // Builds the exact project-owned E-0066 three-block topology fixture and
 // returns its fully owned metadata-only diagnostic image.

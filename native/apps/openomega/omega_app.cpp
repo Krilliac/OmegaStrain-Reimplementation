@@ -1923,6 +1923,51 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         log_->Info("runtime",
             "OPENOMEGA_START_DIAGNOSTIC_PLAY: booting into the loaded level scene");
     }
+
+    // Dev-only: OPENOMEGA_START_SCREEN=multiplayer opens the project multiplayer
+    // menu overlay (Host Game / Direct Connect / Server List with stub session
+    // actions) for capture and interactive use. DeveloperDiagnostics only;
+    // separate from the retail OPENOMEGA_FRONTEND_START_SCREEN override and from
+    // the project ReduceFrontEnd flow. Seeds default field text so a headless
+    // capture shows content; live typing edits it.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const char* const start_multiplayer_menu = std::getenv("OPENOMEGA_START_SCREEN");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    const std::string_view requested_mp_screen =
+        start_multiplayer_menu != nullptr ? std::string_view(start_multiplayer_menu)
+                                          : std::string_view{};
+    const bool mp_requested =
+        requested_mp_screen == "multiplayer" || requested_mp_screen == "hostgame" ||
+        requested_mp_screen == "directconnect" || requested_mp_screen == "serverlist";
+    if (mp_requested &&
+        presentation_mode_ ==
+            runtime::FrontEndPresentationMode::DeveloperDiagnostics)
+    {
+        mp_menu_active_ = true;
+        mp_menu_state_ = multiplayer::MpMenuState{};
+        if (requested_mp_screen == "hostgame")
+            mp_menu_state_.screen = multiplayer::MpScreen::HostGame;
+        else if (requested_mp_screen == "directconnect")
+            mp_menu_state_.screen = multiplayer::MpScreen::DirectConnect;
+        else if (requested_mp_screen == "serverlist")
+            mp_menu_state_.screen = multiplayer::MpScreen::ServerList;
+        // Seed default field text so a headless capture shows populated fields;
+        // live typing edits them interactively once text input is wired.
+        for (const char symbol : std::string_view("OMEGA HOST"))
+            multiplayer::MpTextInsert(mp_menu_state_.server_name, symbol,
+                multiplayer::MpTextFieldKind::Name);
+        for (const char symbol : std::string_view("127.0.0.1:33333"))
+            multiplayer::MpTextInsert(mp_menu_state_.address, symbol,
+                multiplayer::MpTextFieldKind::Address);
+        UpdateMultiplayerMenuPresentation();
+        log_->Info("runtime",
+            "OPENOMEGA_START_SCREEN multiplayer menu overlay active");
+    }
     RunResult result;
     bool running = true;
     auto previous_frame = Clock::now();
@@ -2286,6 +2331,43 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                     };
                 }
             }
+        }
+        else if (mp_menu_active_)
+        {
+            // Project multiplayer menu overlay: step the pure MP reducer from the
+            // resolved front-end input edges (arrows/gamepad map to up/down/select/
+            // back) instead of the project ReduceFrontEnd flow, and recompose only
+            // when the menu state changes. Live text entry into the fields is a
+            // follow-up (needs SDL text-input events); fields carry seeded defaults.
+            const auto mp_edges = ResolveFrontEndInputEdges(
+                FrontEndMode::Title,
+                FrontEndInputEdges{
+                    .primary_pressed =
+                        input_snapshot.WasPressed(kFrontEndPrimaryAction),
+                    .previous_pressed =
+                        input_snapshot.WasPressed(kFrontEndPreviousAction),
+                    .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
+                    .cancel_pressed =
+                        input_snapshot.WasPressed(kFrontEndCancelAction),
+                },
+                input_snapshot.WasPressed(kDebugMoveLeftAction),
+                input_snapshot.WasPressed(kDebugMoveRightAction),
+                input_snapshot.WasPressed(kDebugFireAction),
+                input_snapshot.WasPressed(kDebugTargetAction));
+            const multiplayer::MpMenuState before_state = mp_menu_state_;
+            const multiplayer::MpMenuStep step = multiplayer::StepMpMenu(
+                mp_menu_state_,
+                multiplayer::MpMenuInput{
+                    .up = mp_edges.previous_pressed,
+                    .down = mp_edges.next_pressed,
+                    .primary = mp_edges.primary_pressed,
+                    .cancel = mp_edges.cancel_pressed,
+                });
+            mp_menu_state_ = step.state;
+            if (step.request.type != multiplayer::SessionRequestType::None)
+                DispatchMultiplayerSessionRequest(step.request);
+            if (mp_menu_state_ != before_state)
+                UpdateMultiplayerMenuPresentation();
         }
         else if (presentation_mode_ ==
                      runtime::FrontEndPresentationMode::RetailRequired &&
@@ -3377,6 +3459,86 @@ void OmegaApp::ComposeRetailScreenPresentation(
     retail_front_end_ready_ = true;
 }
 
+void OmegaApp::UpdateMultiplayerMenuPresentation() noexcept
+{
+    if (!host_)
+        return;
+    const runtime::DebugImage image = BuildProjectMultiplayerImage(mp_menu_state_);
+    auto uploaded = host_->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+        .width = image.width,
+        .height = image.height,
+        .pixels = image.pixels(),
+    });
+    if (!uploaded)
+    {
+        log_->Warning("presentation", "multiplayer menu texture upload failed");
+        return;
+    }
+    constexpr runtime::RenderSourceRectQ16 full_source{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    constexpr runtime::RenderTargetRectQ16 full_target{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    const runtime::RenderTextureBlitCommand command{
+        .texture = *uploaded,
+        .source = full_source,
+        .destination = full_target,
+        .fit_mode = runtime::RenderTextureFitMode::Stretch,
+        .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+    };
+    auto draw_list = runtime::RenderDrawList::Create(
+        std::span<const runtime::RenderTextureBlitCommand>{&command, 1U});
+    if (!draw_list)
+    {
+        static_cast<void>(host_->ReleaseTexture(*uploaded));
+        log_->Warning("presentation", "multiplayer menu draw-list creation failed");
+        return;
+    }
+    if (mp_menu_texture_valid_)
+        static_cast<void>(host_->ReleaseTexture(mp_menu_texture_));
+    mp_menu_texture_ = *uploaded;
+    mp_menu_texture_valid_ = true;
+    mp_menu_draw_list_ = std::move(*draw_list);
+    mp_menu_ready_ = true;
+}
+
+void OmegaApp::DispatchMultiplayerSessionRequest(
+    const multiplayer::MpSessionRequest& request) noexcept
+{
+    // Stub seam: a future transport layer implements these requests. Today the
+    // app only logs the intent + parameters -- no sockets, threads, or netcode.
+    switch (request.type)
+    {
+    case multiplayer::SessionRequestType::HostSession:
+        log_->Info("multiplayer",
+            std::string("host-session request: mode=") +
+                std::string(multiplayer::HostModeName(request.host_mode)) +
+                " name=\"" + std::string(request.server_name.view()) + "\"");
+        break;
+    case multiplayer::SessionRequestType::DirectConnect:
+        log_->Info("multiplayer",
+            std::string("direct-connect request: address=") +
+                std::string(request.address.view()));
+        break;
+    case multiplayer::SessionRequestType::JoinServer:
+        log_->Info("multiplayer", "join-server request (stub server list entry 0)");
+        break;
+    case multiplayer::SessionRequestType::RefreshServers:
+        log_->Info("multiplayer",
+            "refresh-servers request (no master server configured)");
+        break;
+    case multiplayer::SessionRequestType::None:
+        break;
+    }
+}
+
 std::expected<void, std::string> OmegaApp::DeployDiagnosticMission()
 {
     const auto deployed = gameplay::AdvanceDiagnosticMissionLifecycle(
@@ -3796,6 +3958,11 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
 
 const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcept
 {
+    // Project multiplayer menu overlay (dev-gated): when active it replaces the
+    // whole front end with the MP menu card. DeveloperDiagnostics only.
+    if (mp_menu_active_ && mp_menu_ready_)
+        return mp_menu_draw_list_;
+
     // Retail presentation (Gap B Phase 1): once the decoded retail screen has been
     // composited, it IS the whole front end -- a single full-frame blit of the
     // static Title -- and supersedes every project-authored per-mode draw list.
