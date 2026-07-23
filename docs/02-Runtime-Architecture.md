@@ -488,8 +488,10 @@ Its normalized detailed trace is private-only; a separate public reducer emits f
 and policy categories plus bounded aggregate counts. The private validator retains anonymous static
 site bindings, strict single-lane lifecycle intervals, immutable submission-time context, global
 event/submission/final-draw chronology, exact draw disposition/membership, terminal state, and
-discovered-versus-retained reconciliation. A private three-artifact capture-domain manifest must
-join phase, scene, and front-end artifacts explicitly; matching dense draw ordinals are insufficient.
+discovered-versus-retained frame/table reconciliation. Both reducers require the selected private
+site map and its binding to match before reduction. A private three-artifact capture-domain manifest
+must join phase, scene, and front-end artifacts explicitly; matching dense draw ordinals are
+insufficient.
 The format and limits are fully described in `analysis/formats/FRONTEND-PHASE.md`.
 
 No C++ producer-wire mirror, PCSX2 producer, owner capture, canonical-IR consumer, `OmegaApp`

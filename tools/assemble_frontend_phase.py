@@ -32,6 +32,7 @@ MAX_FRAGMENT_BYTES: Final = 4 * 1024 * 1024
 MAX_TOTAL_INPUT_BYTES: Final = 32 * 1024 * 1024
 MAX_FRAGMENTS: Final = 8
 MAX_MANIFEST_BYTES: Final = 64 * 1024
+MAX_SITE_MAP_BYTES: Final = 1024 * 1024
 MAX_STRING_BYTES: Final = 256
 MAX_FRAMES: Final = 600
 MAX_SITES: Final = 4_096
@@ -47,7 +48,7 @@ MAX_SCRATCH_BYTES: Final = 16 * 1024 * 1024
 MAX_PRIVATE_OUTPUT_BYTES: Final = 16 * 1024 * 1024
 MAX_PUBLIC_AGGREGATE_ROWS: Final = 8
 MAX_PUBLIC_OUTPUT_BYTES: Final = 4 * 1024
-MAX_CLI_ARGUMENTS: Final = 64
+MAX_CLI_ARGUMENTS: Final = 60
 MAX_CLI_ARGUMENT_BYTES: Final = 32 * 1024
 _READ_CHUNK_BYTES: Final = 64 * 1024
 
@@ -76,6 +77,7 @@ _HEADER_BYTES: Final = (
     len(FRAGMENT_MAGIC)
     + 4
     + 32 * 3
+    + 4  # discovered frame count
     + 4  # retained frame count
     + 4  # terminal status
     + 4  # commit state
@@ -132,6 +134,7 @@ HARD_LIMITS: Final[dict[str, int]] = {
     "total_input_bytes": MAX_TOTAL_INPUT_BYTES,
     "fragments": MAX_FRAGMENTS,
     "manifest_bytes": MAX_MANIFEST_BYTES,
+    "site_map_bytes": MAX_SITE_MAP_BYTES,
     "string_bytes": MAX_STRING_BYTES,
     "frames": MAX_FRAMES,
     "sites": MAX_SITES,
@@ -150,7 +153,7 @@ HARD_LIMITS: Final[dict[str, int]] = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PhaseLimits:
     """Caller-tightenable capacities beneath immutable hard ceilings."""
 
@@ -158,6 +161,7 @@ class PhaseLimits:
     total_input_bytes: int = MAX_TOTAL_INPUT_BYTES
     fragments: int = MAX_FRAGMENTS
     manifest_bytes: int = MAX_MANIFEST_BYTES
+    site_map_bytes: int = MAX_SITE_MAP_BYTES
     string_bytes: int = MAX_STRING_BYTES
     frames: int = MAX_FRAMES
     sites: int = MAX_SITES
@@ -184,26 +188,26 @@ class PhaseLimits:
 DEFAULT_LIMITS: Final = PhaseLimits()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SiteMapBinding:
     runtime_config_digest: bytes
     site_map_digest: bytes
     site_count: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CaptureDomainManifest:
     phase_capture_domain: bytes
     scene_capture_domain: bytes
     frontend_capture_domain: bytes
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SiteRow:
     ordinal: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class InvocationRow:
     ordinal: int
     site: int
@@ -213,7 +217,7 @@ class InvocationRow:
     exit_event: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class EventRow:
     ordinal: int
     sequence: int
@@ -222,7 +226,7 @@ class EventRow:
     kind: EventKind
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SubmissionRow:
     ordinal: int
     sequence: int
@@ -232,7 +236,7 @@ class SubmissionRow:
     primitive_count: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DrawRow:
     ordinal: int
     sequence: int
@@ -240,22 +244,24 @@ class DrawRow:
     disposition: DrawDisposition
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MembershipRow:
     submission: int
     draw: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TerminalRecord:
     status: TerminalStatus
     commit_state: CommitState
+    discovered_frame_count: int
+    retained_frame_count: int
     failure_counts: tuple[int, ...]
     discovered_counts: tuple[int, ...]
     retained_counts: tuple[int, ...]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ParsedPhaseFragment:
     """Fully validated private trace; no semantic promotion is implied."""
 
@@ -272,13 +278,35 @@ class ParsedPhaseFragment:
     memberships: tuple[MembershipRow, ...]
 
     @property
-    def ordering_evidence_valid(self) -> bool:
+    def terminal_capture_complete(self) -> bool:
         return (
             self.terminal.status is TerminalStatus.Complete
             and self.terminal.commit_state is CommitState.Committed
+            and self.terminal.discovered_frame_count
+            == self.terminal.retained_frame_count
             and not any(self.terminal.failure_counts)
             and self.terminal.discovered_counts == self.terminal.retained_counts
         )
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class VerifiedPhaseAssembly:
+    """Private trace after selected site-map and capture-domain joins succeed."""
+
+    trace: ParsedPhaseFragment
+
+    def __init__(self, _trace: ParsedPhaseFragment) -> None:
+        raise _assembly_fail("verified phase assemblies are created only by join validation")
+
+    @classmethod
+    def _from_validated(cls, trace: ParsedPhaseFragment) -> VerifiedPhaseAssembly:
+        result = object.__new__(cls)
+        object.__setattr__(result, "trace", trace)
+        return result
+
+    @property
+    def ordering_evidence_valid(self) -> bool:
+        return self.trace.terminal_capture_complete
 
 
 class _Reader:
@@ -311,7 +339,14 @@ def _require_reference(value: int, count: int, message: str) -> None:
 
 
 def _logical_scratch_bytes(counts: tuple[int, ...]) -> int:
-    return sum(count * (width + 16) for count, width in zip(counts, _ROW_WIDTHS, strict=True))
+    # Conservative retained-allocation charge for slots rows, separately
+    # allocated integer objects, list/tuple references, and every auxiliary
+    # validation index. This is a deliberately padded contract charge rather
+    # than a claim about one Python allocator's exact heap usage.
+    charges = (256, 1_024, 1_024, 1_024, 768, 512)
+    return 65_536 + sum(
+        count * charge for count, charge in zip(counts, charges, strict=True)
+    )
 
 
 def _logical_lookup_work(counts: tuple[int, ...]) -> int:
@@ -356,6 +391,8 @@ def _validate_counts(
 def _validate_terminal(
     status_value: int,
     commit_value: int,
+    discovered_frame_count: int,
+    retained_frame_count: int,
     failure_counts: tuple[int, ...],
     discovered_counts: tuple[int, ...],
     retained_counts: tuple[int, ...],
@@ -369,6 +406,11 @@ def _validate_terminal(
 
     if sum(failure_counts) > limits.failure_records:
         raise _fragment_fail("phase fragment failure accounting exceeds the caller capacity")
+    if (
+        discovered_frame_count > limits.frames
+        or retained_frame_count > discovered_frame_count
+    ):
+        raise _fragment_fail("phase fragment frame accounting is unreconciled")
 
     if status is TerminalStatus.Complete:
         if commit_state is not CommitState.Committed:
@@ -377,6 +419,8 @@ def _validate_terminal(
             raise _fragment_fail("a complete phase fragment reports a failure")
         if discovered_counts != retained_counts:
             raise _fragment_fail("a complete phase fragment has unreconciled records")
+        if discovered_frame_count != retained_frame_count:
+            raise _fragment_fail("a complete phase fragment has unreconciled frames")
     else:
         if commit_state is not CommitState.Aborted:
             raise _fragment_fail("an incomplete phase fragment was committed")
@@ -400,6 +444,8 @@ def _validate_terminal(
     return TerminalRecord(
         status=status,
         commit_state=commit_state,
+        discovered_frame_count=discovered_frame_count,
+        retained_frame_count=retained_frame_count,
         failure_counts=failure_counts,
         discovered_counts=discovered_counts,
         retained_counts=retained_counts,
@@ -452,9 +498,26 @@ def _validate_temporal_model(
         raise _fragment_fail("temporal sequence contains a gap")
 
     stack: list[int] = []
+    prior_frame = 0
     for sequence, temporal_item in enumerate(temporal, start=1):
         assert temporal_item is not None
         kind, ordinal = temporal_item
+        if kind == 0:
+            frame = events[ordinal - 1].frame
+        elif kind == 1:
+            frame = submissions[ordinal - 1].frame
+        else:
+            frame = draws[ordinal - 1].frame
+        if frame < prior_frame:
+            raise _fragment_fail("frame chronology regresses within the capture")
+        prior_frame = frame
+        if kind == 1:
+            submission = submissions[ordinal - 1]
+            if not stack or submission.invocation != stack[-1]:
+                raise _fragment_fail(
+                    "submission context is not the active lifecycle stack top"
+                )
+            continue
         if kind != 0:
             continue
         event = events[ordinal - 1]
@@ -514,7 +577,7 @@ def _validate_temporal_model(
         if submission.primitive_count == 0 or submission.primitive_begin != prior_primitive_end:
             raise _fragment_fail("submission primitive ranges contain a gap or overlap")
         prior_primitive_end += submission.primitive_count
-        if prior_primitive_end > 0xFFFFFFFF:
+        if prior_primitive_end > 0x100000000:
             raise _fragment_fail("submission primitive range overflows u32")
 
     member_for_submission = [0] * len(submissions)
@@ -577,6 +640,7 @@ def parse_phase_fragment(
     if not all(any(value) for value in (capture_domain, runtime_config_digest, site_map_digest)):
         raise _fragment_fail("phase fragment consistency values are invalid")
 
+    discovered_frame_count = reader.u32()
     frame_count = reader.u32()
     if frame_count > limits.frames:
         raise _fragment_fail("phase fragment frame count exceeds the caller capacity")
@@ -589,6 +653,8 @@ def parse_phase_fragment(
     terminal = _validate_terminal(
         status_value,
         commit_value,
+        discovered_frame_count,
+        frame_count,
         failure_counts,
         discovered_counts,
         counts,
@@ -882,6 +948,7 @@ def validate_private_bindings(
     model: ParsedPhaseFragment,
     site_map_binding: SiteMapBinding,
     capture_manifest: CaptureDomainManifest,
+    selected_site_map_sha256: str,
 ) -> None:
     """Verify private configuration/site and three-artifact capture-domain joins."""
 
@@ -889,6 +956,7 @@ def validate_private_bindings(
         site_map_binding.runtime_config_digest != model.runtime_config_digest
         or site_map_binding.site_map_digest != model.site_map_digest
         or site_map_binding.site_count != len(model.sites)
+        or selected_site_map_sha256 != site_map_binding.site_map_digest.hex()
     ):
         raise _assembly_fail("private site-map binding does not match the phase fragment")
     if not (
@@ -911,11 +979,12 @@ def _validate_expected_sha256(value: str | None) -> str | None:
 def assemble_phase_model(
     raw_fragments: Sequence[bytes],
     *,
+    site_map_bytes: bytes,
     site_map_binding: SiteMapBinding,
     capture_manifest: CaptureDomainManifest,
     expected_fragment_sha256: str | None = None,
     limits: PhaseLimits = DEFAULT_LIMITS,
-) -> ParsedPhaseFragment:
+) -> VerifiedPhaseAssembly:
     """Compare independent in-memory copies and parse only the reference bytes."""
 
     if not isinstance(raw_fragments, Sequence) or isinstance(
@@ -924,19 +993,21 @@ def assemble_phase_model(
         raise _assembly_fail("phase fragment collection must be a sequence")
     if not raw_fragments or len(raw_fragments) > limits.fragments:
         raise _assembly_fail("phase fragment count exceeds the caller capacity")
-    if sum(len(raw) for raw in raw_fragments if type(raw) is bytes) > limits.total_input_bytes:
+    if type(site_map_bytes) is not bytes or len(site_map_bytes) > limits.site_map_bytes:
+        raise _assembly_fail("selected private site map exceeds the caller capacity")
+    if any(type(raw) is not bytes for raw in raw_fragments):
+        raise _assembly_fail("phase fragments must be immutable bytes")
+    if any(len(raw) > limits.fragment_bytes for raw in raw_fragments):
+        raise _assembly_fail("phase fragment exceeds the caller capacity")
+    if len(site_map_bytes) + sum(len(raw) for raw in raw_fragments) > limits.total_input_bytes:
         raise _assembly_fail("phase fragments exceed the total caller byte capacity")
 
     expected_digest = _validate_expected_sha256(expected_fragment_sha256)
     reference = raw_fragments[0]
-    if type(reference) is not bytes:
-        raise _assembly_fail("phase fragments must be immutable bytes")
     reference_hash = hashlib.sha256(reference).hexdigest()
     if expected_digest is not None and reference_hash != expected_digest:
         raise _assembly_fail("phase fragment SHA-256 does not match the expected consistency value")
     for repeat in raw_fragments[1:]:
-        if type(repeat) is not bytes:
-            raise _assembly_fail("phase fragments must be immutable bytes")
         if repeat is reference:
             raise _assembly_fail("repeat verification requires an independent byte object")
         repeat_hash = hashlib.sha256(repeat).hexdigest()
@@ -944,14 +1015,22 @@ def assemble_phase_model(
             raise _assembly_fail("repeat phase fragments are not byte-identical")
 
     model = parse_phase_fragment(reference, limits=limits)
-    validate_private_bindings(model, site_map_binding, capture_manifest)
-    return model
+    validate_private_bindings(
+        model,
+        site_map_binding,
+        capture_manifest,
+        hashlib.sha256(site_map_bytes).hexdigest(),
+    )
+    return VerifiedPhaseAssembly._from_validated(model)
 
 
 def _public_report_document(
-    model: ParsedPhaseFragment,
+    assembly: VerifiedPhaseAssembly,
     limits: PhaseLimits,
 ) -> dict[str, object]:
+    if type(assembly) is not VerifiedPhaseAssembly:
+        raise _assembly_fail("public reduction requires a fully verified private assembly")
+    model = assembly.trace
     submitted = sum(
         draw.disposition is DrawDisposition.Submitted for draw in model.draws
     )
@@ -968,7 +1047,7 @@ def _public_report_document(
     )
     if len(counts) > limits.public_aggregate_rows:
         raise _assembly_fail("public aggregate rows exceed the caller capacity")
-    if not model.ordering_evidence_valid:
+    if not assembly.ordering_evidence_valid:
         policy = "IncompleteCapture"
     elif not model.submissions:
         policy = "NoOrderingEvidence"
@@ -977,7 +1056,7 @@ def _public_report_document(
     return {
         "schema": PUBLIC_REPORT_SCHEMA,
         "terminal_status": model.terminal.status.name,
-        "completeness": "Complete" if model.ordering_evidence_valid else "Incomplete",
+        "completeness": "Complete" if assembly.ordering_evidence_valid else "Incomplete",
         "policy": policy,
         "aggregate_counts": [
             {"category": category, "count": count}
@@ -987,12 +1066,12 @@ def _public_report_document(
 
 
 def encode_public_report(
-    model: ParsedPhaseFragment,
+    assembly: VerifiedPhaseAssembly,
     *,
     limits: PhaseLimits = DEFAULT_LIMITS,
 ) -> bytes:
     return _bounded_canonical_json(
-        _public_report_document(model, limits),
+        _public_report_document(assembly, limits),
         limits.public_output_bytes,
     )
 
@@ -1104,10 +1183,13 @@ def _write_membership(writer: _BoundedJsonWriter, value: object) -> None:
 
 
 def encode_private_trace(
-    model: ParsedPhaseFragment,
+    assembly: VerifiedPhaseAssembly,
     *,
     limits: PhaseLimits = DEFAULT_LIMITS,
 ) -> bytes:
+    if type(assembly) is not VerifiedPhaseAssembly:
+        raise _assembly_fail("private encoding requires a fully verified private assembly")
+    model = assembly.trace
     writer = _BoundedJsonWriter(limits.private_output_bytes)
     writer.raw(b'{"schema":')
     writer.string(PRIVATE_TRACE_SCHEMA)
@@ -1120,11 +1202,15 @@ def encode_private_trace(
     writer.raw(b',"frame_count":')
     writer.integer(model.frame_count)
     writer.raw(b',"ordering_evidence_valid":')
-    writer.boolean(model.ordering_evidence_valid)
+    writer.boolean(assembly.ordering_evidence_valid)
     writer.raw(b',"terminal":{"status":')
     writer.string(model.terminal.status.name)
     writer.raw(b',"commit_state":')
     writer.string(model.terminal.commit_state.name)
+    writer.raw(b',"discovered_frame_count":')
+    writer.integer(model.terminal.discovered_frame_count)
+    writer.raw(b',"retained_frame_count":')
+    writer.integer(model.terminal.retained_frame_count)
     writer.raw(b',"failure_counts":')
     _private_map(writer, _FAILURE_COUNTER_NAMES, model.terminal.failure_counts)
     writer.raw(b',"discovered_counts":')
@@ -1166,16 +1252,39 @@ def _read_snapshot(
         while remaining:
             chunk = stream.read(min(_READ_CHUNK_BYTES, remaining))
             if not chunk:
-                raise _assembly_fail("a private input changed during its authenticated snapshot")
+                raise _assembly_fail("a private input changed during its consistency snapshot")
             output.extend(chunk)
             digest.update(chunk)
             remaining -= len(chunk)
         if stream.read(1):
-            raise _assembly_fail("a private input grew during its authenticated snapshot")
+            raise _assembly_fail("a private input grew during its consistency snapshot")
         after = _fstat_signature(stream)
     if before != after:
-        raise _assembly_fail("a private input changed during its authenticated snapshot")
+        raise _assembly_fail("a private input changed during its consistency snapshot")
     return bytes(output), (before[0], before[1]), digest.hexdigest()
+
+
+def _digest_snapshot(path: str, byte_limit: int) -> tuple[int, str]:
+    """Hash a bounded private file snapshot without retaining its opaque contents."""
+
+    with open(path, "rb") as stream:
+        before = _fstat_signature(stream)
+        if before[2] > byte_limit:
+            raise _assembly_fail("a private input exceeds the caller byte capacity")
+        digest = hashlib.sha256()
+        remaining = before[2]
+        while remaining:
+            chunk = stream.read(min(_READ_CHUNK_BYTES, remaining))
+            if not chunk:
+                raise _assembly_fail("a private input changed during its consistency read")
+            digest.update(chunk)
+            remaining -= len(chunk)
+        if stream.read(1):
+            raise _assembly_fail("a private input grew during its consistency read")
+        after = _fstat_signature(stream)
+    if before != after:
+        raise _assembly_fail("a private input changed during its consistency read")
+    return before[2], digest.hexdigest()
 
 
 def _compare_snapshot(
@@ -1209,11 +1318,12 @@ def _compare_snapshot(
 def assemble_phase_paths(
     paths: Sequence[str],
     *,
+    site_map_path: str,
     site_map_binding: SiteMapBinding,
     capture_manifest: CaptureDomainManifest,
     expected_fragment_sha256: str,
     limits: PhaseLimits = DEFAULT_LIMITS,
-) -> ParsedPhaseFragment:
+) -> VerifiedPhaseAssembly:
     """Stream-compare stored copies, then parse only the reference snapshot."""
 
     if not paths or len(paths) > limits.fragments:
@@ -1222,17 +1332,22 @@ def assemble_phase_paths(
     if expected_digest is None:
         raise _assembly_fail("path assembly requires an expected consistency value")
 
+    remaining_input_bytes = limits.total_input_bytes
+    site_map_size, site_map_hash = _digest_snapshot(
+        site_map_path,
+        min(limits.site_map_bytes, remaining_input_bytes),
+    )
+    remaining_input_bytes -= site_map_size
     reference, reference_identity, reference_hash = _read_snapshot(
-        paths[0], limits.fragment_bytes
+        paths[0], min(limits.fragment_bytes, remaining_input_bytes)
     )
     if reference_hash != expected_digest:
         raise _assembly_fail("phase fragment SHA-256 does not match the expected consistency value")
     total_bytes = len(reference)
-    if total_bytes > limits.total_input_bytes:
-        raise _assembly_fail("phase fragments exceed the total caller byte capacity")
+    fragment_budget = remaining_input_bytes
     identities = {reference_identity}
     for path in paths[1:]:
-        if total_bytes > limits.total_input_bytes - len(reference):
+        if total_bytes > fragment_budget - len(reference):
             raise _assembly_fail("phase fragments exceed the total caller byte capacity")
         identity = _compare_snapshot(
             path, reference, reference_hash, limits.fragment_bytes
@@ -1243,14 +1358,20 @@ def assemble_phase_paths(
         total_bytes += len(reference)
 
     model = parse_phase_fragment(reference, limits=limits)
-    validate_private_bindings(model, site_map_binding, capture_manifest)
-    return model
+    validate_private_bindings(
+        model,
+        site_map_binding,
+        capture_manifest,
+        site_map_hash,
+    )
+    return VerifiedPhaseAssembly._from_validated(model)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _CliOptions:
     public_output: str
     private_output: str | None
+    site_map: str
     site_map_binding: str
     capture_manifest: str
     expected_sha256: str
@@ -1275,10 +1396,12 @@ def _parse_cli(args: Sequence[str]) -> _CliOptions:
     private_output: str | None = None
     fragments: list[str] = []
     limits = DEFAULT_LIMITS
+    limit_names: set[str] = set()
     index = 0
     value_options = {
         "--public-output": "public_output",
         "--private-output": "private_output",
+        "--site-map": "site_map",
         "--site-map-binding": "site_map_binding",
         "--capture-manifest": "capture_manifest",
         "--expected-sha256": "expected_sha256",
@@ -1289,7 +1412,12 @@ def _parse_cli(args: Sequence[str]) -> _CliOptions:
             index += 1
             if index >= len(args):
                 raise _assembly_fail("CLI option is missing its value")
-            limits = _apply_limit(limits, args[index])
+            specification = args[index]
+            limit_name = specification.split("=", 1)[0]
+            if limit_name in limit_names:
+                raise _assembly_fail("CLI limit was repeated")
+            limits = _apply_limit(limits, specification)
+            limit_names.add(limit_name)
         elif argument in value_options:
             index += 1
             if index >= len(args):
@@ -1306,6 +1434,7 @@ def _parse_cli(args: Sequence[str]) -> _CliOptions:
 
     required = (
         "public_output",
+        "site_map",
         "site_map_binding",
         "capture_manifest",
         "expected_sha256",
@@ -1318,6 +1447,7 @@ def _parse_cli(args: Sequence[str]) -> _CliOptions:
     return _CliOptions(
         public_output=values["public_output"],
         private_output=private_output,
+        site_map=values["site_map"],
         site_map_binding=values["site_map_binding"],
         capture_manifest=values["capture_manifest"],
         expected_sha256=values["expected_sha256"],
@@ -1326,10 +1456,9 @@ def _parse_cli(args: Sequence[str]) -> _CliOptions:
     )
 
 
-# Recognized gitignored roots a --private-output path may resolve under when
-# it lands inside this repository. This module cannot police a destination
-# outside the repository (a foreign filesystem has no tracked tree to check
-# against), so a path resolving elsewhere is accepted unconditionally.
+# Recognized gitignored roots a --private-output path may resolve under. The
+# CLI refuses external destinations because it cannot prove that a foreign
+# tree is ignored/private.
 _IGNORED_PRIVATE_ROOTS: Final = ("private", "runtime", "analysis/output")
 _REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 
@@ -1337,17 +1466,18 @@ _REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 def _validate_private_output_path(path: str) -> None:
     """Refuse a --private-output destination that is not explicitly ignored.
 
-    A path that resolves inside this repository but outside a recognized
-    ignored root is refused: writing the detailed private trace there would
-    make it a public-tree candidate by accident. A path resolving outside the
-    repository entirely is accepted unconditionally.
+    A path outside this repository, or inside it but outside a recognized
+    ignored root, is refused. The CLI cannot prove an external/synced tree is
+    private and must fail closed.
     """
 
     resolved = Path(path).resolve()
     try:
         relative = resolved.relative_to(_REPOSITORY_ROOT)
     except ValueError:
-        return
+        raise _assembly_fail(
+            "private output path is outside a recognized repository-private root"
+        ) from None
     posix = relative.as_posix()
     if not any(posix == root or posix.startswith(root + "/") for root in _IGNORED_PRIVATE_ROOTS):
         raise _assembly_fail(
@@ -1386,7 +1516,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args in (["-h"], ["--help"]):
         _write_ascii_line(
             sys.stdout,
-            "usage: assemble_frontend_phase.py --site-map-binding FILE "
+            "usage: assemble_frontend_phase.py --site-map FILE "
+            "--site-map-binding FILE "
             "--capture-manifest FILE --expected-sha256 HEX "
             "--public-output FILE [--private-output FILE] "
             "[--limit NAME=VALUE] FRAGMENT [FRAGMENT ...]",
@@ -1397,22 +1528,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         options = _parse_cli(args)
         if options.private_output is not None:
             _validate_private_output_path(options.private_output)
+        remaining_input_bytes = options.limits.total_input_bytes
         site_raw, _, _ = _read_snapshot(
-            options.site_map_binding, options.limits.manifest_bytes
+            options.site_map_binding,
+            min(options.limits.manifest_bytes, remaining_input_bytes),
         )
+        remaining_input_bytes -= len(site_raw)
         capture_raw, _, _ = _read_snapshot(
-            options.capture_manifest, options.limits.manifest_bytes
+            options.capture_manifest,
+            min(options.limits.manifest_bytes, remaining_input_bytes),
         )
+        remaining_input_bytes -= len(capture_raw)
         site_binding = parse_site_map_binding(site_raw, limits=options.limits)
         capture_manifest = parse_capture_domain_manifest(
             capture_raw, limits=options.limits
         )
+        fragment_limits = replace(
+            options.limits,
+            total_input_bytes=remaining_input_bytes,
+        )
         model = assemble_phase_paths(
             options.fragments,
+            site_map_path=options.site_map,
             site_map_binding=site_binding,
             capture_manifest=capture_manifest,
             expected_fragment_sha256=options.expected_sha256,
-            limits=options.limits,
+            limits=fragment_limits,
         )
         public_payload = encode_public_report(model, limits=options.limits)
         private_payload = (
@@ -1420,9 +1561,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if options.private_output is not None
             else None
         )
-        _write_new_file(options.public_output, public_payload)
         if options.private_output is not None and private_payload is not None:
             _write_new_file(options.private_output, private_payload)
+        _write_new_file(options.public_output, public_payload)
     except Exception:
         _write_ascii_line(sys.stderr, "Phase fragment processing failed.")
         return 1

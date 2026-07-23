@@ -345,9 +345,10 @@ The branch-local `OMEGAFRPHASE0002` Python evidence contract separates an ignore
 trace from a categorical aggregate-only public report. It validates anonymous site binding,
 single-lane lifecycle nesting, immutable submission context, global chronology, exact draw
 disposition/membership, terminal completeness, and an explicit private phase/scene/front-end
-capture-domain join. It has no evidence ID in this branch. No independent C++ mirror, PCSX2 producer,
-owner capture, or canonical-IR consumer exists yet; widget/visual descendant order, text interleave,
-action lifecycle, and animation timing remain unproven.
+capture-domain join. Both reducers require a verified selected-site-map and capture-domain assembly,
+not a bare parsed fragment. It has no evidence ID in this branch. No independent C++ mirror, PCSX2
+producer, owner capture, or canonical-IR consumer exists yet; widget/visual descendant order, text
+interleave, action lifecycle, and animation timing remain unproven.
 The logging service (bounded thread-safe writes, stderr and ring sinks), configuration service
 (strict bounded key/value grammar with typed lookups and overrides), job service (bounded
 worker-pool owner with deterministic shutdown), fixed-step frame scheduler (pure integer-

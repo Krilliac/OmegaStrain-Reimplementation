@@ -22,12 +22,13 @@ canonical semantics.
 
 ## Private inputs and joins
 
-The tool consumes three kinds of private input:
+The tool consumes four kinds of private input:
 
 1. one reference phase fragment and optionally up to seven distinct stored
    copies used only for byte-for-byte repeat comparison;
-2. a separately selected private site-map binding; and
-3. a separately selected private capture-domain manifest.
+2. the separately selected opaque private site-map bytes;
+3. a separately selected private site-map binding; and
+4. a separately selected private capture-domain manifest.
 
 The site-map binding has the exact private JSON shape:
 
@@ -37,8 +38,9 @@ The site-map binding has the exact private JSON shape:
 
 The binding contains only the consistency values and neutral dense site count
 needed by this validator. A producer's actual static locator-to-ordinal map is
-owner-private and outside this format. The fragment's runtime-configuration
-and site-map values must match the selected binding exactly. These digests are
+owner-private and outside this format. The selected opaque site-map bytes are
+hashed by the tool. That value and the fragment's runtime-configuration and
+site-map values must match the selected binding exactly. These digests are
 consistency/deduplication aids only; they are not authentication, an
 immutability proof, or evidence of semantic identity.
 
@@ -66,6 +68,7 @@ All integers are little-endian. The header is:
 | private capture-domain consistency value | 32 |
 | runtime-configuration consistency digest | 32 |
 | private site-map consistency digest | 32 |
+| discovered frame count | 4 |
 | retained frame count | 4 |
 | terminal status | 4 |
 | commit state | 4 |
@@ -112,18 +115,22 @@ parent.enter < child.enter < child.exit < parent.exit
 Events, submissions, and finalized draws each carry a monotonic sequence in
 one shared producer domain. The union must be exactly dense from one through
 the number of retained temporal rows. A duplicate or gap is rejected.
-Chronology is retained only in the private trace.
+Frames must be nondecreasing across that same unified sequence. Chronology is
+retained only in the private trace.
 
 Event frames, submission frames, and draw frames must fall within the retained
 frame count. An attributed submission must occur strictly between its named
 invocation's Enter and Exit sequence and within that interval's frame range.
+It must name the invocation at the top of the active lifecycle stack, not an
+active ancestor.
 The producer records the immutable invocation context at submission time; a
 consumer must never infer it from mutable "current phase" state at later draw
 finalization.
 
 Submission primitive ranges begin at zero and are exactly contiguous in
 submission order. They preserve within-draw producer chronology without
-sorting invocation ordinals or using traversal order.
+sorting invocation ordinals or using traversal order. The exclusive primitive
+end may equal `2^32`; it may not exceed it.
 
 ### Draw disposition and membership
 
@@ -152,8 +159,9 @@ Terminal status is exactly one of:
 - `InternalFailure`
 
 Commit state is exactly `Committed` or `Aborted`. `Complete` requires
-`Committed`, zero failure counters, and exact equality between all discovered
-and retained table counts. Every incomplete category requires `Aborted`.
+`Committed`, zero failure counters, exact equality between discovered and
+retained frame counts, and exact equality between all discovered and retained
+table counts. Every incomplete category requires `Aborted`.
 Nonzero failure counters use the fixed precedence shown above; the terminal
 status must match the first nonzero counter. `ProducerAborted` has no failure
 counter. Discovered counts may never be less than retained counts.
@@ -183,14 +191,10 @@ Complete captures with no submission records have public policy
 The option must point to an ignored private destination. It is absent by
 default. If the resolved destination is inside this repository, the CLI
 accepts it only under `/private/`, `/runtime/`, or `/analysis/output/`, which
-are explicit repository ignore roots; a destination outside the repository is
-accepted as the caller-selected private sink. Private output is ASCII JSON
-with one LF and is capped during streaming encoding before write.
-If the destination resolves inside this repository, it must fall under
-`private/`, `runtime/`, or `analysis/output/`; any other in-repository path is
-refused before any input is read or any file is written. A destination that
-resolves outside this repository is accepted unconditionally, since this
-module has no tracked tree to check it against there.
+are explicit repository ignore roots. Destinations outside the repository are
+refused because the tool cannot prove a foreign or synchronized tree is
+private. Private output is ASCII JSON with one LF and is capped during
+streaming encoding before write.
 
 ### Default public report
 
@@ -202,9 +206,11 @@ module has no tracked tree to check it against there.
 - eight fixed aggregate count rows.
 
 It contains no private relation or identity and is byte-deterministic for the
-same validated model. A public report is not automatically suitable for the
-evidence ledger; it still requires ordinary public-tree review and cannot
-upgrade hypotheses.
+same fully verified assembly. Neither public nor private reduction accepts a
+bare structurally parsed fragment: selected site-map consistency and the
+capture-domain join must also succeed. A public report is not automatically
+suitable for the evidence ledger; it still requires ordinary public-tree
+review and cannot upgrade hypotheses.
 
 ## Limits and I/O behavior
 
@@ -214,9 +220,10 @@ Every capacity can be tightened through `PhaseLimits`; CLI callers may repeat
 | Capacity | Hard ceiling |
 | --- | ---: |
 | one fragment | 4 MiB |
-| all fragment copies | 32 MiB |
+| all private input bytes | 32 MiB |
 | fragment copies | 8 |
 | one private manifest | 64 KiB |
+| selected private site map | 1 MiB |
 | one manifest string | 256 bytes |
 | frames | 600 |
 | sites | 4,096 |
@@ -228,13 +235,15 @@ Every capacity can be tightened through `PhaseLimits`; CLI callers may repeat
 | memberships | 131,072 |
 | failure accounting | 131,072 |
 | logical lookup work | 1,048,576 |
-| logical parser scratch | 16 MiB |
+| conservative parser allocation charge | 16 MiB |
 | private output | 16 MiB |
 | public aggregate rows | 8 |
 | public output | 4 KiB |
 
-The parser checks calculated wire size, logical scratch, and logical lookup
-work before table allocation. A path-based run snapshots the reference bytes,
+The parser checks calculated wire size, its conservative allocation charge,
+and logical lookup work before table allocation. The total-input budget covers
+the selected site map, both private manifests, and every fragment copy. A
+path-based run snapshots the reference bytes,
 checks file identity/size/timestamp before and after the bounded read, verifies
 the caller-supplied SHA-256 over exactly the captured bytes, and parses only
 that immutable snapshot. Each repeat must be a different stored file and is
@@ -249,15 +258,18 @@ one immutable bounded snapshot before parsing.
 
 Outputs use exclusive create and exact write accounting. Existing files are
 never overwritten. A short or failed output is left in place; the tool never
-unlinks by pathname after a failure. Ordinary stdout/stderr diagnostics are
-fixed and contain no path or exception text. An explicitly incomplete capture
-writes its requested reports, returns exit status 2, and cannot be mistaken
-for valid ordering evidence.
+unlinks by pathname after a failure. When private output is requested, it is
+written before the public report; the public report is the last successful
+commit marker and therefore cannot survive a prior private-write failure.
+Ordinary stdout/stderr diagnostics are fixed and contain no path or exception
+text. An explicitly incomplete capture writes its requested reports, returns
+exit status 2, and cannot be mistaken for valid ordering evidence.
 
 ## Usage
 
 ```text
 python -I -E -s -S -B tools/assemble_frontend_phase.py \
+  --site-map <ignored-private-selected-site-map> \
   --site-map-binding <ignored-private-binding.json> \
   --capture-manifest <ignored-private-capture-manifest.json> \
   --expected-sha256 <64-hex-consistency-value> \
