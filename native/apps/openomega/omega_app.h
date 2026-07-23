@@ -456,6 +456,13 @@ private:
     // persistence-free diagnostic-start path instead.
     bool requires_active_profile_for_diagnostic_play_ = false;
     bool requires_active_character_for_diagnostic_play_ = false;
+    // Dev-only headless capture aid (OPENOMEGA_START_DIAGNOSTIC_PLAY). When set,
+    // the app opens the documented synthetic, persistence-free diagnostic-start
+    // path (can_start=true, no profile/character confirmation gate) and boots
+    // straight into DiagnosticPlay so the loaded level's flat-3D scene renders
+    // without interactive menu navigation. Only honored in DeveloperDiagnostics
+    // mode with a level loaded; never affects the normal interactive flow.
+    bool synthetic_diagnostic_play_start_ = false;
     // Explicit per-launch activation only. The corresponding confirmation is
     // persisted before this value is published, but startup never copies a durable
     // confirmation into session state or selects a profile implicitly. This value

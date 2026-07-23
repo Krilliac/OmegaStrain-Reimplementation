@@ -1893,6 +1893,36 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
 
     log_->Info("runtime", "entering native host loop");
     LoadRetailFrontEndBundleIfEnabled();
+
+    // Dev-only headless capture aid: OPENOMEGA_START_DIAGNOSTIC_PLAY boots the
+    // project diagnostic build straight into the loaded level's flat-3D scene
+    // (FrontEndMode::DiagnosticPlay) instead of the diagnostic menu, so an
+    // automated --screenshot-frame captures the level, not the menu. Gated on
+    // DeveloperDiagnostics + an actually-loaded level scene; it opens the
+    // documented synthetic, persistence-free start (see CurrentFrontEndCapabilities)
+    // so the gameplay gate is satisfied without interactive profile/character
+    // confirmation. Never affects the retail path or the normal interactive flow.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const char* const start_diagnostic_play =
+        std::getenv("OPENOMEGA_START_DIAGNOSTIC_PLAY");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    if (start_diagnostic_play != nullptr && start_diagnostic_play[0] == '1' &&
+        start_diagnostic_play[1] == '\0' &&
+        presentation_mode_ ==
+            runtime::FrontEndPresentationMode::DeveloperDiagnostics &&
+        diagnostic_scene_presentation_)
+    {
+        synthetic_diagnostic_play_start_ = true;
+        front_end_state_ = InitialFrontEndState();
+        front_end_state_.mode = FrontEndMode::DiagnosticPlay;
+        log_->Info("runtime",
+            "OPENOMEGA_START_DIAGNOSTIC_PLAY: booting into the loaded level scene");
+    }
     RunResult result;
     bool running = true;
     auto previous_frame = Clock::now();
@@ -2939,6 +2969,21 @@ std::expected<void, std::string> OmegaApp::CreateFirstCharacter()
 
 FrontEndCapabilities OmegaApp::CurrentFrontEndCapabilities() const noexcept
 {
+    // Dev-only synthetic, persistence-free diagnostic start (see
+    // synthetic_diagnostic_play_start_): open start support with no confirmation
+    // gate so the loaded level renders in DiagnosticPlay for a headless capture,
+    // without mutating or requiring durable profile/character confirmation.
+    if (synthetic_diagnostic_play_start_)
+    {
+        return FrontEndCapabilities{
+            .can_create_first_profile = can_create_first_profile_,
+            .can_start_diagnostic_campaign = true,
+            .requires_active_profile_for_diagnostic_play = false,
+            .supports_character_selection = native_persistence_ != nullptr,
+            .can_create_first_character = can_create_first_character_,
+            .requires_active_character_for_diagnostic_play = false,
+        };
+    }
     const bool active_profile_is_confirmed = ActiveProfileIsConfirmed();
     const bool active_character_is_confirmed = ActiveCharacterIsConfirmed();
     return FrontEndCapabilities{
