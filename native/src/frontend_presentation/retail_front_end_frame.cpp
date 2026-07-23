@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <new>
 #include <optional>
 #include <span>
@@ -378,6 +380,27 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
             // text stays empty -> no glyphs emitted below; children still recurse.
             if (diag != nullptr)
                 ++diag->strings_missing;
+        }
+
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        static const bool kTextDump =
+            std::getenv("OPENOMEGA_FRONTEND_TEXT_DUMP") != nullptr;
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+        if (kTextDump)
+        {
+            std::fprintf(stderr,
+                "TEXTDUMP id=%s vis=%d en=%d rect=(%.1f,%.1f,%.1f,%.1f) text=[%.*s]\n",
+                widget.identifier.c_str(), widget.visible ? 1 : 0,
+                widget.enabled ? 1 : 0, static_cast<double>(widget.rectangle.left),
+                static_cast<double>(widget.rectangle.top),
+                static_cast<double>(widget.rectangle.width),
+                static_cast<double>(widget.rectangle.height),
+                static_cast<int>(text.size()), text.data());
         }
 
         const retail::FntV3IR* const font =
