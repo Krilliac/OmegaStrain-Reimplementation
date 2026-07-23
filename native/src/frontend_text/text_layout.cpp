@@ -7,6 +7,7 @@
 #include <limits>
 #include <new>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -144,7 +145,7 @@ FindPairAdjustment(const std::vector<PairLookupEntry> &pairs,
 }
 
 [[nodiscard]] std::expected<float, TextLayoutError>
-MeasureItems(const retail::FntV3IR &font, const std::vector<TextItem> &items,
+MeasureItems(const retail::FntV3IR &font, const std::span<const TextItem> items,
              const float atlas_width,
              const std::vector<PairLookupEntry> &pairs) noexcept {
   float advance = 0.0F;
@@ -456,8 +457,14 @@ TextLayoutResult LayoutRetailText(const retail::FntV3IR &font,
         std::vector<TextItem> remainder(current.begin() + *last_space + 1U,
                                         current.end());
         TrimLeadingSpaces(remainder);
-        const auto line_advance =
-            MeasureItems(font, line_items, options.atlas_extent.width, *pairs);
+        // Retail consumes the boundary space while choosing the break and
+        // retains its advance for line alignment even though no glyph quad is
+        // emitted for that space. Measure the exact prefix through the chosen
+        // boundary before removing its non-rendering items.
+        const auto line_advance = MeasureItems(
+            font,
+            std::span<const TextItem>(current.data(), *last_space + 1U),
+            options.atlas_extent.width, *pairs);
         if (!line_advance)
           return std::unexpected(line_advance.error());
         auto finalized = finalize_line(std::move(line_items), *line_advance);

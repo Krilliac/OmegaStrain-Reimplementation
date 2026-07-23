@@ -200,12 +200,24 @@ int main() {
   Check(wrapped && wrapped->lines.size() == 2U && wrapped->glyphs.size() == 4U,
         "space overflow wraps a generated string into two owned lines");
   if (wrapped) {
-    CheckNear(wrapped->lines[0].advance, 10.0F,
-              "wrap removes the boundary space from the first line");
+    CheckNear(wrapped->lines[0].advance, 13.0F,
+              "wrap retains the consumed boundary-space advance");
     CheckNear(wrapped->lines[1].advance, 10.0F,
               "the wrapped word is measured independently");
     Check(wrapped->glyphs[2].source_index == 3U,
           "wrapped glyph retains its original source index");
+  }
+
+  wrap_options.horizontal_alignment = HorizontalTextAlignment::Center;
+  const auto centered_wrap =
+      LayoutRetailText(font, U"AA AA", wrap_options);
+  Check(centered_wrap && centered_wrap->lines.size() == 2U,
+        "centered wrap fixture lays out two lines");
+  if (centered_wrap) {
+    CheckNear(centered_wrap->lines[0].left, 9.5F,
+              "consumed boundary advance participates in centered placement");
+    CheckNear(centered_wrap->lines[1].left, 11.0F,
+              "the independent wrapped word uses only its own advance");
   }
 
   wrap_options.wrap_mode = TextWrapMode::ExplicitNewlinesOnly;
