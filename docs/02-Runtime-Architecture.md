@@ -483,16 +483,19 @@ E-0127 therefore supplies only a bounded blocker inventory for the next evidence
 establishes no grounded layer ordering, retail text encoding, text/geometry interleave, action
 lifecycle, animation timing/application, retail frame, menu, visual parity, or PCSX2 equivalence.
 
-E-0127 defines the `OMEGAFRPHASE0001` phase/draw attribution contract and its Python-only tooling
-under `tools/` and `analysis/formats/`, answering only "which anonymous front-end call interval was
-open when a finalized draw's contributing vertices were submitted" so the existing
-`frontend-trace-v1` and `scene-fragment-v1` contracts stay byte-identical. The wire format,
-sanitizer, and generated fixture are fully described in `analysis/formats/FRONTEND-PHASE.md`; no C++
-mirror test, PCSX2 producer, or canonical-IR consumer exists yet, and this contract does not enter
-`OmegaApp`, `AssetService`, or any rendering path. It supplies evidence machinery only — the
-widget/visual descendant order, text interleave, action lifecycle, and animation-timing questions
-left open by E-0126 remain unproven until repeat-stable runtime evidence under this contract agrees
-with independent static call-flow evidence.
+The branch-local `OMEGAFRPHASE0002` evidence contract remains outside the runtime composition graph.
+Its normalized detailed trace is private-only; a separate public reducer emits fixed completeness
+and policy categories plus bounded aggregate counts. The private validator retains anonymous static
+site bindings, strict single-lane lifecycle intervals, immutable submission-time context, global
+event/submission/final-draw chronology, exact draw disposition/membership, terminal state, and
+discovered-versus-retained reconciliation. A private three-artifact capture-domain manifest must
+join phase, scene, and front-end artifacts explicitly; matching dense draw ordinals are insufficient.
+The format and limits are fully described in `analysis/formats/FRONTEND-PHASE.md`.
+
+No C++ producer-wire mirror, PCSX2 producer, owner capture, canonical-IR consumer, `OmegaApp`
+integration, or rendering-path integration exists yet. The contract supplies evidence machinery
+only. Widget/visual descendant order, text interleave, action lifecycle, and animation timing remain
+unproven until a complete private capture agrees with independent static call-flow evidence.
 
 The Windows prelaunch process is deliberately outside the game composition graph.
 `openomega_launcher.exe` owns only owner-data selection, validation, the default-off gamepad
