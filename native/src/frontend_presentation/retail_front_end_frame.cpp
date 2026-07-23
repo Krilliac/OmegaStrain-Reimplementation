@@ -3,6 +3,7 @@
 #include "omega/asset/frontend_ir.h"
 #include "omega/content/front_end_screen_bundle.h"
 #include "omega/frontend/compositor_math.h"
+#include "omega/frontend_presentation/retail_frontend_timeline.h"
 #include "omega/frontend_text/text_layout.h"
 
 #include <array>
@@ -75,9 +76,15 @@ inline constexpr std::uint32_t kMaximumVisualTreeDepth = 64U;
 // Depth-first preorder over the retail IE visual tree: each node emits its own
 // triangles under its accumulated world transform (parent_world * local), THEN
 // recurses into its children, matching the retail render order recovered from
-// the disassembly. Animation tracks are intentionally held at frame-0 (the
-// node's base positions/uvs/colors). A node whose declared texture member is
-// not resolvable falls back to the untextured vertex-color path.
+// the disassembly. A node whose declared texture member is not resolvable falls
+// back to the untextured vertex-color path.
+//
+// Animation (Phase 3b): a node carrying animation_tracks is evaluated at
+// `animation_tick` via the retail timeline primitive; its interpolated positions
+// (VERTEX tracks), UV offset (UVOFF tracks), and opacity (OPACITY tracks,
+// multiplied into vertex-colour alpha) replace the frame-0 base values. Tick 0
+// reproduces frame-0 exactly, and a node with no tracks is untouched at any tick.
+// Timeline clone/evaluation failure is fail-soft: the node renders at frame-0.
 //
 // The walk is FAIL-SOFT and never aborts the screen: an out-of-range vertex
 // index, a non-finite transform/projection/colour, or a degenerate (zero-area)
@@ -88,6 +95,7 @@ inline constexpr std::uint32_t kMaximumVisualTreeDepth = 64U;
 void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
     const asset::FrontendVisualNodeIR& node,
     const AffineTransform12& parent_world, const std::uint32_t depth,
+    const std::uint32_t animation_tick,
     RetailFrontEndFrameDiagnostics* const diag,
     std::vector<RetailFrontEndRasterTriangle>& out)
 {
@@ -102,6 +110,43 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
         return;
     if (diag != nullptr)
         ++diag->visual_nodes_visited;
+
+    // Animation: evaluate this node's tracks at the tick. On success the cloned
+    // instance owns the interpolated positions and any resolved opacity / UV
+    // offset; on failure (or with no tracks) the base frame-0 values are used.
+    // The instance outlives the triangle loop so `effective_positions` stays valid.
+    const std::vector<asset::Float3IR>* effective_positions = &node.positions;
+    RgbaF opacity_modulation{1.0F, 1.0F, 1.0F, 1.0F};
+    std::optional<asset::FrontendUvIR> uv_offset;
+    std::optional<RetailFrontendVisualInstanceState> instance;
+    if (!node.animation_tracks.empty())
+    {
+        auto cloned = CloneRetailFrontendVisualInstance(node);
+        if (cloned)
+        {
+            const RetailFrontendTimelineInput timeline_input{
+                .live_tick = animation_tick,
+                .authored_timeline_tick = static_cast<float>(animation_tick),
+            };
+            const auto evaluation = EvaluateRetailFrontendTimeline(
+                *cloned, node, timeline_input);
+            if (evaluation)
+            {
+                instance = std::move(*cloned);
+                if (instance->positions().size() == node.positions.size())
+                    effective_positions = &instance->positions();
+                if (instance->opacity())
+                    opacity_modulation.alpha = *instance->opacity();
+                if (instance->uv_offset_u() || instance->uv_offset_v())
+                    uv_offset = asset::FrontendUvIR{
+                        .u = instance->uv_offset_u().value_or(0.0F),
+                        .v = instance->uv_offset_v().value_or(0.0F),
+                    };
+                if (diag != nullptr)
+                    ++diag->animated_nodes;
+            }
+        }
+    }
 
     // Fail-soft texture resolution within the node's owning scope. A missing or
     // absent texture member draws with vertex colors only.
@@ -122,7 +167,7 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
                 source_triangle.uv_indices[vertex_index];
             const std::uint16_t color_index =
                 source_triangle.color_indices[vertex_index];
-            if (position_index >= node.positions.size() ||
+            if (position_index >= effective_positions->size() ||
                 uv_index >= node.uvs.size() ||
                 color_index >= node.colors.size())
             {
@@ -132,8 +177,8 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
                 break;
             }
 
-            const auto transformed =
-                TransformPoint(*world, node.positions[position_index]);
+            const auto transformed = TransformPoint(
+                *world, (*effective_positions)[position_index]);
             if (!transformed)
             {
                 vertices_valid = false;
@@ -160,7 +205,7 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
             // preorder walk (see ComposeRetailFrontEndFrame) as its submission
             // ordinal; here it is a placeholder overwritten there.
             const auto modulation = ModulateVertexColor(
-                node.colors[color_index], RgbaF{1.0F, 1.0F, 1.0F, 1.0F});
+                node.colors[color_index], opacity_modulation);
             if (!modulation)
             {
                 vertices_valid = false;
@@ -169,11 +214,22 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
                 break;
             }
 
+            // Animated UV scroll: apply the resolved offset with unit scale
+            // ((uv+offset-0.5)*1+0.5 == uv+offset); fail-soft to the base UV.
+            asset::FrontendUvIR normalized_st = node.uvs[uv_index];
+            if (uv_offset)
+            {
+                const auto scrolled = TransformUv(normalized_st, *uv_offset,
+                    asset::FrontendUvIR{.u = 1.0F, .v = 1.0F});
+                if (scrolled)
+                    normalized_st = *scrolled;
+            }
+
             triangle.vertices[vertex_index] = RetailFrontEndRasterVertex{
                 .x = projected->raster_position.x,
                 .y = projected->raster_position.y,
                 .depth_rank = 0.0F,
-                .normalized_st = node.uvs[uv_index],
+                .normalized_st = normalized_st,
                 .modulation = *modulation,
             };
         }
@@ -191,7 +247,8 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
     }
 
     for (const auto& child : node.children)
-        AppendVisualNodeTriangles(scope, child, *world, depth + 1U, diag, out);
+        AppendVisualNodeTriangles(
+            scope, child, *world, depth + 1U, animation_tick, diag, out);
 }
 
 // ---- Phase 2: GUI text pass ----------------------------------------------
@@ -408,7 +465,8 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
     const content::FrontEndScreenBundle& bundle,
     const RetailFrontEndRasterLimits limits,
     RetailFrontEndFrameDiagnostics* const diagnostics,
-    const std::string_view selected_widget_identifier) noexcept
+    const std::string_view selected_widget_identifier,
+    const std::uint32_t animation_tick) noexcept
 {
     if (!bundle.presentation_capability().valid())
         return std::unexpected(RetailFrontEndFrameError::InvalidRetailCapability);
@@ -450,8 +508,8 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
     std::vector<RetailFrontEndRasterTriangle> triangles;
     try
     {
-        AppendVisualNodeTriangles(
-            *scope, *root_visual, initial_world, 0U, diagnostics, triangles);
+        AppendVisualNodeTriangles(*scope, *root_visual, initial_world, 0U,
+            animation_tick, diagnostics, triangles);
         // Phase 2 GUI text pass. Glyph quads are appended AFTER all IE geometry
         // so the submission-ordinal depth pass below ranks them highest and they
         // draw on top of the screen art. Text is a decoration over a valid IE

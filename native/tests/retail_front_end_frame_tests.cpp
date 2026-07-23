@@ -258,6 +258,44 @@ void Check(const bool condition, const std::string_view message)
         RetailFrontEndPresentationCapabilityTestAccess::Make(valid_capability));
 }
 
+// Root quad plus a centred child quad whose OPACITY track fades it from fully
+// opaque at tick 0 to fully transparent at tick 20 (Phase 3b animation). At tick 0
+// the opaque child covers the root in its region; at tick 20 it is transparent and
+// the root shows through, so the two composed frames differ. Nodes without tracks
+// are tick-invariant (verified separately with MakeRootPlusChildBundle).
+[[nodiscard]] FrontEndScreenBundle MakeAnimatedOpacityBundle()
+{
+    FrontendVisualNodeIR root_visual = MakeQuad("ROOT_root", 320.0F, 224.0F,
+        FrontendColorRgba8IR{.red = 16U, .green = 16U, .blue = 16U, .alpha = 255U});
+    FrontendVisualNodeIR child = MakeQuad("LOGO", 120.0F, 90.0F,
+        FrontendColorRgba8IR{.red = 240U, .green = 48U, .blue = 48U, .alpha = 255U});
+    child.animation_tracks.push_back(omega::asset::FrontendScalarAnimationTrackIR{
+        .target = omega::asset::FrontendScalarAnimationTarget::Opacity,
+        .keys = {
+            omega::asset::FrontendScalarAnimationKeyIR{
+                .timeline_tick = 0.0F, .value = 1.0F},
+            omega::asset::FrontendScalarAnimationKeyIR{
+                .timeline_tick = 20.0F, .value = 0.0F},
+        },
+    });
+    root_visual.children.push_back(std::move(child));
+
+    omega::asset::FrontendVisualDocumentIR document{.root = std::move(root_visual)};
+    auto scope = FrontEndScreenBundleTestAccess::MakeScope(std::move(document),
+        FrontEndVisualScope::ResourceSet{"ROOT_root", "LOGO"},
+        FrontEndVisualScope::TextureMap{});
+    FrontEndScreenBundle::VisualScopeMap scopes;
+    scopes.emplace("TITLE", std::move(scope));
+
+    FrontendWidgetIR root_widget = MakeWidget("ROOT");
+    root_widget.children.push_back(MakeWidget("LOGO"));
+
+    return FrontEndScreenBundleTestAccess::MakeBundle(FrontEndScreenKey::Title,
+        omega::asset::FrontendWidgetDocumentIR{.root = std::move(root_widget)},
+        "TITLE", std::move(scopes),
+        RetailFrontEndPresentationCapabilityTestAccess::Make(true));
+}
+
 [[nodiscard]] std::array<std::uint8_t, 4U> Pixel(
     const omega::frontend::presentation::OwnedRgba8Frame& frame,
     const std::uint32_t x, const std::uint32_t y)
@@ -474,6 +512,46 @@ int main()
         Check(unmatched.has_value() && unselected.has_value() &&
                   unmatched->pixels == unselected->pixels,
             "an unmatched selection identifier leaves the frame unchanged");
+    }
+
+    // Phase 3b: a node carrying an OPACITY animation track composes differently at
+    // different ticks (the child fades out), while a screen with no tracks is
+    // tick-invariant. Diagnostics report the animated node.
+    {
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto tick0 = ComposeRetailFrontEndFrame(
+            MakeAnimatedOpacityBundle(), {}, &diagnostics, {}, 0U);
+        const auto tick20 = ComposeRetailFrontEndFrame(
+            MakeAnimatedOpacityBundle(), {}, nullptr, {}, 20U);
+        Check(tick0.has_value() && tick20.has_value(),
+            "an animated screen composes at both ticks");
+        Check(diagnostics.animated_nodes == 1U,
+            "the compositor evaluates the one node carrying animation tracks");
+        if (tick0 && tick20)
+        {
+            Check(tick0->pixels != tick20->pixels,
+                "advancing the animation tick changes the composed pixels");
+        }
+
+        // Regression guard: a screen with no animation tracks renders identically at
+        // any tick, so tick 0 (the default) reproduces the static frame exactly.
+        const auto static_tick0 = ComposeRetailFrontEndFrame(
+            MakeRootPlusChildBundle(
+                FrontendColorRgba8IR{.red = 16U, .green = 16U, .blue = 16U,
+                    .alpha = 255U},
+                FrontendColorRgba8IR{.red = 240U, .green = 48U, .blue = 48U,
+                    .alpha = 255U}),
+            {}, nullptr, {}, 0U);
+        const auto static_tick20 = ComposeRetailFrontEndFrame(
+            MakeRootPlusChildBundle(
+                FrontendColorRgba8IR{.red = 16U, .green = 16U, .blue = 16U,
+                    .alpha = 255U},
+                FrontendColorRgba8IR{.red = 240U, .green = 48U, .blue = 48U,
+                    .alpha = 255U}),
+            {}, nullptr, {}, 20U);
+        Check(static_tick0.has_value() && static_tick20.has_value() &&
+                  static_tick0->pixels == static_tick20->pixels,
+            "a screen with no animation tracks is tick-invariant");
     }
 
     if (failures != 0)

@@ -3144,6 +3144,11 @@ void OmegaApp::UpdateRetailFrontEndPresentation(
 
     try
     {
+        // Advance one animation tick per rendered frame (this runs once per frame).
+        // Each compose re-clones+evaluates the timeline from scratch, so the tick is
+        // a pure input with no cross-frame instance state to keep monotonic.
+        ++retail_animation_tick_;
+
         // Derive the current screen's selectable buttons to bound navigation and
         // resolve the selected button's accept target, then step the pure nav.
         std::uint32_t button_count = 0U;
@@ -3158,10 +3163,14 @@ void OmegaApp::UpdateRetailFrontEndPresentation(
         retail_nav_ = frontend::presentation::StepRetailFrontEndNav(
             retail_nav_, input, button_count, accept_target);
 
-        // Recompose only when the navigation state changed (or nothing composed
-        // yet). Selection moves and screen switches are the only triggers.
-        if (retail_front_end_ready_ && retail_composed_nav_.has_value() &&
-            *retail_composed_nav_ == retail_nav_)
+        // Recompose when the navigation state changed (selection move / screen
+        // switch), when nothing has composed yet, or -- for an animated screen --
+        // every frame so the tick advances the tracks. A static screen composes
+        // once and holds.
+        const bool nav_unchanged = retail_front_end_ready_ &&
+            retail_composed_nav_.has_value() &&
+            *retail_composed_nav_ == retail_nav_;
+        if (nav_unchanged && !retail_screen_has_animation_)
             return;
 
         const auto* const bundle = RetailBundleForScreen(retail_nav_.screen);
@@ -3194,7 +3203,11 @@ void OmegaApp::ComposeRetailScreenPresentation(
 
     frontend::presentation::RetailFrontEndFrameDiagnostics diagnostics;
     const auto frame = frontend::presentation::ComposeRetailFrontEndFrame(
-        bundle, {}, &diagnostics, selected_identifier);
+        bundle, {}, &diagnostics, selected_identifier, retail_animation_tick_);
+    // Whether this screen animates decides if the host recomposes every frame
+    // (advancing the tick) or composes once and holds -- see
+    // UpdateRetailFrontEndPresentation.
+    retail_screen_has_animation_ = diagnostics.animated_nodes > 0U;
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 4996)
@@ -3224,7 +3237,8 @@ void OmegaApp::ComposeRetailScreenPresentation(
                 std::to_string(diagnostics.fonts_resolved) + " font_miss=" +
                 std::to_string(diagnostics.fonts_missing) + " layout_fail=" +
                 std::to_string(diagnostics.text_layouts_failed) + " glyph_quads=" +
-                std::to_string(diagnostics.glyph_quads_emitted) + " total_tris=" +
+                std::to_string(diagnostics.glyph_quads_emitted) + " anim_nodes=" +
+                std::to_string(diagnostics.animated_nodes) + " total_tris=" +
                 std::to_string(diagnostics.total_triangles) + " frame=" +
                 std::to_string(diagnostics.frame_width) + "x" +
                 std::to_string(diagnostics.frame_height));
@@ -3276,14 +3290,27 @@ void OmegaApp::ComposeRetailScreenPresentation(
         std::span<const runtime::RenderTextureBlitCommand>{&command, 1U});
     if (!draw_list)
     {
+        // The just-uploaded texture is now orphaned (the old draw list still owns
+        // the prior handle); release it so a failed recompose does not leak.
+        static_cast<void>(host_->ReleaseTexture(*uploaded));
         log_->Warning("presentation",
             "retail front-end Title draw-list creation failed; using project fallback");
         return;
     }
+    // Success: adopt the new texture and release the one the previous compose left
+    // behind (the old draw list is about to be replaced), so per-frame animated
+    // recompose holds at most one retail frame texture.
+    if (retail_front_end_texture_valid_)
+        static_cast<void>(host_->ReleaseTexture(retail_front_end_texture_));
+    retail_front_end_texture_ = *uploaded;
+    retail_front_end_texture_valid_ = true;
     retail_front_end_draw_list_ = std::move(*draw_list);
+    // Log once on the first successful compose; recompose runs every frame for an
+    // animated screen, so the per-compose detail lives behind OPENOMEGA_FRONTEND_TRACE.
+    if (!retail_front_end_ready_)
+        log_->Info("presentation",
+            "retail front-end presentation composited (Gap B: retail screen live)");
     retail_front_end_ready_ = true;
-    log_->Info("presentation",
-        "retail front-end Title presentation composited (Gap B Phase 1: static root+children)");
 }
 
 std::expected<void, std::string> OmegaApp::DeployDiagnosticMission()

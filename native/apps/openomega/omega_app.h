@@ -417,6 +417,16 @@ private:
     // lifetime. When not ready, CurrentFrontEndDrawList uses the project path.
     runtime::RenderDrawList retail_front_end_draw_list_;
     bool retail_front_end_ready_ = false;
+    // Gap B Phase 3b: the composited retail frame's uploaded texture, owned here so
+    // each recompose (nav change or animation tick) can release the prior handle
+    // before adopting the new one -- otherwise per-frame animated recompose would
+    // grow the host texture pool without bound. Advances one animation tick per
+    // rendered frame; recomposes every frame only while the current screen has
+    // animation tracks (else it composes once and holds).
+    runtime::RenderTextureHandle retail_front_end_texture_;
+    bool retail_front_end_texture_valid_ = false;
+    std::uint32_t retail_animation_tick_ = 0U;
+    bool retail_screen_has_animation_ = false;
     // Gap B Phase 3: retail front-end navigation. The nav state (current screen +
     // selected button) is stepped each frame from resolved input; the draw list is
     // recomposed only when it changes. CreateAgent/LoadAgent bundles are lazily

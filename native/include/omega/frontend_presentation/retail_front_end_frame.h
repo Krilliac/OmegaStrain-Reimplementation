@@ -52,6 +52,7 @@ struct RetailFrontEndFrameDiagnostics final
     std::uint32_t fonts_missing = 0U;
     std::uint32_t text_layouts_failed = 0U;
     std::uint32_t glyph_quads_emitted = 0U;
+    std::uint32_t animated_nodes = 0U;
     std::uint32_t total_triangles = 0U;
     std::uint32_t frame_width = 0U;
     std::uint32_t frame_height = 0U;
@@ -73,8 +74,17 @@ struct RetailFrontEndFrameDiagnostics final
 // emits textured glyph quads for visible Text/Button widgets -- string resolved
 // via the bundle string table, font/atlas via the bundle resolvers, glyphs laid
 // out by LayoutRetailText -- appended last so they carry the highest submission
-// ordinals and draw on top. Animation tracks are still held at frame-0; GUI
-// action interaction is a later phase. The walk is FAIL-SOFT: a node
+// ordinals and draw on top. GUI action interaction is a later phase.
+//
+// `animation_tick` (Phase 3b) advances the IE animation tracks: for each visual
+// node carrying tracks, the timeline is evaluated at this tick (via the retail
+// timeline primitive) and the node's interpolated positions (VERTEX tracks),
+// UV offset (UVOFF tracks, applied as (uv+offset-0.5)*scale+0.5 with unit scale),
+// and opacity (OPACITY tracks, multiplied into vertex-colour alpha) are used in
+// place of the frame-0 base values. Tick 0 (the default) reproduces the static
+// frame-0 screen exactly; a node with no tracks is unaffected at any tick. The
+// caller owns the live->authored tick mapping (this boundary assigns no rate).
+// The walk is FAIL-SOFT: a node
 // whose declared texture member is not resolvable draws untextured (vertex colors
 // only); an out-of-range vertex index, a non-finite transform/projection/colour,
 // or a degenerate (zero-area, kernel-rejected) triangle drops only that triangle;
@@ -94,5 +104,6 @@ struct RetailFrontEndFrameDiagnostics final
     const content::FrontEndScreenBundle& bundle,
     RetailFrontEndRasterLimits limits = {},
     RetailFrontEndFrameDiagnostics* diagnostics = nullptr,
-    std::string_view selected_widget_identifier = {}) noexcept;
+    std::string_view selected_widget_identifier = {},
+    std::uint32_t animation_tick = 0U) noexcept;
 } // namespace omega::frontend::presentation
