@@ -119,6 +119,12 @@ struct SdlInputService::Impl
                 log->Warning("input", SdlError("SDL_GetGamepads"));
             return;
         }
+        // SDL_GetGamepads requires SDL_free on its result. The log calls below build strings
+        // (std::to_string/operator+) that can throw std::bad_alloc; without an RAII owner, an
+        // exception there would skip the unconditional SDL_free that used to sit at the end of
+        // this function and leak the array.
+        const std::unique_ptr<SDL_JoystickID[], decltype(&SDL_free)> gamepad_ids_owner(
+            gamepad_ids, &SDL_free);
 
         for (int index = 0; index < count; ++index)
         {
@@ -143,8 +149,6 @@ struct SdlInputService::Impl
             }
             break;
         }
-
-        SDL_free(gamepad_ids);
     }
 
     bool subsystem_initialized = false;
