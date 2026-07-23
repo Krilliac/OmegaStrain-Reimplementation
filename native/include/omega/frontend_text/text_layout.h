@@ -112,6 +112,8 @@ struct TextLineLayout {
   std::size_t glyph_count = 0;
   float left = 0.0F;
   float source_y = 0.0F;
+  // Alignment advance. A space consumed as an automatic wrap boundary is
+  // retained here even though it emits no glyph quad.
   float advance = 0.0F;
   bool ellipsized = false;
 

@@ -334,12 +334,15 @@ The current native build targets express the same direction:
 - `omega_assets`: canonical owned IR values and decode contracts;
 - `omega_frontend`: stateless, platform-neutral front-end composition math over owned
   `omega_assets` values, with no renderer, filesystem, service, or host dependency;
+- `omega_frontend_text`: bounded, stateless glyph and line layout over an explicitly selected
+  retail FNT value, returning only owned canonical-GUI-space results and retaining no input view;
 - `omega_frontend_presentation`: a platform-neutral presentation boundary whose static entry point
   composes an immutable retail screen bundle into one owned canonical RGBA8 frame and whose live
-  timeline entry point owns only per-instance value state. The static subset accepts only results
-  invariant to projection, texture composition, draw-order, text, animation, action, and
-  output-alpha rules that it does not yet implement; required unsupported semantics reject the
-  whole frame;
+  timeline entry point owns only per-instance value state. Its CPU raster entry point consumes
+  already-projected ordered triangles; it does not choose projection, traversal, or lane order. The
+  older static subset accepts only results invariant to projection, texture composition, draw-order,
+  text, animation, action, and output-alpha rules that it does not yet implement; required
+  unsupported semantics reject the whole frame;
 - `omega_media`: bounded MPEG/program-stream and owned decoded-media values. Its current
   Media-Foundation-named public header and `platform_code` error field are transitional internal
   contracts, not promoted SDK APIs, even though Windows SDK types remain hidden;
@@ -390,6 +393,13 @@ atlases use the same metadata-bearing value through their separate font-archive 
 title compositor still rejects all textured input and now distinguishes a declared texture whose
 binding is absent from merely unsupported texture sampling; neither case returns a partial frame.
 
+The separate `omega_frontend_text` layout boundary accepts an explicitly selected `FntV3IR`,
+explicit codepoints, rectangle, atlas extent, line step, alignment, wrapping, ellipsis policy, and
+caller-tightenable limits. It returns owned glyph quads and line records and makes no byte-encoding,
+default-font, or unresolved pair-table assumption. For automatic space wrapping, the selected
+boundary space emits no glyph but its consumed advance remains part of that line's left/center/right
+placement. Exact whole-run R5900 truncation behavior remains unimplemented and unclaimed.
+
 The platform-neutral retail frontend sampler is a separate stateless value kernel over one live
 `FrontEndTextureBinding`. Its explicitly named bilinear-repeat entry point maps normalized ST to
 texel coordinates, subtracts one half texel, repeats each axis, fetches four expanded indexed-4 or
@@ -401,6 +411,19 @@ TCC ignores texture alpha, the result carries an explicit identity multiplier so
 must retain vertex/node alpha. The kernel allocates nothing and retains no view. It establishes no
 projection, triangle fill, FST, blend, depth, draw-order, output-alpha, or complete Title-frame
 contract, and the fail-closed static compositor does not yet invoke it.
+
+The E-0123 CPU raster boundary supplies the next isolated stage without claiming a complete Title
+compositor. It accepts only finite, normalized, already-projected vertices with an explicit
+larger-is-nearer depth rank and an optional synchronously borrowed texture binding. A fixed
+640-by-448 float color/depth scratch applies strict positive-alpha rejection before GEQUAL depth,
+later-equal ordered replacement, the retained bilinear-repeat sampler, straight source-over RGB,
+and current-source output alpha. The completed frame is converted once to owned RGBA8 by an
+explicit native clamp-and-round bridge. Triangle count, aggregate covered samples, scratch bytes,
+and output bytes have caller-tightenable limits beneath hard ceilings; coordinate, texture, and
+nested-kernel ceilings remain immutable, and allocations stay bounded. Any failure discards scratch
+and publishes no partial frame. This
+stage still assigns no asset-Z projection, hierarchy transform, IE-versus-GUI lane order, text
+interleave, live action dispatch, GS intermediate quantization, or visual-parity claim.
 
 The Windows prelaunch process is deliberately outside the game composition graph.
 `openomega_launcher.exe` owns only owner-data selection, validation, the default-off gamepad
