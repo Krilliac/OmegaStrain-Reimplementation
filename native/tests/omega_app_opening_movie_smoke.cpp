@@ -318,36 +318,39 @@ constexpr std::uint64_t kEmptyProfilePresentationLogicalBytes = 233'476U;
 constexpr std::uint64_t kEmptyProfileMoviePresentationLogicalBytes =
     kEmptyProfilePresentationLogicalBytes + kGeneratedLogicalBytes;
 constexpr std::uint64_t kCharacterCardLogicalBytes = 128ULL * 72ULL * 4ULL;
-constexpr FrontEndState kProfilesFirst{
-    .mode = FrontEndMode::Profiles,
-    .selected_main_row = FrontEndMainRow::Profiles,
+constexpr FrontEndState kTitleCreateAgent{
+    .mode = FrontEndMode::Title,
+    .selected_main_row = FrontEndMainRow::CreateAgent,
     .selected_profile_slot = FrontEndProfileSlot::First,
+    .selected_character_slot = FrontEndCharacterSlot::First,
 };
-constexpr FrontEndState kReturnedProfilesRow{
-    .mode = FrontEndMode::Main,
-    .selected_main_row = FrontEndMainRow::Profiles,
+constexpr FrontEndState kTitleLoadAgent{
+    .mode = FrontEndMode::Title,
+    .selected_main_row = FrontEndMainRow::LoadAgent,
     .selected_profile_slot = FrontEndProfileSlot::First,
+    .selected_character_slot = FrontEndCharacterSlot::First,
 };
-constexpr FrontEndState kMainStart{
-    .mode = FrontEndMode::Main,
-    .selected_main_row = FrontEndMainRow::StartDiagnostic,
+constexpr FrontEndState kAgentCreation{
+    .mode = FrontEndMode::AgentCreation,
+    .selected_main_row = FrontEndMainRow::CreateAgent,
     .selected_profile_slot = FrontEndProfileSlot::First,
+    .selected_character_slot = FrontEndCharacterSlot::First,
 };
-constexpr FrontEndState kCharactersFirst{
-    .mode = FrontEndMode::Characters,
-    .selected_main_row = FrontEndMainRow::Profiles,
+constexpr FrontEndState kAgentSelectionCreate{
+    .mode = FrontEndMode::AgentSelection,
+    .selected_main_row = FrontEndMainRow::CreateAgent,
     .selected_profile_slot = FrontEndProfileSlot::First,
     .selected_character_slot = FrontEndCharacterSlot::First,
 };
 constexpr FrontEndState kBriefingRoom{
     .mode = FrontEndMode::BriefingRoom,
-    .selected_main_row = FrontEndMainRow::StartDiagnostic,
+    .selected_main_row = FrontEndMainRow::CreateAgent,
     .selected_profile_slot = FrontEndProfileSlot::First,
     .selected_character_slot = FrontEndCharacterSlot::First,
 };
-constexpr FrontEndState kDiagnosticPlay{
-    .mode = FrontEndMode::DiagnosticPlay,
-    .selected_main_row = FrontEndMainRow::StartDiagnostic,
+constexpr FrontEndState kGameplay{
+    .mode = FrontEndMode::Gameplay,
+    .selected_main_row = FrontEndMainRow::CreateAgent,
     .selected_profile_slot = FrontEndProfileSlot::First,
     .selected_character_slot = FrontEndCharacterSlot::First,
 };
@@ -801,7 +804,7 @@ void CheckTransitionCleanup(const OmegaApp& app, const AppBaseline& before,
 void CheckPersistentMovieStartup(OmegaApp& app, const std::string_view context)
 {
     const GpuHostSnapshot gpu = OmegaAppTestAccess::Gpu(app);
-    Check(OmegaAppTestAccess::FrontEnd(app) == kProfilesFirst &&
+    Check(OmegaAppTestAccess::FrontEnd(app) == kTitleCreateAgent &&
               OmegaAppTestAccess::FrontEndModel(app) ==
                   omega::app::FrontEndStartupModel{} &&
               OmegaAppTestAccess::CanCreateFirstProfile(app) &&
@@ -809,7 +812,7 @@ void CheckPersistentMovieStartup(OmegaApp& app, const std::string_view context)
               OmegaAppTestAccess::ProfileCatalogCount(app) ==
                   std::optional<std::size_t>{0U},
         context,
-        "empty native persistence derives Profiles without creating or selecting a profile");
+        "empty native persistence starts at Title/Create Agent without creating or selecting an owner");
     Check(gpu.successful_uploads == 9U &&
               gpu.successful_upload_logical_bytes ==
                   kEmptyProfileMoviePresentationLogicalBytes &&
@@ -819,7 +822,7 @@ void CheckPersistentMovieStartup(OmegaApp& app, const std::string_view context)
               gpu.textures.resident_logical_bytes ==
                   kEmptyProfileMoviePresentationLogicalBytes,
         context,
-        "the generated 2x2 movie coexists with the exact nine-slot empty-profile presentation");
+        "the generated 2x2 movie coexists with the exact nine-slot empty-owner presentation budget");
 }
 
 [[nodiscard]] bool RunOneModalFrameWithExactDraws(OmegaApp& app,
@@ -847,7 +850,7 @@ void CheckPersistentMovieStartup(OmegaApp& app, const std::string_view context)
     return ran;
 }
 
-[[nodiscard]] bool RunOneCharacterMenuFrameWithTextureDelta(OmegaApp& app,
+[[nodiscard]] bool RunOneModalFrameWithTextureDelta(OmegaApp& app,
     const std::uint64_t expected_uploads,
     const std::uint64_t expected_releases,
     const std::uint64_t expected_draws, const std::string_view context)
@@ -860,10 +863,10 @@ void CheckPersistentMovieStartup(OmegaApp& app, const std::string_view context)
         run->input_frames == 1U && run->planned_simulation_steps == 0U &&
         run->executed_simulation_steps == 0U && !run->quit_requested;
     Check(ran, context,
-        "the scripted character-menu frame renders once without simulation or quit");
+        "the scripted texture-mutating front-end frame renders once without simulation or quit");
     Check(SameSimulationState(
               before_simulation, OmegaAppTestAccess::Simulation(app)),
-        context, "the scripted character-menu frame remains modal");
+        context, "the scripted texture-mutating front-end frame remains modal");
     Check(after_gpu.successful_uploads ==
               before_gpu.successful_uploads + expected_uploads &&
               after_gpu.successful_upload_logical_bytes ==
@@ -875,7 +878,7 @@ void CheckPersistentMovieStartup(OmegaApp& app, const std::string_view context)
               after_gpu.successful_releases ==
                   before_gpu.successful_releases + expected_releases,
         context,
-        "the scripted character-menu frame has the exact upload and release delta");
+        "the scripted texture-mutating front-end frame has the exact upload and release delta");
     Check(after_gpu.textures.slot_capacity ==
               before_gpu.textures.slot_capacity &&
               after_gpu.textures.reserved_slots ==
@@ -891,7 +894,7 @@ void CheckPersistentMovieStartup(OmegaApp& app, const std::string_view context)
                   before_gpu.textures.resident_logical_bytes +
                       expected_uploads * kCharacterCardLogicalBytes,
         context,
-        "the scripted character-menu frame has the exact texture residency delta");
+        "the scripted texture-mutating front-end frame has the exact texture residency delta");
     Check(after_gpu.frame_submissions == before_gpu.frame_submissions + 1U &&
               after_gpu.blit_submissions == before_gpu.blit_submissions + 1U &&
               after_gpu.successful_blit_draws ==
@@ -902,7 +905,7 @@ void CheckPersistentMovieStartup(OmegaApp& app, const std::string_view context)
               after_gpu.rejected_nondefault_texture_handles ==
                   before_gpu.rejected_nondefault_texture_handles,
         context,
-        "the scripted character-menu frame has the exact submission and draw count");
+        "the scripted texture-mutating front-end frame has the exact submission and draw count");
     return ran;
 }
 
@@ -1037,7 +1040,7 @@ void CheckNaturalCompletionAndActionableMenu()
         context, "source EOS completes the modal boot state");
     Check(OmegaAppTestAccess::FrontEnd(*app) ==
               omega::app::InitialFrontEndState(),
-        context, "completion enters the initial main menu");
+        context, "completion enters the canonical Title/Create Agent state");
     CheckTransitionCleanup(*app, before, 1U, 2U, 1U, context);
 
     Check(PushKey(SDL_SCANCODE_DOWN, true), context,
@@ -1047,12 +1050,8 @@ void CheckNaturalCompletionAndActionableMenu()
               navigated->planned_simulation_steps == 0U &&
               navigated->executed_simulation_steps == 0U,
         context, "the first post-movie menu frame remains modal");
-    Check(OmegaAppTestAccess::FrontEnd(*app) == FrontEndState{
-              .mode = FrontEndMode::Main,
-              .selected_main_row = FrontEndMainRow::Profiles,
-              .selected_profile_slot = FrontEndProfileSlot::First,
-          },
-        context, "the next frame accepts menu navigation");
+    Check(OmegaAppTestAccess::FrontEnd(*app) == kTitleLoadAgent,
+        context, "the next frame navigates from Create Agent to Load Agent");
 }
 
 void CheckScheduledSkip(const std::size_t advance_count,
@@ -1312,7 +1311,7 @@ void CheckOverReportedPcmRejection()
               BootSequencePhase::Failed &&
               OmegaAppTestAccess::FrontEnd(*app) ==
                   omega::app::InitialFrontEndState(),
-        context, "oversized refill fails open to the main menu");
+        context, "oversized refill fails open to Title/Create Agent");
     Check(OmegaAppTestAccess::Audio(*app).opening_movie_session_generation ==
               before.audio.opening_movie_session_generation,
         context, "oversized refill never starts an SDL audio session");
@@ -1359,7 +1358,7 @@ void CheckHostileRuntimeErrorRedaction()
               BootSequencePhase::Failed &&
               OmegaAppTestAccess::FrontEnd(*app) ==
                   omega::app::InitialFrontEndState(),
-        context, "categorical player failure fails open to the main menu");
+        context, "categorical player failure fails open to Title/Create Agent");
     CheckTransitionCleanup(*app, before, 0U, 1U, 0U, context);
 
     std::size_t canonical_warning_count = 0U;
@@ -1425,7 +1424,7 @@ void CheckLateAudioFaultFailsOpenToActionableMenu()
               BootSequencePhase::Failed &&
               OmegaAppTestAccess::FrontEnd(*app) ==
                   omega::app::InitialFrontEndState(),
-        context, "the late fault enters the initial main menu");
+        context, "the late fault enters Title/Create Agent");
     CheckTransitionCleanup(*app, before, 1U, 2U, 1U, context);
 
     std::size_t warning_count = 0U;
@@ -1447,12 +1446,8 @@ void CheckLateAudioFaultFailsOpenToActionableMenu()
     Check(PushKey(SDL_SCANCODE_DOWN, true), context,
         "a post-fault menu edge enters the SDL queue");
     auto navigated = app->Run(1);
-    Check(navigated && OmegaAppTestAccess::FrontEnd(*app) == FrontEndState{
-              .mode = FrontEndMode::Main,
-              .selected_main_row = FrontEndMainRow::Profiles,
-              .selected_profile_slot = FrontEndProfileSlot::First,
-          },
-        context, "the next frame accepts main-menu navigation");
+    Check(navigated && OmegaAppTestAccess::FrontEnd(*app) == kTitleLoadAgent,
+        context, "the next frame navigates from Create Agent to Load Agent");
 }
 
 void CheckLateControlFaultRebaselinesForMenu()
@@ -1490,7 +1485,7 @@ void CheckLateControlFaultRebaselinesForMenu()
               BootSequencePhase::Failed &&
               OmegaAppTestAccess::FrontEnd(*app) ==
                   omega::app::InitialFrontEndState(),
-        context, "the control fault enters the initial main menu");
+        context, "the control fault enters Title/Create Agent");
     CheckTransitionCleanup(*app, before, 1U, 2U, 1U, context, 1U);
 }
 
@@ -1555,7 +1550,7 @@ void CheckPersistenceBackedMovieProfileFlow(
                       completed->executed_simulation_steps == 0U &&
                       !completed->quit_requested,
                 context,
-                "natural EOS renders one movie frame and one Profiles transition frame");
+                "natural EOS renders one movie frame and one Title transition frame");
             Check(observation->advance_calls == 2U &&
                       observation->audio_read_calls == 0U &&
                       observation->destruction_count == 1U &&
@@ -1564,7 +1559,7 @@ void CheckPersistenceBackedMovieProfileFlow(
                 context,
                 "natural EOS owns the exact generated playback lifetime");
             CheckTransitionCleanup(*app, before_transition, 1U, 2U, 1U,
-                context, 0U, 2U);
+                context);
         }
         else
         {
@@ -1575,7 +1570,7 @@ void CheckPersistenceBackedMovieProfileFlow(
                       skipped->executed_simulation_steps == 0U &&
                       !skipped->quit_requested,
                 context,
-                "the Primary skip renders one movie frame and one Profiles transition frame without simulation");
+                "the Primary skip renders one movie frame and one Title transition frame without simulation");
             Check(observation->advance_calls == 1U &&
                       observation->audio_read_calls == 0U &&
                       observation->destruction_count == 1U &&
@@ -1584,17 +1579,17 @@ void CheckPersistenceBackedMovieProfileFlow(
                 context,
                 "the first rendered movie frame arms the scheduled Primary edge");
             CheckTransitionCleanup(*app, before_transition, 1U, 2U, 1U,
-                context, 0U, 2U);
+                context);
         }
 
         const GpuHostSnapshot after_transition = OmegaAppTestAccess::Gpu(*app);
-        Check(OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+        Check(OmegaAppTestAccess::FrontEnd(*app) == kTitleCreateAgent &&
                   OmegaAppTestAccess::CanCreateFirstProfile(*app) &&
                   !OmegaAppTestAccess::ActiveProfile(*app) &&
                   OmegaAppTestAccess::ProfileCatalogCount(*app) ==
                       std::optional<std::size_t>{0U},
             context,
-            "movie completion enters Profiles without an implicit create or selection");
+            "movie completion enters Title/Create Agent without an implicit create or selection");
         Check(after_transition.successful_uploads == 9U &&
                   after_transition.successful_upload_logical_bytes ==
                       kEmptyProfileMoviePresentationLogicalBytes &&
@@ -1609,14 +1604,14 @@ void CheckPersistenceBackedMovieProfileFlow(
         if (entry == PersistentMovieEntry::PrimarySkip)
         {
             const bool released_skip = PushKey(SDL_SCANCODE_F1, false) &&
-                RunOneModalFrameWithExactDraws(*app, 2U, context);
+                RunOneModalFrameWithExactDraws(*app, 3U, context);
             Check(released_skip &&
-                      OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                      OmegaAppTestAccess::FrontEnd(*app) == kTitleCreateAgent &&
                       OmegaAppTestAccess::ProfileCatalogCount(*app) ==
                           std::optional<std::size_t>{0U} &&
                       !OmegaAppTestAccess::ActiveProfile(*app),
                 context,
-                "the swallowed skip edge must release before a distinct create press");
+                "the swallowed skip edge must release before a distinct Create Agent press");
         }
 
         const bool timestamp_armed =
@@ -1629,7 +1624,7 @@ void CheckPersistenceBackedMovieProfileFlow(
             OmegaAppTestAccess::ReadProfile(*app, *first_profile_id);
         const auto created_model = OmegaAppTestAccess::FrontEndModel(*app);
         Check(timestamp_armed && create_pressed && create_frame &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kAgentCreation &&
                   !OmegaAppTestAccess::CanCreateFirstProfile(*app) &&
                   !OmegaAppTestAccess::ActiveProfile(*app) &&
                   OmegaAppTestAccess::ProfileCatalogCount(*app) ==
@@ -1653,86 +1648,30 @@ void CheckPersistenceBackedMovieProfileFlow(
                   OmegaAppTestAccess::PersistenceLogicalValueBytes(*app) ==
                       std::optional<std::size_t>{41U},
             context,
-            "only the explicit post-movie create edge durably publishes the 41-byte fixed-ID PROFILE 1 without activation or a durable confirmation");
+            "the explicit post-movie Create Agent edge durably publishes only the 41-byte fixed-ID PROFILE 1 owner and cannot confirm it on the same edge");
 
         const bool create_released = PushKey(SDL_SCANCODE_F1, false) &&
             RunOneModalFrameWithExactDraws(*app, 3U, context);
         Check(create_released &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kAgentCreation &&
                   !OmegaAppTestAccess::ActiveProfile(*app) &&
                   OmegaAppTestAccess::ProfileCatalogCount(*app) ==
                       std::optional<std::size_t>{1U},
             context,
-            "the explicit create release is inert and leaves PROFILE 1 unselected");
+            "the explicit owner-create release is inert and leaves PROFILE 1 unconfirmed in Agent Creation");
 
-        // The created profile is still unconfirmed, so the post-movie front end
-        // must leave diagnostic entry inert. Explicit navigation then reaches
-        // the surface that can satisfy the gate. RunOneModalFrameWithExactDraws
-        // proves each of these frames simulates nothing and allocates no GPU
-        // resource.
-        const bool unconfirmed_cancelled = PushKey(SDL_SCANCODE_BACKSPACE, true) &&
-            RunOneModalFrameWithExactDraws(*app, 3U, context) &&
-            PushKey(SDL_SCANCODE_BACKSPACE, false) &&
-            RunOneModalFrameWithExactDraws(*app, 3U, context);
-        Check(unconfirmed_cancelled &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kReturnedProfilesRow &&
-                  !OmegaAppTestAccess::ActiveProfile(*app),
-            context,
-            "Cancel leaves the unconfirmed post-movie Profiles surface for its Main row");
-
-        const bool unconfirmed_navigated = PushKey(SDL_SCANCODE_UP, true) &&
-            RunOneModalFrameWithExactDraws(*app, 3U, context) &&
-            PushKey(SDL_SCANCODE_UP, false) &&
-            RunOneModalFrameWithExactDraws(*app, 3U, context);
-        Check(unconfirmed_navigated &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kMainStart &&
-                  !OmegaAppTestAccess::ActiveProfile(*app),
-            context,
-            "the unconfirmed post-movie front end selects its START DIAGNOSTIC row");
-
-        const bool unconfirmed_start_inert = PushKey(SDL_SCANCODE_F1, true) &&
-            RunOneModalFrameWithExactDraws(*app, 3U, context);
-        Check(unconfirmed_start_inert &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kMainStart &&
-                  !OmegaAppTestAccess::ActiveProfile(*app) &&
-                  !OmegaAppTestAccess::PersistedConfirmedProfile(*app) &&
-                  OmegaAppTestAccess::ProfileCatalogCount(*app) ==
-                      std::optional<std::size_t>{1U},
-            context,
-            "an unconfirmed Start Diagnostic edge is inert without simulation, activation, durable confirmation, or catalog mutation");
-
-        const bool inert_start_released = PushKey(SDL_SCANCODE_F1, false) &&
-            RunOneModalFrameWithExactDraws(*app, 3U, context);
-        Check(inert_start_released &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kMainStart,
-            context,
-            "the inert post-movie entry edge releases before explicit profile navigation");
-
-        const bool profiles_navigated = PushKey(SDL_SCANCODE_DOWN, true) &&
-            RunOneModalFrameWithExactDraws(*app, 3U, context) &&
-            PushKey(SDL_SCANCODE_DOWN, false) &&
-            RunOneModalFrameWithExactDraws(*app, 3U, context);
-        Check(profiles_navigated &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kReturnedProfilesRow,
-            context,
-            "explicit post-movie navigation selects the Profiles main row");
-
-        const bool profiles_opened = PushKey(SDL_SCANCODE_F1, true) &&
-            RunOneModalFrameWithExactDraws(*app, 3U, context) &&
-            PushKey(SDL_SCANCODE_F1, false) &&
-            RunOneModalFrameWithExactDraws(*app, 3U, context);
-        Check(profiles_opened &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst,
-            context,
-            "Primary explicitly opens the unmarked post-movie Profiles surface before confirmation");
-
-        const bool select_pressed = PushKey(SDL_SCANCODE_F1, true) &&
-            RunOneCharacterMenuFrameWithTextureDelta(
-                *app, 2U, 0U, 2U, context);
+        // Owner creation and confirmation intentionally require distinct
+        // Primary edges. The confirmation prepares both bounded agent cards,
+        // but Agent Creation remains modal until another fresh edge creates an
+        // agent. This preserves the movie/input no-same-edge contract through
+        // the canonical player flow.
+        const bool owner_confirm_pressed = PushKey(SDL_SCANCODE_F1, true) &&
+            RunOneModalFrameWithTextureDelta(
+                *app, 2U, 0U, 3U, context);
         const auto empty_character_model =
             OmegaAppTestAccess::FrontEndCharacterModel(*app);
-        Check(select_pressed &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kCharactersFirst &&
+        Check(owner_confirm_pressed &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kAgentCreation &&
                   OmegaAppTestAccess::ActiveProfile(*app) == *first_profile_id &&
                   OmegaAppTestAccess::PersistedConfirmedProfile(*app) ==
                       *first_profile_id &&
@@ -1753,27 +1692,27 @@ void CheckPersistenceBackedMovieProfileFlow(
                   OmegaAppTestAccess::PersistenceLogicalValueBytes(*app) ==
                       std::optional<std::size_t>{73U},
             context,
-            "a later distinct Primary edge confirms PROFILE 1 and enters empty Characters with both fixed character cards resident");
+            "a later distinct Primary edge confirms PROFILE 1 while Agent Creation remains modal and both fixed agent cards become resident");
 
-        const bool select_released = PushKey(SDL_SCANCODE_F1, false) &&
-            RunOneModalFrameWithExactDraws(*app, 2U, context);
-        Check(select_released &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kCharactersFirst &&
+        const bool owner_confirm_released = PushKey(SDL_SCANCODE_F1, false) &&
+            RunOneModalFrameWithExactDraws(*app, 3U, context);
+        Check(owner_confirm_released &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kAgentCreation &&
                   OmegaAppTestAccess::ActiveProfile(*app) == *first_profile_id &&
                   OmegaAppTestAccess::CanCreateFirstCharacter(*app),
             context,
-            "the explicit profile-selection release preserves the empty Characters route");
+            "the explicit owner-confirmation release preserves the empty Agent Creation route");
 
         const bool character_create_pressed =
             PushKey(SDL_SCANCODE_F1, true) &&
-            RunOneCharacterMenuFrameWithTextureDelta(
+            RunOneModalFrameWithTextureDelta(
                 *app, 0U, 1U, 3U, context);
         const auto created_character = OmegaAppTestAccess::ReadCharacter(
             *app, *first_profile_id, *first_character_id);
         const auto created_character_model =
             OmegaAppTestAccess::FrontEndCharacterModel(*app);
         Check(character_create_pressed &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kCharactersFirst &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kAgentSelectionCreate &&
                   !OmegaAppTestAccess::CanCreateFirstCharacter(*app) &&
                   OmegaAppTestAccess::CharacterCatalogCount(
                       *app, *first_profile_id) ==
@@ -1798,16 +1737,16 @@ void CheckPersistenceBackedMovieProfileFlow(
                   OmegaAppTestAccess::PersistenceLogicalValueBytes(*app) ==
                       std::optional<std::size_t>{125U},
             context,
-            "Primary creates fixed-ID DIAGNOSTIC CHARACTER, keeps Characters modal, and releases the obsolete empty card");
+            "Primary creates fixed-ID AGENCY FIELD AGENT 1, enters Agent Selection, and releases the obsolete empty card without confirming the agent on the same edge");
 
         const bool character_create_released =
             PushKey(SDL_SCANCODE_F1, false) &&
             RunOneModalFrameWithExactDraws(*app, 3U, context);
         Check(character_create_released &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kCharactersFirst &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kAgentSelectionCreate &&
                   !OmegaAppTestAccess::ActiveCharacter(*app),
             context,
-            "the explicit character-creation release leaves the new character unselected");
+            "the explicit agent-creation release leaves the new agent unselected");
 
         const bool character_select_pressed = PushKey(SDL_SCANCODE_F1, true) &&
             RunOneModalFrameWithExactDraws(*app, 3U, context);
@@ -1825,7 +1764,7 @@ void CheckPersistenceBackedMovieProfileFlow(
                   OmegaAppTestAccess::PersistenceLogicalValueBytes(*app) ==
                       std::optional<std::size_t>{173U},
             context,
-            "Primary confirms DIAGNOSTIC CHARACTER and enters the Briefing Room mission selector after the exact 48-byte active-character write");
+            "Primary confirms AGENCY FIELD AGENT 1 and enters the Briefing Room mission selector after the exact 48-byte active-agent write");
 
         const bool character_select_released =
             PushKey(SDL_SCANCODE_F1, false) &&
@@ -1837,12 +1776,12 @@ void CheckPersistenceBackedMovieProfileFlow(
             context,
             "the explicit character-selection release preserves the Briefing Room mission selector");
 
-        const bool diagnostic_started = OmegaAppTestAccess::ArmNextRunElapsed(
+        const bool campaign_started = OmegaAppTestAccess::ArmNextRunElapsed(
                                             *app, std::chrono::nanoseconds::zero()) &&
             PushKey(SDL_SCANCODE_F1, true) &&
             RunOneModalFrameWithExactDraws(*app, 3U, context);
-        Check(diagnostic_started &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kDiagnosticPlay &&
+        Check(campaign_started &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kGameplay &&
                   OmegaAppTestAccess::ActiveProfile(*app) == *first_profile_id &&
                   OmegaAppTestAccess::PersistedConfirmedProfile(*app) ==
                       *first_profile_id &&
@@ -1857,7 +1796,7 @@ void CheckPersistenceBackedMovieProfileFlow(
                   OmegaAppTestAccess::PersistenceLogicalValueBytes(*app) ==
                       std::optional<std::size_t>{221U},
             context,
-            "mission selection commits the exact 48-byte character-owned session checkpoint before publishing DiagnosticPlay");
+            "mission selection commits the exact 48-byte agent-owned session checkpoint before publishing Gameplay");
 
     }
 
@@ -1893,12 +1832,12 @@ void CheckPersistenceBackedMovieProfileFlow(
                   reopened_character->metadata.modified_unix_milliseconds &&
               reopened_character->metadata_revision == 3U,
         context,
-        "reopening validates PROFILE 1, DIAGNOSTIC CHARACTER, both durable confirmations, and the exact five-record 221-byte session totals");
+        "reopening validates PROFILE 1, AGENCY FIELD AGENT 1, both durable confirmations, and the exact five-record 221-byte session totals");
 }
 
 void CheckPersistenceBackedMovieFailureRoute()
 {
-    constexpr std::string_view context = "persistent-fail-open-profiles";
+    constexpr std::string_view context = "persistent-fail-open-title";
     TempDirectory directory(context);
     if (directory.path().empty())
         return;
@@ -1932,20 +1871,20 @@ void CheckPersistenceBackedMovieFailureRoute()
                   failed_open->executed_simulation_steps == 0U &&
                   !failed_open->quit_requested,
             context,
-            "the bounded decoder failure renders one Profiles transition frame");
+            "the bounded decoder failure renders one Title transition frame");
         Check(observation->advance_calls == 1U &&
                   observation->destruction_count == 1U &&
                   OmegaAppTestAccess::BootSequence(*app).phase ==
                       BootSequencePhase::Failed &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kTitleCreateAgent &&
                   OmegaAppTestAccess::CanCreateFirstProfile(*app) &&
                   !OmegaAppTestAccess::ActiveProfile(*app) &&
                   OmegaAppTestAccess::ProfileCatalogCount(*app) ==
                       std::optional<std::size_t>{0U},
             context,
-            "movie failure fails open to Profiles without profile mutation");
+            "movie failure fails open to Title/Create Agent without owner mutation");
         CheckTransitionCleanup(*app, before, 0U, 1U, 0U,
-            context, 0U, 2U);
+            context);
     }
 
     auto reopened = NativePersistence::Bootstrap(directory.path());
@@ -1955,7 +1894,7 @@ void CheckPersistenceBackedMovieFailureRoute()
 
 void CheckOwnedSourceCreationFailureRoute()
 {
-    constexpr std::string_view context = "owned-source-create-fail-open-profiles";
+    constexpr std::string_view context = "owned-source-create-fail-open-title";
     TempDirectory directory(context);
     if (directory.path().empty())
         return;
@@ -1984,13 +1923,13 @@ void CheckOwnedSourceCreationFailureRoute()
 
         Check(OmegaAppTestAccess::BootSequence(*app) ==
                   omega::app::BootSequenceState{} &&
-                  OmegaAppTestAccess::FrontEnd(*app) == kProfilesFirst &&
+                  OmegaAppTestAccess::FrontEnd(*app) == kTitleCreateAgent &&
                   OmegaAppTestAccess::CanCreateFirstProfile(*app) &&
                   !OmegaAppTestAccess::ActiveProfile(*app) &&
                   OmegaAppTestAccess::ProfileCatalogCount(*app) ==
                       std::optional<std::size_t>{0U},
             context,
-            "owned source creation failure opens Profiles without profile mutation");
+            "owned source creation failure opens Title/Create Agent without owner mutation");
         Check(!OmegaAppTestAccess::HasOpeningMoviePlayback(*app) &&
                   !OmegaAppTestAccess::HasOpeningMovieTexture(*app) &&
                   OmegaAppTestAccess::OpeningMovieDrawCommandCount(*app) == 0U,
