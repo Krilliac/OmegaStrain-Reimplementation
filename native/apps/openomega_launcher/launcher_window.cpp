@@ -37,12 +37,17 @@ constexpr float kDefaultClientHeight = 680.0F;
 constexpr float kMinimumWindowWidth = 780.0F;
 constexpr float kMinimumWindowHeight = 610.0F;
 
+// Posted to the launcher window (from a thread-pool wait callback) once the
+// supervised game process exits. wParam carries the process exit code.
+constexpr UINT kGameExitedMessage = WM_APP + 1U;
+
 enum class FocusTarget : std::uint8_t
 {
     None,
     ExtractedFolder,
     OwnedIso,
     Gamepad,
+    DeveloperDiagnostics,
     Play,
     Quit,
 };
@@ -62,10 +67,11 @@ enum class StatusTone : std::uint8_t
     Error,
 };
 
-constexpr std::array<FocusTarget, 5> kFocusOrder{
+constexpr std::array<FocusTarget, 6> kFocusOrder{
     FocusTarget::ExtractedFolder,
     FocusTarget::OwnedIso,
     FocusTarget::Gamepad,
+    FocusTarget::DeveloperDiagnostics,
     FocusTarget::Play,
     FocusTarget::Quit,
 };
@@ -77,6 +83,7 @@ struct LauncherLayout
     D2D1_RECT_F owned_iso{};
     D2D1_RECT_F settings_card{};
     D2D1_RECT_F gamepad{};
+    D2D1_RECT_F developer_diagnostics{};
     D2D1_RECT_F play{};
     D2D1_RECT_F quit{};
 };
@@ -278,6 +285,101 @@ struct LauncherLayout
     return *local_app_data / L"OpenOmega" / L"openomega.cfg";
 }
 
+// The launcher redirects the supervised game's stdout+stderr here so a headless
+// failure (the child has no console) can be surfaced back in the launcher window
+// instead of the process silently vanishing. Best-effort: an absent path just
+// disables output capture, never the launch.
+[[nodiscard]] std::optional<std::filesystem::path> DefaultRunLogPath()
+{
+    auto local_app_data = ReadLocalAppDataPath();
+    if (!local_app_data)
+    {
+        return std::nullopt;
+    }
+    return *local_app_data / L"OpenOmega" / L"last-run.log";
+}
+
+// Reads the final meaningful diagnostic line from the run log so the launcher can
+// show why the game exited. Returns an empty string when nothing usable is found.
+[[nodiscard]] std::wstring ReadRunLogFailureSummary(const std::filesystem::path& log_path)
+{
+    HANDLE file = ::CreateFileW(log_path.c_str(), GENERIC_READ,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return std::wstring{};
+    }
+
+    LARGE_INTEGER size{};
+    if (::GetFileSizeEx(file, &size) == FALSE || size.QuadPart <= 0)
+    {
+        ::CloseHandle(file);
+        return std::wstring{};
+    }
+
+    constexpr LONGLONG kMaxTail = 4096;
+    const LONGLONG tail = size.QuadPart < kMaxTail ? size.QuadPart : kMaxTail;
+    LARGE_INTEGER offset{};
+    offset.QuadPart = size.QuadPart - tail;
+    if (::SetFilePointerEx(file, offset, nullptr, FILE_BEGIN) == FALSE)
+    {
+        ::CloseHandle(file);
+        return std::wstring{};
+    }
+
+    std::string bytes(static_cast<std::size_t>(tail), '\0');
+    DWORD read = 0U;
+    const BOOL ok = ::ReadFile(file, bytes.data(), static_cast<DWORD>(tail), &read, nullptr);
+    ::CloseHandle(file);
+    if (ok == FALSE || read == 0U)
+    {
+        return std::wstring{};
+    }
+    bytes.resize(static_cast<std::size_t>(read));
+
+    // Prefer the last line that names an ERROR or the failing runtime seam; fall
+    // back to the last non-empty line.
+    std::string chosen;
+    std::size_t line_start = 0U;
+    for (std::size_t cursor = 0U; cursor <= bytes.size(); ++cursor)
+    {
+        if (cursor == bytes.size() || bytes[cursor] == '\n' || bytes[cursor] == '\r')
+        {
+            if (cursor > line_start)
+            {
+                std::string_view line(bytes.data() + line_start, cursor - line_start);
+                const bool interesting = line.find("ERROR") != std::string_view::npos ||
+                                         line.find("runtime loop:") != std::string_view::npos ||
+                                         line.find("]: ") != std::string_view::npos;
+                if (interesting || chosen.empty())
+                {
+                    chosen.assign(line);
+                }
+            }
+            line_start = cursor + 1U;
+        }
+    }
+    if (chosen.empty())
+    {
+        return std::wstring{};
+    }
+
+    constexpr std::size_t kMaxSummary = 160U;
+    if (chosen.size() > kMaxSummary)
+    {
+        chosen.resize(kMaxSummary);
+    }
+    // The diagnostic stream is ASCII; widen byte-for-byte and drop anything else.
+    std::wstring summary;
+    summary.reserve(chosen.size());
+    for (const unsigned char byte : chosen)
+    {
+        summary.push_back(byte < 0x80U ? static_cast<wchar_t>(byte) : L'?');
+    }
+    return summary;
+}
+
 [[nodiscard]] std::expected<std::filesystem::path, DWORD> CurrentExecutablePath()
 {
     std::vector<wchar_t> buffer(512U, L'\0');
@@ -311,6 +413,23 @@ class LauncherWindow final
 
     LauncherWindow(const LauncherWindow&) = delete;
     LauncherWindow& operator=(const LauncherWindow&) = delete;
+
+    ~LauncherWindow()
+    {
+        // Defensive cleanup: the normal exit path already unregisters the wait and
+        // closes the process handle in OnGameExited, but never leak them if the
+        // window is torn down while a supervised game is still tracked.
+        if (game_wait_ != nullptr)
+        {
+            static_cast<void>(::UnregisterWaitEx(game_wait_, INVALID_HANDLE_VALUE));
+            game_wait_ = nullptr;
+        }
+        if (game_process_ != nullptr)
+        {
+            ::CloseHandle(game_process_);
+            game_process_ = nullptr;
+        }
+    }
 
     [[nodiscard]] bool CreateAndShow(const int show_command)
     {
@@ -474,6 +593,9 @@ class LauncherWindow final
         case WM_CLOSE:
             ::DestroyWindow(window_);
             return 0;
+        case kGameExitedMessage:
+            OnGameExited();
+            return 0;
         case WM_DESTROY:
             ::PostQuitMessage(0);
             return 0;
@@ -625,6 +747,8 @@ class LauncherWindow final
         layout.quit = D2D1::RectF(right - 106.0F, footer_top, right, footer_top + 48.0F);
         layout.play = D2D1::RectF(layout.quit.left - 202.0F, footer_top, layout.quit.left - 12.0F,
                                   footer_top + 48.0F);
+        layout.developer_diagnostics = D2D1::RectF(layout.play.left - 222.0F, footer_top,
+                                                   layout.play.left - 12.0F, footer_top + 48.0F);
         return layout;
     }
 
@@ -715,9 +839,11 @@ class LauncherWindow final
         DrawGamepadControl(layout.gamepad);
 
         DrawText(L"Tab / arrows navigate    Enter selects    Esc closes", status_format_.Get(),
-                 D2D1::RectF(44.0F, layout.play.top + 14.0F, layout.play.left - 20.0F,
-                             layout.play.bottom),
+                 D2D1::RectF(44.0F, layout.play.top + 14.0F,
+                             layout.developer_diagnostics.left - 20.0F, layout.play.bottom),
                  MutedTextColor());
+        DrawButton(FocusTarget::DeveloperDiagnostics, layout.developer_diagnostics,
+                   L"DEV DIAGNOSTICS", false);
         DrawButton(FocusTarget::Play, layout.play, L"PLAY OPENOMEGA", true);
         DrawButton(FocusTarget::Quit, layout.quit, L"QUIT", false);
 
@@ -948,6 +1074,10 @@ class LauncherWindow final
         {
             return FocusTarget::Gamepad;
         }
+        if (ContainsPoint(layout.developer_diagnostics, point))
+        {
+            return FocusTarget::DeveloperDiagnostics;
+        }
         if (ContainsPoint(layout.play, point))
         {
             return FocusTarget::Play;
@@ -1070,7 +1200,7 @@ class LauncherWindow final
         {
             return false;
         }
-        if (target == FocusTarget::Play)
+        if (target == FocusTarget::Play || target == FocusTarget::DeveloperDiagnostics)
         {
             return valid_source_ && configuration_path_.has_value();
         }
@@ -1091,8 +1221,11 @@ class LauncherWindow final
             preferences_.gamepad_enabled = !preferences_.gamepad_enabled;
             ::InvalidateRect(window_, nullptr, FALSE);
             break;
+        case FocusTarget::DeveloperDiagnostics:
+            SaveAndLaunch(true);
+            break;
         case FocusTarget::Play:
-            SaveAndLaunch();
+            SaveAndLaunch(false);
             break;
         case FocusTarget::Quit:
             ::DestroyWindow(window_);
@@ -1277,9 +1410,11 @@ class LauncherWindow final
         ValidateDataSource(*preferences_.data_source, kind);
     }
 
-    void SaveAndLaunch()
+    void SaveAndLaunch(const bool developer_diagnostics)
     {
-        if (!IsEnabled(FocusTarget::Play) || !configuration_path_)
+        if ((!IsEnabled(FocusTarget::Play) &&
+             !IsEnabled(FocusTarget::DeveloperDiagnostics)) ||
+            !configuration_path_)
         {
             return;
         }
@@ -1294,7 +1429,9 @@ class LauncherWindow final
         }
 
         status_tone_ = StatusTone::Busy;
-        status_text_ = L"Starting the native game...";
+        status_text_ = developer_diagnostics
+                           ? L"Starting the native game (developer diagnostics)..."
+                           : L"Starting the native game...";
         ::InvalidateRect(window_, nullptr, FALSE);
         ::UpdateWindow(window_);
 
@@ -1307,21 +1444,144 @@ class LauncherWindow final
         const std::filesystem::path executable_directory = executable_path->parent_path();
         const std::filesystem::path game_executable = executable_directory / L"openomega.exe";
 
+        // Redirect the child's stdout+stderr to a log so a headless failure (the
+        // game runs in its own window-subsystem process with no console) can be
+        // surfaced back here instead of the window silently vanishing. This is
+        // best-effort: if any handle cannot be prepared we still launch, just
+        // without captured diagnostics.
+        SECURITY_ATTRIBUTES inheritable{};
+        inheritable.nLength = static_cast<DWORD>(sizeof(inheritable));
+        inheritable.bInheritHandle = TRUE;
+
+        std::optional<std::filesystem::path> log_path = DefaultRunLogPath();
+        HANDLE log_handle = INVALID_HANDLE_VALUE;
+        HANDLE null_input = INVALID_HANDLE_VALUE;
+        if (log_path)
+        {
+            log_handle = ::CreateFileW(log_path->c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                                       &inheritable, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (log_handle != INVALID_HANDLE_VALUE)
+            {
+                null_input = ::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                           &inheritable, OPEN_EXISTING, 0U, nullptr);
+            }
+        }
+        const bool capture_output =
+            log_handle != INVALID_HANDLE_VALUE && null_input != INVALID_HANDLE_VALUE;
+
+        std::wstring command_line = L"\"" + game_executable.wstring() + L"\"";
+        if (developer_diagnostics)
+        {
+            command_line += L" --developer-diagnostics";
+        }
+        std::vector<wchar_t> command_buffer(command_line.begin(), command_line.end());
+        command_buffer.push_back(L'\0');
+
         STARTUPINFOW startup{};
         startup.cb = static_cast<DWORD>(sizeof(startup));
+        if (capture_output)
+        {
+            startup.dwFlags |= STARTF_USESTDHANDLES;
+            startup.hStdInput = null_input;
+            startup.hStdOutput = log_handle;
+            startup.hStdError = log_handle;
+        }
+
         PROCESS_INFORMATION process{};
-        const BOOL launched =
-            ::CreateProcessW(game_executable.c_str(), nullptr, nullptr, nullptr, FALSE, 0U, nullptr,
-                             executable_directory.c_str(), &startup, &process);
+        const BOOL launched = ::CreateProcessW(
+            game_executable.c_str(), command_buffer.data(), nullptr, nullptr,
+            capture_output ? TRUE : FALSE, 0U, nullptr, executable_directory.c_str(), &startup,
+            &process);
+
+        // The child owns its own copies of the inherited handles now.
+        if (log_handle != INVALID_HANDLE_VALUE)
+        {
+            ::CloseHandle(log_handle);
+        }
+        if (null_input != INVALID_HANDLE_VALUE)
+        {
+            ::CloseHandle(null_input);
+        }
+
         if (!launched)
         {
             SetLaunchFailure(::GetLastError());
             return;
         }
-
         ::CloseHandle(process.hThread);
-        ::CloseHandle(process.hProcess);
-        ::DestroyWindow(window_);
+
+        // Supervise the child so its exit (clean or failed) is observed. On a
+        // successful registration the launcher hides itself and waits; the wait
+        // callback posts kGameExitedMessage back to the UI thread.
+        run_log_path_ = capture_output ? log_path : std::nullopt;
+        game_process_ = process.hProcess;
+        if (::RegisterWaitForSingleObject(&game_wait_, process.hProcess, &GameWaitCallback, window_,
+                                          INFINITE, WT_EXECUTEONLYONCE) == FALSE)
+        {
+            // Supervision unavailable: fall back to the original detached launch
+            // so the game still runs; we simply cannot surface a later failure.
+            game_wait_ = nullptr;
+            game_process_ = nullptr;
+            run_log_path_ = std::nullopt;
+            ::CloseHandle(process.hProcess);
+            ::DestroyWindow(window_);
+            return;
+        }
+        ::ShowWindow(window_, SW_HIDE);
+    }
+
+    static VOID CALLBACK GameWaitCallback(PVOID context, BOOLEAN /*timed_out*/)
+    {
+        auto* const window = static_cast<HWND>(context);
+        if (window != nullptr)
+        {
+            static_cast<void>(::PostMessageW(window, kGameExitedMessage, 0U, 0U));
+        }
+    }
+
+    void OnGameExited()
+    {
+        if (game_wait_ != nullptr)
+        {
+            // INVALID_HANDLE_VALUE blocks until any in-flight callback returns; the
+            // callback merely posts, so there is no re-entrancy on the UI thread.
+            static_cast<void>(::UnregisterWaitEx(game_wait_, INVALID_HANDLE_VALUE));
+            game_wait_ = nullptr;
+        }
+
+        DWORD exit_code = 1U;
+        if (game_process_ != nullptr)
+        {
+            static_cast<void>(::GetExitCodeProcess(game_process_, &exit_code));
+            ::CloseHandle(game_process_);
+            game_process_ = nullptr;
+        }
+
+        if (exit_code == 0U)
+        {
+            ::DestroyWindow(window_);
+            return;
+        }
+
+        std::wstring summary;
+        if (run_log_path_)
+        {
+            summary = ReadRunLogFailureSummary(*run_log_path_);
+        }
+        status_tone_ = StatusTone::Error;
+        std::wstring text = L"The game exited (code " + std::to_wstring(exit_code) + L").";
+        if (!summary.empty())
+        {
+            text += L" " + summary;
+        }
+        else
+        {
+            text += L" See last-run.log in %LOCALAPPDATA%\\OpenOmega.";
+        }
+        status_text_ = std::move(text);
+        ::ShowWindow(window_, SW_SHOW);
+        static_cast<void>(::SetForegroundWindow(window_));
+        ::InvalidateRect(window_, nullptr, FALSE);
     }
 
     void SetLaunchFailure(const DWORD error)
@@ -1335,6 +1595,10 @@ class LauncherWindow final
     HINSTANCE instance_ = nullptr;
     HWND window_ = nullptr;
     std::optional<std::filesystem::path> configuration_path_;
+    // Supervised game process (null unless a launch is in flight and being watched).
+    HANDLE game_process_ = nullptr;
+    HANDLE game_wait_ = nullptr;
+    std::optional<std::filesystem::path> run_log_path_;
     LauncherPreferences preferences_{};
     SourceKind source_kind_ = SourceKind::None;
     bool valid_source_ = false;
