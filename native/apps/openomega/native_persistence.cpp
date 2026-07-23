@@ -367,6 +367,17 @@ DiagnosticCheckpointProfileIdFromKey(std::string_view key) noexcept
 [[nodiscard]] bool IsGameSessionCheckpointKeyCandidate(
     const std::string_view key) noexcept
 {
+    // Explicit length guard before GameSessionCheckpointIdsFromKey's remove_prefix/
+    // remove_suffix can run on a key this predicate accepts (string_view::remove_prefix/
+    // remove_suffix beyond size() is UB). No untrusted persisted key can combine both fixed
+    // literals below their combined length today: the only key at or below that length
+    // satisfying starts_with/ends_with is the single fixed string
+    // "profiles/sessions/diagnostic/checkpoint", which contains no "/characters/" and is
+    // already rejected by the find() check below. This guard is a release-mode backstop
+    // against that coincidence rather than the only thing keeping it safe -- matching the
+    // explicit length guard IsDiagnosticCheckpointKeyCandidate's caller already has.
+    if (key.size() < kProfilesKeyPrefix.size() + kGameSessionCheckpointKeySuffix.size())
+        return false;
     return key.starts_with(kProfilesKeyPrefix) &&
            key.ends_with(kGameSessionCheckpointKeySuffix) &&
            key.find("/characters/") != std::string_view::npos;
