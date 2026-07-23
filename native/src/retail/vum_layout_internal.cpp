@@ -103,7 +103,17 @@ enum class MetadataRecordKind
     const std::optional<std::uint32_t> previous_combined_reference)
 {
     const bool grouped = span_bytes != 16U;
-    const std::uint32_t first_reference = ReadVumU32(bytes, span_begin + (grouped ? 0x74U : 4U));
+    // IsObservedMiddleSpan's fixed {16,256,480,704} set keeps every read below in range today
+    // (0xF4+4 <= 256, the smallest grouped span). This is a release-mode backstop, not the
+    // primary gate, against that set ever being widened without revisiting the fixed offsets
+    // read here.
+    const std::uint32_t first_reference_offset = grouped ? 0x74U : 4U;
+    if (first_reference_offset + 4U > span_bytes || (grouped && 0xF4U + 4U > span_bytes))
+    {
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+            "VUM middle payload span cannot hold its combined-reference offsets", span_begin));
+    }
+    const std::uint32_t first_reference = ReadVumU32(bytes, span_begin + first_reference_offset);
     if (!StrictlyInsideAligned(first_reference, final_payload_begin, primary_end, 16))
         return std::unexpected(Error(asset::DecodeErrorCode::InvalidReference,
             "VUM middle payload has an invalid final-payload reference", span_begin));
