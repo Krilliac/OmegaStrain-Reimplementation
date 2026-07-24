@@ -290,6 +290,10 @@ private:
         // Albedo texture bound to the environment meshes (Gap-A textured level
         // slice). A default handle leaves the environment flat-shaded.
         runtime::RenderTextureHandle environment_texture{};
+        // Objective HUD panel texture blitted into overlay_draw_list over the 3D
+        // level (uploaded once at scene build, like environment_texture; released
+        // by the host at teardown). Default = no HUD blit.
+        runtime::RenderTextureHandle hud_texture{};
         asset::SceneCameraIR camera;
         runtime::RenderMeshDrawList environment_draw_list;
         runtime::RenderMeshDrawList draw_list;

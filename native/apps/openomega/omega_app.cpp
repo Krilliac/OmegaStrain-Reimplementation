@@ -1408,6 +1408,87 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         return std::unexpected(error);
     }
     diagnostic_actor_marker_texture = *uploaded_actor_marker;
+
+    // Objective HUD overlay for the 3D level view: render the seeded Minsk
+    // objective state (same demo as the menu overlay above) onto a small slate
+    // panel image and upload it, so it can be blitted into the scene overlay
+    // draw list on top of the level. Level content only; fail-soft.
+    runtime::RenderTextureHandle diagnostic_objective_hud_texture;
+    if (content_stage == runtime::ContentStartupStage::LevelContent)
+    {
+        const gameplay::MissionData &hud_mission = gameplay::MinskMissionData();
+        gameplay::ObjectiveState hud_state =
+            gameplay::InitialObjectiveState(hud_mission);
+        const auto hud_apply = [&hud_mission, &hud_state](
+                                   const gameplay::ObjectiveChoice choice,
+                                   const std::uint16_t id) {
+            const auto step =
+                gameplay::AdvanceObjectives(hud_mission, hud_state, {choice, id});
+            if (step)
+                hud_state = step->state;
+        };
+        for (const std::uint16_t id : {std::uint16_t{1U}, std::uint16_t{2U},
+                 std::uint16_t{3U}, std::uint16_t{4U}})
+            hud_apply(gameplay::ObjectiveChoice::Add, id);
+        hud_apply(gameplay::ObjectiveChoice::Pass, std::uint16_t{1U});
+
+        std::vector<ObjectiveHudEntry> hud_entries;
+        std::uint32_t hud_complete = 0U;
+        for (std::size_t index = 0U; index < hud_mission.objectives.size();
+             ++index)
+        {
+            std::uint8_t status_code = 0U;
+            switch (hud_state.status[index])
+            {
+            case gameplay::ObjectiveStatus::Active:
+                status_code = 1U;
+                break;
+            case gameplay::ObjectiveStatus::Complete:
+                status_code = 2U;
+                ++hud_complete;
+                break;
+            case gameplay::ObjectiveStatus::Failed:
+                status_code = 3U;
+                break;
+            case gameplay::ObjectiveStatus::Inactive:
+                break;
+            }
+            if (status_code != 0U)
+                hud_entries.push_back(ObjectiveHudEntry{
+                    hud_mission.objectives[index].id, status_code});
+        }
+
+        constexpr std::uint32_t kHudPanelWidth = 88U;
+        constexpr std::uint32_t kHudPanelHeight = 72U;
+        std::vector<std::byte> hud_pixels(
+            static_cast<std::size_t>(kHudPanelWidth) * kHudPanelHeight * 4U);
+        for (std::size_t i = 0U; i + 3U < hud_pixels.size(); i += 4U)
+        {
+            hud_pixels[i] = std::byte{16};
+            hud_pixels[i + 1U] = std::byte{20};
+            hud_pixels[i + 2U] = std::byte{28};
+            hud_pixels[i + 3U] = std::byte{255};
+        }
+        runtime::DebugImage hud_panel_image{
+            .width = kHudPanelWidth,
+            .height = kHudPanelHeight,
+            .rgba8_pixels = std::move(hud_pixels),
+        };
+        DrawObjectiveHudOnto(hud_panel_image, hud_entries, hud_complete,
+            static_cast<std::uint32_t>(hud_mission.objectives.size()));
+        auto uploaded_hud =
+            host->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+                .width = hud_panel_image.width,
+                .height = hud_panel_image.height,
+                .pixels = hud_panel_image.pixels(),
+            });
+        if (uploaded_hud)
+            diagnostic_objective_hud_texture = *uploaded_hud;
+        else
+            log->Info(
+                "startup", "objective HUD texture unavailable: upload-failed");
+    }
+
     if (diagnostic_hidden_draw_list.size() != 1U)
     {
         constexpr std::string_view error =
@@ -1447,9 +1528,33 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         return std::unexpected(std::string(error));
     }
     diagnostic_actor_draw_list = std::move(*created_actor_draw_list);
+    std::array<runtime::RenderTextureBlitCommand, 2U> scene_overlay_commands{
+        diagnostic_actor_commands[2U],
+        runtime::RenderTextureBlitCommand{},
+    };
+    std::size_t scene_overlay_command_count = 1U;
+    if (diagnostic_objective_hud_texture.valid())
+    {
+        // Objective HUD panel, top-left screen-space (Q16 normalized), on top of
+        // the 3D level. Contain preserves the panel's aspect.
+        scene_overlay_commands[1U] = runtime::RenderTextureBlitCommand{
+            .texture = diagnostic_objective_hud_texture,
+            .source = full_source,
+            .destination =
+                runtime::RenderTargetRectQ16{
+                    .left = 512U,
+                    .top = 512U,
+                    .right = 19000U,
+                    .bottom = 15000U,
+                },
+            .fit_mode = runtime::RenderTextureFitMode::Contain,
+            .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+        };
+        scene_overlay_command_count = 2U;
+    }
     auto created_scene_overlay_draw_list = runtime::RenderDrawList::Create(
         std::span<const runtime::RenderTextureBlitCommand>{
-            diagnostic_actor_commands.data() + 2U, 1U});
+            scene_overlay_commands.data(), scene_overlay_command_count});
     if (!created_scene_overlay_draw_list)
     {
         constexpr std::string_view error =
@@ -1633,6 +1738,8 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             std::move(*created_scene_presentation);
         diagnostic_scene_presentation->overlay_draw_list =
             std::move(diagnostic_scene_overlay_draw_list);
+        diagnostic_scene_presentation->hud_texture =
+            diagnostic_objective_hud_texture;
     }
 
     log->Info("startup", "runtime services ready with " +
@@ -4243,10 +4350,37 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
         return std::unexpected(
             std::string{"diagnostic actor draw-list creation failed"});
     }
+    // Scene overlay (composited over the 3D level each frame): the world-anchored
+    // markers, plus the screen-space objective HUD panel on top. The HUD is added
+    // here (not to `commands`) so it appears only over the 3D level, not in the
+    // full actor draw list.
+    std::array<runtime::RenderTextureBlitCommand, commands.size() + 1U>
+        scene_overlay_commands{};
+    std::size_t scene_overlay_count = 0U;
+    for (std::size_t index = overlay_command_offset; index < command_count;
+         ++index)
+        scene_overlay_commands[scene_overlay_count++] = commands[index];
+    if (diagnostic_scene_presentation_ &&
+        diagnostic_scene_presentation_->hud_texture.valid())
+    {
+        scene_overlay_commands[scene_overlay_count++] =
+            runtime::RenderTextureBlitCommand{
+                .texture = diagnostic_scene_presentation_->hud_texture,
+                .source = full_source,
+                .destination =
+                    runtime::RenderTargetRectQ16{
+                        .left = 512U,
+                        .top = 512U,
+                        .right = 19000U,
+                        .bottom = 15000U,
+                    },
+                .fit_mode = runtime::RenderTextureFitMode::Contain,
+                .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+            };
+    }
     auto created_scene_overlay = runtime::RenderDrawList::Create(
         std::span<const runtime::RenderTextureBlitCommand>{
-            commands.data() + overlay_command_offset,
-            command_count - overlay_command_offset});
+            scene_overlay_commands.data(), scene_overlay_count});
     if (!created_scene_overlay)
     {
         return std::unexpected(
