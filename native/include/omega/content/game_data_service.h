@@ -8,6 +8,7 @@
 #include "omega/asset/opening_movie_source.h"
 #include "omega/asset/source_locator.h"
 #include "omega/content/front_end_screen_bundle.h"
+#include "omega/retail/vum_visual_geometry_decoder.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -146,6 +147,16 @@ public:
     // imply no binding.
     [[nodiscard]] std::expected<asset::LevelContentIR, GameDataError> LoadLevelContent(
         const asset::LevelManifestIR& manifest) const;
+
+    // [any worker thread after Open(); thread-safe] Same single archive+cell traversal as
+    // LoadLevelContent, but when visual_geometry_out is non-null it additionally decodes each
+    // cell's VUM final-payload VISUAL geometry (project-owned per-vertex meshes) into it, in
+    // manifest cell order. A cell whose visual geometry cannot be decoded contributes an empty
+    // VumVisualGeometryIR (cardinality is preserved) -- the visual decode is fail-soft and never
+    // fails the load. A null pointer reproduces LoadLevelContent exactly.
+    [[nodiscard]] std::expected<asset::LevelContentIR, GameDataError> LoadLevelContent(
+        const asset::LevelManifestIR& manifest,
+        std::vector<retail::VumVisualGeometryIR>* visual_geometry_out) const;
 
 private:
     // Opaque non-owning source identity. It follows the service implementation across moves but

@@ -95,7 +95,8 @@ std::expected<ContentStartupState, ContentStartupError> StartContent(
     }
     state.level_manifest = std::move(*loaded);
 
-    auto content = state.game_data->LoadLevelContent(*state.level_manifest);
+    auto content = state.game_data->LoadLevelContent(
+        *state.level_manifest, &state.level_visual_geometry);
     if (!content)
     {
         return std::unexpected(ContentStartupError{

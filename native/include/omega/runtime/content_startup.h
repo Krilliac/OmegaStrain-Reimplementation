@@ -54,6 +54,11 @@ struct ContentStartupState
     std::optional<asset::LevelManifestIR> level_manifest;
     // Keeps the loader-established spatial and material collections present and owned together.
     std::optional<asset::LevelContentIR> level_content;
+    // Project-owned per-cell VUM VISUAL geometry (decoded meshes + UVs), cell-aligned with
+    // level_content->spatial. Empty when no level is loaded; a cell that could not be decoded is an
+    // empty entry (fail-soft). Used by the diagnostic renderer to draw the real visual surfaces
+    // instead of the collision hull.
+    std::vector<retail::VumVisualGeometryIR> level_visual_geometry;
     std::optional<DebugImage> debug_image;
 };
 

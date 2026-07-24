@@ -456,6 +456,74 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             return std::unexpected(error);
         }
         diagnostic_scene = std::move(*built_scene);
+
+        // Prefer the real VUM VISUAL geometry over the collision hull when it decoded. The decoded
+        // per-cell meshes are re-expressed as a LevelSpatialIR and fed through the SAME scene
+        // builder, so they get the identical bounds-fitted projection + framed camera the collision
+        // path uses (VUM positions share the collision world space, but the builder projects world
+        // coords into its normalized view -- reusing them raw would land off-screen). Falls back to
+        // the collision scene when nothing decoded or the VUM scene fails to build. Real per-vertex
+        // UVs are decoded but not yet fed to the GPU (triplanar shading for now); a UV-attribute
+        // shader variant is the next step.
+        constexpr std::size_t kMaximumVisualVertices = 600000U;
+        asset::LevelSpatialIR visual_spatial;
+        std::size_t visual_vertices = 0;
+        std::size_t visual_triangles = 0;
+        bool visual_vertex_cap_hit = false;
+        for (const auto& cell : content_owner->level_visual_geometry)
+        {
+            for (const auto& visual_mesh : cell.meshes)
+            {
+                if (visual_mesh.positions.empty() || visual_mesh.triangle_indices.size() < 3U)
+                    continue;
+                if (visual_vertices + visual_mesh.positions.size() > kMaximumVisualVertices)
+                {
+                    visual_vertex_cap_hit = true;
+                    break;
+                }
+                asset::SpatialMeshIR spatial_mesh;
+                spatial_mesh.vertices = visual_mesh.positions;
+                const std::uint32_t vertex_count =
+                    static_cast<std::uint32_t>(visual_mesh.positions.size());
+                for (std::size_t base = 0U; base + 2U < visual_mesh.triangle_indices.size();
+                     base += 3U)
+                {
+                    const std::uint32_t a = visual_mesh.triangle_indices[base];
+                    const std::uint32_t b = visual_mesh.triangle_indices[base + 1U];
+                    const std::uint32_t c = visual_mesh.triangle_indices[base + 2U];
+                    if (a < vertex_count && b < vertex_count && c < vertex_count)
+                        spatial_mesh.triangles.push_back(asset::SpatialTriangleIR{
+                            .vertex_indices = {a, b, c}});
+                }
+                if (spatial_mesh.triangles.empty())
+                    continue;
+                visual_vertices += spatial_mesh.vertices.size();
+                visual_triangles += spatial_mesh.triangles.size();
+                visual_spatial.terrain_cells.push_back(std::move(spatial_mesh));
+            }
+            if (visual_vertex_cap_hit)
+                break;
+        }
+        if (!visual_spatial.terrain_cells.empty())
+        {
+            auto visual_scene = runtime::BuildGlobalSpatialDiagnosticScene(visual_spatial);
+            if (visual_scene)
+            {
+                diagnostic_scene = std::move(*visual_scene);
+                log->Info("level",
+                    "rendering VUM visual geometry: cells=" +
+                        std::to_string(visual_spatial.terrain_cells.size()) + " vertices=" +
+                        std::to_string(visual_vertices) + " triangles=" +
+                        std::to_string(visual_triangles) +
+                        (visual_vertex_cap_hit ? " (vertex cap hit; remaining skipped)" : ""));
+            }
+            else
+            {
+                log->Warning("level",
+                    "VUM visual scene build failed; using collision hull: " +
+                        visual_scene.error());
+            }
+        }
     }
 
     auto created_jobs = runtime::JobService::Create(settings.jobs);

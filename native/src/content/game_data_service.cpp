@@ -10,6 +10,7 @@
 #include "omega/retail/pop_level_manifest_decoder.h"
 #include "omega/retail/retail_string_table_decoder.h"
 #include "omega/retail/vum_material_catalog_decoder.h"
+#include "omega/retail/vum_visual_geometry_decoder.h"
 #include "omega/vfs/virtual_file_system.h"
 
 #include <algorithm>
@@ -2695,7 +2696,19 @@ GameDataService::LoadLevelMaterialCatalogs(const asset::LevelManifestIR& manifes
 std::expected<asset::LevelContentIR, GameDataError> GameDataService::LoadLevelContent(
     const asset::LevelManifestIR& manifest) const
 {
+    return LoadLevelContent(manifest, nullptr);
+}
+
+std::expected<asset::LevelContentIR, GameDataError> GameDataService::LoadLevelContent(
+    const asset::LevelManifestIR& manifest,
+    std::vector<retail::VumVisualGeometryIR>* const visual_geometry_out) const
+{
     const asset::DecodeLimits limits = impl_->config.decode_limits;
+    if (visual_geometry_out != nullptr)
+    {
+        visual_geometry_out->clear();
+        visual_geometry_out->reserve(manifest.terrain_cells.size());
+    }
     auto budget_result = LevelDecodeBudget::CreateContent(manifest, limits);
     if (!budget_result)
         return std::unexpected(DecodeFailure(
@@ -2834,6 +2847,18 @@ std::expected<asset::LevelContentIR, GameDataError> GameDataService::LoadLevelCo
 
         result.spatial.terrain_cells.push_back(std::move(*mesh));
         result.material_catalogs.terrain_cells.push_back(std::move(catalog->catalog));
+
+        if (visual_geometry_out != nullptr)
+        {
+            // Fail-soft, non-budget-committed diagnostic decode: the VUM bytes were already
+            // input-budgeted above and the visual geometry is bounded by them. A cell that does
+            // not decode contributes an empty entry so the vector stays cell-aligned; it never
+            // fails the level load.
+            auto visual = retail::DecodeVumVisualGeometry(
+                vum_bytes, budget.ChildLimits(archive_depth));
+            visual_geometry_out->push_back(
+                visual ? std::move(*visual) : retail::VumVisualGeometryIR{});
+        }
     }
     return result;
 }
