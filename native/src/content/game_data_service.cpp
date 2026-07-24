@@ -2699,6 +2699,32 @@ std::expected<asset::LevelContentIR, GameDataError> GameDataService::LoadLevelCo
     return LoadLevelContent(manifest, nullptr);
 }
 
+std::expected<retail::PopGameObjectsIR, GameDataError>
+GameDataService::LoadLevelGameObjects(const std::string_view level_code) const
+{
+    auto normalized_level = NormalizeLevelCode(level_code);
+    if (!normalized_level)
+        return std::unexpected(normalized_level.error());
+
+    const std::string pop_path = "GAMEDATA/" + *normalized_level + "/DATA.POP";
+    if (!impl_->files.Contains(pop_path))
+        return std::unexpected(Error(GameDataErrorCode::MissingRequiredFile,
+            "level is missing DATA.POP: " + *normalized_level));
+
+    auto pop_bytes = impl_->files.Read(pop_path, impl_->config.maximum_pop_bytes);
+    if (!pop_bytes)
+        return std::unexpected(Error(GameDataErrorCode::ReadFailed,
+            "unable to read level DATA.POP"));
+
+    // Fail-soft: a malformed GOB region yields whatever spawns decoded (or none),
+    // never failing the level. Only file access above is a hard error.
+    auto decoded =
+        retail::DecodePopGameObjects(*pop_bytes, impl_->config.decode_limits);
+    if (!decoded)
+        return retail::PopGameObjectsIR{};
+    return std::move(*decoded);
+}
+
 std::expected<asset::LevelContentIR, GameDataError> GameDataService::LoadLevelContent(
     const asset::LevelManifestIR& manifest,
     std::vector<retail::VumVisualGeometryIR>* const visual_geometry_out) const

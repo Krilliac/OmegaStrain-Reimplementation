@@ -108,6 +108,15 @@ std::expected<ContentStartupState, ContentStartupError> StartContent(
     }
     state.level_content = std::move(*content);
 
+    // Authentic game objects (NPC spawns / nav / hotboxes) from the level's
+    // DATA.POP GOB sections. Fail-soft: if it can't be loaded, gameplay falls back
+    // to project-placed entities rather than failing content startup.
+    if (auto game_objects =
+            state.game_data->LoadLevelGameObjects(*options.level_code))
+    {
+        state.level_game_objects = std::move(*game_objects);
+    }
+
     auto built_image = BuildSpatialDebugImage(state.level_content->spatial);
     if (!built_image)
     {

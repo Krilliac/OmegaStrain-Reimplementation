@@ -2045,37 +2045,62 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             if (npc_flag != nullptr && npc_flag[0] == '1' && npc_flag[1] == '\0')
             {
                 diagnostic_scene_presentation->npc_active = true;
-                // A few project-placed guards spaced along the player's own +Y
-                // corridor (walkable, so LOS back down it to the approaching
-                // player is clear). Each patrols a tiny +/-Y segment facing -Y
-                // (down the corridor) and runs the full stealth loop; the player
-                // walking +Y meets them in sequence. Range is short so each
-                // starts out of range and only reacts when the player closes.
-                // Project-placed: authentic spawns / nav Nodes live in the
-                // undecoded POP GOB: section (a later decode slice), not the .SO.
-                for (const float ahead : {50.0F, 90.0F, 130.0F})
-                {
+                // Seeds one patrolling guard at a world position: a short local
+                // +/-Y patrol segment facing -Y, running the full stealth loop.
+                const auto seed_guard = [&](const asset::Float3IR &at) {
                     DiagnosticScenePresentation::NpcRuntime npc;
                     npc.params = player_seed_params;
-                    npc.state = gameplay::CharacterState{
-                        .position = asset::Float3IR{
-                            .x = spawn.x, .y = spawn.y + ahead, .z = spawn.z}};
+                    npc.state = gameplay::CharacterState{.position = at};
                     npc.waypoints = {
-                        asset::Float3IR{
-                            .x = spawn.x, .y = spawn.y + ahead + 5.0F, .z = spawn.z},
-                        asset::Float3IR{
-                            .x = spawn.x, .y = spawn.y + ahead - 5.0F, .z = spawn.z}};
+                        asset::Float3IR{.x = at.x, .y = at.y + 5.0F, .z = at.z},
+                        asset::Float3IR{.x = at.x, .y = at.y - 5.0F, .z = at.z}};
                     npc.waypoint = 1U;
                     npc.facing = asset::Float3IR{.x = 0.0F, .y = -1.0F, .z = 0.0F};
                     npc.vision = gameplay::NpcVisionParams{
                         .range = 22.0F, .cos_half_angle = 0.5F, .eye_height = 8.0F};
                     diagnostic_scene_presentation->npcs.push_back(std::move(npc));
+                };
+                // Authentic enemy placement decoded from the level's DATA.POP GOB
+                // NPC: section (id + model/type name + world position). The player
+                // character model (PC_MALE) is the player start, not an enemy, so
+                // it is skipped. Fail-soft: with no decoded spawns, fall back to a
+                // few project-placed guards along the player's +Y corridor.
+                std::size_t authentic = 0U;
+                for (const auto &sp :
+                    content_owner->level_game_objects.npc_spawns)
+                {
+                    if (sp.model.find("PC_MALE") != std::string::npos ||
+                        sp.model.find("pc_male") != std::string::npos)
+                        continue;
+                    seed_guard(sp.position);
+                    ++authentic;
                 }
-                log->Info("npc",
-                    "enemy NPCs placed (project-placed): " +
-                        std::to_string(
-                            diagnostic_scene_presentation->npcs.size()) +
-                        " guards patrolling the +Y corridor");
+                if (authentic != 0U)
+                {
+                    log->Info("npc",
+                        "authentic enemy spawns placed from DATA.POP GOB: " +
+                            std::to_string(authentic) + " of " +
+                            std::to_string(content_owner->level_game_objects
+                                    .npc_spawns.size()) +
+                            " NPC records (nav nodes=" +
+                            std::to_string(content_owner->level_game_objects
+                                    .nav_node_count) +
+                            ", hotboxes=" +
+                            std::to_string(content_owner->level_game_objects
+                                    .hotbox_count) +
+                            ")");
+                }
+                else
+                {
+                    for (const float ahead : {50.0F, 90.0F, 130.0F})
+                        seed_guard(asset::Float3IR{
+                            .x = spawn.x, .y = spawn.y + ahead, .z = spawn.z});
+                    log->Info("npc",
+                        "enemy NPCs placed (project-placed fallback): " +
+                            std::to_string(
+                                diagnostic_scene_presentation->npcs.size()) +
+                            " guards patrolling the +Y corridor");
+                }
             }
         }
     }

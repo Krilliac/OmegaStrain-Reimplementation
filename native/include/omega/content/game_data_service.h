@@ -8,6 +8,7 @@
 #include "omega/asset/opening_movie_source.h"
 #include "omega/asset/source_locator.h"
 #include "omega/content/front_end_screen_bundle.h"
+#include "omega/retail/pop_game_objects_decoder.h"
 #include "omega/retail/vum_visual_geometry_decoder.h"
 
 #include <cstddef>
@@ -157,6 +158,14 @@ public:
     [[nodiscard]] std::expected<asset::LevelContentIR, GameDataError> LoadLevelContent(
         const asset::LevelManifestIR& manifest,
         std::vector<retail::VumVisualGeometryIR>* visual_geometry_out) const;
+
+    // [any worker thread after Open(); thread-safe] Reads the level's DATA.POP and
+    // decodes the post-TER GOB game-object sections: the authentic NPC/actor spawns
+    // (id + model/type name + world position) plus the NOD nav-node and BOX hotbox
+    // declared counts (see retail::DecodePopGameObjects). Fail-soft on decode issues
+    // (an empty roster is a valid result); only a missing/unreadable DATA.POP errors.
+    [[nodiscard]] std::expected<retail::PopGameObjectsIR, GameDataError>
+    LoadLevelGameObjects(std::string_view level_code) const;
 
 private:
     // Opaque non-owning source identity. It follows the service implementation across moves but

@@ -59,6 +59,10 @@ struct ContentStartupState
     // empty entry (fail-soft). Used by the diagnostic renderer to draw the real visual surfaces
     // instead of the collision hull.
     std::vector<retail::VumVisualGeometryIR> level_visual_geometry;
+    // Authentic game objects decoded from the level's DATA.POP GOB sections: the
+    // real NPC/actor spawns (id + model/type name + world position) + nav/hotbox
+    // counts. Empty when no level is loaded or the POP has no decodable GOB data.
+    retail::PopGameObjectsIR level_game_objects;
     std::optional<DebugImage> debug_image;
 };
 
