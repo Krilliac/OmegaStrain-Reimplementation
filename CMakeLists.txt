@@ -114,6 +114,7 @@ add_library(omega_gameplay STATIC
     native/src/gameplay/minsk_mission.cpp
     native/src/gameplay/mission_trigger.cpp
     native/src/gameplay/character_controller.cpp
+    native/src/gameplay/npc_ai.cpp
 )
 target_include_directories(omega_gameplay PUBLIC native/include)
 target_link_libraries(omega_gameplay PUBLIC omega_simulation)
@@ -2193,6 +2194,20 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_character_controller_tests COMMAND omega_character_controller_tests)
     set_tests_properties(omega_character_controller_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_npc_ai_tests
+        native/tests/npc_ai_tests.cpp
+    )
+    target_link_libraries(omega_npc_ai_tests PRIVATE omega_gameplay)
+    if(MSVC)
+        target_compile_options(omega_npc_ai_tests PRIVATE
+            /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+    else()
+        target_compile_options(omega_npc_ai_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+    endif()
+    add_test(NAME omega_npc_ai_tests COMMAND omega_npc_ai_tests)
+    set_tests_properties(omega_npc_ai_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_mission_trigger_tests
         native/tests/mission_trigger_tests.cpp

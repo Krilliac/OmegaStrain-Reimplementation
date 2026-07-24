@@ -135,6 +135,22 @@ constexpr float kPlayerCamHeight = 70.0F;  // follow-camera offset along +Z
     return m;
 }
 
+// The enemy NPC marker is drawn a bit larger than the player so it reads clearly
+// against the dense level from the follow camera.
+constexpr float kNpcMeshScale = 20.0F;
+[[nodiscard]] asset::Matrix4x4IR NpcMeshTransform(
+    const asset::Float3IR& p) noexcept
+{
+    asset::Matrix4x4IR m = asset::kIdentityMatrix4x4IR;
+    m.row_major[0] = kNpcMeshScale;
+    m.row_major[5] = kNpcMeshScale;
+    m.row_major[10] = kNpcMeshScale;
+    m.row_major[3] = p.x;
+    m.row_major[7] = p.y;
+    m.row_major[11] = p.z;
+    return m;
+}
+
 // Renders the objective HUD panel (the 88x72 slate + DrawObjectiveHudOnto) from
 // the current objective state and uploads it. Returns a default (invalid) handle
 // on upload failure. Used both at scene build and on a live objective change
@@ -2010,6 +2026,53 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             place_trigger(2U, 35.0F);
             place_trigger(3U, 80.0F);
             place_trigger(4U, 125.0F);
+
+            // Enemy NPC (OPENOMEGA_NPC=1): a project-placed patrolling guard
+            // ahead of the player on the +Y corridor. It patrols a short +Y
+            // segment (facing the corridor) and, per frame, checks whether it
+            // sees the player by vision cone + line-of-sight against the level
+            // COL; on a sighting it latches to Alerted (rendered blue -> red).
+            // Project-placed: authentic NPC spawns / nav Nodes live in the
+            // undecoded POP GOB: section (a later decode slice), not the .SO.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+            const char *const npc_flag = std::getenv("OPENOMEGA_NPC");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+            if (npc_flag != nullptr && npc_flag[0] == '1' && npc_flag[1] == '\0')
+            {
+                diagnostic_scene_presentation->npc_active = true;
+                diagnostic_scene_presentation->npc_params = player_seed_params;
+                // On the player's own +Y corridor (which is walkable, so the
+                // line-of-sight back down it to the approaching player is clear),
+                // a short way ahead. Patrols a tiny +/-Y segment there, facing the
+                // corridor. Range is tuned so the player starts just out of range
+                // and walks into it -- a clean Patrol -> Alerted transition.
+                diagnostic_scene_presentation->npc_state = gameplay::CharacterState{
+                    .position = asset::Float3IR{
+                        .x = spawn.x, .y = spawn.y + 50.0F, .z = spawn.z}};
+                diagnostic_scene_presentation->npc_waypoints = {
+                    asset::Float3IR{
+                        .x = spawn.x, .y = spawn.y + 55.0F, .z = spawn.z},
+                    asset::Float3IR{
+                        .x = spawn.x, .y = spawn.y + 45.0F, .z = spawn.z}};
+                // Head toward the nearer (+45) waypoint first, facing -Y down the
+                // corridor toward the approaching player.
+                diagnostic_scene_presentation->npc_waypoint = 1U;
+                diagnostic_scene_presentation->npc_facing =
+                    asset::Float3IR{.x = 0.0F, .y = -1.0F, .z = 0.0F};
+                // Short range so the player starts out of range (a clear blue
+                // Patrol frame) and only alerts (red) when it walks up close.
+                diagnostic_scene_presentation->npc_vision =
+                    gameplay::NpcVisionParams{.range = 22.0F,
+                        .cos_half_angle = 0.5F, .eye_height = 8.0F};
+                log->Info("npc",
+                    "enemy NPC placed (project-placed) patrolling the +Y "
+                    "corridor ahead of the player");
+            }
         }
     }
 
@@ -4775,6 +4838,45 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                     std::to_string(pp.position.z) +
                     ") grounded=" + (pp.grounded ? "yes" : "no") +
                     " nearby=" + std::to_string(nearby.size()));
+
+            // Enemy NPC: patrol its route (kinematic, vs the same level COL),
+            // then test whether it now sees the player (vision cone + LOS) and
+            // step its awareness. Alerted latches; on the Patrol->Alerted edge it
+            // logs and its render colour flips to red (below).
+            if (diagnostic_scene_presentation_->npc_active)
+            {
+                DiagnosticScenePresentation &np = *diagnostic_scene_presentation_;
+                const gameplay::NpcPatrolPlan plan = gameplay::PlanNpcPatrol(
+                    np.npc_state.position, np.npc_waypoints, np.npc_waypoint,
+                    np.npc_params.radius + 2.0F, np.npc_facing);
+                np.npc_waypoint = plan.waypoint;
+                if (plan.facing.x != 0.0F || plan.facing.y != 0.0F ||
+                    plan.facing.z != 0.0F)
+                    np.npc_facing = plan.facing;
+                std::vector<gameplay::CollisionTriangle> npc_nearby;
+                gameplay::SelectNearbyCollisionTriangles(np.player_collision,
+                    np.npc_state.position, np.npc_vision.range, npc_nearby);
+                np.npc_state = gameplay::StepCharacter(np.npc_state,
+                    gameplay::CharacterInput{.move = plan.move}, np.npc_params,
+                    npc_nearby, kPlayerStepDt);
+                const bool sees = gameplay::NpcSeesPlayer(np.npc_state.position,
+                    np.npc_facing, np.player_state.position, np.npc_vision,
+                    npc_nearby);
+                const gameplay::NpcAwareness prev_awareness = np.npc_awareness;
+                np.npc_awareness =
+                    gameplay::StepNpcAwareness(prev_awareness, sees);
+                if (prev_awareness != np.npc_awareness &&
+                    np.npc_awareness == gameplay::NpcAwareness::Alerted)
+                    log_->Info("npc", "NPC alerted: player spotted");
+                log_->Info("npc",
+                    "npc pos=(" + std::to_string(np.npc_state.position.x) + "," +
+                        std::to_string(np.npc_state.position.y) + "," +
+                        std::to_string(np.npc_state.position.z) + ") sees=" +
+                        (sees ? "yes" : "no") + " state=" +
+                        (np.npc_awareness == gameplay::NpcAwareness::Alerted
+                                ? "ALERTED"
+                                : "patrol"));
+            }
         }
         else if (free_fly)
         {
@@ -4828,6 +4930,36 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
             .color = kDiagnosticActorMeshColor,
             .raster_mode = runtime::RenderMeshRasterMode::Fill,
         };
+        // Enemy NPC marker: same cube mesh at the NPC's world position, coloured
+        // by awareness (patrol = blue, alerted = red), through the same camera as
+        // the level/player. Skipped if the per-frame draw budget is full.
+        if (diagnostic_scene_presentation_->npc_active &&
+            mesh_command_count < runtime::kMaximumRenderMeshDrawsPerFrame)
+        {
+            const auto npc_object_to_clip = runtime::ComposeObjectToClip(
+                diagnostic_scene_presentation_->camera,
+                NpcMeshTransform(
+                    diagnostic_scene_presentation_->npc_state.position));
+            if (npc_object_to_clip)
+            {
+                // High-contrast against the blue-grey level: green while
+                // patrolling, red once alerted.
+                const runtime::RenderMeshColorRgba8 npc_color =
+                    diagnostic_scene_presentation_->npc_awareness ==
+                            gameplay::NpcAwareness::Alerted
+                        ? runtime::RenderMeshColorRgba8{
+                              .red = 255U, .green = 24U, .blue = 24U, .alpha = 255U}
+                        : runtime::RenderMeshColorRgba8{
+                              .red = 40U, .green = 230U, .blue = 60U, .alpha = 255U};
+                mesh_commands[mesh_command_count++] =
+                    runtime::RenderMeshDrawCommand{
+                        .mesh = diagnostic_scene_presentation_->actor_mesh_handle,
+                        .object_to_clip = *npc_object_to_clip,
+                        .color = npc_color,
+                        .raster_mode = runtime::RenderMeshRasterMode::Fill,
+                    };
+            }
+        }
         auto created_scene_draw_list = runtime::RenderMeshDrawList::Create(
             std::span<const runtime::RenderMeshDrawCommand>{
                 mesh_commands.data(), mesh_command_count});

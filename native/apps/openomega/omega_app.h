@@ -14,6 +14,7 @@
 #include "omega/content/front_end_screen_bundle.h"
 #include "omega/frontend_presentation/retail_front_end_nav.h"
 #include "omega/gameplay/character_controller.h"
+#include "omega/gameplay/npc_ai.h"
 #include "omega/gameplay/mission_trigger.h"
 #include "omega/gameplay/objective_tracker.h"
 #include "omega/gameplay/diagnostic_mission_lifecycle.h"
@@ -332,6 +333,19 @@ private:
         // still references the OLD handle; it is stashed here and released at the
         // top of the next refresh, after this frame's render consumed it.
         runtime::RenderTextureHandle pending_hud_release{};
+        // Enemy NPC (OPENOMEGA_NPC=1, with the player). A kinematic patrolling AI
+        // that spots the player by vision cone + line-of-sight against the level
+        // COL and latches to Alerted (rendered blue -> red). Placement is
+        // project-placed -- authentic spawns/nodes live in the undecoded POP GOB:
+        // section (a later decode slice), not the .SO.
+        bool npc_active = false;
+        gameplay::CharacterState npc_state{};
+        gameplay::CharacterControllerParams npc_params{};
+        std::vector<asset::Float3IR> npc_waypoints{};
+        std::uint32_t npc_waypoint = 0U;
+        asset::Float3IR npc_facing{.x = 0.0F, .y = 1.0F, .z = 0.0F};
+        gameplay::NpcAwareness npc_awareness = gameplay::NpcAwareness::Patrol;
+        gameplay::NpcVisionParams npc_vision{};
     };
 
     // [game/main/render thread, startup] Validates the complete scene-to-command projection before
