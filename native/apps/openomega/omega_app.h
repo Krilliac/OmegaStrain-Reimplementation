@@ -13,6 +13,7 @@
 
 #include "omega/content/front_end_screen_bundle.h"
 #include "omega/frontend_presentation/retail_front_end_nav.h"
+#include "omega/gameplay/character_controller.h"
 #include "omega/gameplay/diagnostic_mission_lifecycle.h"
 #include "omega/gameplay/diagnostic_proximity_trigger.h"
 #include "omega/gameplay/diagnostic_target_fire.h"
@@ -311,6 +312,15 @@ private:
         runtime::FreeFlyInput free_fly_script{};
         std::array<asset::Matrix4x4IR,
             runtime::kMaximumRenderMeshDrawsPerFrame> environment_local_to_world{};
+        // Kinematic player (OPENOMEGA_PLAYER=1). When player_active, the per-frame
+        // actor refresh steps player_state against the level COL (player_collision,
+        // nearby-culled), renders the actor mesh at the player's float position,
+        // and drives a Z-up follow camera -- so the player walks the 3D level.
+        // Takes precedence over the detached free-fly camera when both are set.
+        bool player_active = false;
+        gameplay::CharacterState player_state{};
+        gameplay::CharacterControllerParams player_params{};
+        std::vector<gameplay::CollisionTriangle> player_collision{};
     };
 
     // [game/main/render thread, startup] Validates the complete scene-to-command projection before
@@ -323,7 +333,10 @@ private:
         const content::GameDataService* game_data,
         std::optional<runtime::FreeFlyPose> free_fly_pose = std::nullopt,
         float free_fly_move_speed = 1.0F,
-        runtime::FreeFlyInput free_fly_script = {});
+        runtime::FreeFlyInput free_fly_script = {},
+        std::optional<gameplay::CharacterState> player_seed = std::nullopt,
+        gameplay::CharacterControllerParams player_params = {},
+        std::vector<gameplay::CollisionTriangle> player_collision = {});
     // [game/main/render thread; no concurrent use] Clears commands before releasing exact resident
     // generations in reverse upload order. The host remains the final cleanup authority.
     void ReleaseDiagnosticScenePresentation() noexcept;

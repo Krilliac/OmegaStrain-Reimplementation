@@ -99,6 +99,36 @@ asset::Matrix4x4IR FreeFlyViewMatrix(const FreeFlyPose& pose) noexcept
     };
 }
 
+asset::Matrix4x4IR LookAtViewMatrix(const asset::Float3IR& eye,
+    const asset::Float3IR& target, const asset::Float3IR& world_up) noexcept
+{
+    const asset::Float3IR forward = Normalize(asset::Float3IR{
+        .x = target.x - eye.x,
+        .y = target.y - eye.y,
+        .z = target.z - eye.z,
+    });
+    // Left-handed basis: right = world_up x forward, up = forward x right.
+    asset::Float3IR right = Cross(world_up, forward);
+    if (!(Dot(right, right) > 0.0F))
+    {
+        // world_up parallel to forward: pick an arbitrary perpendicular axis.
+        right = Cross(asset::Float3IR{.x = 1.0F, .y = 0.0F, .z = 0.0F}, forward);
+        if (!(Dot(right, right) > 0.0F))
+            right = Cross(asset::Float3IR{.x = 0.0F, .y = 1.0F, .z = 0.0F}, forward);
+    }
+    right = Normalize(right);
+    const asset::Float3IR up = Cross(forward, right);
+
+    return asset::Matrix4x4IR{
+        .row_major = {
+            right.x, right.y, right.z, -Dot(right, eye),
+            up.x, up.y, up.z, -Dot(up, eye),
+            forward.x, forward.y, forward.z, -Dot(forward, eye),
+            0.0F, 0.0F, 0.0F, 1.0F,
+        },
+    };
+}
+
 asset::Matrix4x4IR PerspectiveProjection(const float vertical_field_of_view_radians,
     const float aspect_ratio, const float near_plane, const float far_plane) noexcept
 {

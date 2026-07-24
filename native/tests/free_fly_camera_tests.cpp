@@ -173,6 +173,27 @@ void TestParseScript()
 }
 } // namespace
 
+void TestLookAtViewMatrix()
+{
+    // Camera 10 units back along -Y, looking at the origin, world up = +Z.
+    const auto m = omega::runtime::LookAtViewMatrix(
+        omega::asset::Float3IR{.x = 0.0F, .y = -10.0F, .z = 0.0F},
+        omega::asset::Float3IR{.x = 0.0F, .y = 0.0F, .z = 0.0F},
+        omega::asset::Float3IR{.x = 0.0F, .y = 0.0F, .z = 1.0F});
+    // forward = +Y, up-row = +Z, right-row = -X (left-handed right = up x forward).
+    Check(Near(m.row_major[8], 0.0F) && Near(m.row_major[9], 1.0F) &&
+              Near(m.row_major[10], 0.0F),
+          "look-at forward row is +Y");
+    Check(Near(m.row_major[4], 0.0F) && Near(m.row_major[6], 1.0F),
+          "look-at up row is +Z (Z-up)");
+    Check(Near(m.row_major[0], -1.0F), "look-at right row is -X");
+    // The forward-row translation is -dot(forward, eye): the target (origin) sits
+    // at view depth 10 in front of the camera, and the eye at depth 0.
+    Check(Near(m.row_major[11], 10.0F), "look-at target is 10 units in front");
+    Check(Near(m.row_major[3], 0.0F) && Near(m.row_major[7], 0.0F),
+          "look-at centres the eye's right/up view coordinates");
+}
+
 int main()
 {
     TestForwardProjectsToClipCentre();
@@ -182,6 +203,7 @@ int main()
     TestPitchClamp();
     TestParse();
     TestParseScript();
+    TestLookAtViewMatrix();
     if (g_failures != 0)
     {
         std::cerr << g_failures << " free-fly camera test(s) failed\n";

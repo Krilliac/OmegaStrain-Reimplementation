@@ -200,6 +200,27 @@ void TestBuildLevelCollisionTriangles()
 }
 } // namespace
 
+void TestSelectNearbyCollisionTriangles()
+{
+    const CollisionTriangle near_tri{
+        .a = {.x = 0.0F, .y = 0.0F, .z = 0.0F},
+        .b = {.x = 10.0F, .y = 0.0F, .z = 0.0F},
+        .c = {.x = 0.0F, .y = 10.0F, .z = 0.0F}};
+    const CollisionTriangle far_tri{
+        .a = {.x = 500.0F, .y = 500.0F, .z = 500.0F},
+        .b = {.x = 510.0F, .y = 500.0F, .z = 500.0F},
+        .c = {.x = 500.0F, .y = 510.0F, .z = 500.0F}};
+    const std::array<CollisionTriangle, 2> tris{near_tri, far_tri};
+    std::vector<CollisionTriangle> out;
+    omega::gameplay::SelectNearbyCollisionTriangles(
+        tris, Float3IR{.x = 3.0F, .y = 3.0F, .z = 5.0F}, 8.0F, out);
+    Check(out.size() == 1U && out[0] == near_tri,
+          "broadphase keeps the near triangle and drops the far one");
+    omega::gameplay::SelectNearbyCollisionTriangles(
+        tris, Float3IR{.x = 3.0F, .y = 3.0F, .z = 5.0F}, 0.0F, out);
+    Check(out.empty(), "broadphase with radius 0 selects nothing");
+}
+
 int main()
 {
     TestClosestPointOnTriangle();
@@ -209,6 +230,7 @@ int main()
     TestAirborneNotGrounded();
     TestNonFinitePassThrough();
     TestBuildLevelCollisionTriangles();
+    TestSelectNearbyCollisionTriangles();
 
     if (failures != 0)
     {

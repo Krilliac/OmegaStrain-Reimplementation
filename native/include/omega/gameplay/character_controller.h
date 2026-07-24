@@ -96,4 +96,14 @@ struct CharacterControllerParams
 // std::bad_alloc; no other failure mode.
 [[nodiscard]] std::vector<CollisionTriangle> BuildLevelCollisionTriangles(
     const asset::LevelSpatialIR& spatial);
+
+// [any thread; reentrant] Broadphase cull: appends to `out` every triangle in
+// `triangles` whose axis-aligned bounding box, expanded by `radius` on each
+// axis, contains `center` -- i.e. the triangles a sphere of that radius at
+// `center` could possibly touch. Cheap per-triangle AABB test (correct for large
+// floor triangles whose vertices are far but whose surface is under the sphere).
+// `out` is cleared first. A non-positive/non-finite radius yields an empty set.
+void SelectNearbyCollisionTriangles(std::span<const CollisionTriangle> triangles,
+    const asset::Float3IR& center, float radius,
+    std::vector<CollisionTriangle>& out);
 } // namespace omega::gameplay

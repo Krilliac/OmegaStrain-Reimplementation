@@ -48,6 +48,16 @@ struct FreeFlyInput
 // [any thread; reentrant] world_to_view for the pose (a look transform).
 [[nodiscard]] asset::Matrix4x4IR FreeFlyViewMatrix(const FreeFlyPose& pose) noexcept;
 
+// [any thread; reentrant] A world_to_view matrix looking from `eye` toward
+// `target` with `world_up` as the up reference -- the same row-major,
+// left-handed (+Z view forward), column-vector convention as FreeFlyViewMatrix,
+// but with an explicit up axis. Used for a Z-up follow/chase camera on the
+// Z-up level (the free-fly yaw/pitch basis is Y-up). Degenerate inputs
+// (eye==target, up parallel to the view) fall back to a stable basis.
+[[nodiscard]] asset::Matrix4x4IR LookAtViewMatrix(
+    const asset::Float3IR& eye, const asset::Float3IR& target,
+    const asset::Float3IR& world_up) noexcept;
+
 // [any thread; reentrant] view_to_clip perspective (left-handed, clip depth
 // [0,1]). aspect = width/height. Returns identity-safe finite values; callers
 // pass sane, positive fov/aspect/near<far.

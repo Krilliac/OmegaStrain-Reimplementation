@@ -102,6 +102,38 @@ private:
     std::size_t* count_ = nullptr;
     bool active_ = true;
 };
+
+// Kinematic-player presentation constants + helpers (OPENOMEGA_PLAYER=1). The
+// player is a world-space mesh at its float CharacterState.position projected
+// through the same camera as the level; a Z-up look-at follows it.
+constexpr float kPlayerStepDt = 1.0F / 60.0F;
+constexpr float kPlayerCullRadius = 60.0F; // broadphase radius around the player
+constexpr float kPlayerMeshScale = 12.0F;  // world-space size of the player marker
+constexpr float kPlayerCamBack = 90.0F;    // follow-camera offset along -Y
+constexpr float kPlayerCamHeight = 70.0F;  // follow-camera offset along +Z
+
+[[nodiscard]] asset::Matrix4x4IR PlayerFollowView(
+    const asset::Float3IR& p, const float radius) noexcept
+{
+    const asset::Float3IR eye{
+        .x = p.x, .y = p.y - kPlayerCamBack, .z = p.z + kPlayerCamHeight};
+    const asset::Float3IR target{.x = p.x, .y = p.y, .z = p.z + radius};
+    return runtime::LookAtViewMatrix(
+        eye, target, asset::Float3IR{.x = 0.0F, .y = 0.0F, .z = 1.0F});
+}
+
+[[nodiscard]] asset::Matrix4x4IR PlayerMeshTransform(
+    const asset::Float3IR& p) noexcept
+{
+    asset::Matrix4x4IR m = asset::kIdentityMatrix4x4IR;
+    m.row_major[0] = kPlayerMeshScale;
+    m.row_major[5] = kPlayerMeshScale;
+    m.row_major[10] = kPlayerMeshScale;
+    m.row_major[3] = p.x;
+    m.row_major[7] = p.y;
+    m.row_major[11] = p.z;
+    return m;
+}
 } // namespace
 
 std::expected<std::unique_ptr<OmegaApp::DiagnosticScenePresentation>, std::string>
@@ -110,7 +142,10 @@ OmegaApp::BuildDiagnosticScenePresentation(
     const content::LevelTextureStore* const level_texture_store,
     const content::GameDataService* const game_data,
     const std::optional<runtime::FreeFlyPose> free_fly_pose,
-    const float free_fly_move_speed, const runtime::FreeFlyInput free_fly_script)
+    const float free_fly_move_speed, const runtime::FreeFlyInput free_fly_script,
+    const std::optional<gameplay::CharacterState> player_seed,
+    const gameplay::CharacterControllerParams player_params,
+    std::vector<gameplay::CollisionTriangle> player_collision)
 {
     static_assert(sizeof(std::unique_ptr<DiagnosticScenePresentation>) <
                   sizeof(DiagnosticScenePresentation));
@@ -187,6 +222,13 @@ OmegaApp::BuildDiagnosticScenePresentation(
                 ? free_fly_move_speed
                 : 1.0F;
         presentation->free_fly_script = free_fly_script;
+    }
+    if (player_seed)
+    {
+        presentation->player_active = true;
+        presentation->player_state = *player_seed;
+        presentation->player_params = player_params;
+        presentation->player_collision = std::move(player_collision);
     }
 
     DiagnosticSceneRollbackGuard rollback(
@@ -468,6 +510,11 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     std::optional<runtime::FreeFlyPose> free_fly_initial_pose;
     float free_fly_initial_speed = 1.0F;
     runtime::FreeFlyInput free_fly_script_input{};
+    // Kinematic player seed (OPENOMEGA_PLAYER=1), settled onto a real floor in the
+    // camera block below and consumed at the BuildDiagnosticScenePresentation call.
+    std::optional<gameplay::CharacterState> player_seed_state;
+    gameplay::CharacterControllerParams player_seed_params{};
+    std::vector<gameplay::CollisionTriangle> player_seed_collision;
     if (content_owner->level_content)
     {
         auto built_scene = runtime::BuildGlobalSpatialDiagnosticScene(
@@ -705,6 +752,47 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                 free_fly_initial_speed = std::max(radius * 0.01F, 0.05F);
                 free_fly_script_input = runtime::ParseFreeFlyScript(
                     camera_script_env != nullptr ? camera_script_env : "", 0.03F);
+
+                // OPENOMEGA_PLAYER=1: spawn a kinematic player, settle it onto a
+                // real floor, and switch the camera to a Z-up follow view. The
+                // per-frame refresh then steps the player from input and moves the
+                // camera with it, so the level is walkable (vs the detached
+                // free-fly camera). Off by default -- no behavior change.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+                const char* const player_env = std::getenv("OPENOMEGA_PLAYER");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+                if (player_env != nullptr && std::string_view(player_env) == "1")
+                {
+                    player_seed_collision =
+                        gameplay::BuildLevelCollisionTriangles(camera_spatial);
+                    if (!player_seed_collision.empty())
+                    {
+                        gameplay::CharacterState pstate{
+                            .position = asset::Float3IR{.x = center.x,
+                                .y = center.y, .z = maximum.z + 20.0F}};
+                        const std::span<const gameplay::CollisionTriangle> full(
+                            player_seed_collision);
+                        for (int step = 0; step < 240; ++step)
+                            pstate = gameplay::StepCharacter(pstate,
+                                gameplay::CharacterInput{}, player_seed_params,
+                                full, kPlayerStepDt);
+                        player_seed_state = pstate;
+                        world_scene->camera.world_to_view = PlayerFollowView(
+                            pstate.position, player_seed_params.radius);
+                        log->Info("player",
+                            "player active: spawn(" +
+                                std::to_string(pstate.position.x) + "," +
+                                std::to_string(pstate.position.y) + "," +
+                                std::to_string(pstate.position.z) +
+                                ") grounded=" + (pstate.grounded ? "yes" : "no") +
+                                " tris=" + std::to_string(player_seed_collision.size()));
+                    }
+                }
                 diagnostic_scene = std::move(*world_scene);
                 log->Info("level",
                     "free-fly 3D camera active: bounds min(" +
@@ -1800,7 +1888,8 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                     : nullptr,
                 content_owner->game_data ? &*content_owner->game_data : nullptr,
                 free_fly_initial_pose, free_fly_initial_speed,
-                free_fly_script_input);
+                free_fly_script_input, player_seed_state, player_seed_params,
+                std::move(player_seed_collision));
         if (!created_scene_presentation)
         {
             log->Error("startup", created_scene_presentation.error());
@@ -4483,7 +4572,37 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
         // new viewpoint. Accumulates across frames (the pose lives on the
         // presentation). Inactive when free_fly_active is false (fixed camera).
         const bool free_fly = diagnostic_scene_presentation_->free_fly_active;
-        if (free_fly)
+        const bool player_active = diagnostic_scene_presentation_->player_active;
+        if (player_active)
+        {
+            // Step the kinematic player from this frame's input against the level
+            // COL (nearby-culled), then follow it with the Z-up camera. camera_input
+            // forward/strafe map to world +Y/+X horizontal move (up = +Z).
+            const gameplay::CharacterInput move_input{
+                .move = asset::Float3IR{
+                    .x = camera_input.strafe, .y = camera_input.forward, .z = 0.0F}};
+            std::vector<gameplay::CollisionTriangle> nearby;
+            gameplay::SelectNearbyCollisionTriangles(
+                diagnostic_scene_presentation_->player_collision,
+                diagnostic_scene_presentation_->player_state.position,
+                kPlayerCullRadius, nearby);
+            diagnostic_scene_presentation_->player_state = gameplay::StepCharacter(
+                diagnostic_scene_presentation_->player_state, move_input,
+                diagnostic_scene_presentation_->player_params, nearby,
+                kPlayerStepDt);
+            diagnostic_scene_presentation_->camera.world_to_view = PlayerFollowView(
+                diagnostic_scene_presentation_->player_state.position,
+                diagnostic_scene_presentation_->player_params.radius);
+            const gameplay::CharacterState& pp =
+                diagnostic_scene_presentation_->player_state;
+            log_->Info("player",
+                "pos=(" + std::to_string(pp.position.x) + "," +
+                    std::to_string(pp.position.y) + "," +
+                    std::to_string(pp.position.z) +
+                    ") grounded=" + (pp.grounded ? "yes" : "no") +
+                    " nearby=" + std::to_string(nearby.size()));
+        }
+        else if (free_fly)
         {
             diagnostic_scene_presentation_->free_fly_pose = runtime::AdvanceFreeFly(
                 diagnostic_scene_presentation_->free_fly_pose, camera_input,
@@ -4492,10 +4611,14 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                 runtime::FreeFlyViewMatrix(
                     diagnostic_scene_presentation_->free_fly_pose);
         }
+        const bool camera_moves = free_fly || player_active;
 
         const auto actor_object_to_clip = runtime::ComposeObjectToClip(
             diagnostic_scene_presentation_->camera,
-            PlanProjectDiagnosticActorMeshTransform(*position));
+            player_active
+                ? PlayerMeshTransform(
+                      diagnostic_scene_presentation_->player_state.position)
+                : PlanProjectDiagnosticActorMeshTransform(*position));
         if (!actor_object_to_clip)
         {
             return std::unexpected(
@@ -4510,7 +4633,7 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
         {
             runtime::RenderMeshDrawCommand command =
                 environment_commands[env_index];
-            if (free_fly)
+            if (camera_moves)
             {
                 const auto reprojected = runtime::ComposeObjectToClip(
                     diagnostic_scene_presentation_->camera,

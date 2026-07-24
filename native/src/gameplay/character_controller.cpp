@@ -1,5 +1,6 @@
 #include "omega/gameplay/character_controller.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace omega::gameplay
@@ -216,5 +217,28 @@ std::vector<CollisionTriangle> BuildLevelCollisionTriangles(
         }
     }
     return triangles;
+}
+
+void SelectNearbyCollisionTriangles(
+    const std::span<const CollisionTriangle> triangles, const Float3IR& center,
+    const float radius, std::vector<CollisionTriangle>& out)
+{
+    out.clear();
+    if (!(radius > 0.0F) || !std::isfinite(radius))
+        return;
+    for (const CollisionTriangle& t : triangles)
+    {
+        const float min_x = std::min({t.a.x, t.b.x, t.c.x}) - radius;
+        const float max_x = std::max({t.a.x, t.b.x, t.c.x}) + radius;
+        const float min_y = std::min({t.a.y, t.b.y, t.c.y}) - radius;
+        const float max_y = std::max({t.a.y, t.b.y, t.c.y}) + radius;
+        const float min_z = std::min({t.a.z, t.b.z, t.c.z}) - radius;
+        const float max_z = std::max({t.a.z, t.b.z, t.c.z}) + radius;
+        if (center.x >= min_x && center.x <= max_x && center.y >= min_y &&
+            center.y <= max_y && center.z >= min_z && center.z <= max_z)
+        {
+            out.push_back(t);
+        }
+    }
 }
 } // namespace omega::gameplay
