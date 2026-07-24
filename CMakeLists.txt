@@ -215,6 +215,7 @@ add_library(omega_runtime STATIC
     native/src/runtime/scheduler_elapsed_trace.cpp
     native/src/runtime/scene_structure_snapshot.cpp
     native/src/runtime/scene_transform.cpp
+    native/src/runtime/free_fly_camera.cpp
     native/src/runtime/spatial_diagnostic_scene.cpp
     native/src/runtime/spatial_debug_image.cpp
     native/src/runtime/tactical_menu_image.cpp
@@ -2457,6 +2458,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_scene_transform_tests COMMAND omega_scene_transform_tests)
     set_tests_properties(omega_scene_transform_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_free_fly_camera_tests
+        native/tests/free_fly_camera_tests.cpp
+    )
+    target_link_libraries(omega_free_fly_camera_tests PRIVATE omega_runtime)
+    if(MSVC)
+        target_compile_options(omega_free_fly_camera_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_free_fly_camera_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_free_fly_camera_tests COMMAND omega_free_fly_camera_tests)
+    set_tests_properties(omega_free_fly_camera_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_diagnostic_actor_scene_tests
         native/tests/diagnostic_actor_scene_tests.cpp

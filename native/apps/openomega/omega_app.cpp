@@ -11,6 +11,7 @@
 #include "omega/retail/frontend_tdx_decoder.h"
 #include "omega/runtime/diagnostic_actor_scene.h"
 #include "omega/runtime/level_texture_topology_preview.h"
+#include "omega/runtime/free_fly_camera.h"
 #include "omega/runtime/scene_transform.h"
 #include "omega/runtime/spatial_diagnostic_scene.h"
 
@@ -522,6 +523,95 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                 log->Warning("level",
                     "VUM visual scene build failed; using collision hull: " +
                         visual_scene.error());
+            }
+        }
+
+        // Free-fly 3D camera: view the chosen level geometry (VUM visual if it
+        // decoded, else the collision hull) in true perspective from a movable
+        // camera, so the level is navigable in 3D rather than shown as the flat
+        // diagnostic projection. OPENOMEGA_FIXED_CAMERA=1 keeps the flat view;
+        // OPENOMEGA_CAMERA_POSE="x,y,z,yaw,pitch" overrides the initial pose for
+        // headless capture (live keyboard fly-through advances this pose per frame).
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        const char* const fixed_camera_env = std::getenv("OPENOMEGA_FIXED_CAMERA");
+        const char* const camera_pose_env = std::getenv("OPENOMEGA_CAMERA_POSE");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+        const bool use_free_fly = fixed_camera_env == nullptr ||
+                                  std::string_view(fixed_camera_env) != "1";
+        if (use_free_fly && !diagnostic_scene.render_meshes.empty())
+        {
+            // Navigate the complete collision shell (the VUM visual geometry is
+            // still sparse pending its strip-break topology follow-up, so it is
+            // unsuitable for a framed fly-through).
+            const asset::LevelSpatialIR& camera_spatial =
+                content_owner->level_content->spatial;
+            auto world_scene = runtime::BuildWorldSpaceLevelScene(camera_spatial);
+            if (world_scene && !world_scene->render_meshes.empty() &&
+                !world_scene->render_meshes.front().positions.empty())
+            {
+                asset::Float3IR minimum =
+                    world_scene->render_meshes.front().positions.front();
+                asset::Float3IR maximum = minimum;
+                for (const asset::RenderMeshIR& mesh : world_scene->render_meshes)
+                {
+                    for (const asset::Float3IR& p : mesh.positions)
+                    {
+                        minimum.x = std::min(minimum.x, p.x);
+                        minimum.y = std::min(minimum.y, p.y);
+                        minimum.z = std::min(minimum.z, p.z);
+                        maximum.x = std::max(maximum.x, p.x);
+                        maximum.y = std::max(maximum.y, p.y);
+                        maximum.z = std::max(maximum.z, p.z);
+                    }
+                }
+                const asset::Float3IR center{
+                    .x = (minimum.x + maximum.x) * 0.5F,
+                    .y = (minimum.y + maximum.y) * 0.5F,
+                    .z = (minimum.z + maximum.z) * 0.5F,
+                };
+                const float radius =
+                    std::max({maximum.x - minimum.x, maximum.y - minimum.y,
+                                 maximum.z - minimum.z, 1.0F}) *
+                    0.5F;
+
+                // Default: above and back (along -Z), angled down at the centre.
+                runtime::FreeFlyPose pose{
+                    .position = {.x = center.x,
+                        .y = center.y + radius * 0.6F,
+                        .z = center.z - radius * 1.9F},
+                    .yaw = 0.0F,
+                    .pitch = -0.30F,
+                };
+                if (camera_pose_env != nullptr)
+                {
+                    if (auto parsed = runtime::ParseFreeFlyPose(camera_pose_env))
+                        pose = *parsed;
+                }
+
+                constexpr float aspect = 640.0F / 448.0F;
+                const float near_plane = std::max(0.05F, radius * 0.01F);
+                const float far_plane = radius * 20.0F + near_plane;
+                world_scene->camera = asset::SceneCameraIR{
+                    .world_to_view = runtime::FreeFlyViewMatrix(pose),
+                    .view_to_clip = runtime::PerspectiveProjection(
+                        1.0472F, aspect, near_plane, far_plane),
+                };
+                diagnostic_scene = std::move(*world_scene);
+                log->Info("level",
+                    "free-fly 3D camera active: bounds min(" +
+                        std::to_string(minimum.x) + "," + std::to_string(minimum.y) +
+                        "," + std::to_string(minimum.z) + ") max(" +
+                        std::to_string(maximum.x) + "," + std::to_string(maximum.y) +
+                        "," + std::to_string(maximum.z) + ") radius " +
+                        std::to_string(radius) + " pose(" +
+                        std::to_string(pose.position.x) + "," +
+                        std::to_string(pose.position.y) + "," +
+                        std::to_string(pose.position.z) + ")");
             }
         }
     }

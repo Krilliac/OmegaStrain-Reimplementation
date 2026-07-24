@@ -65,6 +65,7 @@ enum class ProjectionMode
 {
     ContactSheet,
     GlobalCoordinates,
+    WorldSpace,
 };
 
 [[nodiscard]] bool Add(
@@ -346,6 +347,7 @@ void Include(CoordinateBounds& bounds, const asset::Float3IR& vertex) noexcept
         const Projection global_projection = mode == ProjectionMode::GlobalCoordinates
                                                  ? MakeGlobalProjection(spatial)
                                                  : Projection{};
+        const bool world_space = mode == ProjectionMode::WorldSpace;
 
         for (std::size_t cell_index = 0U; cell_index < spatial.terrain_cells.size();
              ++cell_index)
@@ -360,7 +362,8 @@ void Include(CoordinateBounds& bounds, const asset::Float3IR& vertex) noexcept
                                                     mesh, cell_index, planned->side_tiles);
             const auto position_base = static_cast<std::uint32_t>(render_mesh.positions.size());
             for (const asset::Float3IR& vertex : mesh.vertices)
-                render_mesh.positions.push_back(Project(vertex, projection));
+                render_mesh.positions.push_back(
+                    world_space ? vertex : Project(vertex, projection));
             for (const asset::SpatialTriangleIR& triangle : mesh.triangles)
             {
                 for (const std::uint32_t index : triangle.vertex_indices)
@@ -396,5 +399,11 @@ std::expected<asset::SceneIR, std::string> BuildGlobalSpatialDiagnosticScene(
     const asset::LevelSpatialIR& spatial, const SpatialDiagnosticSceneLimits& limits)
 {
     return BuildProjectedScene(spatial, limits, ProjectionMode::GlobalCoordinates);
+}
+
+std::expected<asset::SceneIR, std::string> BuildWorldSpaceLevelScene(
+    const asset::LevelSpatialIR& spatial, const SpatialDiagnosticSceneLimits& limits)
+{
+    return BuildProjectedScene(spatial, limits, ProjectionMode::WorldSpace);
 }
 } // namespace omega::runtime

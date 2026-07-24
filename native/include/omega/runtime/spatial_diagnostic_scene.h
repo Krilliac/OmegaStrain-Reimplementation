@@ -34,4 +34,13 @@ struct SpatialDiagnosticSceneLimits
 [[nodiscard]] std::expected<asset::SceneIR, std::string> BuildGlobalSpatialDiagnosticScene(
     const asset::LevelSpatialIR& spatial,
     const SpatialDiagnosticSceneLimits& limits = SpatialDiagnosticSceneLimits{});
+
+// [any worker thread; reentrant] Builds a scene whose mesh positions are the raw
+// decoded world coordinates (no diagnostic 2D projection is baked into the
+// vertices). The scene camera is left identity; the caller supplies a real
+// world_to_view/view_to_clip so the geometry can be viewed in perspective from a
+// movable camera. Makes no claim about retail axes, winding, or units.
+[[nodiscard]] std::expected<asset::SceneIR, std::string> BuildWorldSpaceLevelScene(
+    const asset::LevelSpatialIR& spatial,
+    const SpatialDiagnosticSceneLimits& limits = SpatialDiagnosticSceneLimits{});
 } // namespace omega::runtime
