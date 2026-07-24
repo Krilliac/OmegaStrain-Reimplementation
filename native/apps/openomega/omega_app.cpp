@@ -134,6 +134,64 @@ constexpr float kPlayerCamHeight = 70.0F;  // follow-camera offset along +Z
     m.row_major[11] = p.z;
     return m;
 }
+
+// Renders the objective HUD panel (the 88x72 slate + DrawObjectiveHudOnto) from
+// the current objective state and uploads it. Returns a default (invalid) handle
+// on upload failure. Used both at scene build and on a live objective change
+// (a player trigger firing) to refresh the panel over the 3D level.
+[[nodiscard]] runtime::RenderTextureHandle BuildObjectiveHudPanelTexture(
+    SdlGpuHost& host, const gameplay::MissionData& mission,
+    const gameplay::ObjectiveState& state)
+{
+    std::vector<ObjectiveHudEntry> entries;
+    std::uint32_t complete = 0U;
+    for (std::size_t index = 0U; index < mission.objectives.size(); ++index)
+    {
+        std::uint8_t status_code = 0U;
+        switch (state.status[index])
+        {
+        case gameplay::ObjectiveStatus::Active:
+            status_code = 1U;
+            break;
+        case gameplay::ObjectiveStatus::Complete:
+            status_code = 2U;
+            ++complete;
+            break;
+        case gameplay::ObjectiveStatus::Failed:
+            status_code = 3U;
+            break;
+        case gameplay::ObjectiveStatus::Inactive:
+            break;
+        }
+        if (status_code != 0U)
+            entries.push_back(
+                ObjectiveHudEntry{mission.objectives[index].id, status_code});
+    }
+    constexpr std::uint32_t kHudPanelWidth = 88U;
+    constexpr std::uint32_t kHudPanelHeight = 72U;
+    std::vector<std::byte> pixels(
+        static_cast<std::size_t>(kHudPanelWidth) * kHudPanelHeight * 4U);
+    for (std::size_t i = 0U; i + 3U < pixels.size(); i += 4U)
+    {
+        pixels[i] = std::byte{16};
+        pixels[i + 1U] = std::byte{20};
+        pixels[i + 2U] = std::byte{28};
+        pixels[i + 3U] = std::byte{255};
+    }
+    runtime::DebugImage panel{
+        .width = kHudPanelWidth,
+        .height = kHudPanelHeight,
+        .rgba8_pixels = std::move(pixels),
+    };
+    DrawObjectiveHudOnto(panel, entries, complete,
+        static_cast<std::uint32_t>(mission.objectives.size()));
+    auto uploaded = host.UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+        .width = panel.width,
+        .height = panel.height,
+        .pixels = panel.pixels(),
+    });
+    return uploaded ? *uploaded : runtime::RenderTextureHandle{};
+}
 } // namespace
 
 std::expected<std::unique_ptr<OmegaApp::DiagnosticScenePresentation>, std::string>
@@ -1902,6 +1960,43 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             std::move(diagnostic_scene_overlay_draw_list);
         diagnostic_scene_presentation->hud_texture =
             diagnostic_objective_hud_texture;
+        // Objective triggers (OPENOMEGA_PLAYER): seed the live objective state to
+        // match the HUD's build-time demo (obj1 complete; obj2-4 active) and place
+        // one project-owned trigger volume a short walk (+Y) from the player spawn,
+        // linked to obj2. Walking into it completes obj2 and the HUD refreshes.
+        // Project-placed: the retail beacon/checkpoint world coordinates are not
+        // recovered from the .SO (only the objective structure/ids), so the volume
+        // position is project-owned, not retail.
+        if (player_seed_state)
+        {
+            const gameplay::MissionData &trigger_mission =
+                gameplay::MinskMissionData();
+            gameplay::ObjectiveState seed =
+                gameplay::InitialObjectiveState(trigger_mission);
+            const auto seed_apply = [&trigger_mission, &seed](
+                                        const gameplay::ObjectiveChoice choice,
+                                        const std::uint16_t id) {
+                const auto step = gameplay::AdvanceObjectives(
+                    trigger_mission, seed, {choice, id});
+                if (step)
+                    seed = step->state;
+            };
+            for (const std::uint16_t id : {std::uint16_t{1U}, std::uint16_t{2U},
+                     std::uint16_t{3U}, std::uint16_t{4U}})
+                seed_apply(gameplay::ObjectiveChoice::Add, id);
+            seed_apply(gameplay::ObjectiveChoice::Pass, std::uint16_t{1U});
+            diagnostic_scene_presentation->objective_state = seed;
+            const asset::Float3IR &spawn = player_seed_state->position;
+            diagnostic_scene_presentation->mission_triggers.push_back(
+                gameplay::MissionTrigger{
+                    .objective_id = 2U,
+                    .position = asset::Float3IR{
+                        .x = spawn.x, .y = spawn.y + 45.0F, .z = spawn.z},
+                    .radius = 25.0F,
+                    .choice = gameplay::ObjectiveChoice::Pass,
+                    .fired = false,
+                });
+        }
     }
 
     log->Info("startup", "runtime services ready with " +
@@ -4423,6 +4518,19 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
             std::string{"diagnostic actor position is unavailable"});
     }
 
+    // Release the HUD texture superseded by a trigger on a prior frame: its draw
+    // list has been rendered, and this frame's overlay will reference the current
+    // handle. Deferring the release here avoids freeing a handle a just-built
+    // overlay still references (which would fault the render).
+    if (diagnostic_scene_presentation_ != nullptr &&
+        diagnostic_scene_presentation_->pending_hud_release.valid())
+    {
+        static_cast<void>(host_->ReleaseTexture(
+            diagnostic_scene_presentation_->pending_hud_release));
+        diagnostic_scene_presentation_->pending_hud_release =
+            runtime::RenderTextureHandle{};
+    }
+
     constexpr runtime::RenderSourceRectQ16 full_source{
         .left = 0U,
         .top = 0U,
@@ -4590,6 +4698,38 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                 diagnostic_scene_presentation_->player_state, move_input,
                 diagnostic_scene_presentation_->player_params, nearby,
                 kPlayerStepDt);
+            // Objective triggers: entering a project-placed trigger volume
+            // completes the linked objective and rebuilds the HUD panel texture
+            // (one-shot). The refreshed hud_texture is picked up by the overlay
+            // blit on the next frame; releasing the prior handle avoids a leak.
+            if (!diagnostic_scene_presentation_->mission_triggers.empty())
+            {
+                const auto trigger_step = gameplay::StepMissionTriggers(
+                    gameplay::MinskMissionData(),
+                    diagnostic_scene_presentation_->objective_state,
+                    diagnostic_scene_presentation_->mission_triggers,
+                    diagnostic_scene_presentation_->player_state.position);
+                if (trigger_step.changed)
+                {
+                    diagnostic_scene_presentation_->objective_state =
+                        trigger_step.state;
+                    const auto rebuilt_hud = BuildObjectiveHudPanelTexture(
+                        *host_, gameplay::MinskMissionData(), trigger_step.state);
+                    if (rebuilt_hud.valid())
+                    {
+                        // This frame's overlay still references the old handle;
+                        // stash it for release at the top of the next refresh
+                        // (after this frame's render consumes it). Any earlier
+                        // pending handle is already released by then.
+                        if (diagnostic_scene_presentation_->hud_texture.valid())
+                            diagnostic_scene_presentation_->pending_hud_release =
+                                diagnostic_scene_presentation_->hud_texture;
+                        diagnostic_scene_presentation_->hud_texture = rebuilt_hud;
+                        log_->Info(
+                            "player", "objective trigger fired; HUD updated");
+                    }
+                }
+            }
             diagnostic_scene_presentation_->camera.world_to_view = PlayerFollowView(
                 diagnostic_scene_presentation_->player_state.position,
                 diagnostic_scene_presentation_->player_params.radius);

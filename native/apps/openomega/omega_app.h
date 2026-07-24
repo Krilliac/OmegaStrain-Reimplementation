@@ -14,6 +14,8 @@
 #include "omega/content/front_end_screen_bundle.h"
 #include "omega/frontend_presentation/retail_front_end_nav.h"
 #include "omega/gameplay/character_controller.h"
+#include "omega/gameplay/mission_trigger.h"
+#include "omega/gameplay/objective_tracker.h"
 #include "omega/gameplay/diagnostic_mission_lifecycle.h"
 #include "omega/gameplay/diagnostic_proximity_trigger.h"
 #include "omega/gameplay/diagnostic_target_fire.h"
@@ -321,6 +323,15 @@ private:
         gameplay::CharacterState player_state{};
         gameplay::CharacterControllerParams player_params{};
         std::vector<gameplay::CollisionTriangle> player_collision{};
+        // Objective triggers (OPENOMEGA_PLAYER): the live objective state + the
+        // project-placed world-space trigger volumes. When the player enters a
+        // trigger, the linked objective completes and hud_texture is rebuilt.
+        gameplay::ObjectiveState objective_state{};
+        std::vector<gameplay::MissionTrigger> mission_triggers{};
+        // When a trigger rebuilds hud_texture mid-frame, the just-built overlay
+        // still references the OLD handle; it is stashed here and released at the
+        // top of the next refresh, after this frame's render consumed it.
+        runtime::RenderTextureHandle pending_hud_release{};
     };
 
     // [game/main/render thread, startup] Validates the complete scene-to-command projection before
