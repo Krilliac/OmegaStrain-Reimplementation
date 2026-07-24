@@ -22,12 +22,35 @@ struct PopNpcSpawn
     bool operator==(const PopNpcSpawn&) const = default;
 };
 
-// Decoded POP game objects. Stage 1: the NPC: enemy/actor spawns (placement +
-// type), plus the declared counts of the NOD: nav-node graph and BOX: hotbox
-// trigger sections (their full per-record decode is a documented follow-up).
+// One adjacency edge of a nav node: the neighbor node index and its edge weight.
+struct PopNavLink
+{
+    std::uint32_t neighbor = 0U;
+    std::uint32_t weight = 0U;
+
+    bool operator==(const PopNavLink&) const = default;
+};
+
+// One decoded NOD: nav-graph node: the retail handle id, world position, and its
+// adjacency list. Neighbor indices are into the level's full node array (some may
+// reference variant records this Stage-2 walk skipped; consumers must bounds-check).
+struct PopNavNode
+{
+    std::uint32_t id = 0U;
+    asset::Float3IR position;
+    std::vector<PopNavLink> links;
+
+    bool operator==(const PopNavNode&) const = default;
+};
+
+// Decoded POP game objects. NPC: enemy/actor spawns (placement + type) and the
+// NOD: nav-graph nodes actually decoded, plus the declared section counts (a
+// node may be skipped when its variant layout is not cleanly walkable, so
+// nav_nodes.size() <= nav_node_count). BOX: is still a count only.
 struct PopGameObjectsIR
 {
     std::vector<PopNpcSpawn> npc_spawns;
+    std::vector<PopNavNode> nav_nodes;
     std::uint32_t npc_section_count = 0U;
     std::uint32_t nav_node_count = 0U;
     std::uint32_t hotbox_count = 0U;

@@ -5,6 +5,7 @@
 #include <iostream>
 #include <limits>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -86,6 +87,53 @@ void AppendNpcRecord(std::vector<std::byte>& body, const std::uint32_t id,
     AppendU32(pop, box_count);
     return pop;
 }
+
+// Appends one NOD nav-node record: class + id + two fields + position(3 f32) +
+// a 6-word transform + link_count + (neighbor,weight) pairs -- the fixed layout
+// the decoder walks (link_count lands at record+52).
+void AppendNodRecord(std::vector<std::byte>& body, const std::uint32_t id,
+    const float x, const float y, const float z,
+    const std::vector<std::pair<std::uint32_t, std::uint32_t>>& links)
+{
+    AppendU32(body, 12U); // class
+    AppendU32(body, id);
+    AppendU32(body, 0U); // field_a
+    AppendU32(body, 0U); // field_b
+    AppendF32(body, x);  // position at record+16
+    AppendF32(body, y);
+    AppendF32(body, z);
+    for (int i = 0; i < 6; ++i) // 6-word transform -> link_count at record+52
+        AppendF32(body, 0.0F);
+    AppendU32(body, static_cast<std::uint32_t>(links.size()));
+    for (const auto& link : links)
+    {
+        AppendU32(body, link.first);  // neighbor index
+        AppendU32(body, link.second); // weight
+    }
+}
+
+// A POP whose NOD: section carries `nod_body` and is terminated by GEN: (the
+// section the decoder walks the NOD body up to).
+[[nodiscard]] std::vector<std::byte> BuildSyntheticPopWithNav(
+    const std::vector<std::byte>& nod_body, const std::uint32_t nod_count)
+{
+    std::vector<std::byte> pop;
+    AppendU32(pop, 70U);
+    AppendTag(pop, "TER:");
+    AppendU32(pop, 0U);
+    AppendTag(pop, "NPC:");
+    AppendU32(pop, 0U);
+    AppendTag(pop, "WPN:");
+    AppendU32(pop, 0U);
+    AppendTag(pop, "NOD:");
+    AppendU32(pop, nod_count);
+    pop.insert(pop.end(), nod_body.begin(), nod_body.end());
+    AppendTag(pop, "GEN:");
+    AppendU32(pop, 0U);
+    AppendTag(pop, "BOX:");
+    AppendU32(pop, 0U);
+    return pop;
+}
 } // namespace
 
 int main()
@@ -157,6 +205,45 @@ int main()
         Check(decoded && decoded->npc_spawns.size() == 1U &&
                   decoded->npc_spawns[0].model == "good.skl",
             "non-finite position skipped, finite one kept");
+    }
+
+    // NOD: nav nodes decode with positions + adjacency (incl. weight-0 links).
+    {
+        std::vector<std::byte> nod;
+        AppendNodRecord(nod, 4777U, -20.1F, -4.2F, 0.8F,
+            {{1U, 2U}, {3U, 2U}, {18U, 0U}});
+        AppendNodRecord(nod, 4778U, 5.0F, 6.0F, 7.0F, {{0U, 1U}});
+        const auto pop = BuildSyntheticPopWithNav(nod, 1613U);
+        const auto decoded = DecodePopGameObjects(pop);
+        Check(decoded && decoded->nav_node_count == 1613U,
+            "NOD: declared count still read with a body present");
+        Check(decoded && decoded->nav_nodes.size() == 2U, "two nav nodes decoded");
+        if (decoded && decoded->nav_nodes.size() == 2U)
+        {
+            const auto& n0 = decoded->nav_nodes[0];
+            Check(n0.id == 4777U && n0.position.x == -20.1F &&
+                      n0.links.size() == 3U,
+                "nav node 0 id / position / link count");
+            Check(n0.links.size() == 3U && n0.links[0].neighbor == 1U &&
+                      n0.links[0].weight == 2U && n0.links[2].neighbor == 18U &&
+                      n0.links[2].weight == 0U,
+                "nav node 0 adjacency incl. a weight-0 link");
+            Check(decoded->nav_nodes[1].links.size() == 1U &&
+                      decoded->nav_nodes[1].links[0].neighbor == 0U,
+                "nav node 1 single link to node 0");
+        }
+    }
+
+    // A NOD record with an out-of-range neighbor is skipped fail-soft.
+    {
+        std::vector<std::byte> nod;
+        AppendNodRecord(nod, 1U, 0.0F, 0.0F, 0.0F, {{9999U, 1U}}); // >= count(10)
+        AppendNodRecord(nod, 2U, 1.0F, 1.0F, 1.0F, {{0U, 1U}});
+        const auto pop = BuildSyntheticPopWithNav(nod, 10U);
+        const auto decoded = DecodePopGameObjects(pop);
+        Check(decoded && decoded->nav_nodes.size() == 1U &&
+                  decoded->nav_nodes[0].id == 2U,
+            "out-of-range-neighbor nav node skipped; the valid one is kept");
     }
 
     if (failures != 0)

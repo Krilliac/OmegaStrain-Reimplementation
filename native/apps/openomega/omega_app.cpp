@@ -2045,15 +2045,62 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             if (npc_flag != nullptr && npc_flag[0] == '1' && npc_flag[1] == '\0')
             {
                 diagnostic_scene_presentation->npc_active = true;
-                // Seeds one patrolling guard at a world position: a short local
-                // +/-Y patrol segment facing -Y, running the full stealth loop.
+                // Real NOD: nav-graph nodes decoded from the level's DATA.POP.
+                const auto &nav_nodes =
+                    content_owner->level_game_objects.nav_nodes;
+                // The nearest decoded nav-node positions to a spawn, forming an
+                // authentic patrol route. (The NOD: adjacency is decoded too, but
+                // its neighbor indices are into the full 1613-node array while we
+                // decode only the cleanly-walkable subset, so spatial nearest-node
+                // routing is used until the variant records are pinned; the patrol
+                // points are still real retail nav nodes.)
+                const auto nearest_nav_waypoints =
+                    [&nav_nodes](const asset::Float3IR &at) {
+                        std::vector<asset::Float3IR> route;
+                        const std::size_t want =
+                            nav_nodes.size() < 4U ? nav_nodes.size() : 4U;
+                        std::vector<bool> used(nav_nodes.size(), false);
+                        for (std::size_t k = 0U; k < want; ++k)
+                        {
+                            std::size_t best = nav_nodes.size();
+                            double best_d = 0.0;
+                            for (std::size_t n = 0U; n < nav_nodes.size(); ++n)
+                            {
+                                if (used[n])
+                                    continue;
+                                const auto &p = nav_nodes[n].position;
+                                const double dx = static_cast<double>(p.x) - at.x;
+                                const double dy = static_cast<double>(p.y) - at.y;
+                                const double dz = static_cast<double>(p.z) - at.z;
+                                const double d = dx * dx + dy * dy + dz * dz;
+                                if (best == nav_nodes.size() || d < best_d)
+                                {
+                                    best = n;
+                                    best_d = d;
+                                }
+                            }
+                            if (best == nav_nodes.size())
+                                break;
+                            used[best] = true;
+                            route.push_back(nav_nodes[best].position);
+                        }
+                        return route;
+                    };
+                // Seeds one patrolling guard at a world position: patrols the
+                // nearest real nav-node positions (fall back to a short local
+                // +/-Y segment if the nav graph is empty), running the full
+                // stealth loop.
                 const auto seed_guard = [&](const asset::Float3IR &at) {
                     DiagnosticScenePresentation::NpcRuntime npc;
                     npc.params = player_seed_params;
                     npc.state = gameplay::CharacterState{.position = at};
-                    npc.waypoints = {
-                        asset::Float3IR{.x = at.x, .y = at.y + 5.0F, .z = at.z},
-                        asset::Float3IR{.x = at.x, .y = at.y - 5.0F, .z = at.z}};
+                    auto route = nearest_nav_waypoints(at);
+                    if (route.size() >= 2U)
+                        npc.waypoints = std::move(route);
+                    else
+                        npc.waypoints = {
+                            asset::Float3IR{.x = at.x, .y = at.y + 5.0F, .z = at.z},
+                            asset::Float3IR{.x = at.x, .y = at.y - 5.0F, .z = at.z}};
                     npc.waypoint = 1U;
                     npc.facing = asset::Float3IR{.x = 0.0F, .y = -1.0F, .z = 0.0F};
                     npc.vision = gameplay::NpcVisionParams{
@@ -2082,10 +2129,11 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                             std::to_string(authentic) + " of " +
                             std::to_string(content_owner->level_game_objects
                                     .npc_spawns.size()) +
-                            " NPC records (nav nodes=" +
+                            " NPC records; patrolling " +
+                            std::to_string(nav_nodes.size()) + " of " +
                             std::to_string(content_owner->level_game_objects
                                     .nav_node_count) +
-                            ", hotboxes=" +
+                            " decoded nav nodes (hotboxes=" +
                             std::to_string(content_owner->level_game_objects
                                     .hotbox_count) +
                             ")");
