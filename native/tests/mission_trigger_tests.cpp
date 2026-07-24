@@ -16,6 +16,7 @@ namespace
 using omega::asset::Float3IR;
 using omega::gameplay::AdvanceObjectives;
 using omega::gameplay::InitialObjectiveState;
+using omega::gameplay::IsObjectiveComplete;
 using omega::gameplay::MissionData;
 using omega::gameplay::MissionTrigger;
 using omega::gameplay::ObjectiveChoice;
@@ -122,6 +123,58 @@ int main()
         Check(!result.changed, "a rejected transition reports no change");
         Check(result.state == prior, "a rejected transition leaves state unchanged");
         Check(triggers[0].fired, "a rejected trigger still fires one-shot");
+    }
+
+    // A walkable mini-mission: three trigger volumes over obj2/obj3/obj4 (all
+    // Active). The player visits each in sequence -> each objective completes
+    // one-shot, and by the end all three are complete (multi-objective HUD
+    // progression). Re-entering a fired volume does nothing.
+    {
+        static constexpr std::array<ObjectiveDef, 4U> seq_objectives{{
+            {1U, "o1m", "o1p", "", ObjectiveKind::Primary},
+            {2U, "o2m", "o2p", "", ObjectiveKind::Primary},
+            {3U, "o3m", "o3p", "", ObjectiveKind::Primary},
+            {4U, "o4m", "o4p", "", ObjectiveKind::Primary},
+        }};
+        static constexpr MissionData seq_mission{
+            .level_code = "SEQ", .objectives = seq_objectives};
+        ObjectiveState state = InitialObjectiveState(seq_mission);
+        for (const std::uint16_t id : {std::uint16_t{2U}, std::uint16_t{3U},
+                 std::uint16_t{4U}})
+        {
+            const auto added =
+                AdvanceObjectives(seq_mission, state, {ObjectiveChoice::Add, id});
+            if (added)
+                state = added->state;
+        }
+        std::array<MissionTrigger, 3U> triggers{{
+            {2U, Float3IR{.x = 0.0F, .y = 0.0F, .z = 0.0F}, 5.0F,
+                ObjectiveChoice::Pass, false},
+            {3U, Float3IR{.x = 50.0F, .y = 0.0F, .z = 0.0F}, 5.0F,
+                ObjectiveChoice::Pass, false},
+            {4U, Float3IR{.x = 100.0F, .y = 0.0F, .z = 0.0F}, 5.0F,
+                ObjectiveChoice::Pass, false},
+        }};
+        auto visit = [&](const float x) {
+            const auto result = StepMissionTriggers(seq_mission, state,
+                std::span<MissionTrigger>{triggers},
+                Float3IR{.x = x, .y = 0.0F, .z = 0.0F});
+            state = result.state;
+            return result.changed;
+        };
+        Check(visit(0.0F) && IsObjectiveComplete(seq_mission, state, 2U),
+            "visiting the first volume completes obj2");
+        Check(triggers[0].fired && !triggers[1].fired && !triggers[2].fired,
+            "only the obj2 trigger fires at the first volume");
+        Check(!visit(0.0F), "the obj2 trigger is one-shot on re-entry");
+        Check(visit(50.0F) && IsObjectiveComplete(seq_mission, state, 3U),
+            "visiting the second volume completes obj3");
+        Check(visit(100.0F) && IsObjectiveComplete(seq_mission, state, 4U),
+            "visiting the third volume completes obj4");
+        Check(IsObjectiveComplete(seq_mission, state, 2U) &&
+                IsObjectiveComplete(seq_mission, state, 3U) &&
+                IsObjectiveComplete(seq_mission, state, 4U),
+            "all three objectives complete after visiting all triggers");
     }
 
     if (failures != 0)

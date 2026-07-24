@@ -1987,15 +1987,29 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             seed_apply(gameplay::ObjectiveChoice::Pass, std::uint16_t{1U});
             diagnostic_scene_presentation->objective_state = seed;
             const asset::Float3IR &spawn = player_seed_state->position;
-            diagnostic_scene_presentation->mission_triggers.push_back(
-                gameplay::MissionTrigger{
-                    .objective_id = 2U,
-                    .position = asset::Float3IR{
-                        .x = spawn.x, .y = spawn.y + 45.0F, .z = spawn.z},
-                    .radius = 25.0F,
-                    .choice = gameplay::ObjectiveChoice::Pass,
-                    .fired = false,
-                });
+            // A small walkable mini-mission: three project-placed trigger volumes
+            // spaced along the +Y path from spawn, each linked to a real Minsk
+            // objective id (obj2/obj3/obj4, all seeded Active). Walking through
+            // them in sequence completes each objective and progresses the HUD
+            // (1/12 -> 4/12). Project-placed positions (the .SO gives the
+            // objective structure/ids, not world coords); radius is generous so
+            // the terrain's z-climb along the path stays inside the sphere.
+            const auto place_trigger = [&](const std::uint16_t id,
+                                           const float forward_offset) {
+                diagnostic_scene_presentation->mission_triggers.push_back(
+                    gameplay::MissionTrigger{
+                        .objective_id = id,
+                        .position = asset::Float3IR{
+                            .x = spawn.x, .y = spawn.y + forward_offset,
+                            .z = spawn.z},
+                        .radius = 32.0F,
+                        .choice = gameplay::ObjectiveChoice::Pass,
+                        .fired = false,
+                    });
+            };
+            place_trigger(2U, 35.0F);
+            place_trigger(3U, 80.0F);
+            place_trigger(4U, 125.0F);
         }
     }
 
@@ -3205,7 +3219,16 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         }
 
         simulation::SimulationStepInput simulation_input{};
-        if (simulation_allowed && diagnostic_play_input_context)
+        // Input split: when the kinematic player is active (OPENOMEGA_PLAYER), the
+        // debug move controls drive the PLAYER (via camera_input, below), so the
+        // old diagnostic-actor marker nudge is suppressed here -- WASD moves the
+        // player, not the int64 sim marker. Without a player, the controls nudge
+        // the diagnostic actor as before.
+        const bool player_controls_active =
+            diagnostic_scene_presentation_ != nullptr &&
+            diagnostic_scene_presentation_->player_active;
+        if (simulation_allowed && diagnostic_play_input_context &&
+            !player_controls_active)
         {
             const auto planned_translation = gameplay::PlanDebugLocomotionStep(
                 gameplay::DigitalMoveCommand{
@@ -3371,12 +3394,23 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                             input_snapshot.IsHeld(kDebugMoveForwardAction) ? 1 : 0) -
                         static_cast<float>(
                             input_snapshot.IsHeld(kDebugMoveBackwardAction) ? 1 : 0);
-                    camera_input.yaw_delta =
-                        (static_cast<float>(
-                             input_snapshot.IsHeld(kDebugMoveRightAction) ? 1 : 0) -
-                         static_cast<float>(
-                             input_snapshot.IsHeld(kDebugMoveLeftAction) ? 1 : 0)) *
-                        0.03F;
+                    const float lateral =
+                        static_cast<float>(
+                            input_snapshot.IsHeld(kDebugMoveRightAction) ? 1 : 0) -
+                        static_cast<float>(
+                            input_snapshot.IsHeld(kDebugMoveLeftAction) ? 1 : 0);
+                    if (player_controls_active)
+                    {
+                        // Player: A/D strafe (the player reads move = {strafe,
+                        // forward}); no camera turn -- the follow camera tracks
+                        // the player.
+                        camera_input.strafe = lateral;
+                    }
+                    else
+                    {
+                        // Free-fly camera: A/D turn (yaw).
+                        camera_input.yaw_delta = lateral * 0.03F;
+                    }
                 }
             }
             auto refreshed_actor_draw_list = RefreshDiagnosticActorDrawList(
