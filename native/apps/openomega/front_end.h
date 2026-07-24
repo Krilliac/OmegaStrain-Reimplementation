@@ -876,6 +876,22 @@ struct FrontEndView
 // consumes no retail asset or network state.
 [[nodiscard]] runtime::DebugImage BuildProjectMultiplayerImage(const multiplayer::MpMenuState &state);
 
+// One line of the objective HUD: an objective id + its status.
+struct ObjectiveHudEntry
+{
+    std::uint16_t id = 0U;
+    std::uint8_t status = 0U;  // 1 = Active, 2 = Complete, 3 = Failed (else omitted)
+};
+
+// [any thread; reentrant] Draws a small objective HUD panel (a title line
+// "OBJECTIVES <complete>/<total>" then one "OBJ <id> <STATUS>" line per active/
+// completed entry) onto `image` at its top-left, using the project 3x5 font.
+// Project-authored overlay; consumes no retail asset. Entries with status 0 are
+// skipped. Draws nothing outside the image bounds.
+void DrawObjectiveHudOnto(runtime::DebugImage &image,
+    std::span<const ObjectiveHudEntry> entries, std::uint32_t complete,
+    std::uint32_t total) noexcept;
+
 // Builds the exact project-owned E-0066 three-block topology fixture and
 // returns its fully owned metadata-only diagnostic image.
 [[nodiscard]] std::expected<runtime::DebugImage, runtime::TextureStorageTopologyDebugImageError>

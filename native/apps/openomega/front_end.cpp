@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <new>
 #include <stdexcept>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -738,6 +739,68 @@ BuildProjectFrontEndAssetTopologyImage()
     catch (const std::length_error &)
     {
         return std::unexpected(TopologyAllocationError());
+    }
+}
+
+void DrawObjectiveHudOnto(runtime::DebugImage &image,
+    const std::span<const ObjectiveHudEntry> entries, const std::uint32_t complete,
+    const std::uint32_t total) noexcept
+{
+    constexpr std::uint32_t kLineStep = kGlyphHeight + 2U;   // 7px per line
+    constexpr std::uint32_t kMargin = 4U;
+    constexpr std::uint32_t kPanelWidth = 76U;
+
+    std::uint32_t drawn = 0U;
+    for (const ObjectiveHudEntry &entry : entries)
+    {
+        if (entry.status >= 1U && entry.status <= 3U)
+            ++drawn;
+    }
+
+    // A slate panel sized to the title + drawn lines, clamped to the image.
+    const std::uint32_t rows = drawn + 1U;   // +1 for the title
+    const std::uint32_t panel_bottom = kMargin + rows * kLineStep + 1U;
+    if (image.width < kMargin + kPanelWidth ||
+        image.height < kMargin + kLineStep + 1U)
+        return;   // too small to host the HUD safely (text would overflow)
+    FillRectangle(image, kMargin - 2U, kMargin - 2U,
+        (kMargin + kPanelWidth < image.width) ? kMargin + kPanelWidth : image.width,
+        (panel_bottom < image.height) ? panel_bottom : image.height, kSlateColor);
+
+    // Title: "OBJECTIVES C/T" (uppercase, digits per the project 3x5 font).
+    std::string title = "OBJECTIVES ";
+    title += std::to_string(complete);
+    title += "/";
+    title += std::to_string(total);
+    DrawText(image, title, kMargin, kMargin);
+
+    std::uint32_t line = 1U;
+    for (const ObjectiveHudEntry &entry : entries)
+    {
+        std::string_view status_text;
+        switch (entry.status)
+        {
+        case 1U:
+            status_text = "ACTIVE";
+            break;
+        case 2U:
+            status_text = "DONE";
+            break;
+        case 3U:
+            status_text = "FAIL";
+            break;
+        default:
+            continue;   // Inactive / unknown: not shown
+        }
+        std::string row = "OBJ ";
+        row += std::to_string(entry.id);
+        row += " ";
+        row += status_text;
+        const std::uint32_t origin_y = kMargin + line * kLineStep;
+        if (origin_y + kGlyphHeight >= image.height)
+            break;
+        DrawText(image, row, kMargin, origin_y);
+        ++line;
     }
 }
 } // namespace omega::app

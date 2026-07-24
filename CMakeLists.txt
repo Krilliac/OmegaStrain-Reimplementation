@@ -110,6 +110,8 @@ add_library(omega_gameplay STATIC
     native/src/gameplay/diagnostic_mission_lifecycle.cpp
     native/src/gameplay/diagnostic_proximity_trigger.cpp
     native/src/gameplay/diagnostic_target_fire.cpp
+    native/src/gameplay/objective_tracker.cpp
+    native/src/gameplay/minsk_mission.cpp
 )
 target_include_directories(omega_gameplay PUBLIC native/include)
 target_link_libraries(omega_gameplay PUBLIC omega_simulation)
@@ -2161,6 +2163,20 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_gameplay_tests COMMAND omega_gameplay_tests)
     set_tests_properties(omega_gameplay_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_objective_tracker_tests
+        native/tests/objective_tracker_tests.cpp
+    )
+    target_link_libraries(omega_objective_tracker_tests PRIVATE omega_gameplay)
+    if(MSVC)
+        target_compile_options(omega_objective_tracker_tests PRIVATE
+            /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+    else()
+        target_compile_options(omega_objective_tracker_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+    endif()
+    add_test(NAME omega_objective_tracker_tests COMMAND omega_objective_tracker_tests)
+    set_tests_properties(omega_objective_tracker_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_diagnostic_proximity_trigger_tests
         native/tests/diagnostic_proximity_trigger_tests.cpp

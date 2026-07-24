@@ -6,6 +6,8 @@
 #include "screenshot_capture.h"
 
 #include "omega/gameplay/debug_locomotion.h"
+#include "omega/gameplay/minsk_mission.h"
+#include "omega/gameplay/objective_tracker.h"
 #include "omega/debug/subsystem_entry_break.h"
 #include "omega/frontend_presentation/retail_front_end_frame.h"
 #include "omega/retail/frontend_tdx_decoder.h"
@@ -853,11 +855,60 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     const simulation::EntityId debug_locomotion_entity =
         *created_debug_locomotion_entity;
 
-    runtime::DebugImage no_level_diagnostic_image;
-    if (!content_owner->debug_image)
-        no_level_diagnostic_image = BuildProjectFrontEndDiagnosticPlayImage();
-    const runtime::DebugImage &diagnostic_image =
-        content_owner->debug_image ? *content_owner->debug_image : no_level_diagnostic_image;
+    runtime::DebugImage diagnostic_image =
+        content_owner->debug_image ? *content_owner->debug_image
+                                   : BuildProjectFrontEndDiagnosticPlayImage();
+    // Objective HUD: for a loaded level, seed its declarative mission objective
+    // state (from the .SO-extracted MissionData) and draw the tracker's active/
+    // completed objectives onto the diagnostic overlay image. This demonstrates
+    // the ObjectiveTracker + HUD end-to-end. NOTE (follow-up): the state is
+    // seeded once here at build time (a demo of obj1 completed with obj2..4
+    // active), not yet advanced per frame from live gameplay triggers.
+    if (content_stage == runtime::ContentStartupStage::LevelContent)
+    {
+        const gameplay::MissionData &mission = gameplay::MinskMissionData();
+        gameplay::ObjectiveState objective_state =
+            gameplay::InitialObjectiveState(mission);
+        const auto apply = [&mission, &objective_state](
+                               const gameplay::ObjectiveChoice choice,
+                               const std::uint16_t id) {
+            const auto step = gameplay::AdvanceObjectives(
+                mission, objective_state, {choice, id});
+            if (step)
+                objective_state = step->state;
+        };
+        for (const std::uint16_t id : {std::uint16_t{1U}, std::uint16_t{2U},
+                 std::uint16_t{3U}, std::uint16_t{4U}})
+            apply(gameplay::ObjectiveChoice::Add, id);
+        apply(gameplay::ObjectiveChoice::Pass, std::uint16_t{1U});
+
+        std::vector<ObjectiveHudEntry> hud_entries;
+        std::uint32_t complete_count = 0U;
+        for (std::size_t index = 0U; index < mission.objectives.size(); ++index)
+        {
+            std::uint8_t status_code = 0U;
+            switch (objective_state.status[index])
+            {
+            case gameplay::ObjectiveStatus::Active:
+                status_code = 1U;
+                break;
+            case gameplay::ObjectiveStatus::Complete:
+                status_code = 2U;
+                ++complete_count;
+                break;
+            case gameplay::ObjectiveStatus::Failed:
+                status_code = 3U;
+                break;
+            case gameplay::ObjectiveStatus::Inactive:
+                break;
+            }
+            if (status_code != 0U)
+                hud_entries.push_back(
+                    ObjectiveHudEntry{mission.objectives[index].id, status_code});
+        }
+        DrawObjectiveHudOnto(diagnostic_image, hud_entries, complete_count,
+            static_cast<std::uint32_t>(mission.objectives.size()));
+    }
     const runtime::DebugImage diagnostic_actor_marker_image{
         .width = 1U,
         .height = 1U,
