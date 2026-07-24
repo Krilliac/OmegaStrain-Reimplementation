@@ -25,6 +25,7 @@
 #include "omega/runtime/job_service.h"
 #include "omega/runtime/log_service.h"
 #include "omega/runtime/render_draw_list.h"
+#include "omega/runtime/free_fly_camera.h"
 #include "omega/runtime/render_mesh_draw_list.h"
 #include "omega/runtime/render_texture.h"
 #include "omega/runtime/runtime_settings.h"
@@ -240,7 +241,8 @@ private:
     // immutable and resident.
     [[nodiscard]] std::expected<void, std::string>
     RefreshDiagnosticActorDrawList(
-        const std::optional<runtime::PointerPositionQ16>& pointer_position);
+        const std::optional<runtime::PointerPositionQ16>& pointer_position,
+        const runtime::FreeFlyInput& camera_input = {});
     [[nodiscard]] const runtime::RenderDrawList& CurrentFrontEndDrawList() const noexcept;
     [[nodiscard]] runtime::RenderMeshDrawList CurrentFrontEndMeshDrawList() const noexcept;
 
@@ -292,6 +294,19 @@ private:
         runtime::RenderMeshDrawList environment_draw_list;
         runtime::RenderMeshDrawList draw_list;
         runtime::RenderDrawList overlay_draw_list;
+        // Live free-fly camera state. When free_fly_active, the per-frame actor
+        // refresh advances free_fly_pose from input, rebuilds camera.world_to_view
+        // from it (keeping camera.view_to_clip), and recomputes every environment
+        // command's object_to_clip from environment_local_to_world so the whole
+        // scene reprojects as the camera moves. free_fly_script (from
+        // OPENOMEGA_CAMERA_SCRIPT) is a constant per-frame input for headless
+        // motion demos; when its magnitude is zero the live held input is used.
+        bool free_fly_active = false;
+        runtime::FreeFlyPose free_fly_pose{};
+        float free_fly_move_speed = 1.0F;
+        runtime::FreeFlyInput free_fly_script{};
+        std::array<asset::Matrix4x4IR,
+            runtime::kMaximumRenderMeshDrawsPerFrame> environment_local_to_world{};
     };
 
     // [game/main/render thread, startup] Validates the complete scene-to-command projection before
@@ -301,7 +316,10 @@ private:
         std::string>
     BuildDiagnosticScenePresentation(SdlGpuHost& host, const asset::SceneIR& scene,
         const content::LevelTextureStore* level_texture_store,
-        const content::GameDataService* game_data);
+        const content::GameDataService* game_data,
+        std::optional<runtime::FreeFlyPose> free_fly_pose = std::nullopt,
+        float free_fly_move_speed = 1.0F,
+        runtime::FreeFlyInput free_fly_script = {});
     // [game/main/render thread; no concurrent use] Clears commands before releasing exact resident
     // generations in reverse upload order. The host remains the final cleanup authority.
     void ReleaseDiagnosticScenePresentation() noexcept;

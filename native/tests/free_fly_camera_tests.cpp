@@ -144,6 +144,33 @@ void TestParse()
     Check(!omega::runtime::ParseFreeFlyPose("1,2,,4,5").has_value(),
         "empty field rejected");
 }
+
+void TestParseScript()
+{
+    const auto empty = omega::runtime::ParseFreeFlyScript("", 0.03F);
+    Check(empty.forward == 0.0F && empty.strafe == 0.0F &&
+              empty.vertical == 0.0F && empty.yaw_delta == 0.0F &&
+              empty.pitch_delta == 0.0F,
+        "empty script yields zero input");
+
+    const auto fwd = omega::runtime::ParseFreeFlyScript("forward", 0.03F);
+    Check(Near(fwd.forward, 1.0F), "forward token sets forward +1");
+
+    const auto turn = omega::runtime::ParseFreeFlyScript("forward right", 0.05F);
+    Check(Near(turn.forward, 1.0F) && Near(turn.yaw_delta, 0.05F),
+        "forward+right drives and turns (yaw by look_step)");
+
+    const auto combo = omega::runtime::ParseFreeFlyScript(
+        "back,straferight,up,pitchup", 0.02F);
+    Check(Near(combo.forward, -1.0F) && Near(combo.strafe, 1.0F) &&
+              Near(combo.vertical, 1.0F) && Near(combo.pitch_delta, 0.02F),
+        "comma-separated tokens accumulate across fields");
+
+    const auto opposed = omega::runtime::ParseFreeFlyScript(
+        "left right nonsense", 0.1F);
+    Check(Near(opposed.yaw_delta, 0.0F) && opposed.forward == 0.0F,
+        "opposed turns cancel and unknown tokens are ignored");
+}
 } // namespace
 
 int main()
@@ -154,6 +181,7 @@ int main()
     TestAdvanceMovesAlongForward();
     TestPitchClamp();
     TestParse();
+    TestParseScript();
     if (g_failures != 0)
     {
         std::cerr << g_failures << " free-fly camera test(s) failed\n";

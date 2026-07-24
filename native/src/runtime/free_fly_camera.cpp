@@ -163,4 +163,51 @@ std::optional<FreeFlyPose> ParseFreeFlyPose(const std::string_view spec) noexcep
         .pitch = values[4],
     };
 }
+
+FreeFlyInput ParseFreeFlyScript(
+    const std::string_view spec, const float look_step) noexcept
+{
+    const float step = std::isfinite(look_step) ? look_step : 0.0F;
+    FreeFlyInput input{};
+    std::size_t cursor = 0U;
+    while (cursor <= spec.size())
+    {
+        std::size_t next = spec.find_first_of(", ;", cursor);
+        const std::string_view token = spec.substr(
+            cursor, next == std::string_view::npos ? std::string_view::npos
+                                                   : next - cursor);
+        if (!token.empty())
+        {
+            if (token == "forward")
+                input.forward += 1.0F;
+            else if (token == "back")
+                input.forward -= 1.0F;
+            else if (token == "left")
+                input.yaw_delta -= step;
+            else if (token == "right")
+                input.yaw_delta += step;
+            else if (token == "yawleft")
+                input.yaw_delta -= step;
+            else if (token == "yawright")
+                input.yaw_delta += step;
+            else if (token == "strafeleft")
+                input.strafe -= 1.0F;
+            else if (token == "straferight")
+                input.strafe += 1.0F;
+            else if (token == "up")
+                input.vertical += 1.0F;
+            else if (token == "down")
+                input.vertical -= 1.0F;
+            else if (token == "pitchup")
+                input.pitch_delta += step;
+            else if (token == "pitchdown")
+                input.pitch_delta -= step;
+            // Unknown tokens are ignored.
+        }
+        if (next == std::string_view::npos)
+            break;
+        cursor = next + 1U;
+    }
+    return input;
+}
 } // namespace omega::runtime

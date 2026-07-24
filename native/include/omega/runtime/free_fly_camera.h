@@ -60,4 +60,14 @@ struct FreeFlyInput
 // non-finite field. Used by the OPENOMEGA_CAMERA_POSE capture hook.
 [[nodiscard]] std::optional<FreeFlyPose> ParseFreeFlyPose(
     std::string_view spec) noexcept;
+
+// [any thread; reentrant] Parses a headless per-frame movement script into a
+// constant FreeFlyInput applied every frame, so live camera motion is provable
+// in a --frames capture (OPENOMEGA_CAMERA_SCRIPT). Tokens are separated by any
+// of ", ;" and accumulate: forward/back, left/right (yaw turn), strafeleft/
+// straferight, up/down, yawleft/yawright, pitchup/pitchdown. look_step (radians)
+// scales the yaw/pitch tokens. Unknown tokens are ignored; an empty/whitespace
+// spec yields a zero input.
+[[nodiscard]] FreeFlyInput ParseFreeFlyScript(
+    std::string_view spec, float look_step) noexcept;
 } // namespace omega::runtime

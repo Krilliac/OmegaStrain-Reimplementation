@@ -105,7 +105,9 @@ std::expected<std::unique_ptr<OmegaApp::DiagnosticScenePresentation>, std::strin
 OmegaApp::BuildDiagnosticScenePresentation(
     SdlGpuHost& host, const asset::SceneIR& scene,
     const content::LevelTextureStore* const level_texture_store,
-    const content::GameDataService* const game_data)
+    const content::GameDataService* const game_data,
+    const std::optional<runtime::FreeFlyPose> free_fly_pose,
+    const float free_fly_move_speed, const runtime::FreeFlyInput free_fly_script)
 {
     static_assert(sizeof(std::unique_ptr<DiagnosticScenePresentation>) <
                   sizeof(DiagnosticScenePresentation));
@@ -173,6 +175,16 @@ OmegaApp::BuildDiagnosticScenePresentation(
             std::string{"diagnostic scene transform is non-finite"});
     }
     presentation->camera = scene.camera;
+    if (free_fly_pose)
+    {
+        presentation->free_fly_active = true;
+        presentation->free_fly_pose = *free_fly_pose;
+        presentation->free_fly_move_speed =
+            std::isfinite(free_fly_move_speed) && free_fly_move_speed > 0.0F
+                ? free_fly_move_speed
+                : 1.0F;
+        presentation->free_fly_script = free_fly_script;
+    }
 
     DiagnosticSceneRollbackGuard rollback(
         host, presentation->mesh_handles, presentation->mesh_count);
@@ -271,6 +283,8 @@ OmegaApp::BuildDiagnosticScenePresentation(
     {
         const asset::SceneMeshInstanceIR& instance =
             scene.mesh_instances[instance_index];
+        presentation->environment_local_to_world[instance_index] =
+            instance.local_to_world;
         commands[instance_index] = runtime::RenderMeshDrawCommand{
             .mesh = presentation->mesh_handles[instance.render_mesh_index],
             .object_to_clip = object_to_clip[instance_index],
@@ -445,6 +459,12 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     }
 
     asset::SceneIR diagnostic_scene;
+    // Live free-fly camera seed (captured in the camera block below, consumed at
+    // the BuildDiagnosticScenePresentation call): the initial pose, a per-frame
+    // move speed scaled to the level, and an optional scripted per-frame input.
+    std::optional<runtime::FreeFlyPose> free_fly_initial_pose;
+    float free_fly_initial_speed = 1.0F;
+    runtime::FreeFlyInput free_fly_script_input{};
     if (content_owner->level_content)
     {
         auto built_scene = runtime::BuildGlobalSpatialDiagnosticScene(
@@ -538,6 +558,7 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
 #endif
         const char* const fixed_camera_env = std::getenv("OPENOMEGA_FIXED_CAMERA");
         const char* const camera_pose_env = std::getenv("OPENOMEGA_CAMERA_POSE");
+        const char* const camera_script_env = std::getenv("OPENOMEGA_CAMERA_SCRIPT");
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
@@ -601,6 +622,14 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                     .view_to_clip = runtime::PerspectiveProjection(
                         1.0472F, aspect, near_plane, far_plane),
                 };
+                // Seed the live camera: initial pose + a per-frame move speed
+                // (~1% of the level radius, so a fly-through crosses in ~100
+                // frames) + an optional scripted per-frame input for headless
+                // motion capture.
+                free_fly_initial_pose = pose;
+                free_fly_initial_speed = std::max(radius * 0.01F, 0.05F);
+                free_fly_script_input = runtime::ParseFreeFlyScript(
+                    camera_script_env != nullptr ? camera_script_env : "", 0.03F);
                 diagnostic_scene = std::move(*world_scene);
                 log->Info("level",
                     "free-fly 3D camera active: bounds min(" +
@@ -1540,7 +1569,9 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                 content_owner->level_texture_store
                     ? &*content_owner->level_texture_store
                     : nullptr,
-                content_owner->game_data ? &*content_owner->game_data : nullptr);
+                content_owner->game_data ? &*content_owner->game_data : nullptr,
+                free_fly_initial_pose, free_fly_initial_speed,
+                free_fly_script_input);
         if (!created_scene_presentation)
         {
             log->Error("startup", created_scene_presentation.error());
@@ -2898,8 +2929,43 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                                     CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
                                     ActiveCharacterIsConfirmed()))
         {
+            // Live free-fly camera input. A headless OPENOMEGA_CAMERA_SCRIPT
+            // (seeded onto the presentation) drives a constant per-frame input so
+            // motion is provable in a --frames capture; otherwise the held debug
+            // move controls fly the camera (WASD forward/back + left/right turn).
+            // These controls also drive the diagnostic actor marker (shared
+            // binding); a dedicated camera-vs-actor toggle is a follow-up.
+            runtime::FreeFlyInput camera_input{};
+            if (diagnostic_scene_presentation_ &&
+                diagnostic_scene_presentation_->free_fly_active)
+            {
+                const runtime::FreeFlyInput& script =
+                    diagnostic_scene_presentation_->free_fly_script;
+                const bool script_active =
+                    script.forward != 0.0F || script.strafe != 0.0F ||
+                    script.vertical != 0.0F || script.yaw_delta != 0.0F ||
+                    script.pitch_delta != 0.0F;
+                if (script_active)
+                {
+                    camera_input = script;
+                }
+                else
+                {
+                    camera_input.forward =
+                        static_cast<float>(
+                            input_snapshot.IsHeld(kDebugMoveForwardAction) ? 1 : 0) -
+                        static_cast<float>(
+                            input_snapshot.IsHeld(kDebugMoveBackwardAction) ? 1 : 0);
+                    camera_input.yaw_delta =
+                        (static_cast<float>(
+                             input_snapshot.IsHeld(kDebugMoveRightAction) ? 1 : 0) -
+                         static_cast<float>(
+                             input_snapshot.IsHeld(kDebugMoveLeftAction) ? 1 : 0)) *
+                        0.03F;
+                }
+            }
             auto refreshed_actor_draw_list = RefreshDiagnosticActorDrawList(
-                input_snapshot.pointer_position());
+                input_snapshot.pointer_position(), camera_input);
             if (!refreshed_actor_draw_list)
             {
                 (void)ContainOpeningMovieAudio();
@@ -4021,7 +4087,8 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
 }
 
 std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
-    const std::optional<runtime::PointerPositionQ16>& pointer_position)
+    const std::optional<runtime::PointerPositionQ16>& pointer_position,
+    const runtime::FreeFlyInput& camera_input)
 {
     if (simulation_ == nullptr)
     {
@@ -4152,6 +4219,22 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                 std::string{"diagnostic scene draw-list creation failed: invalid-state"});
         }
 
+        // Live free-fly camera: advance the pose from this frame's input and
+        // rebuild camera.world_to_view (keeping the fixed view_to_clip), so both
+        // the actor marker (below) and every environment mesh reproject from the
+        // new viewpoint. Accumulates across frames (the pose lives on the
+        // presentation). Inactive when free_fly_active is false (fixed camera).
+        const bool free_fly = diagnostic_scene_presentation_->free_fly_active;
+        if (free_fly)
+        {
+            diagnostic_scene_presentation_->free_fly_pose = runtime::AdvanceFreeFly(
+                diagnostic_scene_presentation_->free_fly_pose, camera_input,
+                diagnostic_scene_presentation_->free_fly_move_speed);
+            diagnostic_scene_presentation_->camera.world_to_view =
+                runtime::FreeFlyViewMatrix(
+                    diagnostic_scene_presentation_->free_fly_pose);
+        }
+
         const auto actor_object_to_clip = runtime::ComposeObjectToClip(
             diagnostic_scene_presentation_->camera,
             PlanProjectDiagnosticActorMeshTransform(*position));
@@ -4164,8 +4247,26 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
         std::array<runtime::RenderMeshDrawCommand,
             runtime::kMaximumRenderMeshDrawsPerFrame> mesh_commands{};
         std::size_t mesh_command_count = 0U;
-        for (const runtime::RenderMeshDrawCommand& command : environment_commands)
+        for (std::size_t env_index = 0U;
+             env_index < environment_commands.size(); ++env_index)
+        {
+            runtime::RenderMeshDrawCommand command =
+                environment_commands[env_index];
+            if (free_fly)
+            {
+                const auto reprojected = runtime::ComposeObjectToClip(
+                    diagnostic_scene_presentation_->camera,
+                    diagnostic_scene_presentation_
+                        ->environment_local_to_world[env_index]);
+                if (!reprojected)
+                {
+                    return std::unexpected(
+                        std::string{"diagnostic scene transform is non-finite"});
+                }
+                command.object_to_clip = *reprojected;
+            }
             mesh_commands[mesh_command_count++] = command;
+        }
         mesh_commands[mesh_command_count++] = runtime::RenderMeshDrawCommand{
             .mesh = diagnostic_scene_presentation_->actor_mesh_handle,
             .object_to_clip = *actor_object_to_clip,
