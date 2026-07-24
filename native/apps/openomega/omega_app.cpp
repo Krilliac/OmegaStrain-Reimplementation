@@ -6,6 +6,7 @@
 #include "screenshot_capture.h"
 
 #include "omega/gameplay/debug_locomotion.h"
+#include "omega/gameplay/character_controller.h"
 #include "omega/gameplay/minsk_mission.h"
 #include "omega/gameplay/objective_tracker.h"
 #include "omega/debug/subsystem_entry_break.h"
@@ -479,6 +480,78 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             return std::unexpected(error);
         }
         diagnostic_scene = std::move(*built_scene);
+
+        // OPENOMEGA_PLAYER_PROBE=1: run the native kinematic character controller
+        // against this level's REAL decoded COL geometry and log the trajectory --
+        // proving the controller (committed 59dbb89, unit-tested on synthetic
+        // triangles) settles on a real floor and stops at a real wall on actual
+        // disc data. Pure additive diagnostic: it does not move the on-screen actor
+        // or camera (the visible player needs a world-space player mesh through the
+        // free-fly camera -- the actor marker is a 2D screen blit -- which is the
+        // next integration slice). Off by default; no behavior change.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        const char* const player_probe_flag = std::getenv("OPENOMEGA_PLAYER_PROBE");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+        if (player_probe_flag != nullptr && player_probe_flag[0] == '1' &&
+            player_probe_flag[1] == '\0')
+        {
+            const std::vector<gameplay::CollisionTriangle> collision =
+                gameplay::BuildLevelCollisionTriangles(
+                    content_owner->level_content->spatial);
+            if (collision.empty())
+            {
+                log->Info("player", "player probe: level has no collision triangles");
+            }
+            else
+            {
+                float min_x = collision.front().a.x, max_x = min_x;
+                float min_y = collision.front().a.y, max_y = min_y;
+                float min_z = collision.front().a.z, max_z = min_z;
+                for (const gameplay::CollisionTriangle& triangle : collision)
+                {
+                    for (const asset::Float3IR& v :
+                         {triangle.a, triangle.b, triangle.c})
+                    {
+                        min_x = std::min(min_x, v.x); max_x = std::max(max_x, v.x);
+                        min_y = std::min(min_y, v.y); max_y = std::max(max_y, v.y);
+                        min_z = std::min(min_z, v.z); max_z = std::max(max_z, v.z);
+                    }
+                }
+                const gameplay::CharacterControllerParams params{};
+                constexpr float dt = 1.0F / 60.0F;
+                // Seed above the level centre and let gravity settle it onto a floor.
+                gameplay::CharacterState state{
+                    .position = asset::Float3IR{.x = (min_x + max_x) * 0.5F,
+                        .y = (min_y + max_y) * 0.5F, .z = max_z + 20.0F}};
+                const std::span<const gameplay::CollisionTriangle> tri_span(collision);
+                for (int step = 0; step < 240; ++step)
+                    state = gameplay::StepCharacter(
+                        state, gameplay::CharacterInput{}, params, tri_span, dt);
+                const float settled_z = state.position.z;
+                const bool settled = state.grounded;
+                // Then drive forward (+X) and see whether a wall clamps the motion.
+                const float pre_x = state.position.x;
+                for (int step = 0; step < 240; ++step)
+                    state = gameplay::StepCharacter(state,
+                        gameplay::CharacterInput{.move = asset::Float3IR{.x = 1.0F}},
+                        params, tri_span, dt);
+                const float travelled_x = state.position.x - pre_x;
+                const float unobstructed_x =
+                    params.move_speed * dt * 240.0F; // if nothing blocked it
+                log->Info("player",
+                    "player probe: tris=" + std::to_string(collision.size()) +
+                        " settled=" + (settled ? "yes" : "no") +
+                        " floor_z=" + std::to_string(settled_z) +
+                        " forward_travel=" + std::to_string(travelled_x) +
+                        " (unobstructed=" + std::to_string(unobstructed_x) +
+                        ") grounded_after=" + (state.grounded ? "yes" : "no"));
+            }
+        }
 
         // Prefer the real VUM VISUAL geometry over the collision hull when it decoded. The decoded
         // per-cell meshes are re-expressed as a LevelSpatialIR and fed through the SAME scene

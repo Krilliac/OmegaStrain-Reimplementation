@@ -170,6 +170,34 @@ void TestNonFinitePassThrough()
               after.velocity == state.velocity && after.grounded == state.grounded,
         "a non-finite state passes through unchanged");
 }
+void TestBuildLevelCollisionTriangles()
+{
+    omega::asset::LevelSpatialIR spatial;
+    // Cell 0: one valid triangle over 3 vertices.
+    omega::asset::SpatialMeshIR cell0;
+    cell0.vertices = {Float3IR{0.0F, 0.0F, 0.0F}, Float3IR{1.0F, 0.0F, 0.0F},
+                      Float3IR{0.0F, 1.0F, 0.0F}};
+    cell0.triangles = {omega::asset::SpatialTriangleIR{.vertex_indices = {0U, 1U, 2U}}};
+    // Cell 1: one valid + one with an out-of-range index (must be skipped).
+    omega::asset::SpatialMeshIR cell1;
+    cell1.vertices = {Float3IR{5.0F, 0.0F, 0.0F}, Float3IR{6.0F, 0.0F, 0.0F},
+                      Float3IR{5.0F, 1.0F, 0.0F}};
+    cell1.triangles = {
+        omega::asset::SpatialTriangleIR{.vertex_indices = {0U, 1U, 2U}},
+        omega::asset::SpatialTriangleIR{.vertex_indices = {0U, 1U, 99U}},
+    };
+    spatial.terrain_cells = {cell0, cell1};
+
+    const auto triangles = omega::gameplay::BuildLevelCollisionTriangles(spatial);
+    Check(triangles.size() == 2U,
+        "level collision build keeps valid triangles and skips out-of-range ones");
+    Check(!triangles.empty() && triangles[0].a == cell0.vertices[0] &&
+              triangles[0].b == cell0.vertices[1] &&
+              triangles[0].c == cell0.vertices[2],
+        "level collision triangle resolves cell vertices by index");
+    Check(triangles.size() > 1U && triangles[1].a == cell1.vertices[0],
+        "level collision spans multiple cells");
+}
 } // namespace
 
 int main()
@@ -180,6 +208,7 @@ int main()
     TestSlidesAlongWall();
     TestAirborneNotGrounded();
     TestNonFinitePassThrough();
+    TestBuildLevelCollisionTriangles();
 
     if (failures != 0)
     {

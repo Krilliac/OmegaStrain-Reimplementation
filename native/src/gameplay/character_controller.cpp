@@ -193,4 +193,28 @@ CharacterState StepCharacter(
     return CharacterState{
         .position = position, .velocity = velocity, .grounded = grounded};
 }
+
+std::vector<CollisionTriangle> BuildLevelCollisionTriangles(
+    const asset::LevelSpatialIR& spatial)
+{
+    std::vector<CollisionTriangle> triangles;
+    for (const asset::SpatialMeshIR& cell : spatial.terrain_cells)
+    {
+        const std::size_t vertex_count = cell.vertices.size();
+        for (const asset::SpatialTriangleIR& triangle : cell.triangles)
+        {
+            const std::uint32_t i0 = triangle.vertex_indices[0];
+            const std::uint32_t i1 = triangle.vertex_indices[1];
+            const std::uint32_t i2 = triangle.vertex_indices[2];
+            if (i0 >= vertex_count || i1 >= vertex_count || i2 >= vertex_count)
+                continue; // fail-soft: skip a triangle with an out-of-range index
+            triangles.push_back(CollisionTriangle{
+                .a = cell.vertices[i0],
+                .b = cell.vertices[i1],
+                .c = cell.vertices[i2],
+            });
+        }
+    }
+    return triangles;
+}
 } // namespace omega::gameplay

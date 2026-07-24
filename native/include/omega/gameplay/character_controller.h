@@ -1,9 +1,11 @@
 #pragma once
 
 #include "omega/asset/geometry_ir.h"
+#include "omega/asset/level_spatial_ir.h"
 
 #include <cstdint>
 #include <span>
+#include <vector>
 
 namespace omega::gameplay
 {
@@ -84,4 +86,14 @@ struct CharacterControllerParams
     CharacterState state, const CharacterInput& input,
     const CharacterControllerParams& params,
     std::span<const CollisionTriangle> triangles, float dt) noexcept;
+
+// [any thread; reentrant] Flattens a decoded level collision mesh
+// (LevelSpatialIR: the COL terrain cells the renderer already uses) into the
+// world-space CollisionTriangle list StepCharacter collides against. Each cell's
+// SpatialTriangleIR indices are resolved against that cell's vertices; a triangle
+// with any out-of-range index is skipped (fail-soft) rather than aborting. The
+// output is in the level's world coordinate space. Allocation may throw
+// std::bad_alloc; no other failure mode.
+[[nodiscard]] std::vector<CollisionTriangle> BuildLevelCollisionTriangles(
+    const asset::LevelSpatialIR& spatial);
 } // namespace omega::gameplay
