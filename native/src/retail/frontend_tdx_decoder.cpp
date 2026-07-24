@@ -687,4 +687,37 @@ asset::DecodeResult<DecodedFrontEndTdx> DecodeTdxScopedFrontEnd(
     return DecodeTdxFrontEndImpl(
         bytes, limits, FrontEndTdxDependencyScope::BoundExternalVisual);
 }
+
+std::optional<Rgba8Image> ExpandIndexedImageToRgba8(
+    const asset::IndexedImageIR& image)
+{
+    const std::uint64_t pixel_count =
+        static_cast<std::uint64_t>(image.width) * image.height;
+    if (pixel_count == 0U || image.palette.empty() ||
+        image.indices.size() < pixel_count)
+        return std::nullopt;
+
+    Rgba8Image out{.width = image.width, .height = image.height, .pixels = {}};
+    try
+    {
+        out.pixels.resize(static_cast<std::size_t>(pixel_count) * 4U);
+    }
+    catch (const std::bad_alloc&)
+    {
+        return std::nullopt;
+    }
+    for (std::uint64_t i = 0U; i < pixel_count; ++i)
+    {
+        std::size_t index = image.indices[static_cast<std::size_t>(i)];
+        if (index >= image.palette.size())
+            index = 0U;
+        const asset::RawGsRgba8& entry = image.palette[index];
+        const std::size_t offset = static_cast<std::size_t>(i) * 4U;
+        out.pixels[offset + 0U] = entry.red;
+        out.pixels[offset + 1U] = entry.green;
+        out.pixels[offset + 2U] = entry.blue;
+        out.pixels[offset + 3U] = GsAlphaToRgba8(entry.alpha);
+    }
+    return out;
+}
 } // namespace omega::retail

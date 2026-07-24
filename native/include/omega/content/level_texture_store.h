@@ -166,6 +166,15 @@ public:
     [[nodiscard]] std::expected<LoadedLevelTexture, LevelTextureStoreError> Load(
         const GameDataService& game_data, const LevelTextureHandle& handle) const;
 
+    // [any worker thread after Open(); reentrant and thread-safe] Returns the raw,
+    // undecoded terminal TDX member bytes for a handle -- the same bytes Load
+    // decodes, before storage decode -- for callers that must run a separate,
+    // independently validated display-pixel expansion the store deliberately
+    // omits. Same handle/service validation and resolve budget as Load.
+    [[nodiscard]] std::expected<std::vector<std::byte>, LevelTextureStoreError>
+    LoadRawBytes(
+        const GameDataService& game_data, const LevelTextureHandle& handle) const;
+
 private:
     struct Impl;
     explicit LevelTextureStore(std::unique_ptr<Impl> impl) noexcept;

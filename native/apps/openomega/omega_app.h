@@ -299,7 +299,9 @@ private:
     // later upload or draw-list validation fails.
     [[nodiscard]] static std::expected<std::unique_ptr<DiagnosticScenePresentation>,
         std::string>
-    BuildDiagnosticScenePresentation(SdlGpuHost& host, const asset::SceneIR& scene);
+    BuildDiagnosticScenePresentation(SdlGpuHost& host, const asset::SceneIR& scene,
+        const content::LevelTextureStore* level_texture_store,
+        const content::GameDataService* game_data);
     // [game/main/render thread; no concurrent use] Clears commands before releasing exact resident
     // generations in reverse upload order. The host remains the final cleanup authority.
     void ReleaseDiagnosticScenePresentation() noexcept;

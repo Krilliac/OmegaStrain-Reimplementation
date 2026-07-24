@@ -8,6 +8,7 @@
 #include "omega/gameplay/debug_locomotion.h"
 #include "omega/debug/subsystem_entry_break.h"
 #include "omega/frontend_presentation/retail_front_end_frame.h"
+#include "omega/retail/frontend_tdx_decoder.h"
 #include "omega/runtime/diagnostic_actor_scene.h"
 #include "omega/runtime/level_texture_topology_preview.h"
 #include "omega/runtime/scene_transform.h"
@@ -101,7 +102,9 @@ private:
 
 std::expected<std::unique_ptr<OmegaApp::DiagnosticScenePresentation>, std::string>
 OmegaApp::BuildDiagnosticScenePresentation(
-    SdlGpuHost& host, const asset::SceneIR& scene)
+    SdlGpuHost& host, const asset::SceneIR& scene,
+    const content::LevelTextureStore* const level_texture_store,
+    const content::GameDataService* const game_data)
 {
     static_assert(sizeof(std::unique_ptr<DiagnosticScenePresentation>) <
                   sizeof(DiagnosticScenePresentation));
@@ -183,13 +186,53 @@ OmegaApp::BuildDiagnosticScenePresentation(
         presentation->mesh_handles[presentation->mesh_count++] = *uploaded;
     }
 
-    // Gap-A textured level slice: upload one procedural "dev grid" albedo texture
-    // and bind it to every environment mesh. The mesh pixel shader triplanar-maps
-    // it from world position, so no per-vertex UVs are needed here. This is a
-    // documented STAND-IN texture that proves the in-house textured mesh pipeline
-    // end to end; binding the real per-material level TDX textures
-    // (LevelTextureStore) with real per-vertex UVs (VUM visual decode, Path B) is
-    // the fidelity follow-up. Fail-soft: an upload miss leaves the level flat.
+    // Textured level slice: bind ONE real level TDX albedo texture, decoded to
+    // RGBA8, to every environment mesh. The mesh pixel shader triplanar-maps it
+    // from world position, so no per-vertex UVs are needed here (real per-vertex
+    // UVs are the VUM visual decode, Path B; per-material texture binding is a
+    // separate RE-blocked follow-up). The level texture store deliberately omits
+    // display expansion, so we pull the raw member bytes and run the front-end
+    // TDX decoder + indexed->RGBA8 expansion. Fail-soft: fall back to a procedural
+    // dev grid if no level texture is available or decodable.
+    bool bound_real_level_texture = false;
+    if (level_texture_store != nullptr && game_data != nullptr)
+    {
+        const content::LevelTextureStore& store = *level_texture_store;
+        const content::GameDataService& game_data_service = *game_data;
+        const std::size_t store_size = store.size();
+        const std::size_t attempt_limit = store_size < 16U ? store_size : 16U;
+        for (std::size_t attempt = 0U;
+             attempt < attempt_limit && !bound_real_level_texture; ++attempt)
+        {
+            const auto handle = store.HandleAt(attempt);
+            if (!handle)
+                continue;
+            const auto raw_bytes = store.LoadRawBytes(game_data_service, *handle);
+            if (!raw_bytes)
+                continue;
+            auto decoded = retail::DecodeTdxFrontEnd(*raw_bytes);
+            if (!decoded)
+                decoded = retail::DecodeTdxScopedFrontEnd(*raw_bytes);
+            if (!decoded)
+                continue;
+            const auto rgba = retail::ExpandIndexedImageToRgba8(decoded->image);
+            if (!rgba)
+                continue;
+            const auto uploaded_texture =
+                host.UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+                    .width = rgba->width,
+                    .height = rgba->height,
+                    .pixels =
+                        std::as_bytes(std::span<const std::uint8_t>(rgba->pixels)),
+                });
+            if (uploaded_texture)
+            {
+                presentation->environment_texture = *uploaded_texture;
+                bound_real_level_texture = true;
+            }
+        }
+    }
+    if (!bound_real_level_texture)
     {
         constexpr std::uint32_t kTextureExtent = 128U;
         std::vector<std::uint8_t> pixels(
@@ -1335,7 +1378,11 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     if (content_owner->level_content)
     {
         auto created_scene_presentation =
-            BuildDiagnosticScenePresentation(*host, diagnostic_scene);
+            BuildDiagnosticScenePresentation(*host, diagnostic_scene,
+                content_owner->level_texture_store
+                    ? &*content_owner->level_texture_store
+                    : nullptr,
+                content_owner->game_data ? &*content_owner->game_data : nullptr);
         if (!created_scene_presentation)
         {
             log->Error("startup", created_scene_presentation.error());

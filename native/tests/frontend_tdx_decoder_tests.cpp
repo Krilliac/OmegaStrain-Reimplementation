@@ -858,6 +858,51 @@ void CheckStrictRejections()
                omega::asset::DecodeErrorCode::UnsupportedVariant,
                "frontend TDX rejects an unsupported block pointer layout");
 }
+void CheckIndexedExpansion()
+{
+    omega::asset::IndexedImageIR image;
+    image.width = 2U;
+    image.height = 1U;
+    image.source_encoding = omega::asset::IndexedImageEncoding::Indexed8;
+    image.indices = {0U, 1U};
+    image.palette = {
+        omega::asset::RawGsRgba8{.red = 10U, .green = 20U, .blue = 30U, .alpha = 0x80U},
+        omega::asset::RawGsRgba8{.red = 200U, .green = 100U, .blue = 50U, .alpha = 0x40U},
+    };
+    const auto expanded = omega::retail::ExpandIndexedImageToRgba8(image);
+    Check(expanded.has_value() && expanded->width == 2U && expanded->height == 1U &&
+              expanded->pixels.size() == 8U,
+          "indexed expansion produces a full RGBA8 image");
+    if (expanded)
+    {
+        Check(expanded->pixels[0] == 10U && expanded->pixels[1] == 20U &&
+                  expanded->pixels[2] == 30U && expanded->pixels[3] == 255U,
+              "indexed expansion maps palette[0] with GS-opaque alpha (0x80 -> 255)");
+        Check(expanded->pixels[4] == 200U && expanded->pixels[5] == 100U &&
+                  expanded->pixels[6] == 50U &&
+                  expanded->pixels[7] == omega::retail::GsAlphaToRgba8(0x40U),
+              "indexed expansion maps palette[1] with scaled GS alpha");
+    }
+
+    omega::asset::IndexedImageIR out_of_range = image;
+    out_of_range.indices = {9U, 0U};
+    const auto clamped = omega::retail::ExpandIndexedImageToRgba8(out_of_range);
+    Check(clamped.has_value() && clamped->pixels[0] == 10U,
+          "indexed expansion clamps an out-of-range index to palette entry 0");
+
+    omega::asset::IndexedImageIR empty_palette = image;
+    empty_palette.palette.clear();
+    Check(!omega::retail::ExpandIndexedImageToRgba8(empty_palette).has_value(),
+          "indexed expansion rejects an empty palette");
+    omega::asset::IndexedImageIR too_few = image;
+    too_few.indices = {0U};
+    Check(!omega::retail::ExpandIndexedImageToRgba8(too_few).has_value(),
+          "indexed expansion rejects too few indices for the declared extent");
+    omega::asset::IndexedImageIR zero_extent = image;
+    zero_extent.width = 0U;
+    Check(!omega::retail::ExpandIndexedImageToRgba8(zero_extent).has_value(),
+          "indexed expansion rejects a zero extent");
+}
 } // namespace
 
 int main()
@@ -866,6 +911,7 @@ int main()
     CheckEndToEnd();
     CheckBudgets();
     CheckStrictRejections();
+    CheckIndexedExpansion();
     if (failures == 0)
         std::cout << "omega_frontend_tdx_decoder_tests: all checks passed\n";
     return failures == 0 ? 0 : 1;

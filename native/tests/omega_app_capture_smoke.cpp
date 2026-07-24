@@ -108,7 +108,8 @@ struct OmegaAppTestAccess final
     BuildDiagnosticScenePresentation(
         SdlGpuHost& host, const asset::SceneIR& scene)
     {
-        auto built = OmegaApp::BuildDiagnosticScenePresentation(host, scene);
+        auto built = OmegaApp::BuildDiagnosticScenePresentation(
+            host, scene, nullptr, nullptr);
         if (!built)
             return std::unexpected(std::move(built.error()));
         const auto& presentation = **built;

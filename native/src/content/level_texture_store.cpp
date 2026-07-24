@@ -686,6 +686,56 @@ std::expected<LoadedLevelTexture, LevelTextureStoreError> LevelTextureStore::Loa
     };
 }
 
+std::expected<std::vector<std::byte>, LevelTextureStoreError>
+LevelTextureStore::LoadRawBytes(
+    const GameDataService& game_data, const LevelTextureHandle& handle) const
+{
+    if (!impl_)
+        return std::unexpected(Error(LevelTextureStoreErrorCode::InvalidHandle,
+            "level texture store is unavailable"));
+
+    const auto handle_identity = handle.store_identity_.lock();
+    if (!handle_identity || handle_identity != impl_->store_identity ||
+        handle.index_ >= impl_->locators.size())
+        return std::unexpected(Error(LevelTextureStoreErrorCode::InvalidHandle,
+            "level texture handle does not belong to this store"));
+
+    const auto expected_source = impl_->source_identity.lock();
+    const GameDataService::SourceBinding actual_binding = game_data.source_binding();
+    const auto actual_source = actual_binding.identity.lock();
+    if (!expected_source || !actual_source || expected_source != actual_source)
+        return std::unexpected(Error(LevelTextureStoreErrorCode::ForeignService,
+            "level texture store belongs to a different game-data service"));
+
+    const GameDataService::SourceBinding expected_binding{
+        .identity = impl_->source_identity,
+    };
+    auto resolved = game_data.ResolveSourceLocator(
+        expected_binding, impl_->locators[handle.index_], impl_->limits);
+    if (!resolved)
+        return std::unexpected(MapGameDataError(
+            resolved.error(), "unable to resolve level texture source"));
+
+    OperationBudget budget(impl_->limits);
+    auto resolver_scratch = budget.ObserveScratch(resolved->peak_scratch_bytes);
+    if (!resolver_scratch)
+        return std::unexpected(resolver_scratch.error());
+    auto ancestor_input = budget.ConsumeInput(resolved->ancestor_input_bytes);
+    if (!ancestor_input)
+        return std::unexpected(ancestor_input.error());
+    auto ancestor_items = budget.ConsumeItems(resolved->ancestor_directory_items);
+    if (!ancestor_items)
+        return std::unexpected(ancestor_items.error());
+    auto depth = budget.ObserveDepth(resolved->archive_depth);
+    if (!depth)
+        return std::unexpected(depth.error());
+    auto terminal_input = budget.ConsumeInput(resolved->terminal_bytes.size());
+    if (!terminal_input)
+        return std::unexpected(terminal_input.error());
+
+    return std::move(resolved->terminal_bytes);
+}
+
 std::size_t LevelTextureStore::size() const noexcept
 {
     return impl_ ? impl_->locators.size() : 0;

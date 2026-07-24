@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace omega::retail
 {
@@ -87,6 +88,25 @@ struct DecodedFrontEndTdx
         return 255U;
     return static_cast<std::uint8_t>((static_cast<std::uint32_t>(raw_alpha) * 255U + 64U) / 128U);
 }
+
+// Owned display-ready RGBA8 image: tightly packed, 4 bytes/pixel, row-major,
+// width*height*4 bytes.
+struct Rgba8Image
+{
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::vector<std::uint8_t> pixels;
+
+    bool operator==(const Rgba8Image&) const = default;
+};
+
+// [any worker thread; reentrant] Expands an indexed image (one index byte per
+// pixel + a palette) into display-ready RGBA8 by palette lookup, mapping retail
+// GS palette alpha (0x80 = opaque) through GsAlphaToRgba8. Returns nullopt when
+// the data is inconsistent (zero extent, empty palette, or fewer indices than
+// width*height); an out-of-range index clamps to palette entry 0 (fail-soft).
+[[nodiscard]] std::optional<Rgba8Image> ExpandIndexedImageToRgba8(
+    const asset::IndexedImageIR& image);
 
 // [any worker thread; reentrant] Strictly decodes the observed one-block
 // frontend transfer-0 TDX family. Unsupported packet layouts fail closed. The
