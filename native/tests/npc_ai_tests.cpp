@@ -18,9 +18,15 @@ using omega::gameplay::NpcAwareness;
 using omega::gameplay::NpcPatrolPlan;
 using omega::gameplay::NpcSeesPlayer;
 using omega::gameplay::NpcVisionParams;
+using omega::gameplay::NpcAwarenessParams;
+using omega::gameplay::NpcAwarenessState;
+using omega::gameplay::NpcPursuing;
+using omega::gameplay::NpcState;
 using omega::gameplay::PlanNpcPatrol;
+using omega::gameplay::PlanNpcPursuit;
 using omega::gameplay::SegmentIntersectsTriangle;
 using omega::gameplay::StepNpcAwareness;
+using omega::gameplay::StepNpcAwarenessLoop;
 
 int failures = 0;
 
@@ -127,6 +133,69 @@ int main()
         Check(std::abs(empty.move.x) < 1e-6F && std::abs(empty.move.y) < 1e-6F &&
                   empty.facing == def,
             "empty waypoints -> zero move, facing falls back to default");
+    }
+
+    // --- Full stealth loop: Patrol -> Alerted -> Chasing -> Searching -> Patrol ---
+    {
+        const NpcAwarenessParams params{.alerted_seconds = 0.5F,
+            .lose_sight_seconds = 2.0F, .search_seconds = 4.0F};
+        const Float3IR player{.x = 100.0F, .y = 0.0F, .z = 0.0F};
+        constexpr float dt = 0.5F;
+
+        // Patrol -> Alerted on first sight, records last-seen.
+        NpcAwarenessState s{};
+        s = StepNpcAwarenessLoop(s, true, player, params, dt);
+        Check(s.state == NpcState::Alerted && s.has_last_seen &&
+                  s.last_seen_player_pos == player,
+            "Patrol + sees -> Alerted, last-seen recorded");
+
+        // Alerted -> Chasing after alerted_seconds of continued sight.
+        s = StepNpcAwarenessLoop(s, true, player, params, dt); // timer 0.5 >= 0.5
+        Check(s.state == NpcState::Chasing, "Alerted -> Chasing after reaction delay");
+        Check(NpcPursuing(s.state), "Chasing pursues last-seen");
+
+        // Chasing: lose sight; last-seen frozen; -> Searching after lose_sight_seconds.
+        const Float3IR moved{.x = 140.0F, .y = 0.0F, .z = 0.0F};
+        s = StepNpcAwarenessLoop(s, false, moved, params, dt); // timer 0.5
+        Check(s.state == NpcState::Chasing &&
+                  s.last_seen_player_pos == player,
+            "Chasing without sight holds, last-seen frozen (not updated while unseen)");
+        s = StepNpcAwarenessLoop(s, false, moved, params, dt); // 1.0
+        s = StepNpcAwarenessLoop(s, false, moved, params, dt); // 1.5
+        s = StepNpcAwarenessLoop(s, false, moved, params, dt); // 2.0 >= 2.0
+        Check(s.state == NpcState::Searching, "Chasing -> Searching after losing sight");
+        Check(NpcPursuing(s.state), "Searching still pursues last-seen");
+
+        // Searching -> Chasing on re-sight (updates last-seen).
+        NpcAwarenessState resight = StepNpcAwarenessLoop(s, true, moved, params, dt);
+        Check(resight.state == NpcState::Chasing &&
+                  resight.last_seen_player_pos == moved,
+            "Searching + re-sight -> Chasing, last-seen updated");
+
+        // Searching -> Patrol after search_seconds without sight.
+        NpcAwarenessState give_up = s; // Searching, timer 0
+        for (int i = 0; i < 8 && give_up.state == NpcState::Searching; ++i)
+            give_up = StepNpcAwarenessLoop(give_up, false, moved, params, dt);
+        Check(give_up.state == NpcState::Patrol,
+            "Searching -> Patrol after the search times out");
+    }
+
+    // --- Pursuit planning ---
+    {
+        const Float3IR def{.x = 1.0F, .y = 0.0F, .z = 0.0F};
+        const NpcPatrolPlan chase = PlanNpcPursuit(
+            Float3IR{}, Float3IR{.x = 0.0F, .y = 10.0F, .z = 5.0F}, 1.0F, def);
+        Check(std::abs(chase.move.x) < 1e-4F && std::abs(chase.move.y - 1.0F) < 1e-4F &&
+                  std::abs(chase.move.z) < 1e-6F,
+            "pursuit moves horizontally toward the target, ignoring z");
+        const NpcPatrolPlan reached = PlanNpcPursuit(
+            Float3IR{.x = 0.0F, .y = 10.0F, .z = 0.0F},
+            Float3IR{.x = 0.0F, .y = 10.0F, .z = 40.0F}, 1.0F, def);
+        Check(std::abs(reached.move.x) < 1e-6F && std::abs(reached.move.y) < 1e-6F &&
+                  reached.facing == def,
+            "within arrive radius (horizontally) -> zero move, default facing");
+        Check(!NpcPursuing(NpcState::Patrol) && NpcPursuing(NpcState::Chasing),
+            "NpcPursuing: Patrol no, Chasing yes");
     }
 
     if (failures != 0)

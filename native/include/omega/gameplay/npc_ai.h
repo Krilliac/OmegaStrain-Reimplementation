@@ -75,6 +75,64 @@ struct NpcPatrolPlan
 [[nodiscard]] NpcAwareness StepNpcAwareness(
     NpcAwareness prev, bool sees_player) noexcept;
 
+// The full stealth loop state (the .SO Awareness -> BlowCover -> GeneralAlert
+// model with de-escalation): Patrol -> Alerted (just spotted, brief reaction)
+// -> Chasing (pursue the player's last-seen position while sight is fresh) ->
+// Searching (lost sight; hunt around last-seen) -> Patrol (search timed out).
+enum class NpcState : std::uint8_t
+{
+    Patrol = 0U,
+    Alerted = 1U,
+    Chasing = 2U,
+    Searching = 3U,
+};
+
+// Fixed-time thresholds for the loop transitions.
+struct NpcAwarenessParams
+{
+    float alerted_seconds = 0.5F;    // Alerted -> Chasing (reaction delay)
+    float lose_sight_seconds = 2.0F; // Chasing (no sight) -> Searching
+    float search_seconds = 4.0F;     // Searching -> Patrol (give up)
+
+    [[nodiscard]] bool operator==(const NpcAwarenessParams&) const = default;
+};
+
+// Retained per-NPC awareness. `last_seen_player_pos` is the pursuit target while
+// Chasing/Searching (updated only on the steps the player is actually seen).
+// `timer` is the elapsed time in the current phase (reset on each transition).
+struct NpcAwarenessState
+{
+    NpcState state = NpcState::Patrol;
+    asset::Float3IR last_seen_player_pos{};
+    bool has_last_seen = false;
+    float timer = 0.0F;
+
+    [[nodiscard]] bool operator==(const NpcAwarenessState&) const = default;
+};
+
+// [any thread; reentrant] Advances the stealth loop by `dt`. Records
+// `last_seen_player_pos` whenever `sees_player`. Transitions: Patrol->Alerted on
+// first sight; Alerted->Chasing after `alerted_seconds` of continued sight (or
+// immediately if sight is lost during the reaction); Chasing stays while seen and
+// ->Searching after `lose_sight_seconds` without sight; Searching->Chasing on
+// re-sight, or ->Patrol after `search_seconds`. Pure; no allocation.
+[[nodiscard]] NpcAwarenessState StepNpcAwarenessLoop(
+    NpcAwarenessState prev, bool sees_player,
+    const asset::Float3IR& player_pos, const NpcAwarenessParams& params,
+    float dt) noexcept;
+
+// [any thread; reentrant] True while the NPC should pursue its last-seen target
+// (Chasing or Searching) rather than follow its patrol route.
+[[nodiscard]] bool NpcPursuing(NpcState state) noexcept;
+
+// [any thread; reentrant] Plans one pursuit step toward `target`: the horizontal
+// unit move (and matching facing), ignoring the up/z component so a z-climb
+// doesn't stall. Within `arrive_radius` horizontally (or non-finite) yields a
+// zero move with `default_facing`. No allocation.
+[[nodiscard]] NpcPatrolPlan PlanNpcPursuit(
+    const asset::Float3IR& pos, const asset::Float3IR& target,
+    float arrive_radius, const asset::Float3IR& default_facing) noexcept;
+
 // [any thread; reentrant] Plans one patrol step toward `waypoints[current]`:
 // returns the horizontal unit move toward it (and the matching facing), advancing
 // to the next waypoint (wrapping) when within `arrive_radius` horizontally.

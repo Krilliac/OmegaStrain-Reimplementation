@@ -123,6 +123,103 @@ NpcAwareness StepNpcAwareness(const NpcAwareness prev, const bool sees_player) n
     return sees_player ? NpcAwareness::Alerted : NpcAwareness::Patrol;
 }
 
+NpcAwarenessState StepNpcAwarenessLoop(NpcAwarenessState prev,
+    const bool sees_player, const asset::Float3IR& player_pos,
+    const NpcAwarenessParams& params, const float dt) noexcept
+{
+    NpcAwarenessState next = prev;
+    const float step = std::isfinite(dt) && dt > 0.0F ? dt : 0.0F;
+    if (sees_player && Finite(player_pos))
+    {
+        next.last_seen_player_pos = player_pos;
+        next.has_last_seen = true;
+    }
+
+    switch (prev.state)
+    {
+    case NpcState::Patrol:
+        if (sees_player)
+        {
+            next.state = NpcState::Alerted;
+            next.timer = 0.0F;
+        }
+        break;
+    case NpcState::Alerted:
+        if (!sees_player)
+        {
+            // Lost the target during the reaction: pursue its last-seen spot.
+            next.state = NpcState::Chasing;
+            next.timer = 0.0F;
+        }
+        else
+        {
+            next.timer = prev.timer + step;
+            if (next.timer >= params.alerted_seconds)
+            {
+                next.state = NpcState::Chasing;
+                next.timer = 0.0F;
+            }
+        }
+        break;
+    case NpcState::Chasing:
+        if (sees_player)
+        {
+            next.timer = 0.0F; // sight fresh; keep chasing the live position
+        }
+        else
+        {
+            next.timer = prev.timer + step;
+            if (next.timer >= params.lose_sight_seconds)
+            {
+                next.state = NpcState::Searching;
+                next.timer = 0.0F;
+            }
+        }
+        break;
+    case NpcState::Searching:
+        if (sees_player)
+        {
+            next.state = NpcState::Chasing;
+            next.timer = 0.0F;
+        }
+        else
+        {
+            next.timer = prev.timer + step;
+            if (next.timer >= params.search_seconds)
+            {
+                next.state = NpcState::Patrol;
+                next.timer = 0.0F;
+            }
+        }
+        break;
+    }
+    return next;
+}
+
+bool NpcPursuing(const NpcState state) noexcept
+{
+    return state == NpcState::Chasing || state == NpcState::Searching;
+}
+
+NpcPatrolPlan PlanNpcPursuit(const asset::Float3IR& pos,
+    const asset::Float3IR& target, const float arrive_radius,
+    const asset::Float3IR& default_facing) noexcept
+{
+    NpcPatrolPlan plan{.facing = default_facing, .waypoint = 0U};
+    if (!Finite(pos) || !Finite(target))
+        return plan;
+    const asset::Float3IR delta{
+        .x = target.x - pos.x, .y = target.y - pos.y, .z = 0.0F};
+    const float len = std::sqrt(delta.x * delta.x + delta.y * delta.y);
+    constexpr float kEpsilon = 1e-4F;
+    if (len <= arrive_radius || len <= kEpsilon)
+        return plan;
+    const asset::Float3IR unit{.x = delta.x / len, .y = delta.y / len, .z = 0.0F};
+    plan.move = unit;
+    plan.facing = unit;
+    return plan;
+}
+
 NpcPatrolPlan PlanNpcPatrol(const asset::Float3IR& pos,
     std::span<const asset::Float3IR> waypoints, std::uint32_t current,
     const float arrive_radius, const asset::Float3IR& default_facing) noexcept

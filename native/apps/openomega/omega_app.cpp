@@ -2045,33 +2045,37 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             if (npc_flag != nullptr && npc_flag[0] == '1' && npc_flag[1] == '\0')
             {
                 diagnostic_scene_presentation->npc_active = true;
-                diagnostic_scene_presentation->npc_params = player_seed_params;
-                // On the player's own +Y corridor (which is walkable, so the
-                // line-of-sight back down it to the approaching player is clear),
-                // a short way ahead. Patrols a tiny +/-Y segment there, facing the
-                // corridor. Range is tuned so the player starts just out of range
-                // and walks into it -- a clean Patrol -> Alerted transition.
-                diagnostic_scene_presentation->npc_state = gameplay::CharacterState{
-                    .position = asset::Float3IR{
-                        .x = spawn.x, .y = spawn.y + 50.0F, .z = spawn.z}};
-                diagnostic_scene_presentation->npc_waypoints = {
-                    asset::Float3IR{
-                        .x = spawn.x, .y = spawn.y + 55.0F, .z = spawn.z},
-                    asset::Float3IR{
-                        .x = spawn.x, .y = spawn.y + 45.0F, .z = spawn.z}};
-                // Head toward the nearer (+45) waypoint first, facing -Y down the
-                // corridor toward the approaching player.
-                diagnostic_scene_presentation->npc_waypoint = 1U;
-                diagnostic_scene_presentation->npc_facing =
-                    asset::Float3IR{.x = 0.0F, .y = -1.0F, .z = 0.0F};
-                // Short range so the player starts out of range (a clear blue
-                // Patrol frame) and only alerts (red) when it walks up close.
-                diagnostic_scene_presentation->npc_vision =
-                    gameplay::NpcVisionParams{.range = 22.0F,
-                        .cos_half_angle = 0.5F, .eye_height = 8.0F};
+                // A few project-placed guards spaced along the player's own +Y
+                // corridor (walkable, so LOS back down it to the approaching
+                // player is clear). Each patrols a tiny +/-Y segment facing -Y
+                // (down the corridor) and runs the full stealth loop; the player
+                // walking +Y meets them in sequence. Range is short so each
+                // starts out of range and only reacts when the player closes.
+                // Project-placed: authentic spawns / nav Nodes live in the
+                // undecoded POP GOB: section (a later decode slice), not the .SO.
+                for (const float ahead : {50.0F, 90.0F, 130.0F})
+                {
+                    DiagnosticScenePresentation::NpcRuntime npc;
+                    npc.params = player_seed_params;
+                    npc.state = gameplay::CharacterState{
+                        .position = asset::Float3IR{
+                            .x = spawn.x, .y = spawn.y + ahead, .z = spawn.z}};
+                    npc.waypoints = {
+                        asset::Float3IR{
+                            .x = spawn.x, .y = spawn.y + ahead + 5.0F, .z = spawn.z},
+                        asset::Float3IR{
+                            .x = spawn.x, .y = spawn.y + ahead - 5.0F, .z = spawn.z}};
+                    npc.waypoint = 1U;
+                    npc.facing = asset::Float3IR{.x = 0.0F, .y = -1.0F, .z = 0.0F};
+                    npc.vision = gameplay::NpcVisionParams{
+                        .range = 22.0F, .cos_half_angle = 0.5F, .eye_height = 8.0F};
+                    diagnostic_scene_presentation->npcs.push_back(std::move(npc));
+                }
                 log->Info("npc",
-                    "enemy NPC placed (project-placed) patrolling the +Y "
-                    "corridor ahead of the player");
+                    "enemy NPCs placed (project-placed): " +
+                        std::to_string(
+                            diagnostic_scene_presentation->npcs.size()) +
+                        " guards patrolling the +Y corridor");
             }
         }
     }
@@ -4839,43 +4843,75 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                     ") grounded=" + (pp.grounded ? "yes" : "no") +
                     " nearby=" + std::to_string(nearby.size()));
 
-            // Enemy NPC: patrol its route (kinematic, vs the same level COL),
-            // then test whether it now sees the player (vision cone + LOS) and
-            // step its awareness. Alerted latches; on the Patrol->Alerted edge it
-            // logs and its render colour flips to red (below).
+            // Enemy NPCs: each patrols (or, once alerted, pursues the player's
+            // last-seen position) kinematically vs the same level COL, then tests
+            // sight (vision cone + LOS) and advances its stealth loop
+            // (Patrol->Alerted->Chasing->Searching->Patrol). Render colour tracks
+            // the state (below): patrol green, searching yellow, alerted/chasing
+            // red.
             if (diagnostic_scene_presentation_->npc_active)
             {
                 DiagnosticScenePresentation &np = *diagnostic_scene_presentation_;
-                const gameplay::NpcPatrolPlan plan = gameplay::PlanNpcPatrol(
-                    np.npc_state.position, np.npc_waypoints, np.npc_waypoint,
-                    np.npc_params.radius + 2.0F, np.npc_facing);
-                np.npc_waypoint = plan.waypoint;
-                if (plan.facing.x != 0.0F || plan.facing.y != 0.0F ||
-                    plan.facing.z != 0.0F)
-                    np.npc_facing = plan.facing;
-                std::vector<gameplay::CollisionTriangle> npc_nearby;
-                gameplay::SelectNearbyCollisionTriangles(np.player_collision,
-                    np.npc_state.position, np.npc_vision.range, npc_nearby);
-                np.npc_state = gameplay::StepCharacter(np.npc_state,
-                    gameplay::CharacterInput{.move = plan.move}, np.npc_params,
-                    npc_nearby, kPlayerStepDt);
-                const bool sees = gameplay::NpcSeesPlayer(np.npc_state.position,
-                    np.npc_facing, np.player_state.position, np.npc_vision,
-                    npc_nearby);
-                const gameplay::NpcAwareness prev_awareness = np.npc_awareness;
-                np.npc_awareness =
-                    gameplay::StepNpcAwareness(prev_awareness, sees);
-                if (prev_awareness != np.npc_awareness &&
-                    np.npc_awareness == gameplay::NpcAwareness::Alerted)
-                    log_->Info("npc", "NPC alerted: player spotted");
-                log_->Info("npc",
-                    "npc pos=(" + std::to_string(np.npc_state.position.x) + "," +
-                        std::to_string(np.npc_state.position.y) + "," +
-                        std::to_string(np.npc_state.position.z) + ") sees=" +
-                        (sees ? "yes" : "no") + " state=" +
-                        (np.npc_awareness == gameplay::NpcAwareness::Alerted
-                                ? "ALERTED"
-                                : "patrol"));
+                for (std::size_t npc_index = 0U; npc_index < np.npcs.size();
+                     ++npc_index)
+                {
+                    DiagnosticScenePresentation::NpcRuntime &npc =
+                        np.npcs[npc_index];
+                    // Pursue the last-seen spot while Chasing/Searching; else patrol.
+                    gameplay::NpcPatrolPlan plan;
+                    if (gameplay::NpcPursuing(npc.awareness.state) &&
+                        npc.awareness.has_last_seen)
+                    {
+                        plan = gameplay::PlanNpcPursuit(npc.state.position,
+                            npc.awareness.last_seen_player_pos,
+                            npc.params.radius + 2.0F, npc.facing);
+                    }
+                    else
+                    {
+                        plan = gameplay::PlanNpcPatrol(npc.state.position,
+                            npc.waypoints, npc.waypoint, npc.params.radius + 2.0F,
+                            npc.facing);
+                        npc.waypoint = plan.waypoint;
+                    }
+                    if (plan.facing.x != 0.0F || plan.facing.y != 0.0F ||
+                        plan.facing.z != 0.0F)
+                        npc.facing = plan.facing;
+                    std::vector<gameplay::CollisionTriangle> npc_nearby;
+                    gameplay::SelectNearbyCollisionTriangles(np.player_collision,
+                        npc.state.position, npc.vision.range, npc_nearby);
+                    npc.state = gameplay::StepCharacter(npc.state,
+                        gameplay::CharacterInput{.move = plan.move}, npc.params,
+                        npc_nearby, kPlayerStepDt);
+                    const bool sees = gameplay::NpcSeesPlayer(npc.state.position,
+                        npc.facing, np.player_state.position, npc.vision,
+                        npc_nearby);
+                    const gameplay::NpcState prev_state = npc.awareness.state;
+                    npc.awareness = gameplay::StepNpcAwarenessLoop(npc.awareness,
+                        sees, np.player_state.position, npc.awareness_params,
+                        kPlayerStepDt);
+                    const auto state_name = [](gameplay::NpcState s) {
+                        switch (s)
+                        {
+                        case gameplay::NpcState::Patrol: return "patrol";
+                        case gameplay::NpcState::Alerted: return "ALERTED";
+                        case gameplay::NpcState::Chasing: return "CHASING";
+                        case gameplay::NpcState::Searching: return "searching";
+                        }
+                        return "?";
+                    };
+                    if (prev_state != npc.awareness.state)
+                        log_->Info("npc",
+                            "npc " + std::to_string(npc_index) + ": " +
+                                state_name(prev_state) + " -> " +
+                                state_name(npc.awareness.state));
+                    log_->Info("npc",
+                        "npc " + std::to_string(npc_index) + " pos=(" +
+                            std::to_string(npc.state.position.x) + "," +
+                            std::to_string(npc.state.position.y) + "," +
+                            std::to_string(npc.state.position.z) + ") sees=" +
+                            (sees ? "yes" : "no") + " state=" +
+                            state_name(npc.awareness.state));
+                }
             }
         }
         else if (free_fly)
@@ -4930,27 +4966,30 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
             .color = kDiagnosticActorMeshColor,
             .raster_mode = runtime::RenderMeshRasterMode::Fill,
         };
-        // Enemy NPC marker: same cube mesh at the NPC's world position, coloured
-        // by awareness (patrol = blue, alerted = red), through the same camera as
-        // the level/player. Skipped if the per-frame draw budget is full.
-        if (diagnostic_scene_presentation_->npc_active &&
-            mesh_command_count < runtime::kMaximumRenderMeshDrawsPerFrame)
+        // Enemy NPC markers: the same cube mesh at each NPC's world position,
+        // coloured by stealth state (patrol = green, searching = yellow, alerted/
+        // chasing = red), through the same camera as the level/player.
+        if (diagnostic_scene_presentation_->npc_active)
         {
-            const auto npc_object_to_clip = runtime::ComposeObjectToClip(
-                diagnostic_scene_presentation_->camera,
-                NpcMeshTransform(
-                    diagnostic_scene_presentation_->npc_state.position));
-            if (npc_object_to_clip)
+            for (const DiagnosticScenePresentation::NpcRuntime &npc :
+                 diagnostic_scene_presentation_->npcs)
             {
-                // High-contrast against the blue-grey level: green while
-                // patrolling, red once alerted.
-                const runtime::RenderMeshColorRgba8 npc_color =
-                    diagnostic_scene_presentation_->npc_awareness ==
-                            gameplay::NpcAwareness::Alerted
-                        ? runtime::RenderMeshColorRgba8{
-                              .red = 255U, .green = 24U, .blue = 24U, .alpha = 255U}
-                        : runtime::RenderMeshColorRgba8{
-                              .red = 40U, .green = 230U, .blue = 60U, .alpha = 255U};
+                if (mesh_command_count >= runtime::kMaximumRenderMeshDrawsPerFrame)
+                    break;
+                const auto npc_object_to_clip = runtime::ComposeObjectToClip(
+                    diagnostic_scene_presentation_->camera,
+                    NpcMeshTransform(npc.state.position));
+                if (!npc_object_to_clip)
+                    continue;
+                runtime::RenderMeshColorRgba8 npc_color{
+                    .red = 40U, .green = 230U, .blue = 60U, .alpha = 255U}; // patrol
+                if (npc.awareness.state == gameplay::NpcState::Searching)
+                    npc_color = runtime::RenderMeshColorRgba8{
+                        .red = 240U, .green = 220U, .blue = 40U, .alpha = 255U};
+                else if (npc.awareness.state == gameplay::NpcState::Alerted ||
+                         npc.awareness.state == gameplay::NpcState::Chasing)
+                    npc_color = runtime::RenderMeshColorRgba8{
+                        .red = 255U, .green = 24U, .blue = 24U, .alpha = 255U};
                 mesh_commands[mesh_command_count++] =
                     runtime::RenderMeshDrawCommand{
                         .mesh = diagnostic_scene_presentation_->actor_mesh_handle,

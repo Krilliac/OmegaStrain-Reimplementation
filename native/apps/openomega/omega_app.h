@@ -338,14 +338,23 @@ private:
         // COL and latches to Alerted (rendered blue -> red). Placement is
         // project-placed -- authentic spawns/nodes live in the undecoded POP GOB:
         // section (a later decode slice), not the .SO.
+        // One project-placed enemy. Each patrols its own route, sees the player
+        // via cone+LOS vs the COL, and runs the full stealth loop (Patrol ->
+        // Alerted -> Chasing -> Searching -> Patrol); rendered green/yellow/red
+        // by state. Placement is project-placed pending the POP GOB: decode.
+        struct NpcRuntime
+        {
+            gameplay::CharacterState state{};
+            gameplay::CharacterControllerParams params{};
+            std::vector<asset::Float3IR> waypoints{};
+            std::uint32_t waypoint = 0U;
+            asset::Float3IR facing{.x = 0.0F, .y = 1.0F, .z = 0.0F};
+            gameplay::NpcVisionParams vision{};
+            gameplay::NpcAwarenessState awareness{};
+            gameplay::NpcAwarenessParams awareness_params{};
+        };
         bool npc_active = false;
-        gameplay::CharacterState npc_state{};
-        gameplay::CharacterControllerParams npc_params{};
-        std::vector<asset::Float3IR> npc_waypoints{};
-        std::uint32_t npc_waypoint = 0U;
-        asset::Float3IR npc_facing{.x = 0.0F, .y = 1.0F, .z = 0.0F};
-        gameplay::NpcAwareness npc_awareness = gameplay::NpcAwareness::Patrol;
-        gameplay::NpcVisionParams npc_vision{};
+        std::vector<NpcRuntime> npcs{};
     };
 
     // [game/main/render thread, startup] Validates the complete scene-to-command projection before
