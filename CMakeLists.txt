@@ -141,6 +141,7 @@ add_library(omega_retail_formats STATIC
     native/src/retail/vum_layout_internal.cpp
     native/src/retail/vum_material_catalog_decoder.cpp
     native/src/retail/vum_render_payload_descriptor.cpp
+    native/src/retail/vum_visual_geometry_decoder.cpp
 )
 target_include_directories(omega_retail_formats PUBLIC native/include)
 target_link_libraries(omega_retail_formats PUBLIC omega_assets omega_core)
@@ -3106,6 +3107,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_frontend_tdx_decoder_tests COMMAND omega_frontend_tdx_decoder_tests)
     set_tests_properties(omega_frontend_tdx_decoder_tests PROPERTIES TIMEOUT 10)
+
+    add_executable(omega_vum_visual_geometry_decoder_tests
+        native/tests/vum_visual_geometry_decoder_tests.cpp
+    )
+    target_link_libraries(omega_vum_visual_geometry_decoder_tests PRIVATE omega_retail_formats)
+    if(MSVC)
+        target_compile_options(omega_vum_visual_geometry_decoder_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_vum_visual_geometry_decoder_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_vum_visual_geometry_decoder_tests COMMAND omega_vum_visual_geometry_decoder_tests)
+    set_tests_properties(omega_vum_visual_geometry_decoder_tests PROPERTIES TIMEOUT 10)
 
     add_executable(omega_front_end_screen_bundle_tests
         native/tests/front_end_screen_bundle_tests.cpp
