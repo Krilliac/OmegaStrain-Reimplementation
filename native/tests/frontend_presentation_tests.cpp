@@ -906,6 +906,14 @@ struct DocumentedMarker final
 
 // MISSION-RING.md, "22 markers, at fixed screen positions": the "centre" and
 // "marker W x H" columns, in draw order.
+//
+// One deliberate divergence, at index 19. That column records each cluster's
+// SMALLEST quad, which for 21 of the 22 markers is also the marker's single
+// opaque pass. Marker 19's smallest quad (37.06 x 34.62) is emitted at alpha 0
+// and its opaque pass is 43.69 x 40.75 on the same centre, so the producer
+// draws the larger extent and this table follows the drawn form. The
+// divergence is written out here rather than hidden so that a future edit to
+// either side still has to justify it.
 constexpr std::array<DocumentedMarker, 22U> kDocumentedMarkers = {{
     {511.812F, 180.438F, 43.00F, 37.50F},
     {437.844F, 361.000F, 29.81F, 27.00F},
@@ -926,7 +934,8 @@ constexpr std::array<DocumentedMarker, 22U> kDocumentedMarkers = {{
     {433.594F, 85.594F, 27.81F, 25.94F},
     {425.344F, 142.062F, 25.56F, 23.88F},
     {479.219F, 134.688F, 29.81F, 27.00F},
-    {515.031F, 164.375F, 37.06F, 34.62F},
+    // Opaque extent, not the cluster minimum -- see the note above.
+    {515.031F, 164.375F, 43.69F, 40.75F},
     {513.156F, 269.031F, 54.06F, 45.56F},
     {469.375F, 310.344F, 52.75F, 45.56F},
 }};
@@ -1023,12 +1032,76 @@ void TestMeasuredMissionRingGeometry()
             "only the animated marker 0 lacks an opaque pass");
     }
 
+    // Every marker's opaque pass names the CMDCENTR.HOG member it samples.
+    // Transcribed from the byte-identity resolution recorded in
+    // retail_mission_ring.h, independently of the producer's table.
+    {
+        using Role = presentation::RetailMissionRingTextureRole;
+        constexpr std::array<Role, 22U> kDocumentedRoles{
+            Role::None, Role::HighlightedDot, Role::PlainDot, Role::PlainDot,
+            Role::PlainDot, Role::PlainDot, Role::PlainDot, Role::PlainDot,
+            Role::PlainDot, Role::PlainDot, Role::PlainDot, Role::PlainDot,
+            Role::PlainDot, Role::PlainDot, Role::PlainDot, Role::PlainDot,
+            Role::PlainDot, Role::PlainDot, Role::PlainDot, Role::UnlockedIcon,
+            Role::OnlineIcon, Role::PersonnelIcon};
+        bool roles_match = markers.size() == kDocumentedRoles.size();
+        for (std::size_t index = 0U;
+             roles_match && index < kDocumentedRoles.size(); ++index)
+        {
+            if (markers[index].opaque_role != kDocumentedRoles[index])
+                roles_match = false;
+        }
+        Check(roles_match,
+            "each marker samples the member the capture resolves it to");
+    }
+
+    // A distinct binding per role, so a quad's texture pointer says which
+    // member the producer chose for it. Synthetic 1x1 textures; no capture data.
+    const auto plain_dot_texture = MakeLayerTexture(
+        omega::asset::RawGsRgba8{
+            .red = 240U, .green = 240U, .blue = 255U, .alpha = 128U},
+        omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha);
+    const auto highlighted_dot_texture = MakeLayerTexture(
+        omega::asset::RawGsRgba8{
+            .red = 120U, .green = 190U, .blue = 255U, .alpha = 128U},
+        omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha);
+    const auto selected_halo_texture = MakeLayerTexture(
+        omega::asset::RawGsRgba8{
+            .red = 90U, .green = 150U, .blue = 220U, .alpha = 128U},
+        omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha);
+    const auto selected_icon_texture = MakeLayerTexture(
+        omega::asset::RawGsRgba8{
+            .red = 255U, .green = 255U, .blue = 255U, .alpha = 128U},
+        omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha);
+    const auto unlocked_icon_texture = MakeLayerTexture(
+        omega::asset::RawGsRgba8{
+            .red = 170U, .green = 180U, .blue = 190U, .alpha = 128U},
+        omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha);
+    const auto online_icon_texture = MakeLayerTexture(
+        omega::asset::RawGsRgba8{
+            .red = 150U, .green = 160U, .blue = 170U, .alpha = 128U},
+        omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha);
+    const auto personnel_icon_texture = MakeLayerTexture(
+        omega::asset::RawGsRgba8{
+            .red = 130U, .green = 140U, .blue = 150U, .alpha = 128U},
+        omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha);
+    const presentation::RetailMissionRingTextures resolved{
+        .band = nullptr,
+        .plain_dot = &plain_dot_texture,
+        .highlighted_dot = &highlighted_dot_texture,
+        .selected_halo = &selected_halo_texture,
+        .selected_icon = &selected_icon_texture,
+        .unlocked_icon = &unlocked_icon_texture,
+        .online_icon = &online_icon_texture,
+        .personnel_icon = &personnel_icon_texture,
+    };
+
     // 2. The markers, composed with the one selection the captures show. With
     // no band texture the band quad is not emitted, so everything here is a
     // marker.
     std::vector<RetailFrontEndRasterTriangle> ring;
-    AppendRetailMissionRingTriangles(
-        nullptr, ring, presentation::kRetailMissionRingCapturedSelectedIndex);
+    AppendRetailMissionRingTriangles(resolved, ring,
+        presentation::kRetailMissionRingCapturedSelectedIndex);
     Check(!ring.empty(), "the mission ring emits triangles");
     Check((ring.size() % 2U) == 0U, "the ring is emitted as whole quads");
 
@@ -1039,11 +1112,12 @@ void TestMeasuredMissionRingGeometry()
         "a two-quad highlight plus one dot per other opaque marker");
 
     bool all_finite_non_degenerate = true;
-    bool markers_untextured = true;
+    bool markers_textured = true;
+    bool modulation_is_measured_unity = true;
     for (const auto& triangle : ring)
     {
-        if (triangle.texture != nullptr)
-            markers_untextured = false;
+        if (triangle.texture == nullptr)
+            markers_textured = false;
         const double ax = static_cast<double>(triangle.vertices[0U].x);
         const double ay = static_cast<double>(triangle.vertices[0U].y);
         const double bx = static_cast<double>(triangle.vertices[1U].x);
@@ -1057,34 +1131,86 @@ void TestMeasuredMissionRingGeometry()
         {
             if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y))
                 all_finite_non_degenerate = false;
+            // Measured: every ring vertex is RGBA (127,127,127,127) under
+            // TFX=Modulate, i.e. white at 127/128 alpha. No project tint.
+            if (!Near(vertex.modulation.red, 1.0F) ||
+                !Near(vertex.modulation.green, 1.0F) ||
+                !Near(vertex.modulation.blue, 1.0F) ||
+                !Near(vertex.modulation.alpha, 127.0F / 128.0F))
+            {
+                modulation_is_measured_unity = false;
+            }
         }
     }
     Check(all_finite_non_degenerate,
         "every ring triangle is finite and non-degenerate");
-    Check(markers_untextured,
-        "marker quads carry no texture: per-marker texture identity is "
-        "unproven");
+    Check(markers_textured,
+        "every marker quad samples the member the capture resolves it to");
+    Check(modulation_is_measured_unity,
+        "ring vertices carry the measured (127,127,127,127) modulation");
+
+    // Every marker's quad is exactly its measured extent, centred on its
+    // measured centre, and sampling its role's binding.
+    {
+        bool extents_match = true;
+        bool bindings_match = true;
+        for (std::uint32_t index = 1U;
+             index < presentation::kRetailMissionRingMarkerCount; ++index)
+        {
+            if (index == presentation::kRetailMissionRingCapturedSelectedIndex)
+                continue;
+            const auto& measured = kDocumentedMarkers[index];
+            bool found = false;
+            for (std::size_t quad = 0U; quad < quads.size(); ++quad)
+            {
+                if (!Near(quads[quad].center_x(), measured.center_x) ||
+                    !Near(quads[quad].center_y(), measured.center_y))
+                {
+                    continue;
+                }
+                found = true;
+                if (!Near(quads[quad].width(), measured.width, 0.01F) ||
+                    !Near(quads[quad].height(), measured.height, 0.01F))
+                {
+                    extents_match = false;
+                }
+                if (ring[quad * 2U].texture !=
+                    resolved.For(markers[index].opaque_role))
+                {
+                    bindings_match = false;
+                }
+            }
+            if (!found)
+                extents_match = false;
+        }
+        Check(extents_match,
+            "each marker's emitted quad is its measured extent, to 0.01 px");
+        Check(bindings_match,
+            "each marker's emitted quad samples its own role's binding");
+    }
 
     // 3. Given a band texture, the band is the FIRST quad, at the measured
-    // modal extent, and it is the only textured quad. The band exists only as
-    // texture art, so with no texture it is absent entirely.
+    // modal extent. The band exists only as texture art, so with no texture it
+    // is absent entirely.
     {
         const auto band_texture = MakeLayerTexture(
             omega::asset::RawGsRgba8{
                 .red = 200U, .green = 210U, .blue = 255U, .alpha = 128U},
             omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha);
+        auto with_band = resolved;
+        with_band.band = &band_texture;
         std::vector<RetailFrontEndRasterTriangle> textured;
-        AppendRetailMissionRingTriangles(&band_texture, textured,
+        AppendRetailMissionRingTriangles(with_band, textured,
             presentation::kRetailMissionRingCapturedSelectedIndex);
         Check(textured.size() == ring.size() + 2U,
             "a band texture adds exactly the two band triangles");
-        std::size_t textured_count = 0U;
+        std::size_t band_triangles = 0U;
         for (const auto& triangle : textured)
         {
-            if (triangle.texture != nullptr)
-                ++textured_count;
+            if (triangle.texture == &band_texture)
+                ++band_triangles;
         }
-        Check(textured_count == 2U,
+        Check(band_triangles == 2U,
             "exactly the two band triangles sample the band texture");
 
         const auto textured_quads = CollectQuads(textured);
@@ -1105,29 +1231,43 @@ void TestMeasuredMissionRingGeometry()
          selected < presentation::kRetailMissionRingMarkerCount; ++selected)
     {
         std::vector<RetailFrontEndRasterTriangle> selection;
-        AppendRetailMissionRingTriangles(nullptr, selection, selected);
+        AppendRetailMissionRingTriangles(resolved, selection, selected);
         std::size_t highlight_quads = 0U;
-        std::size_t highlight_at_selected = 0U;
+        std::size_t halo_on_centre = 0U;
+        std::size_t icon_at_offset = 0U;
         std::size_t dot_quads = 0U;
-        for (const auto& quad : CollectQuads(selection))
+        const auto selection_quads = CollectQuads(selection);
+        for (std::size_t quad = 0U; quad < selection_quads.size(); ++quad)
         {
+            const auto& bounds = selection_quads[quad];
             // MISSION-RING.md, "The highlighted marker": the pair of
             // 52.31 x 47.31 quads spanning (336.688, 338.625)-(389.000,
-            // 385.938) -- 52.312 x 47.312 centred on the marker. The two
-            // largest icon markers (54.06 x 45.56 and 52.75 x 45.56) are close
-            // in size but never equal, so the discriminator stays exact.
-            if (Near(quad.width(),
+            // 385.938) -- 52.312 x 47.312. Markers 20 and 21 (54.06 x 45.56
+            // and 52.75 x 45.56) are close in size but never equal, so the
+            // discriminator stays exact.
+            if (Near(bounds.width(),
                     presentation::kRetailMissionRingHighlightWidth, 0.01F) &&
-                Near(quad.height(),
+                Near(bounds.height(),
                     presentation::kRetailMissionRingHighlightHeight, 0.01F))
             {
                 ++highlight_quads;
-                if (Near(quad.center_x(),
+                if (Near(bounds.center_x(),
                         kDocumentedMarkers[selected].center_x) &&
-                    Near(quad.center_y(),
-                        kDocumentedMarkers[selected].center_y))
+                    Near(bounds.center_y(),
+                        kDocumentedMarkers[selected].center_y) &&
+                    selection[quad * 2U].texture == &selected_halo_texture)
                 {
-                    ++highlight_at_selected;
+                    ++halo_on_centre;
+                }
+                // The capture's second highlight quad is displaced by exactly
+                // (3.125, 0.875) from the first (draws 24 and 25).
+                if (Near(bounds.center_x(),
+                        kDocumentedMarkers[selected].center_x + 3.125F) &&
+                    Near(bounds.center_y(),
+                        kDocumentedMarkers[selected].center_y + 0.875F) &&
+                    selection[quad * 2U].texture == &selected_icon_texture)
+                {
+                    ++icon_at_offset;
                 }
                 continue;
             }
@@ -1136,9 +1276,10 @@ void TestMeasuredMissionRingGeometry()
         Check(highlight_quads ==
                 presentation::kRetailMissionRingHighlightQuadCount,
             "exactly one marker renders the two-quad highlight form");
-        Check(highlight_at_selected ==
-                presentation::kRetailMissionRingHighlightQuadCount,
-            "the highlight sits on the selected marker's measured centre");
+        Check(halo_on_centre == 1U,
+            "the halo quad sits on the selected marker's measured centre");
+        Check(icon_at_offset == 1U,
+            "the icon quad sits at the measured (3.125, 0.875) displacement");
         // 22 markers, less marker 0 (no opaque pass), less the highlighted one.
         Check(dot_quads == 20U, "every other opaque marker renders its dot");
     }
@@ -1164,7 +1305,7 @@ void TestMeasuredMissionRingGeometry()
     // positions are identical for every selection.
     {
         std::vector<RetailFrontEndRasterTriangle> out_of_range;
-        AppendRetailMissionRingTriangles(nullptr, out_of_range,
+        AppendRetailMissionRingTriangles(resolved, out_of_range,
             presentation::kRetailMissionRingMarkerCount);
         // Nothing highlighted, nothing out of bounds: 21 opaque dots.
         Check(CollectQuads(out_of_range).size() == 21U,
@@ -1172,7 +1313,7 @@ void TestMeasuredMissionRingGeometry()
 
         std::vector<RetailFrontEndRasterTriangle> huge;
         AppendRetailMissionRingTriangles(
-            nullptr, huge, std::numeric_limits<std::uint32_t>::max());
+            resolved, huge, std::numeric_limits<std::uint32_t>::max());
         Check(CollectQuads(huge).size() == 21U,
             "a wildly out-of-range selection also fails soft");
 
@@ -1181,13 +1322,13 @@ void TestMeasuredMissionRingGeometry()
         // unobservable, and the highlighted marker is not at the ring's lowest
         // point, so no selection is brought to a focal position.)
         std::vector<RetailFrontEndRasterTriangle> other_selection;
-        AppendRetailMissionRingTriangles(nullptr, other_selection, 12U);
+        AppendRetailMissionRingTriangles(resolved, other_selection, 12U);
         bool marker_five_fixed = false;
         for (const auto& quad : CollectQuads(other_selection))
         {
             if (Near(quad.center_x(), kDocumentedMarkers[5U].center_x) &&
                 Near(quad.center_y(), kDocumentedMarkers[5U].center_y) &&
-                Near(quad.width(), kDocumentedMarkers[5U].width))
+                Near(quad.width(), kDocumentedMarkers[5U].width, 0.01F))
             {
                 marker_five_fixed = true;
             }
@@ -1200,11 +1341,62 @@ void TestMeasuredMissionRingGeometry()
     {
         std::vector<RetailFrontEndRasterTriangle> seeded;
         seeded.push_back(RetailFrontEndRasterTriangle{});
-        AppendRetailMissionRingTriangles(nullptr, seeded,
+        AppendRetailMissionRingTriangles(resolved, seeded,
             presentation::kRetailMissionRingCapturedSelectedIndex);
         Check(seeded.size() == ring.size() + 1U &&
                   seeded.front() == RetailFrontEndRasterTriangle{},
             "the producer appends and preserves prior triangles");
+    }
+
+    // 7. The untextured PROJECT STAND-IN. With no binding at all a marker must
+    // NOT fall back to a flat quad over its whole measured footprint -- that is
+    // the failure this replaced. It emits a fan inside the measured extent,
+    // opaque at the centre and transparent at the rim.
+    {
+        std::vector<RetailFrontEndRasterTriangle> stand_in;
+        AppendRetailMissionRingTriangles(
+            presentation::RetailMissionRingTextures{}, stand_in,
+            presentation::kRetailMissionRingCapturedSelectedIndex);
+        Check(!stand_in.empty(), "a fully unresolved ring still draws");
+
+        bool untextured = true;
+        bool within_measured_extent = true;
+        bool centre_opaque_rim_clear = true;
+        float minimum_x = std::numeric_limits<float>::max();
+        float maximum_x = std::numeric_limits<float>::lowest();
+        for (const auto& triangle : stand_in)
+        {
+            if (triangle.texture != nullptr)
+                untextured = false;
+            // Vertex 0 of every wedge is the opaque centre; the other two are
+            // the transparent rim.
+            if (!Near(triangle.vertices[0U].modulation.alpha, 127.0F / 128.0F))
+                centre_opaque_rim_clear = false;
+            for (std::size_t rim = 1U; rim < 3U; ++rim)
+            {
+                if (!Near(triangle.vertices[rim].modulation.alpha, 0.0F))
+                    centre_opaque_rim_clear = false;
+            }
+            for (const auto& vertex : triangle.vertices)
+            {
+                minimum_x = std::min(minimum_x, vertex.x);
+                maximum_x = std::max(maximum_x, vertex.x);
+            }
+        }
+        // Marker 9 is the leftmost marker and marker 20 the rightmost; a fan
+        // inscribed in the measured extents cannot reach past either rim.
+        const float leftmost = kDocumentedMarkers[9U].center_x -
+            (kDocumentedMarkers[9U].width * 0.5F);
+        const float rightmost = kDocumentedMarkers[20U].center_x +
+            (kDocumentedMarkers[20U].width * 0.5F);
+        if (minimum_x < leftmost - 0.01F || maximum_x > rightmost + 0.01F)
+            within_measured_extent = false;
+
+        Check(untextured, "the stand-in samples nothing");
+        Check(centre_opaque_rim_clear,
+            "the stand-in is opaque at the centre and clear at the rim");
+        Check(within_measured_extent,
+            "the stand-in stays inside the measured marker extents");
     }
 }
 } // namespace

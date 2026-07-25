@@ -363,11 +363,26 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
     const asset::FrontendWidgetIR& widget, const std::uint32_t depth,
     const std::string_view selected_identifier,
     const std::string_view force_visible_group,
+    const std::span<const std::string_view> runtime_hidden_groups,
     RetailFrontEndFrameDiagnostics* const diag,
     std::vector<RetailFrontEndRasterTriangle>& out)
 {
     if (depth >= kMaximumVisualTreeDepth)
         return;
+
+    // Widgets a screen authors visible but its runtime does not draw in the
+    // state this project composes. The retail front end gates these on live
+    // state (a bonus mission's lock status, an online session) that no decoded
+    // artefact models yet; without that gate their text lands on top of the
+    // screen. The list is grounded, not guessed: every one of the reference
+    // capture's 168 draws is accounted for in analysis/formats/MISSION-RING.md
+    // and none of them is this text. Culling matches the whole subtree, as
+    // authored invisibility does.
+    for (const std::string_view hidden : runtime_hidden_groups)
+    {
+        if (!hidden.empty() && widget.identifier == hidden)
+            return;
+    }
 
     // A widget marked not-visible hides its ENTIRE subtree. The retail Command
     // Center hub authors its mutually-exclusive lanes -- each sub-option submenu
@@ -548,26 +563,47 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
 
     for (const auto& child : widget.children)
         AppendGuiTextTriangles(bundle, child, depth + 1U, selected_identifier,
-            force_visible_group, diag, out);
+            force_visible_group, runtime_hidden_groups, diag, out);
 }
 
-// The texture the mission-ring band quad samples, or nullptr when none is
-// identified -- in which case no band quad is emitted at all.
+// The textures the mission ring samples, resolved out of the Command Center
+// screen's own visual scope by the member names the ring module publishes.
 //
-// analysis/formats/MISSION-RING.md measures the band quad's screen extent and
-// that it samples a 256x256 PSMT8 texture, but explicitly does NOT establish
-// WHICH texture ("Texture identity" -- texel payloads were deliberately not
-// decoded). The project previously bound DPAD_COMMANDCENTER.TDX here; a
-// Command Center capture of this build shows that member is the D-pad button
-// art, drawn as a large glyph across the ring, so that binding is now disproven
-// rather than merely unproven and has been withdrawn. The screen's own decoded
-// interface-element art still draws the backdrop. This stays a named function
-// so the one binding point is obvious when a measured answer arrives.
-[[nodiscard]] const content::FrontEndTextureBinding* FindMissionRingBandTexture(
-    const content::FrontEndScreenBundle& bundle) noexcept
+// Those names are decoded, not guessed. Each CMDCENTR.HOG .TDX member stores
+// its GS upload rectangle verbatim, and those exact byte strings appear in the
+// reference capture's GIF IMAGE payloads; walking the capture's stream while
+// tracking BITBLTBUF resolves every draw's TEX0 base pointer to the member
+// whose own bytes last occupied that slot. Under that resolution the ring's
+// opaque passes sample BUTTON.TDX, BUTTON_HIGHLIGHT.TDX, IPCA_LOGO.TDX,
+// MULTI_ICON.TDX, UNLOCKED_DARK.TDX, ONLINEDARK_GREY.TDX and PERSONNELDARK.TDX
+// (see retail_mission_ring.h for the full derivation).
+//
+// The BAND is deliberately left unbound. Its one opaque pass samples a 256x256
+// photographic level tile chosen by the SELECTED mission, and no decoded
+// artefact maps a marker index to a level, so binding one would assert a
+// mapping this project has not measured. An unbound band emits no quad at all,
+// and the screen's own interface-element art still draws the ring backdrop.
+//
+// A member that fails to resolve is not an error: the ring falls back to its
+// labelled untextured stand-in for that pass.
+[[nodiscard]] RetailMissionRingTextures FindMissionRingTextures(
+    const content::FrontEndVisualScope& scope) noexcept
 {
-    (void)bundle;
-    return nullptr;
+    return RetailMissionRingTextures{
+        .band = nullptr,
+        .plain_dot = scope.FindTexture(kRetailMissionRingPlainDotMember),
+        .highlighted_dot =
+            scope.FindTexture(kRetailMissionRingHighlightedDotMember),
+        .selected_halo =
+            scope.FindTexture(kRetailMissionRingSelectedHaloMember),
+        .selected_icon =
+            scope.FindTexture(kRetailMissionRingSelectedIconMember),
+        .unlocked_icon =
+            scope.FindTexture(kRetailMissionRingUnlockedIconMember),
+        .online_icon = scope.FindTexture(kRetailMissionRingOnlineIconMember),
+        .personnel_icon =
+            scope.FindTexture(kRetailMissionRingPersonnelIconMember),
+    };
 }
 } // namespace
 
@@ -641,9 +677,8 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
         if (bundle.key() == content::FrontEndScreenKey::CommandCenter)
         {
             const std::size_t before_ring = triangles.size();
-            AppendRetailMissionRingTriangles(
-                FindMissionRingBandTexture(bundle), triangles,
-                kRetailMissionRingCapturedSelectedIndex);
+            AppendRetailMissionRingTriangles(FindMissionRingTextures(*scope),
+                triangles, kRetailMissionRingCapturedSelectedIndex);
             if (diagnostics != nullptr)
                 diagnostics->mission_ring_triangles =
                     static_cast<std::uint32_t>(triangles.size() - before_ring);
@@ -658,9 +693,27 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
             bundle.key() == content::FrontEndScreenKey::CommandCenter
                 ? std::string_view("offlinebutton_grp")
                 : std::string_view();
+        // The hub's authored-visible, runtime-gated widgets. `bonusmissions`
+        // holds the "$BonusMissionT" popup ("To unlock this bonus mission ...")
+        // plus its list; retail raises it only for a locked bonus mission, and
+        // drawn unconditionally it strikes straight across the mission ring.
+        // `label_region` / `value_region` are the Region row; the reference
+        // frame's label block (draws 12 and 157) is Agent and Rank only. Both
+        // are absent from every draw of the reference capture of exactly this
+        // screen state, which is the evidence for culling them here; neither is
+        // absent from the screen in every state, so this is a state model, not
+        // a claim that the widgets are unused.
+        static constexpr std::array<std::string_view, 3U>
+            kCommandCenterRuntimeHiddenGroups{
+                "bonusmissions", "label_region", "value_region"};
+        const std::span<const std::string_view> runtime_hidden_groups =
+            bundle.key() == content::FrontEndScreenKey::CommandCenter
+                ? std::span<const std::string_view>(
+                      kCommandCenterRuntimeHiddenGroups)
+                : std::span<const std::string_view>();
         AppendGuiTextTriangles(bundle, bundle.widget_document().root, 0U,
-            selected_widget_identifier, force_visible_group, diagnostics,
-            triangles);
+            selected_widget_identifier, force_visible_group,
+            runtime_hidden_groups, diagnostics, triangles);
     }
     catch (const std::bad_alloc&)
     {

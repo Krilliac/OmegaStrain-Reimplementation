@@ -592,8 +592,8 @@ int main()
         // wider-than-tall ellipse over the frame centre.
         std::vector<omega::frontend::presentation::RetailFrontEndRasterTriangle>
             ring;
-        omega::frontend::presentation::AppendRetailMissionRingTriangles(nullptr,
-            ring);
+        omega::frontend::presentation::AppendRetailMissionRingTriangles(
+            omega::frontend::presentation::RetailMissionRingTextures{}, ring);
         Check(!ring.empty(), "mission ring emits triangles");
         bool finite_non_degenerate = true;
         bool all_untextured = true;
