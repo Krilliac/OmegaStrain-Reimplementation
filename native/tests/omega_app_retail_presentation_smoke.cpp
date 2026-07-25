@@ -1,6 +1,10 @@
 #include "opening_movie_player.h"
 #include "omega_app.h"
 
+#include "omega/asset/frontend_ir.h"
+#include "omega/content/front_end_screen_bundle.h"
+#include "omega/content/retail_front_end_presentation_capability.h"
+#include "omega/frontend/compositor_math.h"
 #include "omega/runtime/config_service.h"
 #include "omega/runtime/content_startup.h"
 #include "omega/runtime/input_tracker.h"
@@ -20,6 +24,41 @@
 #include <utility>
 #include <vector>
 
+namespace omega::content::detail
+{
+struct RetailFrontEndPresentationCapabilityTestAccess final
+{
+    [[nodiscard]] static RetailFrontEndPresentationCapability Make() noexcept
+    {
+        return RetailFrontEndPresentationCapability(
+            RetailFrontEndPresentationCapability::ConstructionKey{});
+    }
+};
+
+struct FrontEndScreenBundleTestAccess final
+{
+    [[nodiscard]] static FrontEndVisualScope MakeScope(
+        asset::FrontendVisualDocumentIR document,
+        FrontEndVisualScope::ResourceSet resources,
+        FrontEndVisualScope::TextureMap textures)
+    {
+        return FrontEndVisualScope(
+            std::move(document), std::move(resources), std::move(textures));
+    }
+
+    [[nodiscard]] static FrontEndScreenBundle MakeBundle(
+        asset::FrontendWidgetDocumentIR widget_document,
+        std::string primary_scope,
+        FrontEndScreenBundle::VisualScopeMap visual_scopes,
+        RetailFrontEndPresentationCapability capability)
+    {
+        return FrontEndScreenBundle(FrontEndScreenKey::Title,
+            std::move(widget_document), std::move(primary_scope),
+            std::move(visual_scopes), {}, {}, {}, std::move(capability));
+    }
+};
+} // namespace omega::content::detail
+
 namespace omega::app::detail
 {
 struct OmegaAppTestAccess final
@@ -38,6 +77,44 @@ struct OmegaAppTestAccess final
     [[nodiscard]] static GpuHostSnapshot Gpu(const OmegaApp& app) noexcept
     {
         return app.host_->Snapshot();
+    }
+
+    static void ComposeRetailScreenPresentation(OmegaApp& app,
+        const content::FrontEndScreenBundle& bundle,
+        const std::uint32_t animation_tick) noexcept
+    {
+        app.retail_animation_tick_ = animation_tick;
+        app.ComposeRetailScreenPresentation(bundle, {});
+    }
+
+    [[nodiscard]] static runtime::RenderTextureHandle RetailFrontEndTexture(
+        const OmegaApp& app) noexcept
+    {
+        return app.retail_front_end_texture_;
+    }
+
+    [[nodiscard]] static std::span<const runtime::RenderTextureBlitCommand>
+    RetailFrontEndDrawCommands(const OmegaApp& app) noexcept
+    {
+        return app.retail_front_end_draw_list_.commands();
+    }
+
+    static void ReplaceRetailFrontEndDrawList(
+        OmegaApp& app, runtime::RenderDrawList draw_list) noexcept
+    {
+        app.retail_front_end_draw_list_ = std::move(draw_list);
+    }
+
+    [[nodiscard]] static bool RetailFrontEndReady(
+        const OmegaApp& app) noexcept
+    {
+        return app.retail_front_end_ready_;
+    }
+
+    [[nodiscard]] static bool RetailScreenHasAnimation(
+        const OmegaApp& app) noexcept
+    {
+        return app.retail_screen_has_animation_;
     }
 
     [[nodiscard]] static simulation::SimulationState Simulation(
@@ -75,6 +152,18 @@ using omega::app::OpeningMoviePlayerStatus;
 using omega::app::OpeningMoviePlayerUpdate;
 using omega::app::OmegaApp;
 using omega::app::detail::OmegaAppTestAccess;
+using omega::asset::Float3IR;
+using omega::asset::FrontendColorRgba8IR;
+using omega::asset::FrontendTriangleIR;
+using omega::asset::FrontendVisualNodeIR;
+using omega::asset::FrontendWidgetBindingIR;
+using omega::asset::FrontendWidgetIR;
+using omega::asset::FrontendWidgetKind;
+using omega::content::FrontEndScreenBundle;
+using omega::content::FrontEndVisualScope;
+using omega::content::detail::FrontEndScreenBundleTestAccess;
+using omega::content::detail::RetailFrontEndPresentationCapabilityTestAccess;
+using omega::frontend::kIdentityAffineTransform12;
 
 constexpr std::uint32_t kMovieWidth = 2U;
 constexpr std::uint32_t kMovieHeight = 2U;
@@ -185,6 +274,100 @@ private:
     return settings;
 }
 
+[[nodiscard]] FrontendVisualNodeIR MakeQuad(std::string identifier,
+    const float half_width, const float half_height,
+    const FrontendColorRgba8IR color)
+{
+    return FrontendVisualNodeIR{
+        .identifier = std::move(identifier),
+        .transform_values = kIdentityAffineTransform12.column_vectors,
+        .positions = {
+            Float3IR{.x = -half_width, .y = half_height, .z = 17.0F},
+            Float3IR{.x = half_width, .y = half_height, .z = 17.0F},
+            Float3IR{.x = half_width, .y = -half_height, .z = 17.0F},
+            Float3IR{.x = -half_width, .y = -half_height, .z = 17.0F},
+        },
+        .uvs = {{.u = 0.0F, .v = 0.0F}},
+        .colors = {color},
+        .triangles = {
+            FrontendTriangleIR{
+                .position_indices = {0U, 1U, 2U},
+                .uv_indices = {0U, 0U, 0U},
+                .color_indices = {0U, 0U, 0U},
+            },
+            FrontendTriangleIR{
+                .position_indices = {0U, 2U, 3U},
+                .uv_indices = {0U, 0U, 0U},
+                .color_indices = {0U, 0U, 0U},
+            },
+        },
+    };
+}
+
+[[nodiscard]] FrontendWidgetIR MakeWidget(std::string identifier)
+{
+    return FrontendWidgetIR{
+        .kind = FrontendWidgetKind::Container,
+        .identifier = std::move(identifier),
+        .rectangle = {
+            .left = -320.0F,
+            .top = 224.0F,
+            .width = 640.0F,
+            .height = 448.0F,
+        },
+        .visible = true,
+        .enabled = true,
+        .binding = FrontendWidgetBindingIR{
+            .transform_values = kIdentityAffineTransform12.column_vectors,
+        },
+    };
+}
+
+[[nodiscard]] FrontEndScreenBundle MakeAnimatedOpacityBundle()
+{
+    FrontendVisualNodeIR root = MakeQuad("ROOT_root", 320.0F, 224.0F,
+        FrontendColorRgba8IR{
+            .red = 16U,
+            .green = 16U,
+            .blue = 16U,
+            .alpha = 255U,
+        });
+    FrontendVisualNodeIR child = MakeQuad("LOGO", 120.0F, 90.0F,
+        FrontendColorRgba8IR{
+            .red = 240U,
+            .green = 48U,
+            .blue = 48U,
+            .alpha = 255U,
+        });
+    child.animation_tracks.push_back(omega::asset::FrontendScalarAnimationTrackIR{
+        .target = omega::asset::FrontendScalarAnimationTarget::Opacity,
+        .keys = {
+            omega::asset::FrontendScalarAnimationKeyIR{
+                .timeline_tick = 0.0F,
+                .value = 1.0F,
+            },
+            omega::asset::FrontendScalarAnimationKeyIR{
+                .timeline_tick = 20.0F,
+                .value = 0.0F,
+            },
+        },
+    });
+    root.children.push_back(std::move(child));
+
+    omega::asset::FrontendVisualDocumentIR document{.root = std::move(root)};
+    auto scope = FrontEndScreenBundleTestAccess::MakeScope(std::move(document),
+        FrontEndVisualScope::ResourceSet{"ROOT_root", "LOGO"}, {});
+    FrontEndScreenBundle::VisualScopeMap scopes;
+    scopes.emplace("TITLE", std::move(scope));
+
+    FrontendWidgetIR root_widget = MakeWidget("ROOT");
+    root_widget.children.push_back(MakeWidget("LOGO"));
+    return FrontEndScreenBundleTestAccess::MakeBundle(
+        omega::asset::FrontendWidgetDocumentIR{.root = std::move(root_widget)},
+        "TITLE", std::move(scopes),
+        RetailFrontEndPresentationCapabilityTestAccess::Make());
+}
+
 [[nodiscard]] std::expected<OmegaApp, std::string> CreateRetailApp(
     std::unique_ptr<OpeningMoviePlayback> playback)
 {
@@ -203,6 +386,97 @@ private:
     return left.completed_steps == right.completed_steps &&
            left.simulated_time == right.simulated_time &&
            left.alive_entities == right.alive_entities;
+}
+
+void CheckAnimatedRetailFrameTextureReuse()
+{
+    constexpr std::uint64_t logical_bytes =
+        static_cast<std::uint64_t>(omega::frontend::kCanonicalRasterWidth) *
+        omega::frontend::kCanonicalRasterHeight * 4U;
+
+    auto app = CreateRetailApp(nullptr);
+    Check(app.has_value(),
+        "retail-required host starts for animated texture-reuse coverage");
+    if (!app)
+        return;
+
+    const FrontEndScreenBundle bundle = MakeAnimatedOpacityBundle();
+    const GpuHostSnapshot before = OmegaAppTestAccess::Gpu(*app);
+    Check(!OmegaAppTestAccess::RetailFrontEndReady(*app) &&
+              !OmegaAppTestAccess::RetailFrontEndTexture(*app).valid() &&
+              OmegaAppTestAccess::RetailFrontEndDrawCommands(*app).empty(),
+        "animated retail presentation starts without a published texture");
+
+    OmegaAppTestAccess::ComposeRetailScreenPresentation(*app, bundle, 0U);
+    const GpuHostSnapshot first = OmegaAppTestAccess::Gpu(*app);
+    const auto first_texture = OmegaAppTestAccess::RetailFrontEndTexture(*app);
+    const auto first_commands =
+        OmegaAppTestAccess::RetailFrontEndDrawCommands(*app);
+    const bool first_published =
+        OmegaAppTestAccess::RetailFrontEndReady(*app) &&
+        OmegaAppTestAccess::RetailScreenHasAnimation(*app) &&
+        first_texture.valid() && first_commands.size() == 1U &&
+        first_commands.front().texture == first_texture;
+    Check(first_published,
+        "the first animated compose publishes one texture and draw command");
+    Check(first.successful_uploads == before.successful_uploads + 1U &&
+              first.successful_upload_logical_bytes ==
+                  before.successful_upload_logical_bytes + logical_bytes &&
+              first.successful_updates == before.successful_updates &&
+              first.successful_update_logical_bytes ==
+                  before.successful_update_logical_bytes &&
+              first.successful_releases == before.successful_releases &&
+              first.textures.slot_capacity == before.textures.slot_capacity &&
+              first.textures.free_slots + 1U == before.textures.free_slots &&
+              first.textures.reserved_slots == before.textures.reserved_slots &&
+              first.textures.resident_slots ==
+                  before.textures.resident_slots + 1U &&
+              first.textures.retired_slots == before.textures.retired_slots &&
+              first.textures.reserved_logical_bytes ==
+                  before.textures.reserved_logical_bytes &&
+              first.textures.resident_logical_bytes ==
+                  before.textures.resident_logical_bytes + logical_bytes,
+        "the first animated compose performs exactly one resident upload");
+    if (!first_published)
+        return;
+
+    const omega::runtime::RenderTextureBlitCommand first_command =
+        first_commands.front();
+    omega::runtime::RenderTextureBlitCommand sentinel_command = first_command;
+    sentinel_command.filter_mode =
+        first_command.filter_mode == omega::runtime::RenderTextureFilterMode::Nearest
+        ? omega::runtime::RenderTextureFilterMode::Linear
+        : omega::runtime::RenderTextureFilterMode::Nearest;
+    auto sentinel_draw_list = omega::runtime::RenderDrawList::Create(
+        std::span<const omega::runtime::RenderTextureBlitCommand>{
+            &sentinel_command, 1U});
+    Check(sentinel_draw_list.has_value(),
+        "the distinctive retail draw-list sentinel is valid");
+    if (!sentinel_draw_list)
+        return;
+    OmegaAppTestAccess::ReplaceRetailFrontEndDrawList(
+        *app, std::move(*sentinel_draw_list));
+
+    OmegaAppTestAccess::ComposeRetailScreenPresentation(*app, bundle, 20U);
+    const GpuHostSnapshot second = OmegaAppTestAccess::Gpu(*app);
+    const auto second_commands =
+        OmegaAppTestAccess::RetailFrontEndDrawCommands(*app);
+    Check(OmegaAppTestAccess::RetailFrontEndReady(*app) &&
+              OmegaAppTestAccess::RetailScreenHasAnimation(*app) &&
+              OmegaAppTestAccess::RetailFrontEndTexture(*app) ==
+                  first_texture &&
+              second_commands.size() == 1U &&
+              second_commands.front() == sentinel_command,
+        "the second animated compose preserves the handle and sentinel draw list");
+    Check(second.successful_uploads == first.successful_uploads &&
+              second.successful_upload_logical_bytes ==
+                  first.successful_upload_logical_bytes &&
+              second.successful_updates == first.successful_updates + 1U &&
+              second.successful_update_logical_bytes ==
+                  first.successful_update_logical_bytes + logical_bytes &&
+              second.successful_releases == first.successful_releases &&
+              second.textures == first.textures,
+        "the second animated compose updates in place without upload, release, or residency churn");
 }
 
 void CheckBoundaryWithoutMovie()
@@ -276,6 +550,7 @@ void CheckBoundaryAfterMovie()
 
 int main()
 {
+    CheckAnimatedRetailFrameTextureReuse();
     CheckBoundaryWithoutMovie();
     CheckBoundaryAfterMovie();
 

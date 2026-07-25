@@ -4468,15 +4468,39 @@ void OmegaApp::ComposeRetailScreenPresentation(
         return;
     }
 
-    auto uploaded = host_->UploadRgba8Texture(runtime::Rgba8TextureUploadView{
+    const runtime::Rgba8TextureUploadView upload{
         .width = frame->width,
         .height = frame->height,
         .pixels = std::as_bytes(std::span<const std::uint8_t>(frame->pixels)),
-    });
+    };
+    PublishRetailFrontEndFrame(upload);
+}
+
+void OmegaApp::PublishRetailFrontEndFrame(
+    const runtime::Rgba8TextureUploadView upload) noexcept
+{
+    // Every retail frame has the fixed compositor extent. Once the first frame
+    // owns a resident texture and draw command, animated ticks can replace its
+    // pixels in place: creating a new GPU texture, rebuilding the identical
+    // full-screen draw list, and releasing the prior texture used to force a
+    // wait-for-idle cycle on every animated frame.
+    if (retail_front_end_texture_valid_)
+    {
+        const auto updated =
+            host_->UpdateRgba8Texture(retail_front_end_texture_, upload);
+        if (!updated)
+        {
+            log_->Warning("presentation",
+                "retail front-end texture update failed; keeping prior frame");
+        }
+        return;
+    }
+
+    auto uploaded = host_->UploadRgba8Texture(upload);
     if (!uploaded)
     {
         log_->Warning("presentation",
-            "retail front-end Title texture upload failed; using project fallback");
+            "retail front-end texture upload failed; using project fallback");
         return;
     }
 
@@ -4503,18 +4527,14 @@ void OmegaApp::ComposeRetailScreenPresentation(
         std::span<const runtime::RenderTextureBlitCommand>{&command, 1U});
     if (!draw_list)
     {
-        // The just-uploaded texture is now orphaned (the old draw list still owns
-        // the prior handle); release it so a failed recompose does not leak.
+        // The first upload is not yet owned by a published draw list.
         static_cast<void>(host_->ReleaseTexture(*uploaded));
         log_->Warning("presentation",
-            "retail front-end Title draw-list creation failed; using project fallback");
+            "retail front-end draw-list creation failed; using project fallback");
         return;
     }
-    // Success: adopt the new texture and release the one the previous compose left
-    // behind (the old draw list is about to be replaced), so per-frame animated
-    // recompose holds at most one retail frame texture.
-    if (retail_front_end_texture_valid_)
-        static_cast<void>(host_->ReleaseTexture(retail_front_end_texture_));
+    // First successful compose publishes the one resident texture and the one
+    // full-screen draw command reused by every later in-place update.
     retail_front_end_texture_ = *uploaded;
     retail_front_end_texture_valid_ = true;
     retail_front_end_draw_list_ = std::move(*draw_list);

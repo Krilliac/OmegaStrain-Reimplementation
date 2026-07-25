@@ -205,12 +205,18 @@ private:
     void LoadRetailFrontEndBundleIfEnabled() noexcept;
     // [game/main thread; no concurrent use] Gap B retail front-end (docs/08).
     // Composites one decoded retail screen bundle into a canonical frame with the
-    // named widget highlighted, uploads it, and caches a full-screen blit draw
-    // list so retail mode presents real retail pixels. Never throws: a failure
-    // leaves the retail presentation as-is (last good frame or project fallback).
+    // named widget highlighted. The first frame uploads one resident texture and
+    // caches one full-screen blit draw list; later frames update those pixels in
+    // place. Never throws: a failure leaves the retail presentation as-is (last
+    // good frame or project fallback).
     void ComposeRetailScreenPresentation(
         const content::FrontEndScreenBundle& bundle,
         std::string_view selected_identifier) noexcept;
+    // [game/main thread; no concurrent use] Publishes fixed-size compositor
+    // pixels. The first call creates the texture/draw list; later calls update
+    // the resident texture without replacing either resource.
+    void PublishRetailFrontEndFrame(
+        runtime::Rgba8TextureUploadView upload) noexcept;
     // [game/main thread] Returns the cached retail bundle for a screen, lazily
     // loading+caching it via GameDataService on first use. nullptr if unavailable.
     [[nodiscard]] const content::FrontEndScreenBundle* RetailBundleForScreen(
@@ -557,12 +563,11 @@ private:
     // lifetime. When not ready, CurrentFrontEndDrawList uses the project path.
     runtime::RenderDrawList retail_front_end_draw_list_;
     bool retail_front_end_ready_ = false;
-    // Gap B Phase 3b: the composited retail frame's uploaded texture, owned here so
-    // each recompose (nav change or animation tick) can release the prior handle
-    // before adopting the new one -- otherwise per-frame animated recompose would
-    // grow the host texture pool without bound. Advances one animation tick per
-    // rendered frame; recomposes every frame only while the current screen has
-    // animation tracks (else it composes once and holds).
+    // Gap B Phase 3b: the composited retail frame's resident texture. The first
+    // compose creates the handle; later navigation and animation recomposes update
+    // its fixed-size pixels in place. Advances one animation tick per rendered
+    // frame; recomposes every frame only while the current screen has animation
+    // tracks (else it composes once and holds).
     runtime::RenderTextureHandle retail_front_end_texture_;
     bool retail_front_end_texture_valid_ = false;
     std::uint32_t retail_animation_tick_ = 0U;
