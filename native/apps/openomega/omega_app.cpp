@@ -248,6 +248,7 @@ OmegaApp::BuildDiagnosticScenePresentation(
     SdlGpuHost& host, const asset::SceneIR& scene,
     const content::LevelTextureStore* const level_texture_store,
     const content::GameDataService* const game_data,
+    const std::span<const std::array<float, 2>> scene_uvs,
     const std::optional<runtime::FreeFlyPose> free_fly_pose,
     const float free_fly_move_speed, const runtime::FreeFlyInput free_fly_script,
     const std::optional<gameplay::CharacterState> player_seed,
@@ -340,9 +341,19 @@ OmegaApp::BuildDiagnosticScenePresentation(
 
     DiagnosticSceneRollbackGuard rollback(
         host, presentation->mesh_handles, presentation->mesh_count);
-    for (const asset::RenderMeshIR& mesh : scene.render_meshes)
+    for (std::size_t mesh_index = 0U; mesh_index < scene.render_meshes.size(); ++mesh_index)
     {
-        auto uploaded = host.UploadRenderMesh(mesh);
+        const asset::RenderMeshIR& mesh = scene.render_meshes[mesh_index];
+        // The decoded UVs, when present, belong to the single spatial render mesh (index 0) and
+        // are index-parallel with its positions by construction. Any other mesh, and any count
+        // mismatch, uploads without UVs and is shaded flat exactly as before.
+        const bool mesh_has_uvs =
+            mesh_index == 0U && !scene_uvs.empty() && scene_uvs.size() == mesh.positions.size();
+        auto uploaded = host.UploadRenderMesh(runtime::RenderMeshUploadView{
+            .positions = mesh.positions,
+            .triangle_indices = mesh.triangle_indices,
+            .uvs = mesh_has_uvs ? scene_uvs : std::span<const std::array<float, 2>>{},
+        });
         if (!uploaded)
         {
             return std::unexpected(
@@ -352,11 +363,11 @@ OmegaApp::BuildDiagnosticScenePresentation(
     }
 
     // Textured level slice: bind ONE real level TDX albedo texture, decoded to
-    // RGBA8, to every environment mesh. The mesh pixel shader triplanar-maps it
-    // from world position, so no per-vertex UVs are needed here (real per-vertex
-    // UVs are the VUM visual decode, Path B; per-material texture binding is a
-    // separate RE-blocked follow-up). The level texture store deliberately omits
-    // display expansion, so we pull the raw member bytes and run the front-end
+    // RGBA8, to every environment mesh. The mesh pixel shader samples it with the
+    // mesh's real per-vertex UVs when the VUM visual decode supplied them, and is
+    // otherwise shaded flat (per-material texture binding and name->TDX
+    // resolution remain a separate RE-blocked follow-up). The level texture store
+    // deliberately omits display expansion, so we pull the raw member bytes and run the front-end
     // TDX decoder + indexed->RGBA8 expansion. Fail-soft: fall back to a procedural
     // dev grid if no level texture is available or decodable.
     bool bound_real_level_texture = false;
@@ -611,6 +622,9 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
     }
 
     asset::SceneIR diagnostic_scene;
+    // Real decoded per-vertex UVs for diagnostic_scene's single spatial render mesh, or empty when
+    // the rendered geometry is the COL collision shell (which has no texture coordinates at all).
+    std::vector<std::array<float, 2>> diagnostic_scene_uvs;
     // Live free-fly camera seed (captured in the camera block below, consumed at
     // the BuildDiagnosticScenePresentation call): the initial pose, a per-frame
     // move speed scaled to the level, and an optional scripted per-frame input.
@@ -712,11 +726,16 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         // builder, so they get the identical bounds-fitted projection + framed camera the collision
         // path uses (VUM positions share the collision world space, but the builder projects world
         // coords into its normalized view -- reusing them raw would land off-screen). Falls back to
-        // the collision scene when nothing decoded or the VUM scene fails to build. Real per-vertex
-        // UVs are decoded but not yet fed to the GPU (triplanar shading for now); a UV-attribute
-        // shader variant is the next step.
+        // the collision scene when nothing decoded or the VUM scene fails to build. The REAL decoded
+        // per-vertex UVs are carried alongside in visual_uvs and handed to the GPU as vertex
+        // attribute 2; the scene builder emits one render mesh whose vertices are appended in
+        // terrain-cell order, so the flat UV vector stays index-parallel with its positions.
         constexpr std::size_t kMaximumVisualVertices = 600000U;
         asset::LevelSpatialIR visual_spatial;
+        std::vector<std::array<float, 2>> visual_uvs;
+        // Every accepted cell must contribute exactly one UV per position, or the whole parallel
+        // array is discarded rather than shifting every later cell's texture coordinates.
+        bool visual_uvs_complete = true;
         std::size_t visual_vertices = 0;
         std::size_t visual_triangles = 0;
         bool visual_vertex_cap_hit = false;
@@ -747,6 +766,11 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                 }
                 if (spatial_mesh.triangles.empty())
                     continue;
+                if (visual_mesh.uvs.size() == visual_mesh.positions.size())
+                    visual_uvs.insert(
+                        visual_uvs.end(), visual_mesh.uvs.begin(), visual_mesh.uvs.end());
+                else
+                    visual_uvs_complete = false;
                 visual_vertices += spatial_mesh.vertices.size();
                 visual_triangles += spatial_mesh.triangles.size();
                 visual_spatial.terrain_cells.push_back(std::move(spatial_mesh));
@@ -754,17 +778,25 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             if (visual_vertex_cap_hit)
                 break;
         }
+        if (!visual_uvs_complete || visual_uvs.size() != visual_vertices)
+        {
+            visual_uvs.clear();
+            log->Warning("level",
+                "VUM visual UV stream is not index-parallel with positions; drawing untextured");
+        }
         if (!visual_spatial.terrain_cells.empty())
         {
             auto visual_scene = runtime::BuildGlobalSpatialDiagnosticScene(visual_spatial);
             if (visual_scene)
             {
                 diagnostic_scene = std::move(*visual_scene);
+                diagnostic_scene_uvs = visual_uvs;
                 log->Info("level",
                     "rendering VUM visual geometry: cells=" +
                         std::to_string(visual_spatial.terrain_cells.size()) + " vertices=" +
                         std::to_string(visual_vertices) + " triangles=" +
-                        std::to_string(visual_triangles) +
+                        std::to_string(visual_triangles) + " uvs=" +
+                        std::to_string(diagnostic_scene_uvs.size()) +
                         (visual_vertex_cap_hit ? " (vertex cap hit; remaining skipped)" : ""));
             }
             else
@@ -788,6 +820,7 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         const char* const fixed_camera_env = std::getenv("OPENOMEGA_FIXED_CAMERA");
         const char* const camera_pose_env = std::getenv("OPENOMEGA_CAMERA_POSE");
         const char* const camera_script_env = std::getenv("OPENOMEGA_CAMERA_SCRIPT");
+        const char* const visual_geometry_env = std::getenv("OPENOMEGA_VISUAL_GEOMETRY");
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
@@ -795,12 +828,22 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                                   std::string_view(fixed_camera_env) != "1";
         if (use_free_fly && !diagnostic_scene.render_meshes.empty())
         {
-            // Navigate the complete collision shell (the VUM visual geometry is
-            // still sparse pending its strip-break topology follow-up, so it is
-            // unsuitable for a framed fly-through).
+            // Navigate the complete collision shell by default (the VUM visual
+            // geometry is still sparse pending its strip-break topology
+            // follow-up, so it is unsuitable for a framed fly-through).
+            // OPENOMEGA_VISUAL_GEOMETRY=1 renders the VUM visual geometry, with
+            // its real decoded per-vertex UVs, instead. Off by default: flipping
+            // it is a later decision that depends on the topology work.
             const asset::LevelSpatialIR& camera_spatial =
                 content_owner->level_content->spatial;
-            auto world_scene = runtime::BuildWorldSpaceLevelScene(camera_spatial);
+            const bool use_visual_geometry = visual_geometry_env != nullptr &&
+                                             std::string_view(visual_geometry_env) == "1" &&
+                                             !visual_spatial.terrain_cells.empty();
+            // The player probe and its collision always stay on the COL shell, which is the
+            // authoritative collision surface regardless of what is being drawn.
+            const asset::LevelSpatialIR& render_spatial =
+                use_visual_geometry ? visual_spatial : camera_spatial;
+            auto world_scene = runtime::BuildWorldSpaceLevelScene(render_spatial);
             if (world_scene && !world_scene->render_meshes.empty() &&
                 !world_scene->render_meshes.front().positions.empty())
             {
@@ -901,8 +944,18 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                     }
                 }
                 diagnostic_scene = std::move(*world_scene);
+                // World-space rebuild appends the same cells in the same order as the projected
+                // build above, so the parallel UV array survives the switch unchanged -- but only
+                // when the rebuilt scene actually is the VUM visual geometry.
+                if (use_visual_geometry)
+                    diagnostic_scene_uvs = visual_uvs;
+                else
+                    diagnostic_scene_uvs.clear();
                 log->Info("level",
-                    "free-fly 3D camera active: bounds min(" +
+                    "free-fly 3D camera active: " +
+                        std::string(use_visual_geometry ? "VUM visual geometry"
+                                                        : "COL collision shell") +
+                        " bounds min(" +
                         std::to_string(minimum.x) + "," + std::to_string(minimum.y) +
                         "," + std::to_string(minimum.z) + ") max(" +
                         std::to_string(maximum.x) + "," + std::to_string(maximum.y) +
@@ -1994,7 +2047,7 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                     ? &*content_owner->level_texture_store
                     : nullptr,
                 content_owner->game_data ? &*content_owner->game_data : nullptr,
-                free_fly_initial_pose, free_fly_initial_speed,
+                diagnostic_scene_uvs, free_fly_initial_pose, free_fly_initial_speed,
                 free_fly_script_input, player_seed_state, player_seed_params,
                 std::move(player_seed_collision));
         if (!created_scene_presentation)

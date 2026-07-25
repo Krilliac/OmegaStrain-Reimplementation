@@ -2,6 +2,7 @@
 
 #include "omega/asset/render_mesh_ir.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -33,11 +34,15 @@ static_assert(std::is_trivially_copyable_v<RenderMeshHandle>);
 static_assert(std::is_standard_layout_v<RenderMeshHandle>);
 
 // Borrowed upload data for one synchronous Reserve preflight and backend upload. The caller owns
-// both spans and keeps them alive through backend completion; neither span survives in the pool.
+// every span and keeps them alive through backend completion; no span survives in the pool.
 struct RenderMeshUploadView
 {
     std::span<const asset::Float3IR> positions;
     std::span<const std::uint32_t> triangle_indices;
+    // Optional per-vertex texture coordinates, index-parallel with positions. An EMPTY span means
+    // the mesh carries no UVs (every pre-existing caller), and the mesh is then shaded without a
+    // sampled albedo; a non-empty span must have exactly positions.size() entries.
+    std::span<const std::array<float, 2>> uvs;
 };
 
 struct RenderMeshPoolConfig
@@ -46,8 +51,8 @@ struct RenderMeshPoolConfig
     std::size_t slot_capacity = 64U;
     std::uint64_t maximum_resident_positions = 4ULL << 20U;
     std::uint64_t maximum_resident_triangle_indices = 12ULL << 20U;
-    // Position and index payload bytes only; not allocator capacity, transfer storage, process RSS,
-    // or GPU allocation size.
+    // Position, index and (when present) UV payload bytes only; not allocator capacity, transfer
+    // storage, process RSS, or GPU allocation size.
     std::uint64_t maximum_resident_logical_bytes = 128ULL * 1024ULL * 1024ULL;
 };
 
@@ -136,6 +141,8 @@ struct RenderMeshReservation
     RenderMeshHandle handle;
     std::uint64_t position_count = 0U;
     std::uint64_t triangle_index_count = 0U;
+    // Zero for a mesh uploaded without UVs; otherwise equal to position_count.
+    std::uint64_t uv_count = 0U;
     std::uint64_t logical_bytes = 0U;
 };
 
@@ -144,6 +151,8 @@ struct RenderMeshMetadata
     RenderMeshHandle handle;
     std::uint64_t position_count = 0U;
     std::uint64_t triangle_index_count = 0U;
+    // Zero for a mesh uploaded without UVs; otherwise equal to position_count.
+    std::uint64_t uv_count = 0U;
     std::uint64_t logical_bytes = 0U;
 };
 
@@ -158,6 +167,8 @@ struct RenderMeshPoolSnapshot
     std::uint64_t resident_positions = 0U;
     std::uint64_t reserved_triangle_indices = 0U;
     std::uint64_t resident_triangle_indices = 0U;
+    std::uint64_t reserved_uvs = 0U;
+    std::uint64_t resident_uvs = 0U;
     std::uint64_t reserved_logical_bytes = 0U;
     std::uint64_t resident_logical_bytes = 0U;
 

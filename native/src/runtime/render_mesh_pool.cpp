@@ -1,5 +1,6 @@
 #include "omega/runtime/render_mesh_pool.h"
 
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -18,6 +19,7 @@ struct UploadFacts
 {
     std::uint64_t position_count = 0U;
     std::uint64_t triangle_index_count = 0U;
+    std::uint64_t uv_count = 0U;
     std::uint64_t logical_bytes = 0U;
 };
 
@@ -57,10 +59,15 @@ struct UploadFacts
     if (upload.positions.empty() || upload.triangle_indices.empty() ||
         upload.triangle_indices.size() % 3U != 0U)
         return std::unexpected(Error(RenderMeshErrorCode::InvalidMesh));
+    // UVs are optional, but a partial UV stream is never acceptable: the attribute is bound
+    // index-parallel with positions, so a short or long stream would read outside the mesh.
+    if (!upload.uvs.empty() && upload.uvs.size() != upload.positions.size())
+        return std::unexpected(Error(RenderMeshErrorCode::InvalidMesh));
 
     const std::uint64_t position_count = static_cast<std::uint64_t>(upload.positions.size());
     const std::uint64_t triangle_index_count =
         static_cast<std::uint64_t>(upload.triangle_indices.size());
+    const std::uint64_t uv_count = static_cast<std::uint64_t>(upload.uvs.size());
     constexpr std::uint64_t addressable_positions =
         static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U;
     if (position_count > addressable_positions)
@@ -77,17 +84,26 @@ struct UploadFacts
         if (index >= upload.positions.size())
             return std::unexpected(Error(RenderMeshErrorCode::InvalidMesh));
     }
+    for (const std::array<float, 2>& uv : upload.uvs)
+    {
+        if (!std::isfinite(uv[0]) || !std::isfinite(uv[1]))
+            return std::unexpected(Error(RenderMeshErrorCode::InvalidMesh));
+    }
 
     std::uint64_t position_bytes = 0U;
     std::uint64_t index_bytes = 0U;
+    std::uint64_t uv_bytes = 0U;
     if (!Multiply(position_count, sizeof(asset::Float3IR), position_bytes) ||
         !Multiply(triangle_index_count, sizeof(std::uint32_t), index_bytes) ||
-        index_bytes > std::numeric_limits<std::uint64_t>::max() - position_bytes)
+        !Multiply(uv_count, sizeof(std::array<float, 2>), uv_bytes) ||
+        index_bytes > std::numeric_limits<std::uint64_t>::max() - position_bytes ||
+        uv_bytes > std::numeric_limits<std::uint64_t>::max() - (position_bytes + index_bytes))
         return std::unexpected(Error(RenderMeshErrorCode::InvalidMesh));
     return UploadFacts{
         .position_count = position_count,
         .triangle_index_count = triangle_index_count,
-        .logical_bytes = position_bytes + index_bytes,
+        .uv_count = uv_count,
+        .logical_bytes = position_bytes + index_bytes + uv_bytes,
     };
 }
 } // namespace
@@ -139,6 +155,8 @@ RenderMeshPool::RenderMeshPool(RenderMeshPool&& other) noexcept
       resident_positions_(std::exchange(other.resident_positions_, 0U)),
       reserved_triangle_indices_(std::exchange(other.reserved_triangle_indices_, 0U)),
       resident_triangle_indices_(std::exchange(other.resident_triangle_indices_, 0U)),
+      reserved_uvs_(std::exchange(other.reserved_uvs_, 0U)),
+      resident_uvs_(std::exchange(other.resident_uvs_, 0U)),
       reserved_logical_bytes_(std::exchange(other.reserved_logical_bytes_, 0U)),
       resident_logical_bytes_(std::exchange(other.resident_logical_bytes_, 0U))
 {
@@ -182,16 +200,19 @@ std::expected<RenderMeshReservation, RenderMeshError> RenderMeshPool::Reserve(
     slot.next_free = kNoFreeSlot;
     slot.position_count = facts->position_count;
     slot.triangle_index_count = facts->triangle_index_count;
+    slot.uv_count = facts->uv_count;
     slot.logical_bytes = facts->logical_bytes;
     ++reserved_slots_;
     reserved_positions_ += facts->position_count;
     reserved_triangle_indices_ += facts->triangle_index_count;
+    reserved_uvs_ += facts->uv_count;
     reserved_logical_bytes_ += facts->logical_bytes;
 
     return RenderMeshReservation{
         .handle = HandleFor(slot_index, slot),
         .position_count = slot.position_count,
         .triangle_index_count = slot.triangle_index_count,
+        .uv_count = slot.uv_count,
         .logical_bytes = slot.logical_bytes,
     };
 }
@@ -204,6 +225,7 @@ std::expected<RenderMeshHandle, RenderMeshError> RenderMeshPool::Publish(
     Slot& slot = slots_[reservation.handle.slot_index];
     if (reservation.position_count != slot.position_count ||
         reservation.triangle_index_count != slot.triangle_index_count ||
+        reservation.uv_count != slot.uv_count ||
         reservation.logical_bytes != slot.logical_bytes)
         return std::unexpected(Error(RenderMeshErrorCode::InvalidReservation));
 
@@ -214,6 +236,8 @@ std::expected<RenderMeshHandle, RenderMeshError> RenderMeshPool::Publish(
     resident_positions_ += slot.position_count;
     reserved_triangle_indices_ -= slot.triangle_index_count;
     resident_triangle_indices_ += slot.triangle_index_count;
+    reserved_uvs_ -= slot.uv_count;
+    resident_uvs_ += slot.uv_count;
     reserved_logical_bytes_ -= slot.logical_bytes;
     resident_logical_bytes_ += slot.logical_bytes;
     return reservation.handle;
@@ -227,12 +251,14 @@ std::expected<void, RenderMeshError> RenderMeshPool::Rollback(
     Slot& slot = slots_[reservation.handle.slot_index];
     if (reservation.position_count != slot.position_count ||
         reservation.triangle_index_count != slot.triangle_index_count ||
+        reservation.uv_count != slot.uv_count ||
         reservation.logical_bytes != slot.logical_bytes)
         return std::unexpected(Error(RenderMeshErrorCode::InvalidReservation));
 
     --reserved_slots_;
     reserved_positions_ -= slot.position_count;
     reserved_triangle_indices_ -= slot.triangle_index_count;
+    reserved_uvs_ -= slot.uv_count;
     reserved_logical_bytes_ -= slot.logical_bytes;
     Recycle(reservation.handle.slot_index, slot);
     return {};
@@ -248,6 +274,7 @@ std::expected<RenderMeshMetadata, RenderMeshError> RenderMeshPool::Get(
         .handle = handle,
         .position_count = slot.position_count,
         .triangle_index_count = slot.triangle_index_count,
+        .uv_count = slot.uv_count,
         .logical_bytes = slot.logical_bytes,
     };
 }
@@ -262,11 +289,13 @@ std::expected<RenderMeshMetadata, RenderMeshError> RenderMeshPool::Release(
         .handle = handle,
         .position_count = slot.position_count,
         .triangle_index_count = slot.triangle_index_count,
+        .uv_count = slot.uv_count,
         .logical_bytes = slot.logical_bytes,
     };
     --resident_slots_;
     resident_positions_ -= slot.position_count;
     resident_triangle_indices_ -= slot.triangle_index_count;
+    resident_uvs_ -= slot.uv_count;
     resident_logical_bytes_ -= slot.logical_bytes;
     Recycle(handle.slot_index, slot);
     return metadata;
@@ -284,6 +313,8 @@ RenderMeshPoolSnapshot RenderMeshPool::Snapshot() const noexcept
         .resident_positions = resident_positions_,
         .reserved_triangle_indices = reserved_triangle_indices_,
         .resident_triangle_indices = resident_triangle_indices_,
+        .reserved_uvs = reserved_uvs_,
+        .resident_uvs = resident_uvs_,
         .reserved_logical_bytes = reserved_logical_bytes_,
         .resident_logical_bytes = resident_logical_bytes_,
     };
@@ -312,6 +343,7 @@ void RenderMeshPool::Recycle(const std::uint32_t slot_index, Slot& slot) noexcep
 {
     slot.position_count = 0U;
     slot.triangle_index_count = 0U;
+    slot.uv_count = 0U;
     slot.logical_bytes = 0U;
     if (slot.generation == std::numeric_limits<std::uint64_t>::max())
     {

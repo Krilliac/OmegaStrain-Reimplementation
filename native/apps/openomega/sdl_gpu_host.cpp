@@ -479,8 +479,22 @@ struct MeshBackendSlot
 {
     SDL_GPUBuffer* positions = nullptr;
     SDL_GPUBuffer* triangle_indices = nullptr;
+    // Per-vertex texture coordinates. ALWAYS created, one float2 per position, even for an upload
+    // that carried no UVs (it is then zero-filled). The flat, wireframe and textured pipelines share
+    // one vertex-input description, so the UV slot is always declared and must always be bindable:
+    // binding fewer buffers than the pipeline declares fails the draw at runtime.
+    SDL_GPUBuffer* uvs = nullptr;
     std::uint32_t position_count = 0U;
     std::uint32_t triangle_index_count = 0U;
+    // Uploaded UV count: zero when the mesh carried none (the buffer is then the zero fill above).
+    std::uint32_t uv_count = 0U;
+};
+
+// One float2 vertex texture coordinate, matching VumVisualMeshIR::uvs element layout.
+struct MeshUvF
+{
+    float u = 0.0F;
+    float v = 0.0F;
 };
 
 struct MeshColorRgbF
@@ -494,6 +508,7 @@ struct ResolvedMeshDraw
 {
     SDL_GPUBuffer* positions = nullptr;
     SDL_GPUBuffer* triangle_indices = nullptr;
+    SDL_GPUBuffer* uvs = nullptr;
     std::uint32_t triangle_index_count = 0U;
     // Resolved backend albedo texture, or nullptr when the draw has no (valid)
     // texture -> the flat solid-color pipeline is used for that draw.
@@ -502,6 +517,8 @@ struct ResolvedMeshDraw
 
 static_assert(sizeof(asset::Float3IR) == sizeof(float) * 3U);
 static_assert(sizeof(MeshColorRgbF) == sizeof(float) * 3U);
+static_assert(sizeof(MeshUvF) == sizeof(float) * 2U);
+static_assert(sizeof(MeshUvF) == sizeof(std::array<float, 2U>));
 
 [[nodiscard]] constexpr MeshColorRgbF ToMeshColor(
     const runtime::RenderMeshColorRgba8 color) noexcept
@@ -649,6 +666,11 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
     const SDL_GPUTextureFormat target_format, const SDL_GPUTextureFormat depth_format,
     const SDL_GPUFillMode fill_mode) noexcept
 {
+    // ONE vertex-input description shared by the flat fill, wireframe and textured pipelines. The
+    // three declare the same three buffer slots even though only the textured vertex shader reads
+    // slot 2, because RecordMeshPass binds all three for every draw: if the declared and the bound
+    // buffer counts ever disagreed, the bind would fail at runtime. Slot 2 is per-vertex UVs; a
+    // mesh uploaded without UVs still owns a zero-filled slot-2 buffer (see MeshBackendSlot).
     constexpr std::array vertex_buffers{
         SDL_GPUVertexBufferDescription{
             .slot = 0U,
@@ -660,6 +682,12 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
             .slot = 1U,
             .pitch = static_cast<std::uint32_t>(sizeof(MeshColorRgbF)),
             .input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE,
+            .instance_step_rate = 0U,
+        },
+        SDL_GPUVertexBufferDescription{
+            .slot = 2U,
+            .pitch = static_cast<std::uint32_t>(sizeof(MeshUvF)),
+            .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
             .instance_step_rate = 0U,
         },
     };
@@ -674,6 +702,12 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
             .location = 1U,
             .buffer_slot = 1U,
             .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,
+            .offset = 0U,
+        },
+        SDL_GPUVertexAttribute{
+            .location = 2U,
+            .buffer_slot = 2U,
+            .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
             .offset = 0U,
         },
     };
@@ -797,7 +831,7 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
             commands, 0U, matrix.data(), static_cast<std::uint32_t>(sizeof(matrix)));
 
         // A Fill draw with a resolved texture uses the textured pipeline (which
-        // samples the bound texture with in-shader triplanar mapping); every
+        // samples the bound texture with the mesh's per-vertex UVs); every
         // other case keeps the flat solid-color fill/wireframe pipeline.
         const bool use_textured =
             draw.raster_mode == runtime::RenderMeshRasterMode::Fill &&
@@ -817,6 +851,8 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
             };
             SDL_BindGPUFragmentSamplers(pass, 0U, &texture_binding, 1U);
         }
+        // Three bindings for every draw and every pipeline: the shared vertex-input description
+        // declares three buffer slots, so a short bind list would fail the draw.
         const std::array vertex_bindings{
             SDL_GPUBufferBinding{
                 .buffer = resolved.positions,
@@ -825,6 +861,10 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
             SDL_GPUBufferBinding{
                 .buffer = color_buffer,
                 .offset = static_cast<std::uint32_t>(index * sizeof(MeshColorRgbF)),
+            },
+            SDL_GPUBufferBinding{
+                .buffer = resolved.uvs,
+                .offset = 0U,
             },
         };
         SDL_BindGPUVertexBuffers(pass, 0U, vertex_bindings.data(),
@@ -934,6 +974,8 @@ struct SdlGpuHost::Impl
                     SDL_ReleaseGPUBuffer(device, mesh.positions);
                 if (mesh.triangle_indices != nullptr)
                     SDL_ReleaseGPUBuffer(device, mesh.triangle_indices);
+                if (mesh.uvs != nullptr)
+                    SDL_ReleaseGPUBuffer(device, mesh.uvs);
                 mesh = {};
             }
             if (mesh_color_buffer != nullptr)
@@ -1595,7 +1637,8 @@ std::expected<runtime::RenderMeshHandle, std::string> SdlGpuHost::UploadRenderMe
             return std::unexpected("render mesh backend slot invariant failed");
         const MeshBackendSlot& existing = impl_->mesh_slots[slot_index];
         if (existing.positions != nullptr || existing.triangle_indices != nullptr ||
-            existing.position_count != 0U || existing.triangle_index_count != 0U)
+            existing.uvs != nullptr || existing.position_count != 0U ||
+            existing.triangle_index_count != 0U || existing.uv_count != 0U)
         {
             return std::unexpected("render mesh backend slot invariant failed");
         }
@@ -1606,7 +1649,15 @@ std::expected<runtime::RenderMeshHandle, std::string> SdlGpuHost::UploadRenderMe
             reservation->position_count * sizeof(asset::Float3IR);
         const std::uint64_t index_bytes =
             reservation->triangle_index_count * sizeof(std::uint32_t);
+        // The UV buffer is sized from the POSITION count, not the uploaded UV count: a mesh with no
+        // UVs still needs a bindable, correctly strided slot-2 buffer (zero-filled below), because
+        // all three mesh pipelines declare the UV slot. So the transfer staging size is computed
+        // here rather than reused from the pool's logical byte total, which counts real UVs only.
+        const std::uint64_t uv_bytes = reservation->position_count * sizeof(MeshUvF);
+        const std::uint64_t transfer_bytes = position_bytes + index_bytes + uv_bytes;
         if (position_bytes > maximum_transfer_bytes || index_bytes > maximum_transfer_bytes ||
+            uv_bytes > maximum_transfer_bytes ||
+            transfer_bytes > maximum_transfer_bytes ||
             reservation->logical_bytes > maximum_transfer_bytes ||
             reservation->position_count > std::numeric_limits<std::uint32_t>::max() ||
             reservation->triangle_index_count > std::numeric_limits<std::uint32_t>::max())
@@ -1635,9 +1686,19 @@ std::expected<runtime::RenderMeshHandle, std::string> SdlGpuHost::UploadRenderMe
             return std::unexpected(SdlError("render mesh index buffer create"));
         BufferGuard index_guard(impl_->device, triangle_indices);
 
+        const SDL_GPUBufferCreateInfo uv_info{
+            .usage = SDL_GPU_BUFFERUSAGE_VERTEX,
+            .size = static_cast<std::uint32_t>(uv_bytes),
+            .props = 0,
+        };
+        SDL_GPUBuffer* uvs = SDL_CreateGPUBuffer(impl_->device, &uv_info);
+        if (uvs == nullptr)
+            return std::unexpected(SdlError("render mesh uv buffer create"));
+        BufferGuard uv_guard(impl_->device, uvs);
+
         const SDL_GPUTransferBufferCreateInfo transfer_info{
             .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-            .size = static_cast<std::uint32_t>(reservation->logical_bytes),
+            .size = static_cast<std::uint32_t>(transfer_bytes),
             .props = 0,
         };
         SDL_GPUTransferBuffer* transfer =
@@ -1653,6 +1714,19 @@ std::expected<runtime::RenderMeshHandle, std::string> SdlGpuHost::UploadRenderMe
         std::memcpy(static_cast<std::byte*>(mapped) +
                 static_cast<std::size_t>(position_bytes),
             upload.triangle_indices.data(), static_cast<std::size_t>(index_bytes));
+        std::byte* const uv_staging = static_cast<std::byte*>(mapped) +
+            static_cast<std::size_t>(position_bytes) + static_cast<std::size_t>(index_bytes);
+        if (upload.uvs.empty())
+        {
+            // No decoded UVs: fill the always-present slot-2 buffer with zeroes so the bind stays
+            // valid. Such a mesh is drawn by the flat pipeline, which never reads the attribute.
+            std::memset(uv_staging, 0, static_cast<std::size_t>(uv_bytes));
+        }
+        else
+        {
+            std::memcpy(
+                uv_staging, upload.uvs.data(), static_cast<std::size_t>(uv_bytes));
+        }
         SDL_UnmapGPUTransferBuffer(impl_->device, transfer);
 
         SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(impl_->device);
@@ -1688,6 +1762,16 @@ std::expected<runtime::RenderMeshHandle, std::string> SdlGpuHost::UploadRenderMe
             .size = static_cast<std::uint32_t>(index_bytes),
         };
         SDL_UploadToGPUBuffer(copy, &index_source, &index_target, false);
+        const SDL_GPUTransferBufferLocation uv_source{
+            .transfer_buffer = transfer,
+            .offset = static_cast<std::uint32_t>(position_bytes + index_bytes),
+        };
+        const SDL_GPUBufferRegion uv_target{
+            .buffer = uvs,
+            .offset = 0U,
+            .size = static_cast<std::uint32_t>(uv_bytes),
+        };
+        SDL_UploadToGPUBuffer(copy, &uv_source, &uv_target, false);
         SDL_EndGPUCopyPass(copy);
         if (!command_guard.Submit())
             return std::unexpected(SdlError("render mesh command-buffer submit"));
@@ -1704,12 +1788,15 @@ std::expected<runtime::RenderMeshHandle, std::string> SdlGpuHost::UploadRenderMe
         impl_->mesh_slots[slot_index] = MeshBackendSlot{
             .positions = positions,
             .triangle_indices = triangle_indices,
+            .uvs = uvs,
             .position_count = static_cast<std::uint32_t>(reservation->position_count),
             .triangle_index_count =
                 static_cast<std::uint32_t>(reservation->triangle_index_count),
+            .uv_count = static_cast<std::uint32_t>(reservation->uv_count),
         };
         position_guard.Dismiss();
         index_guard.Dismiss();
+        uv_guard.Dismiss();
         reservation_guard.Dismiss();
         SaturatingIncrement(impl_->successful_mesh_uploads);
         SaturatingAdd(
@@ -1760,8 +1847,10 @@ std::expected<void, std::string> SdlGpuHost::ReleaseRenderMesh(
             }
             const MeshBackendSlot& mesh = impl_->mesh_slots[slot_index];
             if (mesh.positions == nullptr || mesh.triangle_indices == nullptr ||
+                mesh.uvs == nullptr ||
                 mesh.position_count != metadata->position_count ||
-                mesh.triangle_index_count != metadata->triangle_index_count)
+                mesh.triangle_index_count != metadata->triangle_index_count ||
+                mesh.uv_count != metadata->uv_count)
             {
                 SaturatingIncrement(impl_->rejected_nondefault_mesh_handles);
                 return std::unexpected(
@@ -1777,6 +1866,7 @@ std::expected<void, std::string> SdlGpuHost::ReleaseRenderMesh(
 
             SDL_ReleaseGPUBuffer(impl_->device, mesh.positions);
             SDL_ReleaseGPUBuffer(impl_->device, mesh.triangle_indices);
+            SDL_ReleaseGPUBuffer(impl_->device, mesh.uvs);
             impl_->mesh_slots[slot_index] = {};
             SaturatingIncrement(impl_->successful_mesh_releases);
             return {};
@@ -2247,12 +2337,15 @@ SdlGpuHost::ReadbackFrameRgba8(const runtime::RenderFramePacket& packet,
                 return std::unexpected("mesh readback backend slot invariant failed");
             const MeshBackendSlot& mesh = impl_->mesh_slots[slot_index];
             if (mesh.positions == nullptr || mesh.triangle_indices == nullptr ||
+                mesh.uvs == nullptr ||
                 mesh.position_count != metadata->position_count ||
-                mesh.triangle_index_count != metadata->triangle_index_count)
+                mesh.triangle_index_count != metadata->triangle_index_count ||
+                mesh.uv_count != metadata->uv_count)
                 return std::unexpected("mesh readback backend slot invariant failed");
             resolved_draws[index] = ResolvedMeshDraw{
                 .positions = mesh.positions,
                 .triangle_indices = mesh.triangle_indices,
+                .uvs = mesh.uvs,
                 .triangle_index_count = mesh.triangle_index_count,
                 .texture = impl_->ResolveTextureSlot(draw.texture),
             };
@@ -2647,8 +2740,10 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
             }
             const MeshBackendSlot& mesh = impl_->mesh_slots[slot_index];
             if (mesh.positions == nullptr || mesh.triangle_indices == nullptr ||
+                mesh.uvs == nullptr ||
                 mesh.position_count != metadata->position_count ||
-                mesh.triangle_index_count != metadata->triangle_index_count)
+                mesh.triangle_index_count != metadata->triangle_index_count ||
+                mesh.uv_count != metadata->uv_count)
             {
                 SaturatingIncrement(impl_->rejected_nondefault_mesh_handles);
                 return std::unexpected(
@@ -2657,6 +2752,7 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
             resolved_mesh_draws[index] = ResolvedMeshDraw{
                 .positions = mesh.positions,
                 .triangle_indices = mesh.triangle_indices,
+                .uvs = mesh.uvs,
                 .triangle_index_count = mesh.triangle_index_count,
                 .texture = impl_->ResolveTextureSlot(draw.texture),
             };

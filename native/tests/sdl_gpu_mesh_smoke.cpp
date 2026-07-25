@@ -10,6 +10,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -59,8 +60,8 @@ using Clock = std::chrono::steady_clock;
            pool.retired_slots == 0U && pool.reserved_positions == 0U &&
            pool.resident_positions == 0U &&
            pool.reserved_triangle_indices == 0U &&
-           pool.resident_triangle_indices == 0U &&
-           pool.reserved_logical_bytes == 0U &&
+           pool.resident_triangle_indices == 0U && pool.reserved_uvs == 0U &&
+           pool.resident_uvs == 0U && pool.reserved_logical_bytes == 0U &&
            pool.resident_logical_bytes == 0U;
 }
 
@@ -100,6 +101,279 @@ template <typename Predicate>
               << " did not reach a usable swapchain within its bound\n";
     return false;
 }
+
+// Which texel of the 2x2 checker (each quadrant a solid 4x4 block of an 8x8 texture) a readback
+// pixel came from. The textured pixel shader multiplies the sampled albedo by a uniform key-light
+// term, so absolute levels are not fixed; the CHANNEL STRUCTURE identifies the texel that was read.
+enum class CheckerSwatch
+{
+    Red,
+    Green,
+    Blue,
+    White,
+    Other,
+};
+
+[[nodiscard]] std::string_view CheckerSwatchName(const CheckerSwatch swatch) noexcept
+{
+    switch (swatch)
+    {
+    case CheckerSwatch::Red:
+        return "red";
+    case CheckerSwatch::Green:
+        return "green";
+    case CheckerSwatch::Blue:
+        return "blue";
+    case CheckerSwatch::White:
+        return "white";
+    case CheckerSwatch::Other:
+        return "other";
+    }
+    return "other";
+}
+
+[[nodiscard]] CheckerSwatch ClassifyCheckerPixel(
+    const omega::runtime::RenderClearColorRgba8 pixel) noexcept
+{
+    if (pixel.alpha != 255U)
+        return CheckerSwatch::Other;
+    const int red = static_cast<int>(pixel.red);
+    const int green = static_cast<int>(pixel.green);
+    const int blue = static_cast<int>(pixel.blue);
+    const int highest = std::max({red, green, blue});
+    const int lowest = std::min({red, green, blue});
+    // The clear color is opaque black, so anything this dark is an uncovered pixel, not a texel.
+    if (highest < 48)
+        return CheckerSwatch::Other;
+    if (highest - lowest <= 24)
+        return CheckerSwatch::White;
+    const int dominance = 64;
+    if (red == highest && red - std::max(green, blue) >= dominance)
+        return CheckerSwatch::Red;
+    if (green == highest && green - std::max(red, blue) >= dominance)
+        return CheckerSwatch::Green;
+    if (blue == highest && blue - std::max(red, green) >= dominance)
+        return CheckerSwatch::Blue;
+    return CheckerSwatch::Other;
+}
+
+// The UV proof.
+//
+// A screen-filling quad carrying KNOWN per-vertex UVs (0,0)..(1,1) is drawn against an 8x8 texture
+// whose four 4x4 quadrants are four distinguishable colors, and the result is read back at 8x8.
+// That makes each readback pixel center land exactly on one texel center, so the readback must come
+// back as four uniform 4x4 blocks holding all four colors -- which can only happen if the UVs
+// actually addressed the texture. It is deliberately NOT satisfied by "any UVs": with degenerate
+// (all-zero) UVs every fragment samples the same point, every block classifies the same, and the
+// permutation assertion below fails. This is the case that separates real UVs from any UVs.
+//
+// The host lives inside this function so only one GPU device exists at a time; it is called before
+// the baseline case creates its own.
+[[nodiscard]] int RunUvCheckerCase(const omega::app::SdlPlatformService& platform)
+{
+    constexpr std::uint32_t kCheckerExtent = 8U;
+    constexpr std::size_t kCheckerBytes =
+        static_cast<std::size_t>(kCheckerExtent) * kCheckerExtent * 4U;
+    constexpr std::uint64_t kQuadPositions = 4U;
+    constexpr std::uint64_t kQuadIndices = 6U;
+    // positions*12 + indices*4 + uvs*8.
+    constexpr std::uint64_t kQuadLogicalBytes = 4U * 12U + 6U * 4U + 4U * 8U;
+    static_assert(kQuadLogicalBytes == 104U);
+
+    auto created_host = omega::app::SdlGpuHost::Create(platform, false,
+        omega::runtime::RenderTexturePoolConfig{
+            .slot_capacity = 1U,
+            .maximum_resident_logical_bytes = kCheckerBytes,
+        },
+        omega::runtime::RenderMeshPoolConfig{
+            .slot_capacity = 1U,
+            .maximum_resident_positions = kQuadPositions,
+            .maximum_resident_triangle_indices = kQuadIndices,
+            .maximum_resident_logical_bytes = kQuadLogicalBytes,
+        });
+    if (!created_host)
+        return Fail("uv checker host creation failed", created_host.error());
+    auto host = std::move(*created_host);
+    const std::string driver(host.driver_name());
+    if (driver != "direct3d12")
+    {
+        // The textured pipeline is DXIL-only (CreateTexturedMeshShader) and the host fail-softs to
+        // the flat pipeline elsewhere, which cannot sample anything. Skipping loudly beats
+        // asserting a property this backend structurally cannot provide.
+        std::cout << "omega_sdl_gpu_mesh_smoke: UV CHECKER CASE SKIPPED (driver=" << driver
+                  << " has no DXIL textured pipeline; the UV attribute is unverified here)\n";
+        return 0;
+    }
+
+    // Four solid 4x4 quadrants: top-left red, top-right green, bottom-left blue, bottom-right
+    // white. Solid blocks (rather than single texels) keep every readback pixel well inside one
+    // color, so linear filtering cannot smear one quadrant's answer into another's.
+    std::array<std::byte, kCheckerBytes> checker_pixels{};
+    for (std::uint32_t y = 0U; y < kCheckerExtent; ++y)
+    {
+        for (std::uint32_t x = 0U; x < kCheckerExtent; ++x)
+        {
+            const bool right = x >= kCheckerExtent / 2U;
+            const bool lower = y >= kCheckerExtent / 2U;
+            const std::uint8_t red = (!right && !lower) || (right && lower) ? 255U : 0U;
+            const std::uint8_t green = (right && !lower) || (right && lower) ? 255U : 0U;
+            const std::uint8_t blue = (!right && lower) || (right && lower) ? 255U : 0U;
+            const std::size_t offset =
+                (static_cast<std::size_t>(y) * kCheckerExtent + x) * 4U;
+            checker_pixels[offset + 0U] = std::byte{red};
+            checker_pixels[offset + 1U] = std::byte{green};
+            checker_pixels[offset + 2U] = std::byte{blue};
+            checker_pixels[offset + 3U] = std::byte{255U};
+        }
+    }
+    auto checker_texture =
+        host.UploadRgba8Texture(omega::runtime::Rgba8TextureUploadView{
+            .width = kCheckerExtent,
+            .height = kCheckerExtent,
+            .pixels = checker_pixels,
+        });
+    if (!checker_texture)
+        return Fail("uv checker texture upload failed", checker_texture.error());
+
+    // Screen-filling quad. u = (x + 1) / 2 and v = (y + 1) / 2, so an 8x8 readback samples each of
+    // the eight texel centers along each axis exactly once.
+    constexpr std::array<omega::asset::Float3IR, 4U> quad_positions{
+        omega::asset::Float3IR{.x = -1.0F, .y = -1.0F, .z = 0.5F},
+        omega::asset::Float3IR{.x = 1.0F, .y = -1.0F, .z = 0.5F},
+        omega::asset::Float3IR{.x = 1.0F, .y = 1.0F, .z = 0.5F},
+        omega::asset::Float3IR{.x = -1.0F, .y = 1.0F, .z = 0.5F},
+    };
+    constexpr std::array<std::array<float, 2U>, 4U> quad_uvs{
+        std::array<float, 2U>{{0.0F, 0.0F}},
+        std::array<float, 2U>{{1.0F, 0.0F}},
+        std::array<float, 2U>{{1.0F, 1.0F}},
+        std::array<float, 2U>{{0.0F, 1.0F}},
+    };
+    constexpr std::array<std::uint32_t, 6U> quad_indices{0U, 1U, 2U, 0U, 2U, 3U};
+
+    const std::array<std::array<float, 2U>, 2U> short_uvs{
+        std::array<float, 2U>{{0.0F, 0.0F}},
+        std::array<float, 2U>{{1.0F, 0.0F}},
+    };
+    auto mismatched = host.UploadRenderMesh(omega::runtime::RenderMeshUploadView{
+        .positions = quad_positions,
+        .triangle_indices = quad_indices,
+        .uvs = short_uvs,
+    });
+    if (mismatched)
+        return Fail("a uv count that does not match the position count was accepted");
+
+    auto quad = host.UploadRenderMesh(omega::runtime::RenderMeshUploadView{
+        .positions = quad_positions,
+        .triangle_indices = quad_indices,
+        .uvs = quad_uvs,
+    });
+    if (!quad)
+        return Fail("uv quad upload failed", quad.error());
+    const omega::app::GpuHostSnapshot after_quad = host.Snapshot();
+    if (after_quad.meshes.resident_uvs != kQuadPositions ||
+        after_quad.meshes.resident_logical_bytes != kQuadLogicalBytes ||
+        after_quad.successful_mesh_upload_logical_bytes != kQuadLogicalBytes)
+    {
+        return Fail("uv quad residency did not charge the uv payload exactly");
+    }
+
+    const std::array quad_commands{
+        omega::runtime::RenderMeshDrawCommand{
+            .mesh = *quad,
+            .object_to_clip = omega::asset::kIdentityMatrix4x4IR,
+            // A magenta flat color that is NOT one of the four checker swatches: if the textured
+            // pipeline were bypassed, every pixel would classify as Other and the case fails.
+            .color = {
+                .red = 255U,
+                .green = 0U,
+                .blue = 255U,
+                .alpha = 255U,
+            },
+            .raster_mode = omega::runtime::RenderMeshRasterMode::Fill,
+            .texture = *checker_texture,
+        },
+    };
+    auto quad_draw_list = omega::runtime::RenderMeshDrawList::Create(quad_commands);
+    if (!quad_draw_list)
+        return Fail("uv quad draw-list creation failed");
+    omega::runtime::RenderFramePacket packet;
+    packet.clear_color = omega::runtime::RenderClearColorRgba8{
+        .red = 0U,
+        .green = 0U,
+        .blue = 0U,
+        .alpha = 255U,
+    };
+    packet.mesh_draw_list = *quad_draw_list;
+    auto readback =
+        omega::app::detail::SdlGpuHostTestAccess::ReadbackMeshesForTesting(host, packet);
+    if (!readback)
+        return Fail("uv checker readback failed", readback.error());
+
+    // Each 4x4 readback quadrant must be a single swatch, and the four quadrants together must be
+    // all four swatches. Degenerate UVs collapse every quadrant onto one sample point and fail here.
+    std::array<CheckerSwatch, 4U> quadrant{CheckerSwatch::Other, CheckerSwatch::Other,
+        CheckerSwatch::Other, CheckerSwatch::Other};
+    for (std::size_t index = 0U; index < readback->size(); ++index)
+    {
+        const std::size_t row = index / kCheckerExtent;
+        const std::size_t column = index % kCheckerExtent;
+        const std::size_t block =
+            (row >= kCheckerExtent / 2U ? 2U : 0U) + (column >= kCheckerExtent / 2U ? 1U : 0U);
+        const CheckerSwatch swatch = ClassifyCheckerPixel((*readback)[index]);
+        if (swatch == CheckerSwatch::Other)
+        {
+            std::cerr << "omega_sdl_gpu_mesh_smoke: uv checker pixel (" << column << ',' << row
+                      << ") is neither a checker color nor covered\n";
+            return 1;
+        }
+        if (quadrant[block] == CheckerSwatch::Other)
+            quadrant[block] = swatch;
+        else if (quadrant[block] != swatch)
+        {
+            std::cerr << "omega_sdl_gpu_mesh_smoke: uv checker quadrant " << block
+                      << " is not uniform (" << CheckerSwatchName(quadrant[block]) << " vs "
+                      << CheckerSwatchName(swatch) << ")\n";
+            return 1;
+        }
+    }
+    for (std::size_t first = 0U; first < quadrant.size(); ++first)
+    {
+        for (std::size_t second = first + 1U; second < quadrant.size(); ++second)
+        {
+            if (quadrant[first] == quadrant[second])
+            {
+                std::cerr << "omega_sdl_gpu_mesh_smoke: uv checker quadrants " << first << " and "
+                          << second << " both sampled " << CheckerSwatchName(quadrant[first])
+                          << ": the per-vertex UVs did not address the texture\n";
+                return 1;
+            }
+        }
+    }
+
+    auto released_quad = host.ReleaseRenderMesh(*quad);
+    if (!released_quad)
+        return Fail("uv quad release failed", released_quad.error());
+    auto released_checker = host.ReleaseTexture(*checker_texture);
+    if (!released_checker)
+        return Fail("uv checker texture release failed", released_checker.error());
+    const omega::app::GpuHostSnapshot after_release = host.Snapshot();
+    if (after_release.meshes.resident_uvs != 0U ||
+        after_release.meshes.resident_logical_bytes != 0U ||
+        after_release.meshes.resident_slots != 0U)
+    {
+        return Fail("uv quad release left residual mesh residency");
+    }
+    auto idle = host.WaitForIdle();
+    if (!idle)
+        return Fail("uv checker idle wait failed", idle.error());
+
+    std::cout << "omega_sdl_gpu_mesh_smoke: uv checker passed driver=" << driver
+              << " quadrants=" << CheckerSwatchName(quadrant[0]) << ','
+              << CheckerSwatchName(quadrant[1]) << ',' << CheckerSwatchName(quadrant[2]) << ','
+              << CheckerSwatchName(quadrant[3]) << '\n';
+    return 0;
+}
 } // namespace
 
 int main()
@@ -108,6 +382,10 @@ int main()
     if (!created_platform)
         return Fail("platform creation failed", created_platform.error());
     auto platform = std::move(*created_platform);
+
+    // Runs first, and owns its own host, so only one GPU device is live at a time.
+    if (const int uv_result = RunUvCheckerCase(platform); uv_result != 0)
+        return uv_result;
 
     auto created_host = omega::app::SdlGpuHost::Create(platform, false,
         omega::runtime::RenderTexturePoolConfig{

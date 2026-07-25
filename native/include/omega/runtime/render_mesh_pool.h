@@ -71,6 +71,7 @@ private:
         std::uint64_t generation = 1U;
         std::uint64_t position_count = 0U;
         std::uint64_t triangle_index_count = 0U;
+        std::uint64_t uv_count = 0U;
         std::uint64_t logical_bytes = 0U;
         std::uint32_t next_free = 0U;
         SlotState state = SlotState::Free;
@@ -96,6 +97,8 @@ private:
     std::uint64_t resident_positions_ = 0U;
     std::uint64_t reserved_triangle_indices_ = 0U;
     std::uint64_t resident_triangle_indices_ = 0U;
+    std::uint64_t reserved_uvs_ = 0U;
+    std::uint64_t resident_uvs_ = 0U;
     std::uint64_t reserved_logical_bytes_ = 0U;
     std::uint64_t resident_logical_bytes_ = 0U;
 };

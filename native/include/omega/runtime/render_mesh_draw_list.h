@@ -41,7 +41,7 @@ struct RenderMeshDrawCommand
     asset::Matrix4x4IR object_to_clip;
     RenderMeshColorRgba8 color;
     RenderMeshRasterMode raster_mode = RenderMeshRasterMode::Fill;
-    // Optional albedo texture sampled with in-shader triplanar mapping. A default
+    // Optional albedo texture sampled with the mesh's per-vertex UVs. A default
     // (invalid) handle selects the flat solid-color mesh pipeline; a valid handle
     // selects the textured pipeline. The referenced texture generation is kept
     // resident by the caller through synchronous consumption, like the mesh.

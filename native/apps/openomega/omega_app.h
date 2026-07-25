@@ -45,6 +45,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -390,6 +391,10 @@ private:
     BuildDiagnosticScenePresentation(SdlGpuHost& host, const asset::SceneIR& scene,
         const content::LevelTextureStore* level_texture_store,
         const content::GameDataService* game_data,
+        // Real decoded per-vertex UVs for scene.render_meshes.front(), or empty when the scene
+        // carries none. The spatial scene builder emits exactly one render mesh whose vertices are
+        // appended in terrain-cell order, so this stays index-parallel with that mesh's positions.
+        std::span<const std::array<float, 2>> scene_uvs = {},
         std::optional<runtime::FreeFlyPose> free_fly_pose = std::nullopt,
         float free_fly_move_speed = 1.0F,
         runtime::FreeFlyInput free_fly_script = {},

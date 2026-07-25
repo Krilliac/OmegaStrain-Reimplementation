@@ -39,6 +39,11 @@ using omega::runtime::RenderMeshUploadView;
 
 constexpr std::uint64_t kTriangleLogicalBytes =
     3U * sizeof(Float3IR) + 3U * sizeof(std::uint32_t);
+// The same triangle carrying real per-vertex texture coordinates: positions*12 + indices*4 + uvs*8.
+constexpr std::uint64_t kTriangleUvLogicalBytes =
+    kTriangleLogicalBytes + 3U * sizeof(std::array<float, 2>);
+static_assert(kTriangleLogicalBytes == 48U);
+static_assert(kTriangleUvLogicalBytes == 72U);
 
 int failures = 0;
 
@@ -87,10 +92,22 @@ struct TriangleFixture
         Float3IR{.x = 0.0F, .y = 1.0F, .z = 0.5F},
     };
     std::array<std::uint32_t, 3> indices{0U, 1U, 2U};
+    // Deliberately outside [0, 1]: the decoded retail coordinates are signed16/4096 and tile.
+    std::array<std::array<float, 2>, 3> uvs{
+        std::array<float, 2>{{0.0F, 0.0F}},
+        std::array<float, 2>{{4.0F, 0.0F}},
+        std::array<float, 2>{{0.0F, -4.0F}},
+    };
 
     [[nodiscard]] RenderMeshUploadView View() const noexcept
     {
         return RenderMeshUploadView{.positions = positions, .triangle_indices = indices};
+    }
+
+    [[nodiscard]] RenderMeshUploadView UvView() const noexcept
+    {
+        return RenderMeshUploadView{
+            .positions = positions, .triangle_indices = indices, .uvs = uvs};
     }
 };
 
@@ -315,6 +332,107 @@ void CheckBudgetsAndTransactions()
         "one below the exact logical-byte budget is rejected");
 }
 
+// Per-vertex texture coordinates are optional, but never partial, and they are charged as real
+// resident payload. Both properties matter: the UV attribute is bound index-parallel with the
+// positions, so a short or long stream would address outside the mesh.
+void CheckUvAttribute()
+{
+    TriangleFixture fixture;
+    auto created = RenderMeshPool::Create(Config(1U, 3U, 3U, kTriangleUvLogicalBytes));
+    Check(created.has_value(), "uv-attribute pool is created");
+    if (!created)
+        return;
+    RenderMeshPool pool = std::move(*created);
+
+    const std::array<std::array<float, 2>, 2> short_uvs{
+        std::array<float, 2>{{0.0F, 0.0F}},
+        std::array<float, 2>{{1.0F, 0.0F}},
+    };
+    const std::array<std::array<float, 2>, 4> long_uvs{
+        std::array<float, 2>{{0.0F, 0.0F}},
+        std::array<float, 2>{{1.0F, 0.0F}},
+        std::array<float, 2>{{0.0F, 1.0F}},
+        std::array<float, 2>{{1.0F, 1.0F}},
+    };
+    CheckError(pool.Reserve({.positions = fixture.positions,
+                   .triangle_indices = fixture.indices,
+                   .uvs = short_uvs}),
+        RenderMeshErrorCode::InvalidMesh, "fewer uvs than positions is rejected");
+    CheckError(pool.Reserve({.positions = fixture.positions,
+                   .triangle_indices = fixture.indices,
+                   .uvs = long_uvs}),
+        RenderMeshErrorCode::InvalidMesh, "more uvs than positions is rejected");
+
+    auto nonfinite_uvs = fixture.uvs;
+    nonfinite_uvs[1][0] = std::numeric_limits<float>::quiet_NaN();
+    CheckError(pool.Reserve({.positions = fixture.positions,
+                   .triangle_indices = fixture.indices,
+                   .uvs = nonfinite_uvs}),
+        RenderMeshErrorCode::InvalidMesh, "a NaN texture coordinate is rejected");
+    nonfinite_uvs = fixture.uvs;
+    nonfinite_uvs[2][1] = -std::numeric_limits<float>::infinity();
+    CheckError(pool.Reserve({.positions = fixture.positions,
+                   .triangle_indices = fixture.indices,
+                   .uvs = nonfinite_uvs}),
+        RenderMeshErrorCode::InvalidMesh, "an infinite texture coordinate is rejected");
+    Check(pool.Snapshot() == RenderMeshPoolSnapshot{
+                                 .slot_capacity = 1U,
+                                 .free_slots = 1U,
+                             },
+        "rejected uv uploads consume no slot or residency budget");
+
+    auto reservation = pool.Reserve(fixture.UvView());
+    Check(reservation && reservation->position_count == 3U &&
+              reservation->triangle_index_count == 3U && reservation->uv_count == 3U &&
+              reservation->logical_bytes == kTriangleUvLogicalBytes,
+        "a uv-bearing upload charges positions*12 + indices*4 + uvs*8 logical bytes");
+    if (!reservation)
+        return;
+    const auto reserved = pool.Snapshot();
+    Check(reserved.reserved_uvs == 3U && reserved.resident_uvs == 0U &&
+              reserved.reserved_logical_bytes == kTriangleUvLogicalBytes && IsConsistent(reserved),
+        "uv counts and uv bytes are charged at reservation time");
+
+    auto handle = pool.Publish(*reservation);
+    Check(handle.has_value(), "a uv-bearing reservation publishes");
+    if (!handle)
+        return;
+    auto metadata = pool.Get(*handle);
+    Check(metadata && metadata->uv_count == 3U &&
+              metadata->logical_bytes == kTriangleUvLogicalBytes,
+        "resident lookup reports the exact uv count and uv-inclusive byte total");
+    const auto resident = pool.Snapshot();
+    Check(resident.reserved_uvs == 0U && resident.resident_uvs == 3U &&
+              resident.resident_logical_bytes == kTriangleUvLogicalBytes && IsConsistent(resident),
+        "publication transfers the uv counters atomically with the rest");
+    Check(pool.Release(*handle).has_value(), "a uv-bearing resident generation releases");
+    Check(pool.Snapshot() == RenderMeshPoolSnapshot{
+                                 .slot_capacity = 1U,
+                                 .free_slots = 1U,
+                             },
+        "releasing a uv-bearing mesh restores every counter including the uv counters");
+
+    // The same geometry WITHOUT uvs must charge strictly less: uv bytes are only charged when the
+    // uploader actually supplies texture coordinates.
+    auto untextured = pool.Reserve(fixture.View());
+    Check(untextured && untextured->uv_count == 0U &&
+              untextured->logical_bytes == kTriangleLogicalBytes,
+        "an upload without uvs charges no uv count and no uv bytes");
+    if (untextured)
+        Check(pool.Rollback(*untextured).has_value(), "the untextured reservation rolls back");
+
+    auto tight = RenderMeshPool::Create(Config(1U, 3U, 3U, kTriangleUvLogicalBytes - 1U));
+    Check(tight.has_value(), "the one-byte-short uv pool is created");
+    if (!tight)
+        return;
+    CheckError(tight->Reserve(fixture.UvView()),
+        RenderMeshErrorCode::LogicalByteBudgetExceeded,
+        "one below the exact uv-inclusive logical-byte budget is rejected");
+    Check(tight->Reserve(fixture.View()).has_value(),
+        "the same geometry without uvs still fits that budget, so the uv bytes are what "
+        "exceeded it");
+}
+
 void CheckForeignMoveAndRetirement()
 {
     TriangleFixture fixture;
@@ -416,6 +534,7 @@ int main()
     CheckContractAndConfiguration();
     CheckUploadValidation();
     CheckBudgetsAndTransactions();
+    CheckUvAttribute();
     CheckForeignMoveAndRetirement();
     if (failures == 0)
         std::cout << "omega_render_mesh_pool_tests: all checks passed\n";

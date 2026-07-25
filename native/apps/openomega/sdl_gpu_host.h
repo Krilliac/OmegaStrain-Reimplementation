@@ -92,8 +92,9 @@ public:
     [[nodiscard]] std::expected<void, std::string> ReleaseTexture(
         const runtime::RenderTextureHandle& handle);
 
-    // [main/render thread] Synchronously uploads one renderer-neutral indexed triangle mesh. Both
-    // borrowed spans remain caller-owned and are retained only through command submission.
+    // [main/render thread] Synchronously uploads one renderer-neutral indexed triangle mesh. Every
+    // borrowed span remains caller-owned and is retained only through command submission. The UV
+    // span is optional (see RenderMeshUploadView) and must otherwise match the position count.
     [[nodiscard]] std::expected<runtime::RenderMeshHandle, std::string> UploadRenderMesh(
         runtime::RenderMeshUploadView upload);
 
