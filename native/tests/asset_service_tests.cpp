@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <expected>
 #include <filesystem>
 #include <fstream>
@@ -59,6 +60,21 @@ void Check(const bool condition, const std::string_view message)
         std::cerr << "FAILED: " << message << '\n';
         ++failures;
     }
+}
+
+// ContentFixture keeps its content services in optionals that are engaged only when construction
+// succeeded, and its reference accessors cannot report a failure in their return type. Every
+// caller is already gated on ready(), so reaching an accessor with a disengaged member is a
+// fixture-contract regression, not an expected outcome. Report it as a named failed check and
+// stop deterministically: returning a reference into a disengaged optional is undefined
+// behaviour that produces no diagnostic at all.
+void RequireFixtureContent(const bool engaged, const std::string_view message)
+{
+    if (engaged)
+        return;
+    Check(false, message);
+    std::cerr << "omega_asset_service_tests: stopping on an unusable content fixture\n";
+    std::exit(EXIT_FAILURE);
 }
 
 template <typename Value>
@@ -353,17 +369,41 @@ public:
     [[nodiscard]] bool ready() const noexcept { return ready_; }
     [[nodiscard]] const std::filesystem::path& root() const noexcept { return tree_.root(); }
     [[nodiscard]] const LevelManifestIR& manifest() const noexcept { return manifest_; }
-    [[nodiscard]] GameDataService& game_data() noexcept { return *game_data_; }
-    [[nodiscard]] const GameDataService& game_data() const noexcept { return *game_data_; }
-    [[nodiscard]] LevelTextureStore& texture_store() noexcept { return *texture_store_; }
+    [[nodiscard]] GameDataService& game_data() noexcept
+    {
+        RequireFixtureContent(game_data_.has_value(),
+            "the content fixture publishes a game-data service");
+        return *game_data_;
+    }
+    [[nodiscard]] const GameDataService& game_data() const noexcept
+    {
+        RequireFixtureContent(game_data_.has_value(),
+            "the content fixture publishes a game-data service");
+        return *game_data_;
+    }
+    [[nodiscard]] LevelTextureStore& texture_store() noexcept
+    {
+        RequireFixtureContent(texture_store_.has_value(),
+            "the content fixture publishes a level texture store");
+        return *texture_store_;
+    }
     [[nodiscard]] const LevelTextureStore& texture_store() const noexcept
     {
+        RequireFixtureContent(texture_store_.has_value(),
+            "the content fixture publishes a level texture store");
         return *texture_store_;
     }
 
+    // HandleAt can report the failure in its own return type, so an unusable fixture yields a
+    // named failed check and a plain store error instead of stopping the suite.
     [[nodiscard]] std::expected<LevelTextureHandle, LevelTextureStoreError> HandleAt(
         const std::size_t index) const
     {
+        if (!texture_store_)
+        {
+            Check(false, "the content fixture publishes a level texture store for HandleAt");
+            return std::unexpected(LevelTextureStoreError{});
+        }
         return texture_store_->HandleAt(index);
     }
 

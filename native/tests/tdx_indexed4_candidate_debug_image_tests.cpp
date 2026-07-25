@@ -173,6 +173,32 @@ MakeOddStorage(std::vector<std::byte> packed_indices) {
   };
 }
 
+// Guarded palette accessors for the fixtures above. Every block these callers touch is built
+// with a palette, so a disengaged optional means the fixture itself regressed: report a named
+// failed check and hand back a stand-in instead of dereferencing a disengaged optional, which
+// is undefined behaviour that produces no diagnostic. The mutable stand-in absorbs writes; the
+// read-only stand-in keeps the fixed 16-entry cardinality so a caller's index stays in range.
+[[nodiscard]] TexturePaletteStorageIR &Palette(TextureStorageBlockIR &block) {
+  if (block.palette)
+    return *block.palette;
+  Check(false, "the indexed-4 fixture block carries a palette");
+  static TexturePaletteStorageIR scratch;
+  return scratch;
+}
+
+[[nodiscard]] const TexturePaletteStorageIR &
+Palette(const TextureStorageBlockIR &block) {
+  if (block.palette)
+    return *block.palette;
+  Check(false, "the indexed-4 fixture block carries a palette");
+  static const TexturePaletteStorageIR scratch{
+      .width = 4U,
+      .height = 4U,
+      .entries = std::vector<std::array<std::byte, 4>>(16U),
+  };
+  return scratch;
+}
+
 [[nodiscard]] constexpr std::array<std::size_t, 3>
 ChannelSlots(const TdxIndexed4SourceChannelCandidate candidate) noexcept {
   switch (candidate) {
@@ -245,7 +271,7 @@ ExpectedPixel(const TextureStorageIR &storage,
   const std::uint8_t palette_index =
       ExpectedIndex(block.planes.front().bytes[source_pixel / 2U], source_pixel,
                     policy.nibble_order);
-  const auto &entry = block.palette->entries[palette_index];
+  const auto &entry = Palette(block).entries[palette_index];
   const std::array<std::size_t, 3> slots = ChannelSlots(policy.source_channels);
   return {
       entry[slots[0]],
@@ -638,7 +664,7 @@ void CheckDeterminismAndOwnership() {
   const std::vector<std::byte> owned_before_mutation = first->rgba8_pixels;
   std::ranges::fill(first_storage.blocks.front().planes.front().bytes,
                     std::byte{0xff});
-  std::ranges::fill(first_storage.blocks.front().palette->entries,
+  std::ranges::fill(Palette(first_storage.blocks.front()).entries,
                     std::array<std::byte, 4>{std::byte{0}, std::byte{0},
                                              std::byte{0}, std::byte{0}});
   first_storage.blocks.clear();
@@ -813,7 +839,7 @@ void CheckValidationPriorityAndLimits() {
   };
   invalid = storage;
   invalid.blocks.front().planes.front().bytes.pop_back();
-  invalid.blocks.front().palette->width = 0U;
+  Palette(invalid.blocks.front()).width = 0U;
   CheckError(invalid, valid,
              TdxIndexed4CandidateDebugImageErrorCode::IndexByteSizeMismatch,
              "short packed input precedes palette and caller budgets",
@@ -825,27 +851,27 @@ void CheckValidationPriorityAndLimits() {
              "extra packed input fails exact ceil-texels-over-two cardinality");
 
   invalid = storage;
-  invalid.blocks.front().palette->width = 0U;
-  invalid.blocks.front().palette->entries.clear();
+  Palette(invalid.blocks.front()).width = 0U;
+  Palette(invalid.blocks.front()).entries.clear();
   CheckError(invalid, valid,
              TdxIndexed4CandidateDebugImageErrorCode::InvalidPaletteDimensions,
              "present palettes require nonzero rectangles");
   invalid = storage;
-  invalid.blocks.front().palette->entries.pop_back();
+  Palette(invalid.blocks.front()).entries.pop_back();
   CheckError(invalid, valid,
              TdxIndexed4CandidateDebugImageErrorCode::PaletteEntryCountMismatch,
              "palette rectangle and entry count must match exactly");
   invalid = storage;
-  invalid.blocks.front().palette->width = 3U;
-  invalid.blocks.front().palette->height = 5U;
-  invalid.blocks.front().palette->entries.resize(15U);
+  Palette(invalid.blocks.front()).width = 3U;
+  Palette(invalid.blocks.front()).height = 5U;
+  Palette(invalid.blocks.front()).entries.resize(15U);
   CheckError(
       invalid, valid,
       TdxIndexed4CandidateDebugImageErrorCode::PaletteCardinalityMismatch,
       "an internally exact 15-entry palette fails fixed cardinality");
   invalid = storage;
-  invalid.blocks.front().palette->width = 2U;
-  invalid.blocks.front().palette->height = 8U;
+  Palette(invalid.blocks.front()).width = 2U;
+  Palette(invalid.blocks.front()).height = 8U;
   Check(omega::runtime::BuildTdxIndexed4CandidateDebugImage(invalid, valid)
             .has_value(),
         "an alternate exact nonzero 2x8 palette rectangle is accepted");

@@ -312,5 +312,5 @@ int main()
     CheckLimit(bounded, exact, below,
         "exact and one-below logical output-byte limits are enforced");
 
-    return failures;
+    return failures == 0 ? 0 : 1;
 }

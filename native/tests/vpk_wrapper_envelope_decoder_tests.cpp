@@ -317,5 +317,5 @@ int main()
                        DecodeErrorCode::LimitExceeded,
                        "VPK enforces fixed descriptor budgets before diagnosing truncation");
 
-    return failures;
+    return failures == 0 ? 0 : 1;
 }

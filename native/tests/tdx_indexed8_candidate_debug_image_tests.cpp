@@ -113,6 +113,32 @@ MakeStorage(const std::uint8_t palette_seed = 0U) {
   };
 }
 
+// Guarded palette accessors for the fixture above. Every block these callers touch is built with
+// a palette, so a disengaged optional means the fixture itself regressed: report a named failed
+// check and hand back a stand-in instead of dereferencing a disengaged optional, which is
+// undefined behaviour that produces no diagnostic. The mutable stand-in absorbs writes; the
+// read-only stand-in keeps the fixed 256-entry cardinality so a caller's index stays in range.
+[[nodiscard]] TexturePaletteStorageIR &Palette(TextureStorageBlockIR &block) {
+  if (block.palette)
+    return *block.palette;
+  Check(false, "the indexed-8 fixture block carries a palette");
+  static TexturePaletteStorageIR scratch;
+  return scratch;
+}
+
+[[nodiscard]] const TexturePaletteStorageIR &
+Palette(const TextureStorageBlockIR &block) {
+  if (block.palette)
+    return *block.palette;
+  Check(false, "the indexed-8 fixture block carries a palette");
+  static const TexturePaletteStorageIR scratch{
+      .width = 16U,
+      .height = 16U,
+      .entries = std::vector<std::array<std::byte, 4>>(256U),
+  };
+  return scratch;
+}
+
 [[nodiscard]] constexpr std::uint8_t
 PermuteIndex(const std::uint8_t index,
              const TdxIndexed8ClutPermutationCandidate candidate) noexcept {
@@ -182,8 +208,8 @@ ExpectedPixel(const TextureStorageIR &storage,
   const std::uint8_t source_index =
       std::to_integer<std::uint8_t>(block.planes.front().bytes[source_pixel]);
   const auto &entry =
-      block.palette
-          ->entries[PermuteIndex(source_index, policy.clut_permutation)];
+      Palette(block)
+          .entries[PermuteIndex(source_index, policy.clut_permutation)];
   const std::array<std::size_t, 3> slots = ChannelSlots(policy.source_channels);
   return {
       entry[slots[0]],
@@ -517,7 +543,7 @@ void CheckDistinctPalettesDeterminismAndOwnership() {
   const std::vector<std::byte> owned_before_mutation = first->rgba8_pixels;
   std::ranges::fill(first_storage.blocks.front().planes.front().bytes,
                     std::byte{0xff});
-  std::ranges::fill(first_storage.blocks.front().palette->entries,
+  std::ranges::fill(Palette(first_storage.blocks.front()).entries,
                     std::array<std::byte, 4>{std::byte{0}, std::byte{0},
                                              std::byte{0}, std::byte{0}});
   first_storage.blocks.clear();
@@ -694,28 +720,28 @@ void CheckPoliciesValidationAndLimits() {
              "an extra index byte fails exact transfer-rectangle cardinality");
 
   invalid = storage;
-  invalid.blocks.front().palette->width = 0U;
-  invalid.blocks.front().palette->entries.clear();
+  Palette(invalid.blocks.front()).width = 0U;
+  Palette(invalid.blocks.front()).entries.clear();
   CheckError(invalid, valid,
              TdxIndexed8CandidateDebugImageErrorCode::InvalidPaletteDimensions,
              "present palettes require nonzero dimensions");
   invalid = storage;
-  invalid.blocks.front().palette->entries.pop_back();
+  Palette(invalid.blocks.front()).entries.pop_back();
   CheckError(invalid, valid,
              TdxIndexed8CandidateDebugImageErrorCode::PaletteEntryCountMismatch,
              "palette rectangle and owned entry count must match exactly");
   invalid = storage;
-  invalid.blocks.front().palette->width = 15U;
-  invalid.blocks.front().palette->height = 17U;
-  invalid.blocks.front().palette->entries.resize(255U);
+  Palette(invalid.blocks.front()).width = 15U;
+  Palette(invalid.blocks.front()).height = 17U;
+  Palette(invalid.blocks.front()).entries.resize(255U);
   CheckError(
       invalid, valid,
       TdxIndexed8CandidateDebugImageErrorCode::PaletteCardinalityMismatch,
       "an internally exact 255-entry palette still fails the 256-entry "
       "contract");
   invalid = storage;
-  invalid.blocks.front().palette->width = 8U;
-  invalid.blocks.front().palette->height = 32U;
+  Palette(invalid.blocks.front()).width = 8U;
+  Palette(invalid.blocks.front()).height = 32U;
   Check(omega::runtime::BuildTdxIndexed8CandidateDebugImage(invalid, valid)
             .has_value(),
         "an alternate exact 8x32 palette rectangle is accepted without "

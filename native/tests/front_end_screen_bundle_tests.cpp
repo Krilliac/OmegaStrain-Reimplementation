@@ -1319,5 +1319,5 @@ int main()
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     Check(!cleanup_error, "generated front-end fixture tree is removed");
-    return failures;
+    return failures == 0 ? 0 : 1;
 }

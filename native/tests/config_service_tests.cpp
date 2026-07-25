@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -135,8 +136,12 @@ int ConfigServiceFailureCount()
     }
 
     auto opaque = Parse(std::string("raw.bytes = a") + "\xFF" + "\xFE" + "z");
-    Check(opaque.has_value() && opaque->GetString("raw.bytes") &&
-              opaque->GetString("raw.bytes")->size() == 4U,
+    // GetString is called once and bound to a local: checking one returned optional and then
+    // dereferencing a second, independent temporary would only be safe because the getter is
+    // pure, and it hides an unchecked dereference from the reader.
+    const std::optional<std::string_view> opaque_value =
+        opaque ? opaque->GetString("raw.bytes") : std::nullopt;
+    Check(opaque.has_value() && opaque_value && opaque_value->size() == 4U,
         "non-UTF-8 bytes >= 0x20 pass through values as opaque bytes");
 
     Check(!Parse("just a key"), "a line without '=' is rejected");

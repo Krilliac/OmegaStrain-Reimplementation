@@ -1261,9 +1261,10 @@ semantic VUM material/name catalog per manifest cell together in `LevelContentIR
 and one cumulative fail-closed budget preserve exact manifest order and cardinality without
 asserting a mesh-to-material binding. After that content and the synthetic debug image succeed,
 startup also owns the level's direct-TDX locator inventory; it performs no texture `Load` and asserts
-no texture-to-name/material/cell/mesh/draw relationship. The names remain role-free and unbound:
-render geometry, material binding/parameters, display-ready texture expansion, cameras, placements,
-transforms, and visibility remain incomplete. A passive retail-only VUM descriptor preserves the proven
+no texture-to-name/material/cell/mesh/draw relationship. The names remain role-free and unbound.
+Render geometry, cameras, placements and transforms were open when that text was written and have
+since landed (see the 2026-07-25 status below); material binding/parameters, display-ready texture
+expansion and visibility remain incomplete. A passive retail-only VUM descriptor preserves the proven
 pair/reference grammar without asserting vertices, indices, draws, or material assignments, and
 its payload does not enter the canonical level IR.
 
@@ -1290,6 +1291,37 @@ public aggregate fingerprint, and discards only validated bounded NUL padding. I
 key/value or semicolon-comment parsing beyond the proven first-line marker and assigns no fields,
 paths, asset roles, particle semantics, compatibility defaults, rendering behavior, gameplay, or
 emulator equivalence. It is not wired into level loading, effects, or the front end.
+
+Status update, 2026-07-25. MINSK now renders as a navigable 3D environment rather than a flat
+diagnostic bake, so several M3 items moved from open to partially done. What exists:
+
+- A true perspective camera. `free_fly_camera` supplies `FreeFlyViewMatrix`, `PerspectiveProjection`
+  (left-handed, D3D depth `[0,1]`), `AdvanceFreeFly` and `ParseFreeFlyPose`, and
+  `BuildWorldSpaceLevelScene` emits raw world-space positions instead of the 2D orthographic bake.
+  The free-fly camera is the default with a bounds-framed initial pose; `OPENOMEGA_FIXED_CAMERA=1`
+  keeps the old flat projection and `OPENOMEGA_CAMERA_POSE`/`OPENOMEGA_CAMERA_SCRIPT` drive headless
+  capture. Live per-frame input advances the pose and every instance's `object_to_clip` is recomputed
+  from a retained `local_to_world`, so the whole scene reprojects as the camera moves.
+- Real decoded visual geometry. `DecodeVumVisualGeometry` produces per-vertex positions, UVs, colours
+  and strip-assembled indices from the VUM final payload, and the level render can be switched onto
+  it with `OPENOMEGA_VISUAL_GEOMETRY=1`. It is NOT the default source: a live MINSK run decoded 8,876
+  vertices and 8,330 triangles across 273 cells, which is correctly placed but a visibly sparse subset
+  of the level, because each batch is assembled as one triangle strip and strip-break topology is
+  unimplemented. The complete COL collision shell remains the default thing drawn.
+- Real texture sampling. A decoded level TDX texture is bound and the decoded per-vertex UVs now reach
+  the GPU as a third vertex buffer (slot 2, FLOAT2, attribute location 2), replacing a fabricated
+  triplanar projection at a hardcoded scale. A GPU readback test proves the pipeline samples by those
+  per-vertex coordinates and fails when they are zeroed. The sampler is LINEAR/REPEAT because the
+  decoded coordinates span roughly +/-8, which is read as tiling.
+- Correct depth resolution. The mesh pass owns a depth attachment (LESS, depth writes on, cleared per
+  frame), proven active by a near-first/far-second GPU test that fails when depth testing is disabled.
+
+What is still open in M3, stated plainly rather than rounded up: exactly one stand-in texture is bound
+for every environment mesh, so per-material binding and name-to-TDX resolution do not exist; strip-break
+topology is unimplemented, which is why the visual geometry is sparse; triangle winding is unproven, so
+`cull_mode` is deliberately NONE and no backface culling or visibility scheme exists; static objects are
+not placed; and no frame has been compared against PCSX2. "The level renders in 3D with real geometry
+and real UVs" is supported; "the level is visibly and correctly textured as retail draws it" is not.
 
 - Decode and render MINSK geometry, textures, materials, cameras, and static objects.
 - Match coordinate system, transforms, visibility, and representative frames against PCSX2.
@@ -1318,6 +1350,49 @@ play input frame and only an acquired attempt latches completion. The target mar
 completed objective marker and disappears on a hit, while replay reproduces the same owned result.
 This is not a retail camera, aim, weapon, raycast, projectile, damage, health, combat, or target
 implementation.
+
+Status update, 2026-07-25. The diagnostic actor described above is no longer the only thing M4 has.
+A playable character, enemies and a first combat exchange now run against real MINSK data. What
+exists:
+
+- Player movement and collision. `character_controller` is a pure kinematic sphere-versus-mesh
+  controller (`StepCharacter`, Ericson closest-point, push-out with slide and grounding) run against
+  the level's own decoded COL triangles through `BuildLevelCollisionTriangles` and a per-triangle
+  AABB broadphase. Under `OPENOMEGA_PLAYER=1` the player is seeded into the level, settles on a real
+  floor, walks with WASD (A/D strafe when the player is active) and is drawn as a world-space mesh
+  through the level's own transform, with a third-person follow camera.
+- Basic AI. `npc_ai` implements a full stealth loop over `NpcState{Patrol, Alerted, Chasing,
+  Searching}`: range then vision cone then a Moller-Trumbore line-of-sight raycast against the level
+  COL, a reaction delay before committing, pursuit of the last-seen position, and de-escalation on a
+  timer. Multiple guards run it independently, reusing the same `StepCharacter` as the player rather
+  than a second movement path, and render coloured by state.
+- Authentic enemy placement. `DecodePopGameObjects` decodes the level's POP `GOB:` sections, so the
+  guards are the real Minsk roster at their disc positions (a live run placed 25 of 26 NPC records,
+  ids `0x801`-`0x81a`), and they patrol positions taken from the decoded `NOD:` nav graph (621 of
+  1,613 nodes).
+- Weapons and damage. NPCs ramp aim then fire on a cooldown while Chasing with sight, holding position
+  to keep the player in the cone; the player fires a hitscan resolved against NPC hit spheres with
+  level triangles as occluders; hits remove hitpoints, zero latches dead, and dead actors stop acting
+  and render distinctly. A live run walked the player from 100 hitpoints to 0 and separately killed a
+  guard.
+
+What is still open in M4, and it is a large share of the milestone: no actor has a skeleton or an
+animation. `.skl`, `.skm` and `.ska` remain passive descriptors in
+`analysis/formats/DECODER-COVERAGE.md`, and the only things that consume them --
+`native/src/content/model_member_source.cpp` and the `omega_tool` asset commands -- take neutral
+structural summaries (format version, chunk count, observed extents) rather than joints, skin weights
+or keyframes. The project-owned `ModelIR`/`SkeletonIR`/`ClipIR` of ADR 0008 is an authoring-side IR
+with explicitly project-chosen bounds and is not fed from retail data. So every actor on screen,
+player and NPC alike, is a box or a cube.
+The player controller is a box rather than a capsule and pops ungrounded over ramps; step-up and
+slope handling are unimplemented. There is no 3D mouse aim -- the follow view has a fixed orientation
+and the shot direction is the flattened eye-to-target vector. Accuracy falloff and hit-chance rolls
+are unimplemented, so fire is decided purely by line of sight, and every weapon and health number is
+an untuned PROJECT default pending the undecoded `GAMEDATA/COMMON/WEAPONS.WDB`. NPCs do not
+coordinate. Respawn does not exist. And the second bullet below is not satisfied for any of this: the
+capture/replay seam covers input snapshots and the earlier diagnostic actor/objective/target state,
+not the character controller, NPC awareness or combat state, none of which any commit records as
+captured or replayed.
 
 - Skeletons, animation, player movement, camera, collision, weapons, and basic AI.
 - Deterministic capture/replay for input and simulation state.

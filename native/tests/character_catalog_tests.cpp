@@ -109,10 +109,23 @@ public:
     Check(!error, "the synthetic character-catalog test directory is created");
   }
 
+  // Cleanup runs in a destructor, so a failure here would inject a suite failure that has
+  // nothing to do with the checks under test: on Windows remove_all can transiently fail while
+  // the file handles of a just-closed SaveDatabase are still being released. The second attempt
+  // makes progress because a partial removal already deleted the entries it reached. A residual
+  // directory is reported as a warning -- never counted as a failed check, and never dropped
+  // silently.
   ~TempDirectory() {
     std::error_code error;
     std::filesystem::remove_all(root_, error);
-    Check(!error, "the synthetic character-catalog test directory is removed");
+    if (error) {
+      error.clear();
+      std::filesystem::remove_all(root_, error);
+    }
+    if (error) {
+      std::cerr << "WARNING: the synthetic character-catalog test directory was "
+                   "not removed\n";
+    }
   }
 
   TempDirectory(const TempDirectory &) = delete;

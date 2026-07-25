@@ -208,5 +208,5 @@ int main()
     Check(!omega::runtime::BuildCanonicalLevelScene(bounded, widened),
           "callers cannot widen canonical scene safety maxima");
 
-    return failures;
+    return failures == 0 ? 0 : 1;
 }

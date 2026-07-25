@@ -182,5 +182,5 @@ int main()
     Check(!omega::runtime::BuildCanonicalLevelRenderPages(invalid_ordinal),
           "duplicate or reordered source ordinals fail before renderer allocation");
 
-    return failures;
+    return failures == 0 ? 0 : 1;
 }

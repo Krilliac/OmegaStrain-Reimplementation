@@ -90,6 +90,20 @@ void Check(const bool condition, const std::string_view message)
     return palette;
 }
 
+// Guarded palette accessor for the fixtures below. Each fixture block these callers touch is
+// built with a palette, so a disengaged optional means the fixture itself regressed: report a
+// named failed check and hand back a shared scratch palette instead of dereferencing a
+// disengaged optional, which is undefined behaviour that produces no diagnostic. The scratch
+// palette is never read back by a check, so a failing run cannot silently pass through it.
+[[nodiscard]] TexturePaletteStorageIR& Palette(TextureStorageBlockIR& block)
+{
+    if (block.palette)
+        return *block.palette;
+    Check(false, "the topology fixture block carries a palette");
+    static TexturePaletteStorageIR scratch;
+    return scratch;
+}
+
 [[nodiscard]] TextureStorageBlockIR MakeMinimalBlock()
 {
     return TextureStorageBlockIR{
@@ -379,14 +393,14 @@ void CheckCanonicalImage()
     dimension_changed.blocks[0].planes[2].height = 4U;
     dimension_changed.blocks[0].planes[3].width = 4U;
     dimension_changed.blocks[0].planes[3].height = 1U;
-    dimension_changed.blocks[0].palette->width = 1U;
-    dimension_changed.blocks[0].palette->height = 4U;
+    Palette(dimension_changed.blocks[0]).width = 1U;
+    Palette(dimension_changed.blocks[0]).height = 4U;
     dimension_changed.blocks[1].planes[1].width = 1U;
     dimension_changed.blocks[1].planes[1].height = 3U;
     dimension_changed.blocks[2].planes[0].width = 1U;
     dimension_changed.blocks[2].planes[0].height = 6U;
-    dimension_changed.blocks[2].palette->width = 2U;
-    dimension_changed.blocks[2].palette->height = 1U;
+    Palette(dimension_changed.blocks[2]).width = 2U;
+    Palette(dimension_changed.blocks[2]).height = 1U;
     const auto dimension_changed_image =
         omega::runtime::BuildTextureStorageTopologyDebugImage(dimension_changed);
     Check(dimension_changed_image &&

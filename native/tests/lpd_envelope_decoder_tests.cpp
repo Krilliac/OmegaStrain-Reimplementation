@@ -384,5 +384,5 @@ int main()
     Check(omega::retail::DecodeLpdEnvelope(allocation_bytes).has_value(),
           "LPD decode succeeds unchanged after every owning-storage allocation failure");
 
-    return failures;
+    return failures == 0 ? 0 : 1;
 }

@@ -274,5 +274,5 @@ int main()
     Check(!omega::runtime::BuildCanonicalLevelSceneWithMaterials(content, limits),
           "callers cannot widen material safety maxima");
 
-    return failures;
+    return failures == 0 ? 0 : 1;
 }

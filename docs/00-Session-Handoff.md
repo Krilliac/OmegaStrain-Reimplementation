@@ -2143,3 +2143,326 @@ compose or publish a retail presentation.
   implement the shared capture domain and immutable submission context. No `OMEGAFRPHASE0002`
   PCSX2 producer, owner capture, runtime consumer, named phase, grounded layer/text/animation order,
   retail semantic, frame parity, visual parity, or PCSX2 equivalence is claimed.
+
+## Native gameplay and render slices after E-0128 (2026-07-23 to 2026-07-25)
+
+The entries below record the work that landed after E-0128 and are the continuation of this file's
+milestone log. They cite commit hashes rather than evidence-ledger identifiers.
+`analysis/evidence/ledger.jsonl` currently holds 128 records and contains no record for any slice
+below, so assigning an `E-` number here would assert a ledger entry that does not exist. Writing
+those records is outstanding work, not a claim made by this section.
+
+Each entry is written from the commit that landed it. Where a figure came from a live in-level run
+rather than from a tracked fixture or test, it is labelled as such, because those runs read private
+owner content and are not reproducible from this repository alone.
+
+### VUM visual-geometry decoder and level render (commits `7bf0d50`/`d210f39`, 2026-07-23)
+
+- `DecodeVumVisualGeometry` validates the VUM byte layout, isolates the final payload, and walks its
+  VIF stream (NOP / STCYCL / STMOD / STMASK / STROW / FLUSH / MSCAL / UNPACK) into
+  `VumVisualMeshIR{positions, uvs, colors, triangle_indices}`. Per batch, two non-zero V4-32 anchors
+  define a box, V3-16 blocks are per-vertex signed box fractions
+  (`pos = center + (s16 / 32768) * halfext`), V2-16 blocks are read as UVs at `/4096`, and V3-8
+  blocks as per-vertex colour at `/255`. Decoding is fail-soft: a batch that cannot be parsed
+  coherently ends batch decoding for that stream and the coherent batches already decoded are
+  returned. This resolved the earlier "opaque geometry" wall, which was a VIF-parse artifact.
+- The standalone `omega_vum_visual_geometry_decoder_tests` executable covers box-fraction position
+  reconstruction, in-box containment, UV/colour scaling, strip-to-index assembly, interleaved
+  framing-code sync, multi-batch flush, and empty-input fail-soft, all on project-generated
+  fixtures. CTest was 114/114 at that commit.
+- `LoadLevelContent` gained an overload that, given an out-parameter, also decodes each manifest
+  cell's already-read VUM bytes (fail-soft, cell-aligned, not committed against the content budget);
+  the one-argument form delegates with `nullptr` and is unchanged. `ContentStartupState` carries the
+  per-cell visual geometry, and `BuildDiagnosticScenePresentation` re-expresses it as a
+  `LevelSpatialIR` fed through the same `BuildGlobalSpatialDiagnosticScene` builder as the collision
+  shell, so it receives the identical bounds-fitted projection and framed camera. Routing through
+  the builder was the fix; raw VUM coordinates otherwise land off-screen.
+- A live MINSK run reported `cells=273 vertices=8876 triangles=8330`. That geometry is correctly
+  positioned across the level footprint and honestly sparse: only the decoder's coherent batches come
+  through, because each batch is assembled as a single triangle strip and strip-break topology is
+  not modelled. `analysis/formats/DECODER-COVERAGE.md` section 1.1 separates what this decoder
+  proves from what it takes at face value.
+- The render source is not switched by default. `OPENOMEGA_VISUAL_GEOMETRY=1` selects the VUM visual
+  geometry; without it the fly-through renders the complete COL collision shell, because the sparse
+  visual geometry is unsuitable for a framed fly-through until the topology follow-up lands. Player
+  collision stays on the COL shell in both cases -- that surface is authoritative regardless of what
+  is drawn.
+
+This establishes decoded per-vertex level geometry and its presentation. It establishes no retail
+material binding, no `.tdx` resolution, no draw or layer order, no GS register meaning, no visibility
+rule, no triangle winding, and no PCSX2 or visual parity. The `/4096` and `/255` scales and the
+attribute-role assignment remain readings of the block shape, not observed retail constants.
+
+### Kinematic character controller and the walkable level (commits `59dbb89`/`e1ba18c`/`4329a2d`, 2026-07-24)
+
+- `character_controller` is a dependency-free kinematic core: `CollisionTriangle`,
+  `CharacterState{position, velocity, grounded}`, and
+  `CharacterControllerParams{radius, up, gravity, move_speed, walkable_normal_dot,
+  resolve_iterations}`. `ClosestPointOnTriangle` uses the Ericson Voronoi-region barycentric form.
+  `StepCharacter` applies horizontal input re-projected perpendicular to `up`, adds gravity,
+  integrates, then runs N passes of sphere-versus-triangle push-out along the contact normal with
+  into-surface velocity removal, grounding on up-facing contacts. It is pure, deterministic,
+  allocation-free in its step, and fail-soft on non-finite input; `up` is a parameter because MINSK's
+  vertical axis is world `+Z`. The model is kinematic-versus-COL-mesh rather than rigid body because
+  the `.SO` host API exposes `Move`/`MoveToNode`/`SetPos`/`SetSpeed`/paths rather than any
+  rigid-body interface; that is what the symbol table shows, not a proof that retail runs no solver.
+  SparkEngine's controller was consulted as an algorithm reference only; no physics dependency was
+  added.
+- `BuildLevelCollisionTriangles(LevelSpatialIR)` flattens the level's decoded COL cells -- the same
+  `terrain_cells`/`SpatialMeshIR` the renderer uses -- into collision triangles, fail-soft on
+  out-of-range indices. `SelectNearbyCollisionTriangles` is a per-triangle AABB+/-radius broadphase.
+- Live MINSK figures, from private owner content: the COL flattens to 90,329 triangles, the broadphase
+  selects roughly 2,821 to 4,159 per frame, and the `OPENOMEGA_PLAYER_PROBE=1` trajectory settled on
+  a real floor at `floor_z 26.96` with `forward_travel=158.9/160`. Wall-stop is proven only on
+  synthetic geometry in the unit test; the probe's forward path from the level centre was
+  unobstructed, so that run is not wall-stop evidence.
+- The player is drawn as a world-space `RenderMeshIR` at the float `CharacterState` position through
+  the level's own `object_to_clip`, with `LookAtViewMatrix(eye, target, world_up)` supplying a Z-up
+  look-at that matches the existing row-major left-handed convention. This deliberately replaced an
+  earlier plan to reposition the int64 simulation marker: the on-screen diagnostic actor is a 2D
+  screen-space blit and would mis-project against the free-fly camera. The int64 simulation entity is
+  never touched, so the int64-to-float question does not arise.
+- `OPENOMEGA_PLAYER=1` is off by default. CTest was 117/117 across these commits.
+- Honest gaps recorded at the time and not since closed: the player is a box rather than a capsule,
+  and the box controller pops `grounded=no` over ramps. Capsule shape, step-up, and slope tuning are
+  flagged follow-ups.
+
+This is a project-owned movement model matched to the host API's shape. It is not a retail movement,
+acceleration, friction, step-up, slope, capsule, or animation implementation, and no number in it is
+a recovered retail constant.
+
+### Objective/mission system and objective HUD (commits `2a51970`/`cb240a9`/`8670fe0`/`5c33e28`, 2026-07-24)
+
+- `mission_data.h` holds declarative project-owned mission data:
+  `ObjectiveDef{id, menu_key, map_key, voice_cue, kind}` plus `MissionData`. The Minsk set is
+  populated from the real `OBJECTIVES.SO` identifiers -- `obj1`-`obj8` and `obj10`-`obj13` with their
+  `objN_menu`/`objN_map` keys. `obj9` is genuinely absent from the script data rather than omitted
+  here. Three omissions are documented rather than guessed: every objective is marked Primary because
+  no primary/optional flag is proven, voice cues are empty because the per-objective `8_x_1` binding
+  is ambiguous, and the beacon task is identified but its count is not recovered.
+- `objective_tracker`'s `AdvanceObjectives(mission, prior, {choice, id})` implements the host-API
+  objective semantics one-to-one (`AddObjective`/`Succeed`/`Fail`/`DestroyObjectives`/
+  `IsObjectiveComplete`) and emits HUD/map/voice effects. It is allocation-free, snapshot-comparable,
+  and fail-soft; `AreObjectivesComplete` uses the strict rule that every primary objective is
+  Complete.
+- `DrawObjectiveHudOnto` renders the panel through the existing 3x5 font onto an 88x72 slate
+  `DebugImage`, uploaded once at scene build like `environment_texture`. Making it visible required
+  including the blit in the per-frame `RefreshDiagnosticActorDrawList` rebuild, since that function
+  rebuilds the scene-overlay draw list every frame and a one-time blit was discarded. The HUD is
+  composited screen-space, top-left, Q16 Contain.
+- `mission_trigger` adds `MissionTrigger{objective_id, position, radius, choice, fired}` and
+  `StepMissionTriggers(...) -> {state, changed}`, which fires one-shot on squared-distance entry and
+  chains `AdvanceObjectives`. It is fail-soft: a rejected transition still one-shots, and non-finite
+  or zero-radius triggers never fire. Three volumes are placed over the real objective ids `obj2`,
+  `obj3` and `obj4` at spawn `+35`/`+80`/`+125` on `+Y` with radius 32.
+- Those trigger positions are PROJECT values and are flagged as such in code. The `.SO` data gives the
+  beacon/checkpoint and objective STRUCTURE, not world coordinates; no retail objective coordinate
+  has been recovered.
+- HUD refresh-on-change is leak-free by construction: the old `hud_texture` is stashed in
+  `pending_hud_release` and freed at the top of the NEXT refresh, after the frame that still
+  references it has rendered. Immediate release produced an invalid-handle render fault.
+- A scripted forward walk fired all three triggers at frames 12/91/152 and drove the panel from
+  `OBJECTIVES 1/12` to `4/12`. CTest was 116/116, then 118/118 as the trigger tests landed.
+
+This is a project-owned objective reducer over real script-derived identifiers. It establishes no
+retail trigger placement, beacon coordinate, checkpoint, mission flow, voice binding, primary/optional
+classification, HUD layout, or PCSX2 parity.
+
+### Stealth NPC AI: patrol, line of sight, chase, search (commits `90234f0`/`04c8a02`, 2026-07-24)
+
+- `npc_ai` is pure and deterministic. `SegmentIntersectsTriangle` is Moller-Trumbore clamped to the
+  eye-to-player segment so only real occluders block. `NpcSeesPlayer` tests squared range, then the
+  vision cone (`cos_angle >= cos_half_angle`), then a line-of-sight raycast against the level COL
+  triangles; occluded counts as not seen. `PlanNpcPatrol` follows waypoints horizontally, ignoring Z
+  so a climb does not stall arrival, advancing and wrapping within `arrive_radius`.
+- The full loop is `NpcState{Patrol, Alerted, Chasing, Searching}` over
+  `NpcAwarenessState{state, last_seen_player_pos, timer}`. `StepNpcAwarenessLoop` goes Patrol to
+  Alerted on sight and records last-seen, Alerted to Chasing after a reaction delay, holds while
+  seen, Chasing to Searching after `lose_sight_seconds`, Searching back to Chasing on re-sight, and
+  Searching to Patrol after `search_seconds`. Last-seen updates only while the player is seen.
+  `NpcPursuing` and `PlanNpcPursuit` move the NPC toward the last-seen position.
+- Each NPC reuses the shared kinematic `StepCharacter` against `SelectNearbyCollisionTriangles` --
+  the same controller as the player, with no separate physics path -- and renders coloured by state.
+- Tests in `omega_npc_ai_tests` cover segment/triangle hit versus stop-before versus off-axis versus
+  parallel, sight in-cone-clear/out-of-range/behind/off-axis/wall-occluded/near-side-of-wall, every
+  awareness transition including the latch, and patrol advance/wrap. CTest was 119/119.
+- Live in-level proof from private owner content: guards reacted independently as the player passed,
+  with `npc0` ALERTED at frame 199 and CHASING at 204, and `npc2` ALERTED at 669 and CHASING at 674.
+- Honest at the time: guards were project-placed pending the POP `GOB:` decode, the follow camera
+  frequently occludes NPCs in dense geometry so the log rather than the screenshot is the
+  authoritative evidence, and NPCs do not coordinate with each other.
+
+This is the `.SO` stealth model's shape -- Spawn, Patrol, Awareness -- implemented with project-chosen
+timings and distances. No reaction delay, cone angle, sensor range, search duration, patrol route, or
+coordination rule here is a recovered retail value, and none of it is a parity claim.
+
+### Authentic Minsk roster from POP `GOB:` and `NOD:` nav-graph patrol (commits `5ab7a38`/`86b1da1`, 2026-07-24)
+
+- `DecodePopGameObjects` decodes the POP file's post-`TER:` region, which is 19 typed sections of
+  `4-char tag + u32 count + body`. The NPC record layout is pinned as
+  `class(u32 == 12) + id + NUL-terminated model name + 12 param bytes + f32 position[3] +
+  orientation`, so the world position is read at `align4(8 + name_len + 1) + 12` from the record
+  start. The walk splits on the class delimiter and emits only records with a valid model name and a
+  finite position; roughly 40 nameless variant records are skipped fail-soft rather than aborting the
+  decode. It is `DecodeLimits`-capped.
+- `DecodeNavNodes` extends the same decoder to the `NOD:` body:
+  `class + id + field_a + field_b + pos[3] + 6-word transform + link_count + (neighbor, weight) x N`,
+  with `link_count` at record+52. Validation rejects delimiter false positives by requiring a finite
+  position under 4000 per axis and `neighbor < node_count`; weight-0 and neighbor-0 links are accepted
+  because both occur in the real graph. The result carries `PopNavNode{id, position, links[]}`.
+- `GameDataService::LoadLevelGameObjects` reads `DATA.POP` through the decoder fail-soft,
+  `ContentStartupState::level_game_objects` carries it, and the `OPENOMEGA_NPC` seeding places the
+  decoded spawns (skipping `PC_MALE`) at their decoded positions in the existing stealth AI, falling
+  back to the project-placed guards if nothing decodes. Each guard then patrols the nearest decoded
+  nav-node positions through the shared `StepCharacter`, falling back to its local segment when the
+  graph is empty.
+- Live MINSK figures, from private owner content: 25 of 26 NPC records placed, ids `0x801`-`0x81a`,
+  comprising 7x `minsk_metaMIB`, 9x `minsk_dockworker`, 5x `MINSK_SNIPER`, 2x `minsk_security` and
+  others; `nav nodes=1613`, `hotboxes=456`; and 621 of 1,613 nav nodes decoded, which matches the
+  spec's expected ~618 for the dominant fixed layout. Tests cover clean records, the nameless skip,
+  empty and non-finite input, clean nodes with adjacency including a weight-0 link, and an
+  out-of-range neighbour skip. CTest was 120/120.
+- Partial by construction, and stated as such: the ~992 `field_a`-driven variant node records are
+  skipped with a resync on the next class delimiter pending the Ghidra GOB loader; patrol uses
+  spatial nearest-node routing rather than index-correct edge following, because links index the full
+  1,613-entry array while only a subset is decoded; and `BOX:` remains a declared count with no
+  assigned meaning, so the objective triggers are still the project-placed volumes above.
+
+This decodes placement and type and a nav-graph adjacency structure. It establishes no retail spawn
+behaviour, patrol route, alert propagation, hotbox semantics, model binding, or animation, and the
+skipped variant records mean neither section is claimed as fully covered.
+
+### Combat S1 through S3 (commits `b2b767d`/`c2c3c4c`/`98c6af0`/`ede826c`/`795b441`, 2026-07-25)
+
+- S1 is pure value math matching the model read off the `.SO` symbol table
+  (`SetAimMode`/`GetAimPercent` aim ramp, then `ForceWeaponFire`, then `OnAIWeaponFiredMsg`;
+  `Damage`/`Kill`; `SetHitPoints`): an engaging NPC ramps aim to a threshold, then fires on a
+  cooldown, and a hit removes hitpoints clamped at zero. The caller owns all per-NPC state and gates
+  `engaging` on the existing awareness plus line of sight, so no retained global state was added.
+- S2/S3 core adds `StepPlayerWeapon`, which has no aim ramp because the human aims, so holding fire
+  yields exactly one shot per `cooldown_seconds`; `ResolveHitscan`, which takes the nearest live
+  sphere target along the ray within `max_range` and rejects it when a level triangle blocks the
+  segment to the impact point -- occlusion is tested against the impact point rather than an infinite
+  ray, so a wall behind the target does not spare it, and it reuses `SegmentIntersectsTriangle` from
+  `npc_ai` rather than adding a second ray-triangle routine; and `HealthState`/`ApplyDamageToHealth`,
+  where hitpoints clamp at zero and `alive` latches false. Respawn is deliberately not modelled: it
+  is the caller's decision, made by constructing a fresh `HealthState`. `NpcWeaponState`/
+  `NpcWeaponStep` became `WeaponState`/`WeaponStep` since both sides share them, while
+  `StepNpcWeapon` kept its name because the aim ramp is NPC-specific.
+- The wiring puts combat in the live loop. NPC firing is gated on `alive && sees && state ==
+  Chasing` -- Chasing specifically, because Alerted is the reaction delay before commitment and an NPC
+  that fires while Searching is shooting at a memory. The player fires back through the same hitscan
+  against NPC positions, with an `alive` span so corpses are not targets, reusing the already-culled
+  collision triangles as occluders. A dead NPC stops planning, moving, seeing and firing, and both
+  draw sites render the dead in a distinct colour.
+- Aim has a stated limitation: there is no 3D mouse aim in this app. `PlayerFollowView` has a fixed
+  orientation and the pointer feeds only the flat 2D fire cue, so the aim vector is the horizontal
+  component of the follow view's own eye-to-target vector. Flattening is deliberate -- the unflattened
+  camera forward points steeply down and would drive every shot into the floor.
+- Two defects found and fixed in the same series. `ResolveHitscan` took the sphere exit point whenever
+  the entry point was behind the origin, so a target whose hit sphere merely contained the muzzle was
+  reported hit regardless of aim; a live run logged an enemy hit "at range 13.2" while standing 5.6
+  units away and behind the player. The fix requires the target's centre to lie ahead of the ray, so
+  point-blank fire still works and only what is behind is rejected. Separately,
+  `NpcHoldsPositionToAim` makes a guard that has committed stop and keep turning to face the player,
+  because a guard that keeps walking its route carries the player out of its own cone before the
+  reaction delay plus aim ramp can elapse. It is a pure predicate over `(state, sees_player)` --
+  Alerted and Chasing hold WITH sight, Chasing without sight keeps pursuing the last-seen position,
+  Searching and Patrol always move -- and all eight combinations are tested.
+- A control experiment on ITALY isolated that last change: same binary, same level, same 400-frame
+  scripted walk, with only `omega_app.{h,cpp}` reverted. With the change, first sight at frame 49,
+  ALERTED to CHASING at 79, the guard frozen bit-exact for 350 frames, 352 sighted frames, 8 shots
+  landed, player 100 to 36 hitpoints. Control: first sight at the same frame 49, CHASING at 50 via
+  the lost-sight branch, guard walks off, 16 sighted frames, 0 shots, de-escalating at 186. The
+  player path is byte-identical between runs.
+- Two honest limits are recorded with it. A straight-line pass at full walk speed still does not
+  produce a completed shot: exposure past a planted guard is at most `2 * range / move_speed =
+  2 * 22 / 40 = 1.1 s`, while firing needs 0.5 s reaction plus 0.8 s ramp. The shot completes only
+  where terrain drags the player below about 34 u/s, as ITALY does at 25 u/s, or where the player
+  lingers. And MINSK still produces no engagement at all -- seven scripted directions over 47,250
+  awareness samples yielded zero sightings, because the 25 authentic `DATA.POP` guards are scattered
+  while `seed_guard` pins `vision.range` to 22.0F (the `npc_ai.h` default is 200.0F, and the 22 was
+  tuned when every guard was project-placed on the player's corridor). The closest measured approach
+  was 15.8 units to guard 8, with the player on a rooftop 19 units above it, outside the cone and
+  occluded. That is a detection problem, not an aiming one, and closing it needs a knob deliberately
+  not touched here.
+- Every weapon and health stat remains an unmodified PROJECT default; nothing was tuned to make the
+  above happen. The `.SO` symbol table gives the retail model's shape but no numbers, and authentic
+  stats await the undecoded `GAMEDATA/COMMON/WEAPONS.WDB` (S4). `hit_chance` rolls are unimplemented,
+  so S1 through S3 fire only with clear line of sight, and accuracy falloff, damage types, armour, hit
+  zones, recoil, spread, magazines and reloads are documented as not modelled rather than
+  half-implemented (S5). Respawn, the health HUD and the mission fail/complete flow are also not
+  present -- it is correct that the player simply ends up dead. CTest is 121/121.
+
+This is a project-owned combat model shaped by the `.SO` symbol table. It establishes no retail weapon
+statistic, damage value, accuracy model, aim behaviour, engagement rule, death flow, or PCSX2 parity.
+
+### Depth-tested mesh pass (commit `94fa0da`, 2026-07-25)
+
+- The 3D mesh pass had no depth buffer at all: `SDL_BeginGPURenderPass` was called with a null
+  depth-stencil target and the pipelines declared none, so geometry resolved purely by submission
+  order and distant surfaces painted over near ones.
+- The pass now owns a depth attachment -- LESS compare with depth writes on, cleared to the far plane
+  each frame and discarded afterwards, since nothing outside the pass reads depth. The format is
+  resolved once at device setup (`D32_FLOAT`, else `D24_UNORM_S8_UINT`, else `D16_UNORM`) and stored
+  on `Impl`, so pipeline creation and texture creation read the same value and cannot disagree.
+  Stencil load/store ops are filled in only for the one candidate with a stencil plane, because the
+  D3D12 backend turns a CLEAR stencil load op into `D3D12_CLEAR_FLAG_STENCIL`, which is invalid
+  against a depth-only view.
+- A device supporting no depth format is not an error: the pipelines are built without a
+  depth-stencil target, the texture stays null, and the pass runs depth-less exactly as before,
+  mirroring the fail-soft posture the textured pipeline already takes without DXIL. The depth texture
+  is recreated on extent change, with the replacement created before the old one is released, so a
+  failed resize never leaves the host with no depth target. The 2D passes are untouched.
+- `cull_mode` stays NONE, with a comment recording why: the decoded COL/VUM geometry has unproven
+  triangle winding, so backface culling could silently delete surfaces. Depth testing fixes the
+  ordering defect on its own; culling needs winding evidence first.
+- The test is the substance. One mesh is drawn twice through transforms differing only in clip-space
+  Z so both layers rasterize the same pixels, submitted NEAR FIRST and FAR SECOND, asserting the near
+  colour survives. That order is load-bearing: far-then-near would pass with no depth target bound and
+  would prove nothing. A control pass first renders the far layer alone and records its covered pixel
+  set, so the test cannot pass merely because the far draw was dropped or mistransformed. Proven
+  non-vacuous on D3D12 hardware: with depth testing deliberately disabled the test FAILS, and passes
+  again after a byte-for-byte revert. It runs under `OMEGA_RUN_GPU_SMOKE_TEST`, which stays OFF by
+  default for headless safety; the full suite is 121/121 in the default configuration.
+
+This is a project renderer correctness fix. It establishes no retail depth range, precision, sort
+order, culling rule, render-state configuration, or PCSX2 equivalence.
+
+### Real decoded UVs reaching the GPU (commit `a4a6856`, 2026-07-25)
+
+- The pixel shader had been inventing its own texture coordinates: it derived a face normal from
+  screen-space derivatives of the object position and triplanar-projected one texture at a hardcoded
+  `kUvScale = 0.03`, so every surface got the same smeared mapping. Meanwhile the VUM
+  visual-geometry decoder was already producing per-vertex texture coordinates and `omega_app`
+  discarded them one step before upload, copying only positions and indices.
+- `RenderMeshUploadView` now carries an optional `uvs` span, where empty means untextured so every
+  existing caller is unchanged. The pool rejects a UV count that disagrees with the position count as
+  `InvalidMesh`, validates UV finiteness, and charges `uvs * 8` into the logical-byte budget. The host
+  uploads a third vertex buffer bound at slot 2 as FLOAT2 on attribute location 2, and the shader
+  samples `t0` with the interpolated coordinate.
+- `asset::RenderMeshIR` was deliberately NOT widened. It is a canonical IR with a defaulted
+  `operator==` and byte-budget preflights in three composers, and this slice does not need that blast
+  radius.
+- Two facts matter for anyone touching this next. Every mesh always owns a slot-2 buffer, zero-filled
+  when the upload carried no UVs, so declared and bound vertex-buffer counts can never disagree -- the
+  flat and wireframe pipelines share one vertex-input description and the non-DXIL fail-soft path
+  still binds a valid buffer. And both resolve sites were updated, live render and capture readback;
+  updating only one is the obvious way to get this wrong.
+- The sampler stays LINEAR/REPEAT deliberately. The decoded UVs span roughly +/-8, which is read as
+  tiling, so clamping them would be wrong. That reading follows from the decoder's `/4096` scale,
+  which is itself a face-value interpretation rather than an observed retail constant.
+- Proven by readback, not by inspection. A screen-filling quad with known UVs is drawn against an 8x8
+  texture whose four 4x4 quadrants are four distinguishable colours, and the readback must contain all
+  four as a permutation. Forcing the quad's UVs to all zeros makes it FAIL, which is what separates
+  "real UVs" from "any UVs". It runs under `OMEGA_RUN_GPU_SMOKE_TEST`, OFF by default, and skips
+  loudly on non-DXIL backends where the textured pipeline cannot exist.
+- Scope held narrow on purpose: one stand-in level texture is still bound for every environment mesh.
+  Per-material binding and name-to-TDX resolution are RE-blocked follow-ups. The build is clean under
+  `/W4 /WX`, CTest is 121/121, and the public-tree and evidence-ledger gates pass.
+
+The pipeline is proven to carry and sample real per-vertex UVs. What is NOT verified is the retail
+level visibly and correctly textured on screen under `OPENOMEGA_VISUAL_GEOMETRY=1` -- that is a wider
+claim, and it additionally depends on the unproven UV scale, on per-material binding that does not
+exist yet, and on the strip-break topology work. No retail texture mapping, material assignment,
+sampler state, tiling rule, or visual parity is claimed.

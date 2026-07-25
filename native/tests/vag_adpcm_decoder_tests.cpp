@@ -184,6 +184,12 @@ constexpr std::array<std::int16_t, 28> kPredictorFourSecondFrameGolden{
 
 int main()
 {
+    // The loop below counts with std::uint8_t so the index reaches MakeFrame as
+    // the predictor nibble without a narrowing cast; a table wider than the
+    // counter would wrap it instead of terminating.
+    static_assert(kPredictorGolden.size() <= 255U,
+                  "the predictor golden table must fit the std::uint8_t loop counter");
+
     for (std::uint8_t predictor = 0; predictor < kPredictorGolden.size(); ++predictor)
     {
         const auto bytes = MakeVag(0, {MakeFrame(predictor, 4, predictor, kGoldenPayload)});
@@ -410,5 +416,5 @@ int main()
                  "a huge aligned declared extent is rejected without arithmetic "
                  "wrap or allocation");
 
-    return failures;
+    return failures == 0 ? 0 : 1;
 }
