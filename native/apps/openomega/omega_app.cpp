@@ -622,352 +622,9 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
             "retail-derived post-launch presentation is required");
     }
 
-    asset::SceneIR diagnostic_scene;
-    // Real decoded per-vertex UVs for diagnostic_scene's single spatial render mesh, or empty when
-    // the rendered geometry is the COL collision shell (which has no texture coordinates at all).
-    std::vector<std::array<float, 2>> diagnostic_scene_uvs;
-    // Live free-fly camera seed (captured in the camera block below, consumed at
-    // the BuildDiagnosticScenePresentation call): the initial pose, a per-frame
-    // move speed scaled to the level, and an optional scripted per-frame input.
-    std::optional<runtime::FreeFlyPose> free_fly_initial_pose;
-    float free_fly_initial_speed = 1.0F;
-    runtime::FreeFlyInput free_fly_script_input{};
-    // Kinematic player seed (OPENOMEGA_PLAYER=1), settled onto a real floor in the
-    // camera block below and consumed at the BuildDiagnosticScenePresentation call.
-    std::optional<gameplay::CharacterState> player_seed_state;
-    gameplay::CharacterControllerParams player_seed_params{};
-    std::vector<gameplay::CollisionTriangle> player_seed_collision;
-    if (content_owner->level_content)
-    {
-        auto built_scene = runtime::BuildGlobalSpatialDiagnosticScene(
-            content_owner->level_content->spatial);
-        if (!built_scene)
-        {
-            const std::string error =
-                "spatial diagnostic scene: " + built_scene.error();
-            log->Error("startup", error);
-            return std::unexpected(error);
-        }
-        diagnostic_scene = std::move(*built_scene);
-
-        // OPENOMEGA_PLAYER_PROBE=1: run the native kinematic character controller
-        // against this level's REAL decoded COL geometry and log the trajectory --
-        // proving the controller (committed 59dbb89, unit-tested on synthetic
-        // triangles) settles on a real floor and stops at a real wall on actual
-        // disc data. Pure additive diagnostic: it does not move the on-screen actor
-        // or camera (the visible player needs a world-space player mesh through the
-        // free-fly camera -- the actor marker is a 2D screen blit -- which is the
-        // next integration slice). Off by default; no behavior change.
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#endif
-        const char* const player_probe_flag = std::getenv("OPENOMEGA_PLAYER_PROBE");
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
-        if (player_probe_flag != nullptr && player_probe_flag[0] == '1' &&
-            player_probe_flag[1] == '\0')
-        {
-            const std::vector<gameplay::CollisionTriangle> collision =
-                gameplay::BuildLevelCollisionTriangles(
-                    content_owner->level_content->spatial);
-            if (collision.empty())
-            {
-                log->Info("player", "player probe: level has no collision triangles");
-            }
-            else
-            {
-                float min_x = collision.front().a.x, max_x = min_x;
-                float min_y = collision.front().a.y, max_y = min_y;
-                float min_z = collision.front().a.z, max_z = min_z;
-                for (const gameplay::CollisionTriangle& triangle : collision)
-                {
-                    for (const asset::Float3IR& v :
-                         {triangle.a, triangle.b, triangle.c})
-                    {
-                        min_x = std::min(min_x, v.x); max_x = std::max(max_x, v.x);
-                        min_y = std::min(min_y, v.y); max_y = std::max(max_y, v.y);
-                        min_z = std::min(min_z, v.z); max_z = std::max(max_z, v.z);
-                    }
-                }
-                const gameplay::CharacterControllerParams params{};
-                constexpr float dt = 1.0F / 60.0F;
-                // Seed above the level centre and let gravity settle it onto a floor.
-                gameplay::CharacterState state{
-                    .position = asset::Float3IR{.x = (min_x + max_x) * 0.5F,
-                        .y = (min_y + max_y) * 0.5F, .z = max_z + 20.0F}};
-                const std::span<const gameplay::CollisionTriangle> tri_span(collision);
-                for (int step = 0; step < 240; ++step)
-                    state = gameplay::StepCharacter(
-                        state, gameplay::CharacterInput{}, params, tri_span, dt);
-                const float settled_z = state.position.z;
-                const bool settled = state.grounded;
-                // Then drive forward (+X) and see whether a wall clamps the motion.
-                const float pre_x = state.position.x;
-                for (int step = 0; step < 240; ++step)
-                    state = gameplay::StepCharacter(state,
-                        gameplay::CharacterInput{.move = asset::Float3IR{.x = 1.0F}},
-                        params, tri_span, dt);
-                const float travelled_x = state.position.x - pre_x;
-                const float unobstructed_x =
-                    params.move_speed * dt * 240.0F; // if nothing blocked it
-                log->Info("player",
-                    "player probe: tris=" + std::to_string(collision.size()) +
-                        " settled=" + (settled ? "yes" : "no") +
-                        " floor_z=" + std::to_string(settled_z) +
-                        " forward_travel=" + std::to_string(travelled_x) +
-                        " (unobstructed=" + std::to_string(unobstructed_x) +
-                        ") grounded_after=" + (state.grounded ? "yes" : "no"));
-            }
-        }
-
-        // Prefer the real VUM VISUAL geometry over the collision hull when it decoded. The decoded
-        // per-cell meshes are re-expressed as a LevelSpatialIR and fed through the SAME scene
-        // builder, so they get the identical bounds-fitted projection + framed camera the collision
-        // path uses (VUM positions share the collision world space, but the builder projects world
-        // coords into its normalized view -- reusing them raw would land off-screen). Falls back to
-        // the collision scene when nothing decoded or the VUM scene fails to build. The REAL decoded
-        // per-vertex UVs are carried alongside in visual_uvs and handed to the GPU as vertex
-        // attribute 2; the scene builder emits one render mesh whose vertices are appended in
-        // terrain-cell order, so the flat UV vector stays index-parallel with its positions.
-        constexpr std::size_t kMaximumVisualVertices = 600000U;
-        asset::LevelSpatialIR visual_spatial;
-        std::vector<std::array<float, 2>> visual_uvs;
-        // Every accepted cell must contribute exactly one UV per position, or the whole parallel
-        // array is discarded rather than shifting every later cell's texture coordinates.
-        bool visual_uvs_complete = true;
-        std::size_t visual_vertices = 0;
-        std::size_t visual_triangles = 0;
-        bool visual_vertex_cap_hit = false;
-        for (const auto& cell : content_owner->level_visual_geometry)
-        {
-            for (const auto& visual_mesh : cell.meshes)
-            {
-                if (visual_mesh.positions.empty() || visual_mesh.triangle_indices.size() < 3U)
-                    continue;
-                if (visual_vertices + visual_mesh.positions.size() > kMaximumVisualVertices)
-                {
-                    visual_vertex_cap_hit = true;
-                    break;
-                }
-                asset::SpatialMeshIR spatial_mesh;
-                spatial_mesh.vertices = visual_mesh.positions;
-                const std::uint32_t vertex_count =
-                    static_cast<std::uint32_t>(visual_mesh.positions.size());
-                for (std::size_t base = 0U; base + 2U < visual_mesh.triangle_indices.size();
-                     base += 3U)
-                {
-                    const std::uint32_t a = visual_mesh.triangle_indices[base];
-                    const std::uint32_t b = visual_mesh.triangle_indices[base + 1U];
-                    const std::uint32_t c = visual_mesh.triangle_indices[base + 2U];
-                    if (a < vertex_count && b < vertex_count && c < vertex_count)
-                        spatial_mesh.triangles.push_back(asset::SpatialTriangleIR{
-                            .vertex_indices = {a, b, c}});
-                }
-                if (spatial_mesh.triangles.empty())
-                    continue;
-                if (visual_mesh.uvs.size() == visual_mesh.positions.size())
-                    visual_uvs.insert(
-                        visual_uvs.end(), visual_mesh.uvs.begin(), visual_mesh.uvs.end());
-                else
-                    visual_uvs_complete = false;
-                visual_vertices += spatial_mesh.vertices.size();
-                visual_triangles += spatial_mesh.triangles.size();
-                visual_spatial.terrain_cells.push_back(std::move(spatial_mesh));
-            }
-            if (visual_vertex_cap_hit)
-                break;
-        }
-        if (!visual_uvs_complete || visual_uvs.size() != visual_vertices)
-        {
-            visual_uvs.clear();
-            log->Warning("level",
-                "VUM visual UV stream is not index-parallel with positions; drawing untextured");
-        }
-        if (!visual_spatial.terrain_cells.empty())
-        {
-            auto visual_scene = runtime::BuildGlobalSpatialDiagnosticScene(visual_spatial);
-            if (visual_scene)
-            {
-                diagnostic_scene = std::move(*visual_scene);
-                diagnostic_scene_uvs = visual_uvs;
-                log->Info("level",
-                    "rendering VUM visual geometry: cells=" +
-                        std::to_string(visual_spatial.terrain_cells.size()) + " vertices=" +
-                        std::to_string(visual_vertices) + " triangles=" +
-                        std::to_string(visual_triangles) + " uvs=" +
-                        std::to_string(diagnostic_scene_uvs.size()) +
-                        (visual_vertex_cap_hit ? " (vertex cap hit; remaining skipped)" : ""));
-            }
-            else
-            {
-                log->Warning("level",
-                    "VUM visual scene build failed; using collision hull: " +
-                        visual_scene.error());
-            }
-        }
-
-        // Free-fly 3D camera: view the chosen level geometry (VUM visual if it
-        // decoded, else the collision hull) in true perspective from a movable
-        // camera, so the level is navigable in 3D rather than shown as the flat
-        // diagnostic projection. OPENOMEGA_FIXED_CAMERA=1 keeps the flat view;
-        // OPENOMEGA_CAMERA_POSE="x,y,z,yaw,pitch" overrides the initial pose for
-        // headless capture (live keyboard fly-through advances this pose per frame).
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#endif
-        const char* const fixed_camera_env = std::getenv("OPENOMEGA_FIXED_CAMERA");
-        const char* const camera_pose_env = std::getenv("OPENOMEGA_CAMERA_POSE");
-        const char* const camera_script_env = std::getenv("OPENOMEGA_CAMERA_SCRIPT");
-        const char* const visual_geometry_env = std::getenv("OPENOMEGA_VISUAL_GEOMETRY");
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
-        const bool use_free_fly = fixed_camera_env == nullptr ||
-                                  std::string_view(fixed_camera_env) != "1";
-        if (use_free_fly && !diagnostic_scene.render_meshes.empty())
-        {
-            // Navigate the complete collision shell by default (the VUM visual
-            // geometry is still sparse pending its strip-break topology
-            // follow-up, so it is unsuitable for a framed fly-through).
-            // OPENOMEGA_VISUAL_GEOMETRY=1 renders the VUM visual geometry, with
-            // its real decoded per-vertex UVs, instead. Off by default: flipping
-            // it is a later decision that depends on the topology work.
-            const asset::LevelSpatialIR& camera_spatial =
-                content_owner->level_content->spatial;
-            const bool use_visual_geometry = visual_geometry_env != nullptr &&
-                                             std::string_view(visual_geometry_env) == "1" &&
-                                             !visual_spatial.terrain_cells.empty();
-            // The player probe and its collision always stay on the COL shell, which is the
-            // authoritative collision surface regardless of what is being drawn.
-            const asset::LevelSpatialIR& render_spatial =
-                use_visual_geometry ? visual_spatial : camera_spatial;
-            auto world_scene = runtime::BuildWorldSpaceLevelScene(render_spatial);
-            if (world_scene && !world_scene->render_meshes.empty() &&
-                !world_scene->render_meshes.front().positions.empty())
-            {
-                asset::Float3IR minimum =
-                    world_scene->render_meshes.front().positions.front();
-                asset::Float3IR maximum = minimum;
-                for (const asset::RenderMeshIR& mesh : world_scene->render_meshes)
-                {
-                    for (const asset::Float3IR& p : mesh.positions)
-                    {
-                        minimum.x = std::min(minimum.x, p.x);
-                        minimum.y = std::min(minimum.y, p.y);
-                        minimum.z = std::min(minimum.z, p.z);
-                        maximum.x = std::max(maximum.x, p.x);
-                        maximum.y = std::max(maximum.y, p.y);
-                        maximum.z = std::max(maximum.z, p.z);
-                    }
-                }
-                const asset::Float3IR center{
-                    .x = (minimum.x + maximum.x) * 0.5F,
-                    .y = (minimum.y + maximum.y) * 0.5F,
-                    .z = (minimum.z + maximum.z) * 0.5F,
-                };
-                const float radius =
-                    std::max({maximum.x - minimum.x, maximum.y - minimum.y,
-                                 maximum.z - minimum.z, 1.0F}) *
-                    0.5F;
-
-                // Default: above and back (along -Z), angled down at the centre.
-                runtime::FreeFlyPose pose{
-                    .position = {.x = center.x,
-                        .y = center.y + radius * 0.6F,
-                        .z = center.z - radius * 1.9F},
-                    .yaw = 0.0F,
-                    .pitch = -0.30F,
-                };
-                if (camera_pose_env != nullptr)
-                {
-                    if (auto parsed = runtime::ParseFreeFlyPose(camera_pose_env))
-                        pose = *parsed;
-                }
-
-                constexpr float aspect = 640.0F / 448.0F;
-                const float near_plane = std::max(0.05F, radius * 0.01F);
-                const float far_plane = radius * 20.0F + near_plane;
-                world_scene->camera = asset::SceneCameraIR{
-                    .world_to_view = runtime::FreeFlyViewMatrix(pose),
-                    .view_to_clip = runtime::PerspectiveProjection(
-                        1.0472F, aspect, near_plane, far_plane),
-                };
-                // Seed the live camera: initial pose + a per-frame move speed
-                // (~1% of the level radius, so a fly-through crosses in ~100
-                // frames) + an optional scripted per-frame input for headless
-                // motion capture.
-                free_fly_initial_pose = pose;
-                free_fly_initial_speed = std::max(radius * 0.01F, 0.05F);
-                free_fly_script_input = runtime::ParseFreeFlyScript(
-                    camera_script_env != nullptr ? camera_script_env : "", 0.03F);
-
-                // OPENOMEGA_PLAYER=1: spawn a kinematic player, settle it onto a
-                // real floor, and switch the camera to a Z-up follow view. The
-                // per-frame refresh then steps the player from input and moves the
-                // camera with it, so the level is walkable (vs the detached
-                // free-fly camera). Off by default -- no behavior change.
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#endif
-                const char* const player_env = std::getenv("OPENOMEGA_PLAYER");
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
-                if (player_env != nullptr && std::string_view(player_env) == "1")
-                {
-                    player_seed_collision =
-                        gameplay::BuildLevelCollisionTriangles(camera_spatial);
-                    if (!player_seed_collision.empty())
-                    {
-                        gameplay::CharacterState pstate{
-                            .position = asset::Float3IR{.x = center.x,
-                                .y = center.y, .z = maximum.z + 20.0F}};
-                        const std::span<const gameplay::CollisionTriangle> full(
-                            player_seed_collision);
-                        for (int step = 0; step < 240; ++step)
-                            pstate = gameplay::StepCharacter(pstate,
-                                gameplay::CharacterInput{}, player_seed_params,
-                                full, kPlayerStepDt);
-                        player_seed_state = pstate;
-                        world_scene->camera.world_to_view = PlayerFollowView(
-                            pstate.position, player_seed_params.radius);
-                        log->Info("player",
-                            "player active: spawn(" +
-                                std::to_string(pstate.position.x) + "," +
-                                std::to_string(pstate.position.y) + "," +
-                                std::to_string(pstate.position.z) +
-                                ") grounded=" + (pstate.grounded ? "yes" : "no") +
-                                " tris=" + std::to_string(player_seed_collision.size()));
-                    }
-                }
-                diagnostic_scene = std::move(*world_scene);
-                // World-space rebuild appends the same cells in the same order as the projected
-                // build above, so the parallel UV array survives the switch unchanged -- but only
-                // when the rebuilt scene actually is the VUM visual geometry.
-                if (use_visual_geometry)
-                    diagnostic_scene_uvs = visual_uvs;
-                else
-                    diagnostic_scene_uvs.clear();
-                log->Info("level",
-                    "free-fly 3D camera active: " +
-                        std::string(use_visual_geometry ? "VUM visual geometry"
-                                                        : "COL collision shell") +
-                        " bounds min(" +
-                        std::to_string(minimum.x) + "," + std::to_string(minimum.y) +
-                        "," + std::to_string(minimum.z) + ") max(" +
-                        std::to_string(maximum.x) + "," + std::to_string(maximum.y) +
-                        "," + std::to_string(maximum.z) + ") radius " +
-                        std::to_string(radius) + " pose(" +
-                        std::to_string(pose.position.x) + "," +
-                        std::to_string(pose.position.y) + "," +
-                        std::to_string(pose.position.z) + ")");
-            }
-        }
-    }
+    // Level-derived construction (the scene IR, the free-fly/player camera
+    // seed, the uploaded scene meshes, the mission triggers and the NPC
+    // runtimes) is built by AdoptLevelContent after the composition below.
 
     auto created_jobs = runtime::JobService::Create(settings.jobs);
     if (!created_jobs)
@@ -2040,252 +1697,37 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
         }
     }
 
-    if (content_owner->level_content)
-    {
-        auto created_scene_presentation =
-            BuildDiagnosticScenePresentation(*host, diagnostic_scene,
-                content_owner->level_texture_store
-                    ? &*content_owner->level_texture_store
-                    : nullptr,
-                content_owner->game_data ? &*content_owner->game_data : nullptr,
-                diagnostic_scene_uvs, free_fly_initial_pose, free_fly_initial_speed,
-                free_fly_script_input, player_seed_state, player_seed_params,
-                std::move(player_seed_collision));
-        if (!created_scene_presentation)
-        {
-            log->Error("startup", created_scene_presentation.error());
-            return std::unexpected(
-                std::move(created_scene_presentation.error()));
-        }
-        diagnostic_scene_presentation =
-            std::move(*created_scene_presentation);
-        diagnostic_scene_presentation->overlay_draw_list =
-            std::move(diagnostic_scene_overlay_draw_list);
-        diagnostic_scene_presentation->hud_texture =
-            diagnostic_objective_hud_texture;
-        // Objective triggers (OPENOMEGA_PLAYER): seed the live objective state to
-        // match the HUD's build-time demo (obj1 complete; obj2-4 active) and place
-        // one project-owned trigger volume a short walk (+Y) from the player spawn,
-        // linked to obj2. Walking into it completes obj2 and the HUD refreshes.
-        // Project-placed: the retail beacon/checkpoint world coordinates are not
-        // recovered from the .SO (only the objective structure/ids), so the volume
-        // position is project-owned, not retail.
-        if (player_seed_state)
-        {
-            const gameplay::MissionData &trigger_mission =
-                gameplay::MinskMissionData();
-            gameplay::ObjectiveState seed =
-                gameplay::InitialObjectiveState(trigger_mission);
-            const auto seed_apply = [&trigger_mission, &seed](
-                                        const gameplay::ObjectiveChoice choice,
-                                        const std::uint16_t id) {
-                const auto step = gameplay::AdvanceObjectives(
-                    trigger_mission, seed, {choice, id});
-                if (step)
-                    seed = step->state;
-            };
-            for (const std::uint16_t id : {std::uint16_t{1U}, std::uint16_t{2U},
-                     std::uint16_t{3U}, std::uint16_t{4U}})
-                seed_apply(gameplay::ObjectiveChoice::Add, id);
-            seed_apply(gameplay::ObjectiveChoice::Pass, std::uint16_t{1U});
-            diagnostic_scene_presentation->objective_state = seed;
-            const asset::Float3IR &spawn = player_seed_state->position;
-            // A small walkable mini-mission: three project-placed trigger volumes
-            // spaced along the +Y path from spawn, each linked to a real Minsk
-            // objective id (obj2/obj3/obj4, all seeded Active). Walking through
-            // them in sequence completes each objective and progresses the HUD
-            // (1/12 -> 4/12). Project-placed positions (the .SO gives the
-            // objective structure/ids, not world coords); radius is generous so
-            // the terrain's z-climb along the path stays inside the sphere.
-            const auto place_trigger = [&](const std::uint16_t id,
-                                           const float forward_offset) {
-                diagnostic_scene_presentation->mission_triggers.push_back(
-                    gameplay::MissionTrigger{
-                        .objective_id = id,
-                        .position = asset::Float3IR{
-                            .x = spawn.x, .y = spawn.y + forward_offset,
-                            .z = spawn.z},
-                        .radius = 32.0F,
-                        .choice = gameplay::ObjectiveChoice::Pass,
-                        .fired = false,
-                    });
-            };
-            place_trigger(2U, 35.0F);
-            place_trigger(3U, 80.0F);
-            place_trigger(4U, 125.0F);
+    // The composition is assembled before its level content is adopted: every
+    // level-derived structure is built by AdoptLevelContent, a member function,
+    // rather than by startup-only code inside Create. Startup adopts exactly
+    // once; the app owns no scene until it does.
+    OmegaApp app(std::move(native_persistence), std::move(config_owner), /*content*/ nullptr,
+                 std::move(stderr_sink), std::move(ring_sink), std::move(log), std::move(jobs), std::move(assets),
+                 std::move(frame_scheduler), std::move(input), std::move(simulation), debug_locomotion_entity,
+                 std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
+                 std::move(opening_movie_player), opening_movie_texture,
+                 std::move(opening_movie_draw_list), boot_sequence_state, diagnostic_texture,
+                 diagnostic_actor_marker_texture,
+                 std::move(diagnostic_actor_draw_list),
+                 /*diagnostic_scene_presentation*/ nullptr,
+                 std::move(front_end_presentation),
+                 std::move(first_profile_presentation), diagnostic_controls_texture,
+                 diagnostic_asset_topology_texture, diagnostic_asset_transfer_texture,
+                 std::move(diagnostic_hidden_draw_list),
+                 std::move(diagnostic_controls_draw_list),
+                 std::move(diagnostic_asset_topology_draw_list), content_stage,
+                 front_end_startup_model, presentation_mode);
 
-            // Enemy NPC (OPENOMEGA_NPC=1): a project-placed patrolling guard
-            // ahead of the player on the +Y corridor. It patrols a short +Y
-            // segment (facing the corridor) and, per frame, checks whether it
-            // sees the player by vision cone + line-of-sight against the level
-            // COL; on a sighting it latches to Alerted (rendered blue -> red).
-            // Project-placed: authentic NPC spawns / nav Nodes live in the
-            // undecoded POP GOB: section (a later decode slice), not the .SO.
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#endif
-            const char *const npc_flag = std::getenv("OPENOMEGA_NPC");
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
-            if (npc_flag != nullptr && npc_flag[0] == '1' && npc_flag[1] == '\0')
-            {
-                diagnostic_scene_presentation->npc_active = true;
-                // Real NOD: nav-graph nodes decoded from the level's DATA.POP.
-                const auto &nav_nodes =
-                    content_owner->level_game_objects.nav_nodes;
-                // The nearest decoded nav-node positions to a spawn, forming an
-                // authentic patrol route. (The NOD: adjacency is decoded too, but
-                // its neighbor indices are into the full 1613-node array while we
-                // decode only the cleanly-walkable subset, so spatial nearest-node
-                // routing is used until the variant records are pinned; the patrol
-                // points are still real retail nav nodes.)
-                const auto nearest_nav_waypoints =
-                    [&nav_nodes](const asset::Float3IR &at) {
-                        std::vector<asset::Float3IR> route;
-                        const std::size_t want =
-                            nav_nodes.size() < 4U ? nav_nodes.size() : 4U;
-                        std::vector<bool> used(nav_nodes.size(), false);
-                        for (std::size_t k = 0U; k < want; ++k)
-                        {
-                            std::size_t best = nav_nodes.size();
-                            double best_d = 0.0;
-                            for (std::size_t n = 0U; n < nav_nodes.size(); ++n)
-                            {
-                                if (used[n])
-                                    continue;
-                                const auto &p = nav_nodes[n].position;
-                                const double dx = static_cast<double>(p.x) - at.x;
-                                const double dy = static_cast<double>(p.y) - at.y;
-                                const double dz = static_cast<double>(p.z) - at.z;
-                                const double d = dx * dx + dy * dy + dz * dz;
-                                if (best == nav_nodes.size() || d < best_d)
-                                {
-                                    best = n;
-                                    best_d = d;
-                                }
-                            }
-                            if (best == nav_nodes.size())
-                                break;
-                            used[best] = true;
-                            route.push_back(nav_nodes[best].position);
-                        }
-                        return route;
-                    };
-                // Seeds one patrolling guard at a world position: patrols the
-                // nearest real nav-node positions (fall back to a short local
-                // +/-Y segment if the nav graph is empty), running the full
-                // stealth loop.
-                const auto seed_guard = [&](const asset::Float3IR &at) {
-                    DiagnosticScenePresentation::NpcRuntime npc;
-                    npc.params = player_seed_params;
-                    npc.state = gameplay::CharacterState{.position = at};
-                    auto route = nearest_nav_waypoints(at);
-                    if (route.size() >= 2U)
-                        npc.waypoints = std::move(route);
-                    else
-                        npc.waypoints = {
-                            asset::Float3IR{.x = at.x, .y = at.y + 5.0F, .z = at.z},
-                            asset::Float3IR{.x = at.x, .y = at.y - 5.0F, .z = at.z}};
-                    npc.waypoint = 1U;
-                    npc.facing = asset::Float3IR{.x = 0.0F, .y = -1.0F, .z = 0.0F};
-                    // The sensor range is a PROJECT value. Retail's guard sight
-                    // distance is undecoded -- the AI tuning lives with the
-                    // rest of the unread game data, not in the .SO symbol table
-                    // that grounds the model's shape -- so this number is
-                    // chosen, not recovered.
-                    //
-                    // It is chosen for detection reachability weighed against a
-                    // per-frame cost. This same value is reused below as the
-                    // radius handed to SelectNearbyCollisionTriangles, and that
-                    // cull result is swept twice per guard per frame: once as
-                    // brute-force line-of-sight occluders, and once as the
-                    // movement-collision set fed to StepCharacter. So raising it
-                    // enlarges both, which is why the header default (200.0F) is
-                    // deliberately not used here.
-                    //
-                    // Why 22 stopped working: it was tuned in 90234f0, when the
-                    // only guards were project-placed directly on the player's
-                    // forward corridor. 5ab7a38 replaced them with the scattered
-                    // authentic DATA.POP roster and did not revisit the range,
-                    // after which scripted-walk runs on MINSK observed no
-                    // sighting at all. 60 is the smallest change that restores
-                    // reachability without touching any other gate.
-                    //
-                    // The cost of 60 has NOT been measured -- it is a judgement
-                    // that a ~2.7x radius stays affordable, and it should be
-                    // profiled rather than trusted.
-                    npc.vision = gameplay::NpcVisionParams{
-                        .range = 60.0F, .cos_half_angle = 0.5F, .eye_height = 8.0F};
-                    diagnostic_scene_presentation->npcs.push_back(std::move(npc));
-                };
-                // Authentic enemy placement decoded from the level's DATA.POP GOB
-                // NPC: section (id + model/type name + world position). The player
-                // character model (PC_MALE) is the player start, not an enemy, so
-                // it is skipped. Fail-soft: with no decoded spawns, fall back to a
-                // few project-placed guards along the player's +Y corridor.
-                std::size_t authentic = 0U;
-                for (const auto &sp :
-                    content_owner->level_game_objects.npc_spawns)
-                {
-                    if (sp.model.find("PC_MALE") != std::string::npos ||
-                        sp.model.find("pc_male") != std::string::npos)
-                        continue;
-                    seed_guard(sp.position);
-                    ++authentic;
-                }
-                if (authentic != 0U)
-                {
-                    log->Info("npc",
-                        "authentic enemy spawns placed from DATA.POP GOB: " +
-                            std::to_string(authentic) + " of " +
-                            std::to_string(content_owner->level_game_objects
-                                    .npc_spawns.size()) +
-                            " NPC records; patrolling " +
-                            std::to_string(nav_nodes.size()) + " of " +
-                            std::to_string(content_owner->level_game_objects
-                                    .nav_node_count) +
-                            " decoded nav nodes (hotboxes=" +
-                            std::to_string(content_owner->level_game_objects
-                                    .hotbox_count) +
-                            ")");
-                }
-                else
-                {
-                    for (const float ahead : {50.0F, 90.0F, 130.0F})
-                        seed_guard(asset::Float3IR{
-                            .x = spawn.x, .y = spawn.y + ahead, .z = spawn.z});
-                    log->Info("npc",
-                        "enemy NPCs placed (project-placed fallback): " +
-                            std::to_string(
-                                diagnostic_scene_presentation->npcs.size()) +
-                            " guards patrolling the +Y corridor");
-                }
-            }
-        }
-    }
+    auto adopted = app.AdoptLevelContent(std::move(content_owner),
+        diagnostic_objective_hud_texture, std::move(diagnostic_scene_overlay_draw_list));
+    if (!adopted)
+        return std::unexpected(std::move(adopted.error()));
 
-    log->Info("startup", "runtime services ready with " +
-                             std::to_string(jobs->worker_count()) + " workers and " +
-                             std::string(audio->driver_name()) + " audio");
+    app.log_->Info("startup", "runtime services ready with " +
+                                  std::to_string(app.jobs_->worker_count()) + " workers and " +
+                                  std::string(app.audio_->driver_name()) + " audio");
 
-    return OmegaApp(std::move(native_persistence), std::move(config_owner), std::move(content_owner),
-                    std::move(stderr_sink), std::move(ring_sink), std::move(log), std::move(jobs), std::move(assets),
-                    std::move(frame_scheduler), std::move(input), std::move(simulation), debug_locomotion_entity,
-                    std::move(platform), std::move(sdl_input), std::move(audio), std::move(host),
-                    std::move(opening_movie_player), opening_movie_texture,
-                     std::move(opening_movie_draw_list), boot_sequence_state, diagnostic_texture,
-                     diagnostic_actor_marker_texture,
-                     std::move(diagnostic_actor_draw_list),
-                     std::move(diagnostic_scene_presentation),
-                     std::move(front_end_presentation),
-                    std::move(first_profile_presentation), diagnostic_controls_texture,
-                    diagnostic_asset_topology_texture, diagnostic_asset_transfer_texture,
-                    std::move(diagnostic_hidden_draw_list),
-                    std::move(diagnostic_controls_draw_list),
-                    std::move(diagnostic_asset_topology_draw_list), content_stage,
-                    front_end_startup_model, presentation_mode);
+    return std::expected<OmegaApp, std::string>{std::in_place, std::move(app)};
 }
 
 OmegaApp::OmegaApp(
@@ -2516,6 +1958,613 @@ void OmegaApp::ReleaseDiagnosticScenePresentation() noexcept
         }
     }
     diagnostic_scene_presentation_.reset();
+}
+
+std::expected<void, std::string> OmegaApp::AdoptLevelContent(
+    std::unique_ptr<runtime::ContentStartupState> content,
+    const runtime::RenderTextureHandle objective_hud_texture,
+    runtime::RenderDrawList scene_overlay_draw_list)
+{
+    if (content == nullptr)
+        return std::unexpected(std::string{"level content adoption requires owned content"});
+    if (host_ == nullptr || log_ == nullptr)
+    {
+        return std::unexpected(
+            std::string{"level content adoption requires the live GPU host and logging service"});
+    }
+    const auto classified = runtime::ClassifyContentStartupState(*content);
+    if (!classified)
+        return std::unexpected(std::string("content startup state: inconsistent-ownership"));
+
+    // Release the previous level's presentation (its uploaded meshes, its
+    // environment texture generation, and its NPC/trigger runtimes) through the
+    // one existing release path before anything new is uploaded, so no
+    // generation is ever owned twice or leaked.
+    ReleaseDiagnosticScenePresentation();
+    // Launch-local progress through the level being replaced. All three are
+    // default-constructed at composition time, so resetting them is a no-op for
+    // the single startup adoption; they are reset because they describe the old
+    // level, not the app.
+    diagnostic_proximity_trigger_state_ = {};
+    diagnostic_target_fire_state_ = {};
+    diagnostic_mission_lifecycle_state_ = {};
+
+    content_ = std::move(content);
+    content_stage_ = *classified;
+
+    asset::SceneIR diagnostic_scene;
+    // Real decoded per-vertex UVs for diagnostic_scene's single spatial render mesh, or empty when
+    // the rendered geometry is the COL collision shell (which has no texture coordinates at all).
+    std::vector<std::array<float, 2>> diagnostic_scene_uvs;
+    // Live free-fly camera seed (captured in the camera block below, consumed at
+    // the BuildDiagnosticScenePresentation call): the initial pose, a per-frame
+    // move speed scaled to the level, and an optional scripted per-frame input.
+    std::optional<runtime::FreeFlyPose> free_fly_initial_pose;
+    float free_fly_initial_speed = 1.0F;
+    runtime::FreeFlyInput free_fly_script_input{};
+    // Kinematic player seed (OPENOMEGA_PLAYER=1), settled onto a real floor in the
+    // camera block below and consumed at the BuildDiagnosticScenePresentation call.
+    std::optional<gameplay::CharacterState> player_seed_state;
+    gameplay::CharacterControllerParams player_seed_params{};
+    std::vector<gameplay::CollisionTriangle> player_seed_collision;
+    if (content_->level_content)
+    {
+        auto built_scene = runtime::BuildGlobalSpatialDiagnosticScene(
+            content_->level_content->spatial);
+        if (!built_scene)
+        {
+            const std::string error =
+                "spatial diagnostic scene: " + built_scene.error();
+            log_->Error("startup", error);
+            return std::unexpected(error);
+        }
+        diagnostic_scene = std::move(*built_scene);
+
+        // OPENOMEGA_PLAYER_PROBE=1: run the native kinematic character controller
+        // against this level's REAL decoded COL geometry and log the trajectory --
+        // proving the controller (committed 59dbb89, unit-tested on synthetic
+        // triangles) settles on a real floor and stops at a real wall on actual
+        // disc data. Pure additive diagnostic: it does not move the on-screen actor
+        // or camera (the visible player needs a world-space player mesh through the
+        // free-fly camera -- the actor marker is a 2D screen blit -- which is the
+        // next integration slice). Off by default; no behavior change.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        const char* const player_probe_flag = std::getenv("OPENOMEGA_PLAYER_PROBE");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+        if (player_probe_flag != nullptr && player_probe_flag[0] == '1' &&
+            player_probe_flag[1] == '\0')
+        {
+            const std::vector<gameplay::CollisionTriangle> collision =
+                gameplay::BuildLevelCollisionTriangles(
+                    content_->level_content->spatial);
+            if (collision.empty())
+            {
+                log_->Info("player", "player probe: level has no collision triangles");
+            }
+            else
+            {
+                float min_x = collision.front().a.x, max_x = min_x;
+                float min_y = collision.front().a.y, max_y = min_y;
+                float min_z = collision.front().a.z, max_z = min_z;
+                for (const gameplay::CollisionTriangle& triangle : collision)
+                {
+                    for (const asset::Float3IR& v :
+                         {triangle.a, triangle.b, triangle.c})
+                    {
+                        min_x = std::min(min_x, v.x); max_x = std::max(max_x, v.x);
+                        min_y = std::min(min_y, v.y); max_y = std::max(max_y, v.y);
+                        min_z = std::min(min_z, v.z); max_z = std::max(max_z, v.z);
+                    }
+                }
+                const gameplay::CharacterControllerParams params{};
+                constexpr float dt = 1.0F / 60.0F;
+                // Seed above the level centre and let gravity settle it onto a floor.
+                gameplay::CharacterState state{
+                    .position = asset::Float3IR{.x = (min_x + max_x) * 0.5F,
+                        .y = (min_y + max_y) * 0.5F, .z = max_z + 20.0F}};
+                const std::span<const gameplay::CollisionTriangle> tri_span(collision);
+                for (int step = 0; step < 240; ++step)
+                    state = gameplay::StepCharacter(
+                        state, gameplay::CharacterInput{}, params, tri_span, dt);
+                const float settled_z = state.position.z;
+                const bool settled = state.grounded;
+                // Then drive forward (+X) and see whether a wall clamps the motion.
+                const float pre_x = state.position.x;
+                for (int step = 0; step < 240; ++step)
+                    state = gameplay::StepCharacter(state,
+                        gameplay::CharacterInput{.move = asset::Float3IR{.x = 1.0F}},
+                        params, tri_span, dt);
+                const float travelled_x = state.position.x - pre_x;
+                const float unobstructed_x =
+                    params.move_speed * dt * 240.0F; // if nothing blocked it
+                log_->Info("player",
+                    "player probe: tris=" + std::to_string(collision.size()) +
+                        " settled=" + (settled ? "yes" : "no") +
+                        " floor_z=" + std::to_string(settled_z) +
+                        " forward_travel=" + std::to_string(travelled_x) +
+                        " (unobstructed=" + std::to_string(unobstructed_x) +
+                        ") grounded_after=" + (state.grounded ? "yes" : "no"));
+            }
+        }
+
+        // Prefer the real VUM VISUAL geometry over the collision hull when it decoded. The decoded
+        // per-cell meshes are re-expressed as a LevelSpatialIR and fed through the SAME scene
+        // builder, so they get the identical bounds-fitted projection + framed camera the collision
+        // path uses (VUM positions share the collision world space, but the builder projects world
+        // coords into its normalized view -- reusing them raw would land off-screen). Falls back to
+        // the collision scene when nothing decoded or the VUM scene fails to build. The REAL decoded
+        // per-vertex UVs are carried alongside in visual_uvs and handed to the GPU as vertex
+        // attribute 2; the scene builder emits one render mesh whose vertices are appended in
+        // terrain-cell order, so the flat UV vector stays index-parallel with its positions.
+        constexpr std::size_t kMaximumVisualVertices = 600000U;
+        asset::LevelSpatialIR visual_spatial;
+        std::vector<std::array<float, 2>> visual_uvs;
+        // Every accepted cell must contribute exactly one UV per position, or the whole parallel
+        // array is discarded rather than shifting every later cell's texture coordinates.
+        bool visual_uvs_complete = true;
+        std::size_t visual_vertices = 0;
+        std::size_t visual_triangles = 0;
+        bool visual_vertex_cap_hit = false;
+        for (const auto& cell : content_->level_visual_geometry)
+        {
+            for (const auto& visual_mesh : cell.meshes)
+            {
+                if (visual_mesh.positions.empty() || visual_mesh.triangle_indices.size() < 3U)
+                    continue;
+                if (visual_vertices + visual_mesh.positions.size() > kMaximumVisualVertices)
+                {
+                    visual_vertex_cap_hit = true;
+                    break;
+                }
+                asset::SpatialMeshIR spatial_mesh;
+                spatial_mesh.vertices = visual_mesh.positions;
+                const std::uint32_t vertex_count =
+                    static_cast<std::uint32_t>(visual_mesh.positions.size());
+                for (std::size_t base = 0U; base + 2U < visual_mesh.triangle_indices.size();
+                     base += 3U)
+                {
+                    const std::uint32_t a = visual_mesh.triangle_indices[base];
+                    const std::uint32_t b = visual_mesh.triangle_indices[base + 1U];
+                    const std::uint32_t c = visual_mesh.triangle_indices[base + 2U];
+                    if (a < vertex_count && b < vertex_count && c < vertex_count)
+                        spatial_mesh.triangles.push_back(asset::SpatialTriangleIR{
+                            .vertex_indices = {a, b, c}});
+                }
+                if (spatial_mesh.triangles.empty())
+                    continue;
+                if (visual_mesh.uvs.size() == visual_mesh.positions.size())
+                    visual_uvs.insert(
+                        visual_uvs.end(), visual_mesh.uvs.begin(), visual_mesh.uvs.end());
+                else
+                    visual_uvs_complete = false;
+                visual_vertices += spatial_mesh.vertices.size();
+                visual_triangles += spatial_mesh.triangles.size();
+                visual_spatial.terrain_cells.push_back(std::move(spatial_mesh));
+            }
+            if (visual_vertex_cap_hit)
+                break;
+        }
+        if (!visual_uvs_complete || visual_uvs.size() != visual_vertices)
+        {
+            visual_uvs.clear();
+            log_->Warning("level",
+                "VUM visual UV stream is not index-parallel with positions; drawing untextured");
+        }
+        if (!visual_spatial.terrain_cells.empty())
+        {
+            auto visual_scene = runtime::BuildGlobalSpatialDiagnosticScene(visual_spatial);
+            if (visual_scene)
+            {
+                diagnostic_scene = std::move(*visual_scene);
+                diagnostic_scene_uvs = visual_uvs;
+                log_->Info("level",
+                    "rendering VUM visual geometry: cells=" +
+                        std::to_string(visual_spatial.terrain_cells.size()) + " vertices=" +
+                        std::to_string(visual_vertices) + " triangles=" +
+                        std::to_string(visual_triangles) + " uvs=" +
+                        std::to_string(diagnostic_scene_uvs.size()) +
+                        (visual_vertex_cap_hit ? " (vertex cap hit; remaining skipped)" : ""));
+            }
+            else
+            {
+                log_->Warning("level",
+                    "VUM visual scene build failed; using collision hull: " +
+                        visual_scene.error());
+            }
+        }
+
+        // Free-fly 3D camera: view the chosen level geometry (VUM visual if it
+        // decoded, else the collision hull) in true perspective from a movable
+        // camera, so the level is navigable in 3D rather than shown as the flat
+        // diagnostic projection. OPENOMEGA_FIXED_CAMERA=1 keeps the flat view;
+        // OPENOMEGA_CAMERA_POSE="x,y,z,yaw,pitch" overrides the initial pose for
+        // headless capture (live keyboard fly-through advances this pose per frame).
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        const char* const fixed_camera_env = std::getenv("OPENOMEGA_FIXED_CAMERA");
+        const char* const camera_pose_env = std::getenv("OPENOMEGA_CAMERA_POSE");
+        const char* const camera_script_env = std::getenv("OPENOMEGA_CAMERA_SCRIPT");
+        const char* const visual_geometry_env = std::getenv("OPENOMEGA_VISUAL_GEOMETRY");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+        const bool use_free_fly = fixed_camera_env == nullptr ||
+                                  std::string_view(fixed_camera_env) != "1";
+        if (use_free_fly && !diagnostic_scene.render_meshes.empty())
+        {
+            // Navigate the complete collision shell by default (the VUM visual
+            // geometry is still sparse pending its strip-break topology
+            // follow-up, so it is unsuitable for a framed fly-through).
+            // OPENOMEGA_VISUAL_GEOMETRY=1 renders the VUM visual geometry, with
+            // its real decoded per-vertex UVs, instead. Off by default: flipping
+            // it is a later decision that depends on the topology work.
+            const asset::LevelSpatialIR& camera_spatial =
+                content_->level_content->spatial;
+            const bool use_visual_geometry = visual_geometry_env != nullptr &&
+                                             std::string_view(visual_geometry_env) == "1" &&
+                                             !visual_spatial.terrain_cells.empty();
+            // The player probe and its collision always stay on the COL shell, which is the
+            // authoritative collision surface regardless of what is being drawn.
+            const asset::LevelSpatialIR& render_spatial =
+                use_visual_geometry ? visual_spatial : camera_spatial;
+            auto world_scene = runtime::BuildWorldSpaceLevelScene(render_spatial);
+            if (world_scene && !world_scene->render_meshes.empty() &&
+                !world_scene->render_meshes.front().positions.empty())
+            {
+                asset::Float3IR minimum =
+                    world_scene->render_meshes.front().positions.front();
+                asset::Float3IR maximum = minimum;
+                for (const asset::RenderMeshIR& mesh : world_scene->render_meshes)
+                {
+                    for (const asset::Float3IR& p : mesh.positions)
+                    {
+                        minimum.x = std::min(minimum.x, p.x);
+                        minimum.y = std::min(minimum.y, p.y);
+                        minimum.z = std::min(minimum.z, p.z);
+                        maximum.x = std::max(maximum.x, p.x);
+                        maximum.y = std::max(maximum.y, p.y);
+                        maximum.z = std::max(maximum.z, p.z);
+                    }
+                }
+                const asset::Float3IR center{
+                    .x = (minimum.x + maximum.x) * 0.5F,
+                    .y = (minimum.y + maximum.y) * 0.5F,
+                    .z = (minimum.z + maximum.z) * 0.5F,
+                };
+                const float radius =
+                    std::max({maximum.x - minimum.x, maximum.y - minimum.y,
+                                 maximum.z - minimum.z, 1.0F}) *
+                    0.5F;
+
+                // Default: above and back (along -Z), angled down at the centre.
+                runtime::FreeFlyPose pose{
+                    .position = {.x = center.x,
+                        .y = center.y + radius * 0.6F,
+                        .z = center.z - radius * 1.9F},
+                    .yaw = 0.0F,
+                    .pitch = -0.30F,
+                };
+                if (camera_pose_env != nullptr)
+                {
+                    if (auto parsed = runtime::ParseFreeFlyPose(camera_pose_env))
+                        pose = *parsed;
+                }
+
+                constexpr float aspect = 640.0F / 448.0F;
+                const float near_plane = std::max(0.05F, radius * 0.01F);
+                const float far_plane = radius * 20.0F + near_plane;
+                world_scene->camera = asset::SceneCameraIR{
+                    .world_to_view = runtime::FreeFlyViewMatrix(pose),
+                    .view_to_clip = runtime::PerspectiveProjection(
+                        1.0472F, aspect, near_plane, far_plane),
+                };
+                // Seed the live camera: initial pose + a per-frame move speed
+                // (~1% of the level radius, so a fly-through crosses in ~100
+                // frames) + an optional scripted per-frame input for headless
+                // motion capture.
+                free_fly_initial_pose = pose;
+                free_fly_initial_speed = std::max(radius * 0.01F, 0.05F);
+                free_fly_script_input = runtime::ParseFreeFlyScript(
+                    camera_script_env != nullptr ? camera_script_env : "", 0.03F);
+
+                // OPENOMEGA_PLAYER=1: spawn a kinematic player, settle it onto a
+                // real floor, and switch the camera to a Z-up follow view. The
+                // per-frame refresh then steps the player from input and moves the
+                // camera with it, so the level is walkable (vs the detached
+                // free-fly camera). Off by default -- no behavior change.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+                const char* const player_env = std::getenv("OPENOMEGA_PLAYER");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+                if (player_env != nullptr && std::string_view(player_env) == "1")
+                {
+                    player_seed_collision =
+                        gameplay::BuildLevelCollisionTriangles(camera_spatial);
+                    if (!player_seed_collision.empty())
+                    {
+                        gameplay::CharacterState pstate{
+                            .position = asset::Float3IR{.x = center.x,
+                                .y = center.y, .z = maximum.z + 20.0F}};
+                        const std::span<const gameplay::CollisionTriangle> full(
+                            player_seed_collision);
+                        for (int step = 0; step < 240; ++step)
+                            pstate = gameplay::StepCharacter(pstate,
+                                gameplay::CharacterInput{}, player_seed_params,
+                                full, kPlayerStepDt);
+                        player_seed_state = pstate;
+                        world_scene->camera.world_to_view = PlayerFollowView(
+                            pstate.position, player_seed_params.radius);
+                        log_->Info("player",
+                            "player active: spawn(" +
+                                std::to_string(pstate.position.x) + "," +
+                                std::to_string(pstate.position.y) + "," +
+                                std::to_string(pstate.position.z) +
+                                ") grounded=" + (pstate.grounded ? "yes" : "no") +
+                                " tris=" + std::to_string(player_seed_collision.size()));
+                    }
+                }
+                diagnostic_scene = std::move(*world_scene);
+                // World-space rebuild appends the same cells in the same order as the projected
+                // build above, so the parallel UV array survives the switch unchanged -- but only
+                // when the rebuilt scene actually is the VUM visual geometry.
+                if (use_visual_geometry)
+                    diagnostic_scene_uvs = visual_uvs;
+                else
+                    diagnostic_scene_uvs.clear();
+                log_->Info("level",
+                    "free-fly 3D camera active: " +
+                        std::string(use_visual_geometry ? "VUM visual geometry"
+                                                        : "COL collision shell") +
+                        " bounds min(" +
+                        std::to_string(minimum.x) + "," + std::to_string(minimum.y) +
+                        "," + std::to_string(minimum.z) + ") max(" +
+                        std::to_string(maximum.x) + "," + std::to_string(maximum.y) +
+                        "," + std::to_string(maximum.z) + ") radius " +
+                        std::to_string(radius) + " pose(" +
+                        std::to_string(pose.position.x) + "," +
+                        std::to_string(pose.position.y) + "," +
+                        std::to_string(pose.position.z) + ")");
+            }
+        }
+    }
+
+    if (content_->level_content)
+    {
+        auto created_scene_presentation =
+            BuildDiagnosticScenePresentation(*host_, diagnostic_scene,
+                content_->level_texture_store
+                    ? &*content_->level_texture_store
+                    : nullptr,
+                content_->game_data ? &*content_->game_data : nullptr,
+                diagnostic_scene_uvs, free_fly_initial_pose, free_fly_initial_speed,
+                free_fly_script_input, player_seed_state, player_seed_params,
+                std::move(player_seed_collision));
+        if (!created_scene_presentation)
+        {
+            log_->Error("startup", created_scene_presentation.error());
+            return std::unexpected(
+                std::move(created_scene_presentation.error()));
+        }
+        diagnostic_scene_presentation_ =
+            std::move(*created_scene_presentation);
+        diagnostic_scene_presentation_->overlay_draw_list =
+            std::move(scene_overlay_draw_list);
+        diagnostic_scene_presentation_->hud_texture =
+            objective_hud_texture;
+        // Objective triggers (OPENOMEGA_PLAYER): seed the live objective state to
+        // match the HUD's build-time demo (obj1 complete; obj2-4 active) and place
+        // one project-owned trigger volume a short walk (+Y) from the player spawn,
+        // linked to obj2. Walking into it completes obj2 and the HUD refreshes.
+        // Project-placed: the retail beacon/checkpoint world coordinates are not
+        // recovered from the .SO (only the objective structure/ids), so the volume
+        // position is project-owned, not retail.
+        if (player_seed_state)
+        {
+            const gameplay::MissionData &trigger_mission =
+                gameplay::MinskMissionData();
+            gameplay::ObjectiveState seed =
+                gameplay::InitialObjectiveState(trigger_mission);
+            const auto seed_apply = [&trigger_mission, &seed](
+                                        const gameplay::ObjectiveChoice choice,
+                                        const std::uint16_t id) {
+                const auto step = gameplay::AdvanceObjectives(
+                    trigger_mission, seed, {choice, id});
+                if (step)
+                    seed = step->state;
+            };
+            for (const std::uint16_t id : {std::uint16_t{1U}, std::uint16_t{2U},
+                     std::uint16_t{3U}, std::uint16_t{4U}})
+                seed_apply(gameplay::ObjectiveChoice::Add, id);
+            seed_apply(gameplay::ObjectiveChoice::Pass, std::uint16_t{1U});
+            diagnostic_scene_presentation_->objective_state = seed;
+            const asset::Float3IR &spawn = player_seed_state->position;
+            // A small walkable mini-mission: three project-placed trigger volumes
+            // spaced along the +Y path from spawn, each linked to a real Minsk
+            // objective id (obj2/obj3/obj4, all seeded Active). Walking through
+            // them in sequence completes each objective and progresses the HUD
+            // (1/12 -> 4/12). Project-placed positions (the .SO gives the
+            // objective structure/ids, not world coords); radius is generous so
+            // the terrain's z-climb along the path stays inside the sphere.
+            const auto place_trigger = [&](const std::uint16_t id,
+                                           const float forward_offset) {
+                diagnostic_scene_presentation_->mission_triggers.push_back(
+                    gameplay::MissionTrigger{
+                        .objective_id = id,
+                        .position = asset::Float3IR{
+                            .x = spawn.x, .y = spawn.y + forward_offset,
+                            .z = spawn.z},
+                        .radius = 32.0F,
+                        .choice = gameplay::ObjectiveChoice::Pass,
+                        .fired = false,
+                    });
+            };
+            place_trigger(2U, 35.0F);
+            place_trigger(3U, 80.0F);
+            place_trigger(4U, 125.0F);
+
+            // Enemy NPC (OPENOMEGA_NPC=1): a project-placed patrolling guard
+            // ahead of the player on the +Y corridor. It patrols a short +Y
+            // segment (facing the corridor) and, per frame, checks whether it
+            // sees the player by vision cone + line-of-sight against the level
+            // COL; on a sighting it latches to Alerted (rendered blue -> red).
+            // Project-placed: authentic NPC spawns / nav Nodes live in the
+            // undecoded POP GOB: section (a later decode slice), not the .SO.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+            const char *const npc_flag = std::getenv("OPENOMEGA_NPC");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+            if (npc_flag != nullptr && npc_flag[0] == '1' && npc_flag[1] == '\0')
+            {
+                diagnostic_scene_presentation_->npc_active = true;
+                // Real NOD: nav-graph nodes decoded from the level's DATA.POP.
+                const auto &nav_nodes =
+                    content_->level_game_objects.nav_nodes;
+                // The nearest decoded nav-node positions to a spawn, forming an
+                // authentic patrol route. (The NOD: adjacency is decoded too, but
+                // its neighbor indices are into the full 1613-node array while we
+                // decode only the cleanly-walkable subset, so spatial nearest-node
+                // routing is used until the variant records are pinned; the patrol
+                // points are still real retail nav nodes.)
+                const auto nearest_nav_waypoints =
+                    [&nav_nodes](const asset::Float3IR &at) {
+                        std::vector<asset::Float3IR> route;
+                        const std::size_t want =
+                            nav_nodes.size() < 4U ? nav_nodes.size() : 4U;
+                        std::vector<bool> used(nav_nodes.size(), false);
+                        for (std::size_t k = 0U; k < want; ++k)
+                        {
+                            std::size_t best = nav_nodes.size();
+                            double best_d = 0.0;
+                            for (std::size_t n = 0U; n < nav_nodes.size(); ++n)
+                            {
+                                if (used[n])
+                                    continue;
+                                const auto &p = nav_nodes[n].position;
+                                const double dx = static_cast<double>(p.x) - at.x;
+                                const double dy = static_cast<double>(p.y) - at.y;
+                                const double dz = static_cast<double>(p.z) - at.z;
+                                const double d = dx * dx + dy * dy + dz * dz;
+                                if (best == nav_nodes.size() || d < best_d)
+                                {
+                                    best = n;
+                                    best_d = d;
+                                }
+                            }
+                            if (best == nav_nodes.size())
+                                break;
+                            used[best] = true;
+                            route.push_back(nav_nodes[best].position);
+                        }
+                        return route;
+                    };
+                // Seeds one patrolling guard at a world position: patrols the
+                // nearest real nav-node positions (fall back to a short local
+                // +/-Y segment if the nav graph is empty), running the full
+                // stealth loop.
+                const auto seed_guard = [&](const asset::Float3IR &at) {
+                    DiagnosticScenePresentation::NpcRuntime npc;
+                    npc.params = player_seed_params;
+                    npc.state = gameplay::CharacterState{.position = at};
+                    auto route = nearest_nav_waypoints(at);
+                    if (route.size() >= 2U)
+                        npc.waypoints = std::move(route);
+                    else
+                        npc.waypoints = {
+                            asset::Float3IR{.x = at.x, .y = at.y + 5.0F, .z = at.z},
+                            asset::Float3IR{.x = at.x, .y = at.y - 5.0F, .z = at.z}};
+                    npc.waypoint = 1U;
+                    npc.facing = asset::Float3IR{.x = 0.0F, .y = -1.0F, .z = 0.0F};
+                    // The sensor range is a PROJECT value. Retail's guard sight
+                    // distance is undecoded -- the AI tuning lives with the
+                    // rest of the unread game data, not in the .SO symbol table
+                    // that grounds the model's shape -- so this number is
+                    // chosen, not recovered.
+                    //
+                    // It is chosen for detection reachability weighed against a
+                    // per-frame cost. This same value is reused below as the
+                    // radius handed to SelectNearbyCollisionTriangles, and that
+                    // cull result is swept twice per guard per frame: once as
+                    // brute-force line-of-sight occluders, and once as the
+                    // movement-collision set fed to StepCharacter. So raising it
+                    // enlarges both, which is why the header default (200.0F) is
+                    // deliberately not used here.
+                    //
+                    // Why 22 stopped working: it was tuned in 90234f0, when the
+                    // only guards were project-placed directly on the player's
+                    // forward corridor. 5ab7a38 replaced them with the scattered
+                    // authentic DATA.POP roster and did not revisit the range,
+                    // after which scripted-walk runs on MINSK observed no
+                    // sighting at all. 60 is the smallest change that restores
+                    // reachability without touching any other gate.
+                    //
+                    // The cost of 60 has NOT been measured -- it is a judgement
+                    // that a ~2.7x radius stays affordable, and it should be
+                    // profiled rather than trusted.
+                    npc.vision = gameplay::NpcVisionParams{
+                        .range = 60.0F, .cos_half_angle = 0.5F, .eye_height = 8.0F};
+                    diagnostic_scene_presentation_->npcs.push_back(std::move(npc));
+                };
+                // Authentic enemy placement decoded from the level's DATA.POP GOB
+                // NPC: section (id + model/type name + world position). The player
+                // character model (PC_MALE) is the player start, not an enemy, so
+                // it is skipped. Fail-soft: with no decoded spawns, fall back to a
+                // few project-placed guards along the player's +Y corridor.
+                std::size_t authentic = 0U;
+                for (const auto &sp :
+                    content_->level_game_objects.npc_spawns)
+                {
+                    if (sp.model.find("PC_MALE") != std::string::npos ||
+                        sp.model.find("pc_male") != std::string::npos)
+                        continue;
+                    seed_guard(sp.position);
+                    ++authentic;
+                }
+                if (authentic != 0U)
+                {
+                    log_->Info("npc",
+                        "authentic enemy spawns placed from DATA.POP GOB: " +
+                            std::to_string(authentic) + " of " +
+                            std::to_string(content_->level_game_objects
+                                    .npc_spawns.size()) +
+                            " NPC records; patrolling " +
+                            std::to_string(nav_nodes.size()) + " of " +
+                            std::to_string(content_->level_game_objects
+                                    .nav_node_count) +
+                            " decoded nav nodes (hotboxes=" +
+                            std::to_string(content_->level_game_objects
+                                    .hotbox_count) +
+                            ")");
+                }
+                else
+                {
+                    for (const float ahead : {50.0F, 90.0F, 130.0F})
+                        seed_guard(asset::Float3IR{
+                            .x = spawn.x, .y = spawn.y + ahead, .z = spawn.z});
+                    log_->Info("npc",
+                        "enemy NPCs placed (project-placed fallback): " +
+                            std::to_string(
+                                diagnostic_scene_presentation_->npcs.size()) +
+                            " guards patrolling the +Y corridor");
+                }
+            }
+        }
+    }
+    return {};
 }
 
 std::expected<OmegaApp::CharacterPresentation, std::string>

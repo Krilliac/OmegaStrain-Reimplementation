@@ -405,6 +405,28 @@ private:
     // generations in reverse upload order. The host remains the final cleanup authority.
     void ReleaseDiagnosticScenePresentation() noexcept;
 
+    // [game/main/render thread; no concurrent use] Takes ownership of one complete
+    // content-startup state and builds every level-derived structure from it: the
+    // diagnostic scene IR (the COL collision shell or the decoded VUM visual
+    // geometry), the free-fly/player camera seed, the uploaded scene meshes and
+    // environment texture, the mission triggers, and the NPC runtimes. Any
+    // presentation and level-scoped launch-local state owned from a previous
+    // adoption is released first through ReleaseDiagnosticScenePresentation, so no
+    // GPU generation is ever owned twice or leaked. This is the single entry point
+    // through which level content enters the app; Create calls it exactly once and
+    // nothing else calls it yet, so the app has no runtime level change.
+    //
+    // objective_hud_texture and scene_overlay_draw_list are the app-level overlay
+    // resources the caller already built for this content; they are adopted into
+    // the rebuilt presentation. On failure the app owns the new content and no
+    // scene presentation at all, never a half-built one: BuildDiagnosticScenePresentation
+    // releases its own uploaded prefix, and the caller decides whether to retry or
+    // tear the app down.
+    [[nodiscard]] std::expected<void, std::string> AdoptLevelContent(
+        std::unique_ptr<runtime::ContentStartupState> content,
+        runtime::RenderTextureHandle objective_hud_texture = {},
+        runtime::RenderDrawList scene_overlay_draw_list = {});
+
     // [game/main/render thread; no concurrent use] Builds a complete immutable
     // character card. The returned texture remains host-owned and must be
     // released through ReleaseCharacterPresentation.
