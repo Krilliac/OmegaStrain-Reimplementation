@@ -40,6 +40,7 @@ using omega::frontend::presentation::RetailFrontEndTextureAlphaContribution;
 using omega::frontend::presentation::RetailFrontEndTextureSamplingError;
 using omega::frontend::presentation::RetailFrontEndTextureSamplingResult;
 using omega::frontend::presentation::SampleRetailFrontEndTextureBilinearRepeat;
+using omega::frontend::presentation::ValidateRetailFrontEndTexture;
 
 int failures = 0;
 
@@ -288,6 +289,71 @@ void TestFailuresAreTypedAndFailClosed()
         "unrecognized TCC alpha modes fail closed");
 }
 
+// Hoisting validation out of a caller's inner loop must not become a second,
+// laxer sampling rule: the validated overload has to agree bit for bit with the
+// binding overload and keep every per-texel failure that survives validation.
+void TestValidatedLayoutMatchesTheBindingOverload()
+{
+    std::vector<RawGsRgba8> palette(256U);
+    palette[0U] = {0U, 0U, 0U, 0U};
+    palette[1U] = {255U, 0U, 0U, 128U};
+    palette[2U] = {0U, 255U, 0U, 0U};
+    palette[3U] = {0U, 0U, 255U, 128U};
+    const auto texture = MakeTexture(IndexedImageEncoding::Indexed8,
+        FrontEndTextureAlphaMode::UsesPaletteAlpha, 2U, 2U,
+        {0U, 1U, 2U, 3U}, std::move(palette));
+
+    const auto validated = ValidateRetailFrontEndTexture(texture);
+    Check(validated.has_value(), "a well-formed binding validates once");
+    if (!validated)
+        return;
+
+    bool identical = true;
+    for (const float u : {-2.75F, -0.125F, 0.0F, 0.25F, 0.5F, 0.75F, 1.0F,
+             1.25F, 7.375F})
+    {
+        for (const float v : {-1.875F, 0.0F, 0.125F, 0.5F, 0.9375F, 3.5F})
+        {
+            const auto direct = SampleRetailFrontEndTextureBilinearRepeat(
+                texture, {.u = u, .v = v});
+            const auto hoisted = SampleRetailFrontEndTextureBilinearRepeat(
+                *validated, {.u = u, .v = v});
+            identical = identical && direct.has_value() &&
+                        hoisted.has_value() && direct == hoisted;
+        }
+    }
+    Check(identical,
+        "the validated overload reproduces the binding overload exactly");
+
+    CheckError(SampleRetailFrontEndTextureBilinearRepeat(*validated,
+                   {.u = std::numeric_limits<float>::quiet_NaN(), .v = 0.0F}),
+        RetailFrontEndTextureSamplingError::NonFiniteCoordinate,
+        "the validated overload still rejects non-finite coordinates");
+
+    // Palette range is a per-texel property of the payload, not an invariant
+    // of the layout, so hoisting must not have hoisted this check away.
+    const auto escaping = MakeTexture(IndexedImageEncoding::Indexed4,
+        FrontEndTextureAlphaMode::UsesPaletteAlpha, 1U, 1U, {16U});
+    const auto escaping_layout = ValidateRetailFrontEndTexture(escaping);
+    Check(escaping_layout.has_value(),
+        "an in-range layout can still carry an out-of-range index");
+    if (escaping_layout)
+    {
+        CheckError(SampleRetailFrontEndTextureBilinearRepeat(
+                       *escaping_layout, {.u = 0.5F, .v = 0.5F}),
+            RetailFrontEndTextureSamplingError::PaletteIndexOutOfRange,
+            "per-texel palette range survives hoisted validation");
+    }
+
+    const auto malformed_layout = ValidateRetailFrontEndTexture(
+        MakeTexture(IndexedImageEncoding::Indexed4,
+            FrontEndTextureAlphaMode::UsesPaletteAlpha, 2U, 1U, {0U}));
+    Check(!malformed_layout &&
+            malformed_layout.error() ==
+                RetailFrontEndTextureSamplingError::InvalidIndexStorage,
+        "hoisted validation fails closed on the same malformed storage");
+}
+
 void TestDeterminism()
 {
     std::vector<RawGsRgba8> palette(256U);
@@ -317,6 +383,7 @@ int main()
     TestBilinearRepeatAndFractions();
     TestExplicitAlphaModes();
     TestFailuresAreTypedAndFailClosed();
+    TestValidatedLayoutMatchesTheBindingOverload();
     TestDeterminism();
 
     if (failures != 0)

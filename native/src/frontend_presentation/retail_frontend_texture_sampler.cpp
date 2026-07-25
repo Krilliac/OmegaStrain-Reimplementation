@@ -10,13 +10,6 @@ namespace omega::frontend::presentation
 {
 namespace
 {
-struct ValidatedLayout final
-{
-    const asset::IndexedImageIR* image = nullptr;
-    RetailFrontEndTextureAlphaContribution alpha_contribution =
-        RetailFrontEndTextureAlphaContribution::Identity;
-};
-
 struct AxisTaps final
 {
     std::uint32_t lower = 0U;
@@ -24,9 +17,8 @@ struct AxisTaps final
     double fraction = 0.0;
 };
 
-[[nodiscard]] std::expected<ValidatedLayout,
-    RetailFrontEndTextureSamplingError>
-Validate(const content::FrontEndTextureBinding& binding) noexcept
+[[nodiscard]] RetailFrontEndTextureValidationResult Validate(
+    const content::FrontEndTextureBinding& binding) noexcept
 {
     const auto& image = binding.image();
     if (image.width == 0U || image.height == 0U)
@@ -82,34 +74,46 @@ Validate(const content::FrontEndTextureBinding& binding) noexcept
             RetailFrontEndTextureSamplingError::UnsupportedAlphaMode);
     }
 
-    return ValidatedLayout{
-        .image = &image,
+    RetailFrontEndValidatedTexture validated{
+        .indices = image.indices.data(),
+        .palette = image.palette.data(),
+        .palette_size = static_cast<std::uint32_t>(image.palette.size()),
+        .width = image.width,
+        .height = image.height,
         .alpha_contribution = alpha_contribution,
     };
+    // Exactly the value the per-tap path used to recompute: the normalized GS
+    // color, with the Identity alpha substitution already applied. Both are
+    // pure functions of data that cannot change while the layout is valid, so
+    // resolving them here yields the identical float for every tap.
+    for (std::size_t entry = 0U; entry < image.palette.size(); ++entry)
+    {
+        RgbaF modulation = NormalizeGsColor(image.palette[entry]);
+        if (alpha_contribution ==
+            RetailFrontEndTextureAlphaContribution::Identity)
+        {
+            modulation.alpha = 1.0F;
+        }
+        validated.normalized_palette[entry] = modulation;
+    }
+    return validated;
 }
 
 [[nodiscard]] RetailFrontEndTextureSamplingResult LookupValidated(
-    const ValidatedLayout& layout,
+    const RetailFrontEndValidatedTexture& layout,
     const std::uint32_t x,
     const std::uint32_t y) noexcept
 {
-    const auto& image = *layout.image;
     const std::uint64_t offset =
-        static_cast<std::uint64_t>(y) * image.width + x;
+        static_cast<std::uint64_t>(y) * layout.width + x;
     const std::uint8_t palette_index =
-        image.indices[static_cast<std::size_t>(offset)];
-    if (palette_index >= image.palette.size())
+        layout.indices[static_cast<std::size_t>(offset)];
+    if (static_cast<std::uint32_t>(palette_index) >= layout.palette_size)
         return std::unexpected(
             RetailFrontEndTextureSamplingError::PaletteIndexOutOfRange);
 
-    RgbaF modulation = NormalizeGsColor(image.palette[palette_index]);
-    if (layout.alpha_contribution ==
-        RetailFrontEndTextureAlphaContribution::Identity)
-    {
-        modulation.alpha = 1.0F;
-    }
     return RetailFrontEndTextureSample{
-        .modulation = modulation,
+        .modulation = layout.normalized_palette[palette_index],
         .alpha_contribution = layout.alpha_contribution,
     };
 }
@@ -170,35 +174,37 @@ RetailFrontEndTextureSamplingResult LookupRetailFrontEndTexel(
     const auto layout = Validate(binding);
     if (!layout)
         return std::unexpected(layout.error());
-    if (x >= layout->image->width || y >= layout->image->height)
+    if (x >= layout->width || y >= layout->height)
         return std::unexpected(
             RetailFrontEndTextureSamplingError::TexelCoordinateOutOfRange);
     return LookupValidated(*layout, x, y);
 }
 
+RetailFrontEndTextureValidationResult ValidateRetailFrontEndTexture(
+    const content::FrontEndTextureBinding& binding) noexcept
+{
+    return Validate(binding);
+}
+
 RetailFrontEndTextureSamplingResult
 SampleRetailFrontEndTextureBilinearRepeat(
-    const content::FrontEndTextureBinding& binding,
+    const RetailFrontEndValidatedTexture& texture,
     const asset::FrontendUvIR& normalized_st) noexcept
 {
     if (!std::isfinite(normalized_st.u) || !std::isfinite(normalized_st.v))
         return std::unexpected(
             RetailFrontEndTextureSamplingError::NonFiniteCoordinate);
 
-    const auto layout = Validate(binding);
-    if (!layout)
-        return std::unexpected(layout.error());
-
-    const AxisTaps horizontal = ResolveAxis(normalized_st.u, layout->image->width);
-    const AxisTaps vertical = ResolveAxis(normalized_st.v, layout->image->height);
+    const AxisTaps horizontal = ResolveAxis(normalized_st.u, texture.width);
+    const AxisTaps vertical = ResolveAxis(normalized_st.v, texture.height);
     const auto upper_left =
-        LookupValidated(*layout, horizontal.lower, vertical.lower);
+        LookupValidated(texture, horizontal.lower, vertical.lower);
     const auto upper_right =
-        LookupValidated(*layout, horizontal.upper, vertical.lower);
+        LookupValidated(texture, horizontal.upper, vertical.lower);
     const auto lower_left =
-        LookupValidated(*layout, horizontal.lower, vertical.upper);
+        LookupValidated(texture, horizontal.lower, vertical.upper);
     const auto lower_right =
-        LookupValidated(*layout, horizontal.upper, vertical.upper);
+        LookupValidated(texture, horizontal.upper, vertical.upper);
     if (!upper_left)
         return std::unexpected(upper_left.error());
     if (!upper_right)
@@ -214,7 +220,22 @@ SampleRetailFrontEndTextureBilinearRepeat(
         lower_left->modulation, lower_right->modulation, horizontal.fraction);
     return RetailFrontEndTextureSample{
         .modulation = Lerp(upper, lower, vertical.fraction),
-        .alpha_contribution = layout->alpha_contribution,
+        .alpha_contribution = texture.alpha_contribution,
     };
+}
+
+RetailFrontEndTextureSamplingResult
+SampleRetailFrontEndTextureBilinearRepeat(
+    const content::FrontEndTextureBinding& binding,
+    const asset::FrontendUvIR& normalized_st) noexcept
+{
+    if (!std::isfinite(normalized_st.u) || !std::isfinite(normalized_st.v))
+        return std::unexpected(
+            RetailFrontEndTextureSamplingError::NonFiniteCoordinate);
+
+    const auto layout = Validate(binding);
+    if (!layout)
+        return std::unexpected(layout.error());
+    return SampleRetailFrontEndTextureBilinearRepeat(*layout, normalized_st);
 }
 } // namespace omega::frontend::presentation
