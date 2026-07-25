@@ -5162,22 +5162,37 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                     }
                     // Per-NPC diagnostic. pos/sees/state alone cannot explain a
                     // missed sighting, so also report the distance to the
-                    // player and WHICH gate rejected it. NpcSeesPlayer applies
-                    // its gates in a fixed order -- finiteness, then range,
-                    // then the facing cone, then line of sight -- and returns
-                    // on the first failure, so the same tests are recomputed
-                    // here, in that order, purely for the log (npc_ai is not
-                    // touched). The LOS outcome is INFERRED rather than re-run:
-                    // if every earlier gate passes and the NPC still does not
-                    // see, the occlusion sweep is the only remaining reason,
-                    // and re-running it would double the brute-force triangle
-                    // cost per NPC per frame.
-                    const float gate_dx =
-                        np.player_state.position.x - npc.state.position.x;
-                    const float gate_dy =
-                        np.player_state.position.y - npc.state.position.y;
-                    const float gate_dz =
-                        np.player_state.position.z - npc.state.position.z;
+                    // player and WHICH gate rejected it.
+                    //
+                    // This MIRRORS NpcSeesPlayer's gate order exactly, and must
+                    // be kept in step with it: range is centre-to-centre, but
+                    // the cone is judged FROM THE EYE toward the player's
+                    // centre, which is the same segment the LOS sweep then
+                    // tests. Recomputing the cone from the NPC's centre would
+                    // mislabel near-field cone rejections as `los` and send the
+                    // reader hunting occlusion that never happened.
+                    //
+                    // The LOS outcome alone is INFERRED rather than re-run: if
+                    // every earlier gate passes and the NPC still does not see,
+                    // occlusion is the only remaining reason, and re-running the
+                    // sweep would double the brute-force triangle cost per NPC
+                    // per frame.
+                    const asset::Float3IR &gate_npc_pos = npc.state.position;
+                    const asset::Float3IR &gate_player_pos =
+                        np.player_state.position;
+                    const bool gate_inputs_finite =
+                        std::isfinite(gate_npc_pos.x) &&
+                        std::isfinite(gate_npc_pos.y) &&
+                        std::isfinite(gate_npc_pos.z) &&
+                        std::isfinite(npc.facing.x) &&
+                        std::isfinite(npc.facing.y) &&
+                        std::isfinite(npc.facing.z) &&
+                        std::isfinite(gate_player_pos.x) &&
+                        std::isfinite(gate_player_pos.y) &&
+                        std::isfinite(gate_player_pos.z);
+                    const float gate_dx = gate_player_pos.x - gate_npc_pos.x;
+                    const float gate_dy = gate_player_pos.y - gate_npc_pos.y;
+                    const float gate_dz = gate_player_pos.z - gate_npc_pos.z;
                     const float gate_dist2 = gate_dx * gate_dx +
                         gate_dy * gate_dy + gate_dz * gate_dz;
                     const float gate_dist = std::sqrt(gate_dist2);
@@ -5185,27 +5200,44 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                         npc.facing.x * npc.facing.x +
                         npc.facing.y * npc.facing.y +
                         npc.facing.z * npc.facing.z;
-                    // cos(angle) between the facing and the direction to the
-                    // player. A coincident player or a degenerate facing has no
-                    // meaningful angle; 1.0 keeps the cone gate from being
-                    // reported as the failure in those cases (they are reported
-                    // by the earlier gates instead).
+                    // The eye: eye_height along `up` from the NPC's centre.
+                    const float gate_eye_x =
+                        gate_npc_pos.x + npc.vision.up.x * npc.vision.eye_height;
+                    const float gate_eye_y =
+                        gate_npc_pos.y + npc.vision.up.y * npc.vision.eye_height;
+                    const float gate_eye_z =
+                        gate_npc_pos.z + npc.vision.up.z * npc.vision.eye_height;
+                    const bool gate_eye_finite = std::isfinite(gate_eye_x) &&
+                        std::isfinite(gate_eye_y) && std::isfinite(gate_eye_z);
+                    // Eye -> player centre: the vector the cone is judged on.
+                    const float gate_ax = gate_player_pos.x - gate_eye_x;
+                    const float gate_ay = gate_player_pos.y - gate_eye_y;
+                    const float gate_az = gate_player_pos.z - gate_eye_z;
+                    const float gate_aim2 = gate_ax * gate_ax +
+                        gate_ay * gate_ay + gate_az * gate_az;
+                    // A degenerate aim or facing has no meaningful angle; 1.0
+                    // keeps the cone from being blamed in those cases, which the
+                    // earlier gates report instead.
                     const float gate_cos =
-                        (gate_dist2 > 0.0F && gate_facing_len2 > 0.0F)
-                            ? (gate_dx * npc.facing.x + gate_dy * npc.facing.y +
-                                  gate_dz * npc.facing.z) /
-                                (gate_dist * std::sqrt(gate_facing_len2))
+                        (gate_aim2 > 0.0F && gate_facing_len2 > 0.0F)
+                            ? (gate_ax * npc.facing.x + gate_ay * npc.facing.y +
+                                  gate_az * npc.facing.z) /
+                                (std::sqrt(gate_aim2) *
+                                    std::sqrt(gate_facing_len2))
                             : 1.0F;
                     const char *const gate = [&]() -> const char * {
                         if (sees)
                             return "-";
-                        if (!std::isfinite(gate_dist2) ||
-                            !std::isfinite(gate_facing_len2))
+                        if (!gate_inputs_finite)
                             return "nonfinite";
+                        if (!(npc.vision.range > 0.0F))
+                            return "range-invalid";
                         if (!(gate_facing_len2 > 0.0F))
                             return "facing";
                         if (gate_dist2 > npc.vision.range * npc.vision.range)
                             return "range";
+                        if (!gate_eye_finite)
+                            return "eye";
                         if (gate_cos < npc.vision.cos_half_angle)
                             return "cone";
                         return "los";
