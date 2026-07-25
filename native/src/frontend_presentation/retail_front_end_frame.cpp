@@ -551,19 +551,22 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
             force_visible_group, diag, out);
 }
 
-// Finds a texture by member name across all of the bundle's visual scopes
-// (FindTexture is case-insensitive). Used to locate the Command Center ring
-// surface (DPAD_COMMANDCENTER.TDX), which lives in a shell scope rather than a
-// GUI-bound resource. Returns nullptr if absent (the ring then draws untextured).
-[[nodiscard]] const content::FrontEndTextureBinding* FindBundleTexture(
-    const content::FrontEndScreenBundle& bundle,
-    const std::string_view member) noexcept
+// The texture the mission-ring band quad samples, or nullptr when none is
+// identified -- in which case no band quad is emitted at all.
+//
+// analysis/formats/MISSION-RING.md measures the band quad's screen extent and
+// that it samples a 256x256 PSMT8 texture, but explicitly does NOT establish
+// WHICH texture ("Texture identity" -- texel payloads were deliberately not
+// decoded). The project previously bound DPAD_COMMANDCENTER.TDX here; a
+// Command Center capture of this build shows that member is the D-pad button
+// art, drawn as a large glyph across the ring, so that binding is now disproven
+// rather than merely unproven and has been withdrawn. The screen's own decoded
+// interface-element art still draws the backdrop. This stays a named function
+// so the one binding point is obvious when a measured answer arrives.
+[[nodiscard]] const content::FrontEndTextureBinding* FindMissionRingBandTexture(
+    const content::FrontEndScreenBundle& bundle) noexcept
 {
-    for (const auto& scope : bundle.visual_scopes() | std::views::values)
-    {
-        if (const auto* const texture = scope.FindTexture(member))
-            return texture;
-    }
+    (void)bundle;
     return nullptr;
 }
 } // namespace
@@ -615,20 +618,36 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
     std::vector<RetailFrontEndRasterTriangle> triangles;
     try
     {
-        // Command Center 3D mission-ring backdrop (Gap B Slice A, project-authored
-        // approximation). Appended FIRST so its submission ordinals are lowest and
-        // the 2D shell/text draw over it. Only the hub gets a ring; other screens
-        // are unchanged. Fail-soft: a missing texture draws an untextured ring.
-        if (bundle.key() == content::FrontEndScreenKey::CommandCenter)
-        {
-            AppendRetailMissionRingTriangles(
-                FindBundleTexture(bundle, "DPAD_COMMANDCENTER.TDX"), triangles);
-            if (diagnostics != nullptr)
-                diagnostics->mission_ring_triangles =
-                    static_cast<std::uint32_t>(triangles.size());
-        }
         AppendVisualNodeTriangles(*scope, *root_visual, initial_world, 0U,
             animation_tick, diagnostics, triangles);
+        // Command Center mission-select ring, reconstructed from the measured
+        // geometry in analysis/formats/MISSION-RING.md (band quad extent plus the
+        // 22 fixed marker positions). Only the hub gets a ring; other screens are
+        // unchanged.
+        //
+        // Appended AFTER the interface-element geometry, matching the retail
+        // draw order the captures record: the ring occupies draws 16-155 of each
+        // 168-draw frame, after the backdrop furniture and before the text runs
+        // at 156-167. Composing it first instead left the markers underneath the
+        // screen's own semi-transparent ring art, which visibly washed them out;
+        // in the reference frame they are opaque marks over the track.
+        //
+        // The selection passed here is the one the captures actually show
+        // (marker 2). Nothing proves how the retail runtime maps a selected
+        // mission -- or this compositor's selected_widget_identifier -- onto a
+        // marker index, so no such mapping is invented: the caller-facing knob
+        // exists on AppendRetailMissionRingTriangles, and until that mapping is
+        // measured the frame composes the one observed state.
+        if (bundle.key() == content::FrontEndScreenKey::CommandCenter)
+        {
+            const std::size_t before_ring = triangles.size();
+            AppendRetailMissionRingTriangles(
+                FindMissionRingBandTexture(bundle), triangles,
+                kRetailMissionRingCapturedSelectedIndex);
+            if (diagnostics != nullptr)
+                diagnostics->mission_ring_triangles =
+                    static_cast<std::uint32_t>(triangles.size() - before_ring);
+        }
         // Phase 2 GUI text pass. Glyph quads are appended AFTER all IE geometry
         // so the submission-ordinal depth pass below ranks them highest and they
         // draw on top of the screen art. Text is a decoration over a valid IE

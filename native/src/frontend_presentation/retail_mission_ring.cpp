@@ -3,64 +3,98 @@
 #include "omega/asset/frontend_ir.h"
 #include "omega/frontend/compositor_math.h"
 
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
-#include <numbers>
 
 namespace omega::frontend::presentation
 {
 namespace
 {
-// --- Reference-matched approximation parameters (Command Center DrawDump) ---
-// The ring is a flat annulus in the world XZ plane, tilted back about X and
-// viewed through a fixed pinhole camera, producing the foreshortened ellipse the
-// retail mission-select screen shows. Values chosen to seat the ellipse in the
-// centre of the canonical 640x448 frame, wider than tall. These are a project
-// approximation of the retail 3D backdrop, not decoded geometry.
-constexpr float kPi = std::numbers::pi_v<float>;
-constexpr std::uint32_t kSegments = 96U;   // angular tessellation (affine-safe)
-constexpr float kOuterRadius = 1.16F;
-constexpr float kInnerRadius = 0.60F;
-constexpr float kTiltRadians = 1.17F;      // ~67 deg lean-back
-constexpr float kCameraDistance = 2.55F;   // push the ring in front of camera
-constexpr float kCameraHeight = 0.42F;     // camera above the ring plane
-constexpr float kFocalPixels = 340.0F;
-constexpr float kScreenCenterX = 320.0F;
-constexpr float kScreenCenterY = 246.0F;   // ring centre slightly below middle
-constexpr float kUvRadialSpan = 1.0F;
-constexpr float kUvAngularRepeat = 4.0F;   // wrap the texture 4x around the band
+// --- Measured constants (analysis/formats/MISSION-RING.md) ------------------
+// All coordinates are framebuffer pixels in the captures' 640x448 display area
+// (DISP0.DISPLAY: DW=2559, MAGH=3, DH=447, MAGV=0), which is byte-for-byte this
+// project's canonical front-end raster, so nothing is rescaled.
 
-struct Vec2 final
-{
-    float x = 0.0F;
-    float y = 0.0F;
-};
+// MISSION-RING.md, "Per-marker draw structure": every opaque pass is emitted at
+// vertex alpha 127 of 128. Carried through literally rather than rounded to 1.0
+// so the number stays traceable to the capture.
+constexpr float kOpaqueVertexAlpha = 127.0F / 128.0F;
 
-// Perspective-project a world point (x, 0, z) on the flat ring, after the fixed
-// tilt, into canonical raster space. Returns false if it lands at/behind the
-// camera or is non-finite.
-[[nodiscard]] bool ProjectRingPoint(const float x, const float z,
-    Vec2& out) noexcept
-{
-    const float sin_t = std::sin(kTiltRadians);
-    const float cos_t = std::cos(kTiltRadians);
-    // Tilt the y=0 ring back about X: y' = -z sin(t), z' = z cos(t).
-    const float world_y = -z * sin_t;
-    const float world_z = z * cos_t;
-    // Camera sits on -Z looking toward +Z, lifted above the plane.
-    const float view_x = x;
-    const float view_y = world_y - kCameraHeight;
-    const float view_z = world_z + kCameraDistance;
-    if (!std::isfinite(view_x) || !std::isfinite(view_y) ||
-        !std::isfinite(view_z) || !(view_z > 0.03125F))
-        return false;
-    const float screen_x = kScreenCenterX + kFocalPixels * view_x / view_z;
-    const float screen_y = kScreenCenterY - kFocalPixels * view_y / view_z;
-    if (!std::isfinite(screen_x) || !std::isfinite(screen_y))
-        return false;
-    out = Vec2{.x = screen_x, .y = screen_y};
-    return true;
-}
+// MISSION-RING.md, "22 markers, at fixed screen positions" -- the marker table,
+// verbatim, in draw order. Centre and W x H are the "centre" and "marker W x H"
+// columns (the centre and size of each cluster's smallest quad).
+constexpr std::array<RetailMissionRingMarker, kRetailMissionRingMarkerCount>
+    kMarkers = {{
+        // Marker 0 is the animated element: it is the only marker whose
+        // position changes between frames and it carries no opaque pass, so it
+        // contributes no drawn form here. Its measured position is kept in the
+        // table because it is measured; its MEANING is unproven.
+        {.center_x = 511.812F, .center_y = 180.438F, .width = 43.00F,
+            .height = 37.50F, .emits_opaque_pass = false},
+        {.center_x = 437.844F, .center_y = 361.000F, .width = 29.81F,
+            .height = 27.00F, .emits_opaque_pass = true},
+        {.center_x = 362.844F, .center_y = 362.281F, .width = 29.81F,
+            .height = 26.94F, .emits_opaque_pass = true},
+        {.center_x = 297.688F, .center_y = 374.406F, .width = 29.62F,
+            .height = 26.81F, .emits_opaque_pass = true},
+        {.center_x = 229.000F, .center_y = 372.094F, .width = 29.62F,
+            .height = 26.81F, .emits_opaque_pass = true},
+        {.center_x = 202.031F, .center_y = 330.719F, .width = 25.94F,
+            .height = 24.19F, .emits_opaque_pass = true},
+        {.center_x = 141.781F, .center_y = 325.062F, .width = 29.81F,
+            .height = 27.00F, .emits_opaque_pass = true},
+        {.center_x = 123.719F, .center_y = 279.938F, .width = 29.81F,
+            .height = 27.00F, .emits_opaque_pass = true},
+        {.center_x = 168.562F, .center_y = 247.844F, .width = 28.38F,
+            .height = 23.81F, .emits_opaque_pass = true},
+        {.center_x = 99.125F, .center_y = 218.625F, .width = 27.75F,
+            .height = 25.88F, .emits_opaque_pass = true},
+        {.center_x = 160.750F, .center_y = 189.469F, .width = 27.75F,
+            .height = 25.94F, .emits_opaque_pass = true},
+        {.center_x = 176.250F, .center_y = 136.875F, .width = 29.25F,
+            .height = 26.50F, .emits_opaque_pass = true},
+        {.center_x = 253.094F, .center_y = 156.469F, .width = 26.31F,
+            .height = 24.56F, .emits_opaque_pass = true},
+        {.center_x = 258.562F, .center_y = 101.625F, .width = 27.75F,
+            .height = 25.88F, .emits_opaque_pass = true},
+        {.center_x = 315.344F, .center_y = 111.344F, .width = 29.81F,
+            .height = 26.94F, .emits_opaque_pass = true},
+        {.center_x = 371.344F, .center_y = 105.844F, .width = 29.81F,
+            .height = 26.94F, .emits_opaque_pass = true},
+        {.center_x = 433.594F, .center_y = 85.594F, .width = 27.81F,
+            .height = 25.94F, .emits_opaque_pass = true},
+        {.center_x = 425.344F, .center_y = 142.062F, .width = 25.56F,
+            .height = 23.88F, .emits_opaque_pass = true},
+        {.center_x = 479.219F, .center_y = 134.688F, .width = 29.81F,
+            .height = 27.00F, .emits_opaque_pass = true},
+        // Markers 19, 20 and 21 use larger quads and no 32x32 dot texture:
+        // MISSION-RING.md records them as the three distinctly shaped icons on
+        // the right of the ring. Their own measured extent IS their drawn form.
+        {.center_x = 515.031F, .center_y = 164.375F, .width = 37.06F,
+            .height = 34.62F, .emits_opaque_pass = true},
+        {.center_x = 513.156F, .center_y = 269.031F, .width = 54.06F,
+            .height = 45.56F, .emits_opaque_pass = true},
+        {.center_x = 469.375F, .center_y = 310.344F, .width = 52.75F,
+            .height = 45.56F, .emits_opaque_pass = true},
+    }};
+
+// --- Rendering-only choices (NOT measured) ----------------------------------
+// MISSION-RING.md deliberately did not decode texel payloads and states that
+// per-marker texture identity is unproven, so markers are drawn untextured with
+// a flat modulation. These two colours are presentation, not reconstruction:
+// they assert nothing about the retail art and no measurement depends on them.
+constexpr RgbaF kMarkerColor{
+    .red = 0.86F, .green = 0.92F, .blue = 1.00F, .alpha = kOpaqueVertexAlpha};
+constexpr RgbaF kHighlightColor{
+    .red = 1.00F, .green = 0.97F, .blue = 0.78F, .alpha = kOpaqueVertexAlpha};
+
+// Two triangles per quad, and the emitted quad budget: one band quad, plus one
+// quad for each opaque marker, plus the extra highlight quad.
+constexpr std::size_t kTrianglesPerQuad = 2U;
+constexpr std::size_t kMaximumQuads =
+    1U + kRetailMissionRingMarkerCount + kRetailMissionRingHighlightQuadCount;
 
 [[nodiscard]] bool IsFiniteNonDegenerate(
     const RetailFrontEndRasterTriangle& triangle) noexcept
@@ -81,73 +115,126 @@ struct Vec2 final
     return std::isfinite(signed_twice_area) && signed_twice_area != 0.0;
 }
 
-[[nodiscard]] RetailFrontEndRasterVertex MakeVertex(const Vec2 position,
-    const float u, const float v, const RgbaF color) noexcept
+[[nodiscard]] RetailFrontEndRasterVertex MakeVertex(const float x,
+    const float y, const float u, const float v, const RgbaF color) noexcept
 {
     return RetailFrontEndRasterVertex{
-        .x = position.x,
-        .y = position.y,
-        // Overwritten by the compositor's submission-ordinal depth pass; the
-        // ring is appended first, so it ends up under the shell.
+        .x = x,
+        .y = y,
+        // Overwritten by the compositor's submission-ordinal depth pass, which
+        // ranks by append order; the caller places the ring after the screen's
+        // interface-element geometry and before the text pass.
         .depth_rank = 0.0F,
         .normalized_st = asset::FrontendUvIR{.u = u, .v = v},
         .modulation = color,
     };
 }
-} // namespace
 
-void AppendRetailMissionRingTriangles(
-    const content::FrontEndTextureBinding* const ring_texture,
+// Emits one screen-aligned, axis-aligned quad as two triangles, matching the
+// six-vertex triangle-strip quad the captures show for both the band and every
+// marker. The full 0..1 ST mapping is the minimal choice: MISSION-RING.md
+// measures each quad's screen extent but not its ST values, and explicitly does
+// not decode texel payloads, so no sub-atlas rectangle is invented.
+void AppendQuad(const float min_x, const float min_y, const float max_x,
+    const float max_y, const RgbaF color,
+    const content::FrontEndTextureBinding* const texture,
     std::vector<RetailFrontEndRasterTriangle>& out)
 {
-    // White for the textured path (show the TDX at full brightness); a cool tint
-    // for the untextured fallback so the band still reads as the ring surface.
-    const RgbaF color = ring_texture != nullptr
-        ? RgbaF{.red = 1.0F, .green = 1.0F, .blue = 1.0F, .alpha = 1.0F}
-        : RgbaF{.red = 0.22F, .green = 0.42F, .blue = 0.72F, .alpha = 1.0F};
+    const RetailFrontEndRasterTriangle triangle_a{
+        .vertices = {MakeVertex(min_x, min_y, 0.0F, 0.0F, color),
+            MakeVertex(max_x, min_y, 1.0F, 0.0F, color),
+            MakeVertex(max_x, max_y, 1.0F, 1.0F, color)},
+        .texture = texture,
+    };
+    const RetailFrontEndRasterTriangle triangle_b{
+        .vertices = {MakeVertex(min_x, min_y, 0.0F, 0.0F, color),
+            MakeVertex(max_x, max_y, 1.0F, 1.0F, color),
+            MakeVertex(min_x, max_y, 0.0F, 1.0F, color)},
+        .texture = texture,
+    };
+    if (IsFiniteNonDegenerate(triangle_a))
+        out.push_back(triangle_a);
+    if (IsFiniteNonDegenerate(triangle_b))
+        out.push_back(triangle_b);
+}
 
-    for (std::uint32_t segment = 0U; segment < kSegments; ++segment)
+void AppendCenteredQuad(const float center_x, const float center_y,
+    const float width, const float height, const RgbaF color,
+    const content::FrontEndTextureBinding* const texture,
+    std::vector<RetailFrontEndRasterTriangle>& out)
+{
+    const float half_width = width * 0.5F;
+    const float half_height = height * 0.5F;
+    AppendQuad(center_x - half_width, center_y - half_height,
+        center_x + half_width, center_y + half_height, color, texture, out);
+}
+} // namespace
+
+std::span<const RetailMissionRingMarker> RetailMissionRingMarkers() noexcept
+{
+    return std::span<const RetailMissionRingMarker>(kMarkers);
+}
+
+void AppendRetailMissionRingTriangles(
+    const content::FrontEndTextureBinding* const band_texture,
+    std::vector<RetailFrontEndRasterTriangle>& out,
+    const std::uint32_t selected_marker_index)
+{
+    out.reserve(out.size() + (kMaximumQuads * kTrianglesPerQuad));
+
+    // The band. MISSION-RING.md, "The ring band is a screen-aligned textured
+    // quad, not geometry": one axis-aligned quad over a 256x256 PSMT8 texture at
+    // the modal extent (170.812, 97.438) - (489.688, 387.500). Retail re-draws
+    // it 40 times per frame as part of a blended texture stack; the per-draw
+    // blend weights are not measured, so it is emitted once here rather than
+    // stacking 40 unmeasured copies.
+    //
+    // The band exists ONLY as texture art: the same document establishes that
+    // "the elliptical track, the tick marks and the AMERICA lettering visible on
+    // screen are texture art" and that no ellipse is in the vertex stream. A
+    // band with no texture is therefore not a degraded ring, it is a flat opaque
+    // box over the screen -- so with no texture the band is not emitted at all.
+    // Which texture retail binds here is NOT measured (MISSION-RING.md,
+    // "Texture identity"), so the module never picks one; the caller supplies it
+    // or supplies nothing.
+    if (band_texture != nullptr)
     {
-        const float angle0 = (2.0F * kPi * static_cast<float>(segment)) /
-                             static_cast<float>(kSegments);
-        const float angle1 = (2.0F * kPi * static_cast<float>(segment + 1U)) /
-                             static_cast<float>(kSegments);
-        const float cos0 = std::cos(angle0);
-        const float sin0 = std::sin(angle0);
-        const float cos1 = std::cos(angle1);
-        const float sin1 = std::sin(angle1);
+        constexpr RgbaF band_color{.red = 1.0F, .green = 1.0F, .blue = 1.0F,
+            .alpha = kOpaqueVertexAlpha};
+        AppendQuad(kRetailMissionRingBandMinimumX,
+            kRetailMissionRingBandMinimumY, kRetailMissionRingBandMaximumX,
+            kRetailMissionRingBandMaximumY, band_color, band_texture, out);
+    }
 
-        Vec2 inner0;
-        Vec2 inner1;
-        Vec2 outer0;
-        Vec2 outer1;
-        if (!ProjectRingPoint(kInnerRadius * cos0, kInnerRadius * sin0, inner0) ||
-            !ProjectRingPoint(kInnerRadius * cos1, kInnerRadius * sin1, inner1) ||
-            !ProjectRingPoint(kOuterRadius * cos0, kOuterRadius * sin0, outer0) ||
-            !ProjectRingPoint(kOuterRadius * cos1, kOuterRadius * sin1, outer1))
+    // The markers, in measured draw order. Fail-soft selection: an index
+    // outside the table simply matches no marker, so nothing is highlighted and
+    // nothing is read out of bounds.
+    for (std::uint32_t index = 0U; index < kRetailMissionRingMarkerCount;
+         ++index)
+    {
+        const RetailMissionRingMarker& marker = kMarkers[index];
+        if (index == selected_marker_index)
+        {
+            // MISSION-RING.md, "The highlighted marker": the selected marker is
+            // the only one whose opaque pass is not its small dot -- it emits
+            // TWO 52.31 x 47.31 quads at the opaque alpha (a halo plus a
+            // distinct icon texture) and leaves both of its dot draws at alpha
+            // 0. An alpha-0 draw contributes no sample, so the dot is simply
+            // not emitted.
+            for (std::uint32_t quad = 0U;
+                 quad < kRetailMissionRingHighlightQuadCount; ++quad)
+            {
+                AppendCenteredQuad(marker.center_x, marker.center_y,
+                    kRetailMissionRingHighlightWidth,
+                    kRetailMissionRingHighlightHeight, kHighlightColor, nullptr,
+                    out);
+            }
             continue;
-
-        const float u0 = (kUvAngularRepeat * static_cast<float>(segment)) /
-                         static_cast<float>(kSegments);
-        const float u1 = (kUvAngularRepeat * static_cast<float>(segment + 1U)) /
-                         static_cast<float>(kSegments);
-
-        const RetailFrontEndRasterTriangle triangle_a{
-            .vertices = {MakeVertex(inner0, u0, 0.0F, color),
-                MakeVertex(outer0, u0, kUvRadialSpan, color),
-                MakeVertex(outer1, u1, kUvRadialSpan, color)},
-            .texture = ring_texture,
-        };
-        const RetailFrontEndRasterTriangle triangle_b{
-            .vertices = {MakeVertex(inner0, u0, 0.0F, color),
-                MakeVertex(outer1, u1, kUvRadialSpan, color),
-                MakeVertex(inner1, u1, 0.0F, color)},
-            .texture = ring_texture,
-        };
-        if (IsFiniteNonDegenerate(triangle_a))
-            out.push_back(triangle_a);
-        if (IsFiniteNonDegenerate(triangle_b))
-            out.push_back(triangle_b);
+        }
+        if (!marker.emits_opaque_pass)
+            continue;
+        AppendCenteredQuad(marker.center_x, marker.center_y, marker.width,
+            marker.height, kMarkerColor, nullptr, out);
     }
 }
 } // namespace omega::frontend::presentation
