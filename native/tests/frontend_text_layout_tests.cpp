@@ -113,9 +113,10 @@ int main() {
               "atlas width and UV span determine glyph width");
     CheckNear(basic->glyphs[1].left, 14.0F,
               "signed pair adjustment is applied before the right glyph");
-    CheckNear(basic->glyphs[0].top, 48.0F,
-              "the unnamed byte-17 behavior subtracts from source Y");
-    CheckNear(basic->glyphs[0].bottom, 38.0F,
+    CheckNear(basic->glyphs[0].top, 50.0F,
+              "the default vertical origin puts the cell top on the line "
+              "origin");
+    CheckNear(basic->glyphs[0].bottom, 40.0F,
               "atlas height and the UV tuple determine quad height");
     Check(basic->glyphs[0].source_index == 0U &&
               basic->glyphs[1].source_index == 1U &&
@@ -274,13 +275,63 @@ int main() {
         "the unproven byte-16 metric does not acquire invented layout meaning");
   auto different_observed_vertical_metric = font;
   different_observed_vertical_metric.raw_byte_17 = 5U;
-  const auto shifted =
-      LayoutRetailText(different_observed_vertical_metric, U"A", MakeOptions());
+  auto byte17_options = MakeOptions();
+  byte17_options.vertical_origin =
+      omega::frontend::GlyphVerticalOrigin::ObservedByte17Offset;
+  const auto shifted = LayoutRetailText(different_observed_vertical_metric,
+                                        U"A", byte17_options);
   Check(shifted && shifted->glyphs.size() == 1U,
         "changed observed vertical-placement metric lays out");
   if (shifted)
     CheckNear(shifted->glyphs[0].top, 45.0F,
-              "byte-17 subtraction remains visible in canonical GUI space");
+              "byte-17 subtraction remains visible when that origin is "
+              "selected");
+  const auto unshifted = LayoutRetailText(different_observed_vertical_metric,
+                                          U"A", MakeOptions());
+  Check(unshifted && unshifted->glyphs.size() == 1U,
+        "the line-origin model lays out the same run");
+  if (unshifted)
+    CheckNear(unshifted->glyphs[0].top, 50.0F,
+              "the line-origin model does not consult the unproven byte-17 "
+              "metric");
+
+  // Tracking is an advance-only constant: it separates neighbours without
+  // widening either quad, and a space keeps the FNT's own space byte.
+  auto tracked_options = MakeOptions();
+  tracked_options.glyph_tracking = 4.0F;
+  const auto tracked = LayoutRetailText(font, U"A A", tracked_options);
+  Check(tracked && tracked->glyphs.size() == 2U,
+        "tracked run emits one quad per rendered glyph");
+  if (tracked && tracked->glyphs.size() == 2U)
+  {
+    CheckNear(tracked->glyphs[0].left, 10.0F,
+              "tracking does not move the first glyph off the rectangle edge");
+    CheckNear(tracked->glyphs[0].right, 15.0F,
+              "tracking never widens the drawn quad");
+    // 5 (cell) + 4 (tracking) + 3 (space byte, untracked) = 12.
+    CheckNear(tracked->glyphs[1].left, 22.0F,
+              "each rendered glyph advances by its cell plus one tracking "
+              "step while the space stays untracked");
+    CheckNear(tracked->lines[0].advance, 21.0F,
+              "the measured line advance carries a tracking step for every "
+              "rendered glyph");
+  }
+  const auto untracked = LayoutRetailText(font, U"A A", MakeOptions());
+  Check(untracked && untracked->glyphs.size() == 2U &&
+            std::fabs(untracked->glyphs[1].left - 18.0F) <= 0.0001F,
+        "zero tracking reproduces the bare atlas-cell advance");
+  auto nonfinite_tracking = MakeOptions();
+  nonfinite_tracking.glyph_tracking =
+      std::numeric_limits<float>::quiet_NaN();
+  CheckError(LayoutRetailText(font, U"A", nonfinite_tracking),
+             TextLayoutErrorCode::InvalidGeometry,
+             "nonfinite tracking fails closed");
+  auto bad_origin = MakeOptions();
+  bad_origin.vertical_origin =
+      static_cast<omega::frontend::GlyphVerticalOrigin>(0x7FU);
+  CheckError(LayoutRetailText(font, U"A", bad_origin),
+             TextLayoutErrorCode::InvalidOption,
+             "unknown vertical-origin selector fails closed");
 
   auto bad_options = MakeOptions();
   bad_options.rectangle.left = std::numeric_limits<float>::quiet_NaN();

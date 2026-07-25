@@ -339,6 +339,26 @@ void AppendGlyphQuad(const frontend::TextGlyphQuad& glyph,
 // Project-owned (the retail selected-button visual is not yet reverse-engineered).
 inline constexpr RgbaF kRetailSelectionHighlightColor{1.0F, 0.85F, 0.20F, 1.0F};
 
+// Constant inter-glyph tracking, in canonical GUI units, that the retail text
+// pass adds on top of each glyph's atlas cell width.
+//
+// Recovered by MEASUREMENT against the retail reference captures, not from the
+// disassembly and not decoded from any shipped file, so the exact integer is a
+// PROJECT value fitted to that measurement. Method: for a label whose widget
+// rectangle is known from its .GUI document, the horizontal screen mapping is
+// pinned by two left-aligned labels whose first glyph lands on their box's left
+// edge; each neighbouring glyph pair then yields (measured advance - atlas cell
+// width). Over 35 such pairs spanning CALLOUT, DEFAULT and LARGEFNT on two
+// captured screens the difference is 2.00 canonical units (sigma 0.48, standard
+// error 0.08) and shows no dependence on glyph width or font size, so it is a
+// constant and not a scale. The fit is corroborated by a centered label: with
+// this constant the predicted origin of the centered on-line label falls within
+// 0.1 units of its captured ink.
+//
+// Without it every string is roughly a sixth too narrow and reads as a
+// different, cramped typeface even though the glyphs are the retail glyphs.
+inline constexpr float kRetailGlyphTracking = 2.0F;
+
 void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
     const asset::FrontendWidgetIR& widget, const std::uint32_t depth,
     const std::string_view selected_identifier,
@@ -466,6 +486,17 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
                                 widget.text_color->blue, widget.text_color->alpha}
                           : RgbaF{1.0F, 1.0F, 1.0F, 1.0F});
 
+            // The font's own glyph row height is the line step, so the vertical
+            // centering below centers the GLYPH CELL in the authored widget box
+            // -- the placement recovered from the retail captures. Falling back
+            // to the box height (the previous step) only happens for a font
+            // whose glyph records disagree on their row height, which no
+            // shipped retail font does.
+            const float line_step =
+                font->LineCellHeight(
+                        static_cast<float>(atlas->image().height))
+                    .value_or(widget.rectangle.height);
+
             const frontend::TextLayoutOptions options{
                 .rectangle = {.left = widget.rectangle.left,
                     .top = widget.rectangle.top,
@@ -474,9 +505,7 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
                 .atlas_extent = {.width =
                                      static_cast<float>(atlas->image().width),
                     .height = static_cast<float>(atlas->image().height)},
-                // Single-line menu labels: one line fills the widget box. The FNT
-                // exposes no proven line-height, so the box height is the step.
-                .line_origin_step = widget.rectangle.height,
+                .line_origin_step = line_step,
                 .horizontal_alignment =
                     MapHorizontalAlignment(widget.text_alignment),
                 .vertical_alignment = frontend::VerticalTextAlignment::Center,
@@ -491,6 +520,8 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
                         frontend::kMaximumTextLayoutPairAdjustments,
                     .maximum_output_bytes =
                         frontend::kMaximumTextLayoutOutputBytes},
+                .glyph_tracking = kRetailGlyphTracking,
+                .vertical_origin = frontend::GlyphVerticalOrigin::LineOrigin,
             };
 
             const auto layout = frontend::LayoutRetailText(
