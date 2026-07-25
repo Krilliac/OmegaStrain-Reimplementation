@@ -1,10 +1,12 @@
 # Command Center mission-select ring geometry
 
-Status: **measured** from three owner-private PCSX2 GS dumps of the `command-center-mission-select`
-cohort (2026-07-25). Marker screen positions, marker count, per-marker quad extents, ring-band
-extent, and the highlighted-marker discriminator are proven. Ring *parameterisation* (a single
-ellipse with uniform angular spacing) is **disproven** by the same data. Node-to-mission mapping,
-ordering rule, and rotation step remain unproven.
+Status: **measured** from owner-private PCSX2 GS dumps (2026-07-25). Marker screen positions,
+marker count, per-marker quad extents, ring-band extent, and the highlighted-marker discriminator
+are proven. Ring *parameterisation* (a single ellipse with uniform angular spacing) is **disproven**.
+As of the savestate sweep below, **rotation is also disproven**: two ring states with *different*
+selected markers place all 22 markers at bit-identical screen positions, so the ring does not
+rotate and selection is a per-marker alpha/texture swap over a fixed layout. Node-to-mission
+mapping, ordering rule, and the number of markers one L1/R1 press advances remain unproven.
 
 This document contains derived geometry only: screen coordinates, quad sizes, counts and angles.
 No dump bytes, texture payloads, framebuffer contents, or screenshot pixels are reproduced here or
@@ -63,15 +65,41 @@ set defensively; the captures in this corpus are single-frame (both settings yie
 CLI is present on this machine), and handles `.xz` through stdlib `lzma` with concatenated-stream
 handling.
 
+`tools/measure_mission_ring_state.py` builds on that parser and does the ring extraction and the
+across-capture comparison, so the two are never re-implemented by hand. Its rules, all of which
+restate what the single-capture measurement above already established:
+
+* a *ring quad* is a six-vertex `triangle_strip` with `TME=1` and `ABE=1`;
+* among ring quads at least `--band-min-width` (120) px wide, the *band* is the most frequently
+  repeated bounding box; a wide quad joins it only if all four corners sit within 8 px of that
+  modal box. That admits the band's own per-draw jitter (up to 6.94 px on one edge in this corpus)
+  and rejects the backdrop quads, whose closest edge to the modal box is 68.062 px away — more than
+  eight times the tolerance;
+* the *ring* is the single uninterrupted run of ring quads that contains the band draws, grown
+  outwards from them until the neighbouring draw is not a ring quad;
+* remaining quads inside that run are *marker* quads, clustered by centre at an 8 px radius, each
+  cluster reported at the centre of its smallest quad;
+* a quad is *opaque* when all six vertices carry alpha 127, and `opaque_area_ratio` is the largest
+  opaque quad's area over the cluster's smallest quad's area — the doc's own
+  highlight discriminator, expressed as a number.
+
 Reproduce:
 
 ```text
 python -B tools/gs_dump_inspect.py <dump.gs.zst> <out.json>
 python -B tools/gs_dump_inspect.py <dump.gs.zst> <out.json> --no-vertices   # summary only
+python -B tools/measure_mission_ring_state.py <dump-or-dir> [...] --json <out.json>
+python -B tools/measure_mission_ring_state.py <dump-or-dir> --nodes         # per-node table
 ```
 
 Output is deterministic: two runs over the same dump produce byte-identical JSON
 (SHA-256 `cae4dc68…1afb1d` for the `…003922` capture, verified twice).
+
+Run over the three original mission-select captures, `measure_mission_ring_state.py` reproduces the
+single-capture measurement below exactly and independently: 22 clusters, 40 band quads in 9 distinct
+boxes with the modal box occurring 18 times, 100 marker quads, marker 2 as the sole highlight at
+`opaque_area_ratio` 3.082, and the same marker-0 frame-0 positions. That is a cross-check of the
+tables in this document, not a new claim.
 
 ## Corpus and parser coverage
 
@@ -94,6 +122,51 @@ as A+D padding.
 
 The gameplay cohort exercises triangle fans, which no menu cohort produces, so the primitive
 assembly is not tuned to the mission-select screen.
+
+### Savestate sweep (2026-07-25)
+
+A later headless capture pass (`-gsdumpframes` / `-gsdumpstop` / `-gsdumpdir`) took exactly one GS
+dump from every owner savestate, giving a screen-per-slot corpus. Screens are identified from each
+dump's own companion PNG together with its draw structure; the counts are `gs_dump_inspect` output.
+
+| Slot | Screen | Packets | Draws | Primitives | Ring? |
+| --- | --- | ---: | ---: | --- | --- |
+| slot04 | Play Select (`PLAY OFF-LINE` selected) | 300 | 104 | 80 tri-strip, 24 sprite | no |
+| slot05 | Play Select (`PLAY OFF-LINE` selected) | 300 | 104 | 80 tri-strip, 24 sprite | no |
+| slot06 | Command Center — Personnel, no sub-menu | 2,536 | 668 | 636 tri-strip, 32 sprite | **yes** |
+| slot07 | Command Center — Personnel, sub-menu list open | 2,820 | 808 | 740 tri-strip, 68 sprite | **yes** |
+| slot08 | Command Center — mission select | 2,564 | 672 | 636 tri-strip, 36 sprite | **yes** |
+| slot09 | Equipment Modify | 850 | 598 | 550 tri-strip, 48 sprite | no |
+| slot10 | in-mission gameplay | 7,300 | 1,908 | 1,620 tri-strip, 262 sprite, 26 tri-fan | no |
+
+Two further auto-captures sit at the root of the same capture tree (`frame_000005`,
+`frame_000020`); both are mission select and match slot08's counts exactly (2,564 packets,
+672 draws, 636 tri-strip + 36 sprite). Five ring-bearing captures are therefore available, three of
+them from Command Center sub-screens that are *not* mission select.
+
+`measure_mission_ring_state.py` finds zero marker clusters in slot04, slot05, slot09 and slot10:
+the ring is absent from those screens, not merely undetected — none of them contains the band quad
+at all.
+
+**slot07 identified.** It matched no previously recorded cohort. It is the Command Center Personnel
+screen with its sub-menu list open. The evidence:
+
+* Its ring is byte-for-byte the slot06 ring (see below), so it is a Command Center ring screen.
+* Its header text run is *identical* to slot06's — draw 192, 18 sprite vertices, bbox
+  `(433.938, 36.375) – (540.688, 58.750)`; slot06 emits the same 18-vertex run with the same bbox
+  at draw 157. Sprite text is two vertices per glyph, so both headers are 9 glyphs. slot08's header
+  is instead two runs, draw 156 (34 vertices, `(361.938, 30.750) – (529.688, 46.625)`) and draw 158
+  (28 vertices, `(361.938, 49.438) – (508.438, 65.312)`), i.e. 17 and 14 glyphs on two lines.
+* The extra 35 draws in its frame (202 against slot06's 167) include a vertical column of sprite
+  text runs at draws 159, 163, 167, 171, 175, 179, 183 and 187, spanning y 169.812 to y 319.188,
+  each centred within 0.41 px of x = 323 — a menu list drawn over the ring. A ninth run is batched
+  into draw 191, whose 28 vertices and bbox `(74.000, 73.688) – (384.188, 337.812)` merge the
+  `Agent:`/`Rank:` label block with a further column entry.
+* Its footer differs by one text run: a 16-vertex (8-glyph) run at
+  `(120.000, 405.062) – (192.000, 419.062)` that slot06 and slot08 do not emit. On screen slot06
+  and slot08 show the `L1`/`R1` rotate hints there and slot07 shows a d-pad `Navigate` hint.
+
+So slot07 is the same sub-screen as slot06 one level deeper, and the ring is drawn behind it.
 
 All mission-select captures render exactly **168 draw calls per frame**, identical frame to frame.
 Display state from `GSPrivRegSet`: `DISP0.DISPLAY` gives a **640 × 448** visible area
@@ -213,6 +286,70 @@ Marker 2 is **not** at the lowest point of the ring. The lowest marker is marker
 `(297.688, 374.406)`. Marker 2 sits 34.7 px right of the fitted ellipse centre's x and 125 px below
 its y.
 
+### The selection moves; the markers do not
+
+This is the observation the original three captures could not make, and it settles the interaction
+model. Across the five ring-bearing captures — two Personnel captures (slot06, slot07) and three
+mission-select captures (slot08, `frame_000005`, `frame_000020`) — the ring's geometry is not merely
+similar, it is *the same emission, draw for draw*:
+
+| Property | Value, identical in all five captures |
+| --- | --- |
+| ring draw run | draws 13–155 of the first frame; the ring's own 140 draws are 16–155, preceded by three backdrop quads at draws 13–15 (706.31 × 511.44, 503.12 × 469.62 and 725.69 × 444.69) that the tool's contiguity rule sweeps into the run and its band/marker width rules then discard |
+| band quads | 40, at draw indices 21, 23, 28, 30, 35, … 148, 152, 155 |
+| band bounding boxes | all 40 agree to **0.0000 px**; 9 distinct boxes, modal `(170.812, 97.438) – (489.688, 387.500)` occurring 18× |
+| marker quads | 100, resolving to 22 clusters |
+| markers 1–21 | centres, bounding boxes, smallest- and largest-quad sizes and per-marker draw-index lists all agree to **0.0000 px** / exactly |
+
+Only marker 0, the animated one, differs — as it does between frames of a single capture.
+
+Against that fixed backdrop, the *entire* difference in the ring between a Personnel capture and a
+mission-select capture is **four draws' worth of vertex alpha**, and nothing else:
+
+| Marker | Centre | Draw | Quad | Personnel (slot06, slot07) | Mission select (slot08, `…000005`, `…000020`) |
+| ---: | --- | ---: | --- | --- | --- |
+| 2 | 362.844, 362.281 | 24 | 52.312 × 47.312 | alpha 0 | **alpha 127** |
+| 2 | 362.844, 362.281 | 25 | 52.312 × 47.312 | alpha 0 | **alpha 127** |
+| 21 | 469.375, 310.344 | 153 | 53.500 × 46.188 | **alpha 127** | alpha 0 |
+| 21 | 469.375, 310.344 | 154 | 52.750 × 45.562 | alpha 0 | **alpha 127** |
+
+Every other one of the 100 marker quads carries the same alpha in all five captures. Reading that
+table with the discriminator above:
+
+* On mission select, marker 2 is highlighted — `opaque_area_ratio` 3.082, against 1.39 for the
+  next-highest marker (marker 19). This reproduces the original cohort's result.
+* On Personnel, **no** marker satisfies the discriminator: marker 2 emits no opaque pass at all,
+  all five of its quads at alpha 0. Instead marker 21 swaps *which* of its two ≈53 × 46 quads is
+  opaque — draw 153 rather than draw 154. Both its quads are large, so this swap does not move
+  `opaque_area_ratio` above 1.03 and the primary discriminator cannot see it; it is nonetheless the
+  only other alpha difference anywhere in the ring.
+* The two quads marker 21 swaps between are separate textures, `TBP0` 12618 (draw 153) and 13230
+  (draw 154) in both slot06 and slot08. Only which one is painted changes; the addresses do not.
+  (In slot07 the same two draws carry 11480 and 11500 — a texture-cache difference, per the `TBP0`
+  caveat under UNPROVEN, not a different image.)
+* Screenshot corroboration, checked visually against each capture's own PNG: on the Personnel
+  captures the marker-21 icon renders bright and the marker-2 emblem is absent; on the mission-select
+  captures the marker-2 emblem renders bright and the marker-21 icon renders dim.
+
+So two ring states that differ in which marker is selected place all 22 markers, and the band, at
+bit-identical screen positions. **The ring does not rotate.** Selection is expressed entirely by a
+per-marker alpha and texture swap at a fixed screen position.
+
+The header text corroborates that the selected marker is what the header names: slot06 and slot07
+emit one 18-vertex (9-glyph) header run while marker 21 is lit; slot08 emits two runs of 34 and 28
+vertices (17 and 14 glyphs) while marker 2 is lit. On screen those read `Personnel` and
+`Carthage, Michigan` / `Quarantine Zone`.
+
+Markers 21 and 2 are two steps apart in ring order (21 → 1 → 2, wrapping), at ring angles 48.57°
+and 85.28° from the table above. The captures do **not** show how many presses produced that
+difference — see UNPROVEN.
+
+The original `command-center-personnel` capture `…002433` shows the same signature independently:
+marker 2 with no opaque pass and marker 21 painting its 53.500 × 46.188 quad. That capture yields
+21 clusters rather than 22 because its animated marker 0 (draw 16) happened to pass within the 8 px
+cluster radius of marker 19 and merged with it; the merge is visible in the cluster's draw-index
+list `[16, 143, 144, 145, 146]` and is a limitation of the clustering, not a change in the ring.
+
 ### An animated marker exists and is not part of the static loop
 
 Marker 0 is the only element whose position changes. It carries no opaque pass at all (alpha 0 on
@@ -226,8 +363,25 @@ every vertex) and its quad is 43.00 × 37.50, larger than any plain dot. Its tra
 
 Motion is smooth and sub-pixel-quantised (12.4 fixed point), roughly −0.12…−0.22 px/frame in x and
 +0.59…+0.94 px/frame in y within a capture, and the value at `…003940` frame 2 exactly equals
-`…003931` frame 0, so the motion is cyclic rather than monotone. Total observed excursion is under
-5 px.
+`…003931` frame 0, so the motion is cyclic rather than monotone.
+
+The savestate sweep extends this well beyond the ~5 px seen across the original three captures.
+Marker 0 is always draw 16, always alpha 0, and always a 43.00–43.06 × 37.44–37.50 quad, but its
+position ranges widely:
+
+```text
+frame_000005 (mission select) : (501.188, 223.812)
+frame_000020 (mission select) : (498.125, 236.375)
+slot08       (mission select) : (500.594, 226.344)
+slot06       (Personnel)      : (494.312, 251.938)
+slot07       (Personnel)      : (383.406, 107.375)
+```
+
+The slot07 position is 182.205 px from slot06's and 166.992 px from slot08's, on the opposite arc
+of the band. So marker 0 traverses the ring rather than jittering about one point; the small
+excursion recorded from the original three captures is an artefact of those captures being seconds
+apart. Its motion is independent of the marker layout, which does not move at all across the same
+five captures.
 
 ### Screenshot cross-check
 
@@ -258,9 +412,37 @@ Frame 0 of `…003931` and `…003940` reproduce all 21 static marker positions 
 2.190 px respectively), consistent with its animation. All three captures also show the same
 mission-name text lines and the same highlighted marker.
 
-**No rotation step could be measured.** The carousel did not move between the three captures, so
-the cohort provides no evidence about the rotation increment. Recovering it requires new captures
-taken across an L1/R1 press.
+No rotation step could be measured **from this cohort**: all three captures show one selection
+state. That gap is closed by the savestate sweep — see "The selection moves; the markers do not"
+above and the DISPROVEN entry below.
+
+### The ring is shared Command Center furniture
+
+The same ring is drawn on at least three different Command Center sub-screens — Personnel (slot06),
+Personnel with its sub-menu open (slot07), and mission select (slot08) — from the same 140-draw
+emission at the same draw indices with the same geometry, to 0.0000 px. It is therefore a single
+piece of screen furniture that the Command Center draws regardless of which entry is selected, not
+per-screen content. slot07 additionally shows it drawn *behind* an overlaid menu list, unchanged.
+
+It is absent from Play Select (slot04, slot05), Equipment Modify (slot09) and gameplay (slot10):
+those frames contain no band quad and yield zero marker clusters.
+
+## DISPROVEN — the rotating carousel
+
+Rotation would require the marker positions to change when the selection changes. They do not.
+Across five captures spanning two different selected markers and three different Command Center
+sub-screens, all 21 static markers and all 40 band quads agree to **0.0000 px** — identical 12.4
+fixed-point values, at identical draw indices, in identical sizes. The only differences anywhere in
+the ring are four vertex-alpha values on markers 2 and 21, plus the independently animated marker 0.
+
+There is consequently no rotation increment to model. L1/R1 changes *which* marker is selected over
+a static, map-like layout; it does not turn the ring. A reimplementation that stores the 22 marker
+positions as a fixed table and moves a selection index over it is structurally correct.
+
+Two limits on this result, stated plainly. It rests on captures of *different* selection states, not
+on a recording spanning an input, so it disproves rotation as the mechanism without measuring what
+one press does. And the two observed states differ in sub-screen as well as in selected marker; what
+is proven is that neither change moves a marker.
 
 ## DISPROVEN — the uniform-ellipse carousel model
 
@@ -320,16 +502,27 @@ The two mission-name lines share one 256 × 256 glyph atlas and are emitted as `
 * **Whether 22 equals the mission count.** The captures prove 22 markers are drawn. They do not
   establish that every marker is a selectable mission, nor that every mission has a marker. Three
   markers (19–21) render differently, and one (marker 0) is animated and carries no opaque pass, so
-  the count of *selectable* entries may be anywhere from 18 to 22.
+  the count of *selectable* entries may be anywhere from 18 to 22. The savestate sweep narrows the
+  question from one side: marker 21 is selectable — it is the selected entry in slot06 and slot07 —
+  and while it is selected the header reads `Personnel`, so at least one selectable marker is not a
+  mission. 22 is therefore an upper bound on the mission count, not the count itself.
 * **What drives ordering.** Emission order is monotone in ring angle, but the captures cannot show
   whether that order is a stored mission table order, a depth sort, or a re-sorted view of a fixed
   list.
-* **The rotation step.** Not observable: all three captures show an identical ring state. No
-  capture spans an L1/R1 input.
+* **How far one L1/R1 press moves the selection.** The rotation *step* is no longer an open
+  question — there is no rotation (see DISPROVEN). What is still unmeasured is the selection
+  increment: the two observed states differ by two positions in ring order (marker 21 → marker 2,
+  wrapping through marker 1), but the captures are independent savestates, so nothing shows whether
+  that was one press, two presses, or a jump. Measuring it needs two captures known to be separated
+  by exactly one press.
+* **Whether the selection order is the emission order.** Markers 21 and 2 are two apart in emission
+  order, which is consistent with L1/R1 walking that order, but two captures cannot distinguish a
+  ring walk from an independent selection sequence.
 * **Whether the layout is geographic.** The band texture carries continental lettering and the
   marker spacing is irregular, which is consistent with map positions, but nothing in the geometry
-  proves a projection or a coordinate system. The marker positions should be treated as an opaque
-  fixed table until a capture of a different mission set shows whether they move.
+  proves a projection or a coordinate system. The savestate sweep shows the positions do not move
+  with the selection or the sub-screen, which supports treating them as a fixed table; whether that
+  table is the same for a save with different mission progress is still untested.
 * **What marker 0 represents.** Its motion, its lack of an opaque pass, and its position near
   marker 19 are all measured; its meaning is not.
 * **Texture identity.** Markers reference different `TEX0.TBP0` addresses (for example the plain
@@ -347,3 +540,12 @@ Authored 2026-07-25 from the `command-center-mission-select` cohort
 parser generalises. Format definitions read from the PCSX2 working tree at
 `pcsx2/GS/{GSDump.h,GSDump.cpp,GSLzma.cpp,GSState.cpp,GSRegs.h}`. Every number in this document is
 reproducible from `tools/gs_dump_inspect.py` output; nothing is estimated by eye.
+
+Extended 2026-07-25 with the savestate sweep — one headless GS dump per owner savestate (slot04
+through slot10) plus two further auto-captures from the same tree, giving five ring-bearing
+captures across three Command Center sub-screens. That evidence disproves rotation, identifies
+slot07, and establishes the slot-to-screen map. Its numbers come from
+`tools/measure_mission_ring_state.py`, which drives `tools/gs_dump_inspect.py` and is covered by
+`tools/tests/test_measure_mission_ring_state.py`; screen identifications were checked against each
+capture's own companion PNG. The captures, their PNGs and the tool's JSON output are owner-private
+and stay under the git-ignored `analysis/DrawDump/` tree.

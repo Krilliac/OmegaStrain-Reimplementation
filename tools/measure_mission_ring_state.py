@@ -16,11 +16,14 @@ Extraction, per dump, restricted to the dump's first complete frame:
   art, a single screen-aligned textured quad re-drawn many times per frame).
 * The remaining ring quads are *marker* quads. They are clustered by screen centre
   with an 8 px radius, matching the clustering used for the original three-capture
-  measurement recorded in ``analysis/formats/MISSION-RING.md``.
+  measurement recorded in ``analysis/formats/MISSION-RING.md``. Caveat: when the
+  ring's one animated marker happens to pass within that radius of a static marker,
+  the two merge and the frame yields 21 clusters instead of 22. Compare cluster
+  counts before comparing cluster ordinals, or re-run with ``--cluster-radius``.
 * A cluster's reported position is the centre of its smallest-area quad, again
   matching the original measurement.
-* Only clusters whose draws fall inside the band's own draw span count as ring
-  markers; the button-glyph quads emitted after the ring are excluded by that span.
+* Only quads inside the ring's own uninterrupted draw run count as ring markers,
+  which excludes the button-glyph quads emitted lower down the frame.
 * A quad is *opaque* when every one of its vertices carries alpha 127; every other
   ring quad in this corpus is emitted at alpha 0. The highlighted marker is the one
   whose opaque pass is a large halo/icon quad rather than its small dot -- reported
@@ -59,8 +62,8 @@ OPAQUE_ALPHA = 127
 # a wide margin.
 HIGHLIGHT_AREA_RATIO = 2.0
 # Per-draw jitter of the band quad reaches 6.94 px on one edge across this corpus,
-# while the next-largest textured quad in these frames is 503 px wide -- more than
-# 180 px from the band on every edge. 8 px therefore separates the two cleanly.
+# while the nearest non-band wide quad (a backdrop plate) misses the modal box by
+# 68.062 px on its closest edge. 8 px therefore separates the two cleanly.
 BAND_TOLERANCE_PX = 8.0
 
 
@@ -93,8 +96,8 @@ def _opaque(draw: dict[str, Any]) -> bool:
     return all(v["rgba"][3] == OPAQUE_ALPHA for v in verts)
 
 
-def extract_ring(result: dict[str, Any], frame: int | None,
-                 band_min_width: float) -> dict[str, Any]:
+def extract_ring(result: dict[str, Any], frame: int | None, band_min_width: float,
+                 cluster_radius: float = CLUSTER_RADIUS_PX) -> dict[str, Any]:
     """Cluster the marker quads of one parsed dump into ring nodes."""
     draws = result["draws"]
     if frame is None:
@@ -156,7 +159,7 @@ def extract_ring(result: dict[str, Any], frame: int | None,
     for d, g in markers:
         hit = None
         for c in clusters:
-            if math.hypot(g["cx"] - c["seed_cx"], g["cy"] - c["seed_cy"]) <= CLUSTER_RADIUS_PX:
+            if math.hypot(g["cx"] - c["seed_cx"], g["cy"] - c["seed_cy"]) <= cluster_radius:
                 hit = c
                 break
         if hit is None:
@@ -231,10 +234,11 @@ def extract_ring(result: dict[str, Any], frame: int | None,
     }
 
 
-def summarise(path: Path, frame: int | None, band_min_width: float) -> dict[str, Any]:
+def summarise(path: Path, frame: int | None, band_min_width: float,
+              cluster_radius: float = CLUSTER_RADIUS_PX) -> dict[str, Any]:
     result = inspect(path, True, 0, 0)
     disp = result["priv_regs"]
-    ring = extract_ring(result, frame, band_min_width)
+    ring = extract_ring(result, frame, band_min_width, cluster_radius)
     return {
         "dump": path.name,
         "slot": path.parent.name,
@@ -243,6 +247,7 @@ def summarise(path: Path, frame: int | None, band_min_width: float) -> dict[str,
         "prim_histogram": result["prim_histogram"],
         "vsync_draw_marks": result["vsync_draw_marks"],
         "display": _display_of(disp),
+        "cluster_radius_px": cluster_radius,
         "ring": ring,
     }
 
@@ -307,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--band-min-width", type=float, default=120.0,
                     help="ring quads at least this wide are band art, not markers")
     ap.add_argument("--json", type=Path, default=None, help="write full results here")
+    ap.add_argument("--cluster-radius", type=float, default=CLUSTER_RADIUS_PX,
+                    help="quads within this many px of a cluster seed join it")
     ap.add_argument("--nodes", action="store_true", help="print the per-node table")
     args = ap.parse_args(argv)
 
@@ -317,7 +324,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("no dumps found\n")
         return 2
 
-    summaries = [summarise(p, args.frame, args.band_min_width) for p in paths]
+    summaries = [summarise(p, args.frame, args.band_min_width, args.cluster_radius)
+                 for p in paths]
 
     for s in summaries:
         r = s["ring"]
