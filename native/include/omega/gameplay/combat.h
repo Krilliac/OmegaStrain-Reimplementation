@@ -114,6 +114,14 @@ struct HitscanResult
 // `target_radius`, a non-positive `max_range`, and a non-finite target position
 // are likewise fail-soft (no hit / that target skipped).
 //
+// A target is only considered when its centre lies AHEAD of the origin along
+// the ray. That check is load-bearing rather than an optimisation: a sphere
+// large enough to contain the origin has its entry point behind the shooter, so
+// the exit point would be taken instead -- and the exit of a sphere centred
+// behind you is still in front of you. Without the guard a shot could kill an
+// enemy standing at the shooter's back whenever the hit radius was comparable
+// to the spacing between actors.
+//
 // A single sphere per target is the whole hit model at this stage: no capsules,
 // no per-bone hit zones, no penetration through occluders, and no falloff of
 // damage with distance -- those are S5.

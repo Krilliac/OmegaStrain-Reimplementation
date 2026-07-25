@@ -253,6 +253,33 @@ int main()
                 "a dead target is skipped and the live one behind it is hit");
         }
 
+        // A target whose sphere contains the origin but whose centre sits
+        // BEHIND it is not hit. Regression: the entry point of such a sphere is
+        // behind the shooter, so the exit point used to be taken instead, and
+        // the exit of a sphere centred behind you is still in front of you --
+        // which let a forward shot kill an enemy standing at the shooter's back.
+        {
+            const std::array<Float3IR, 1> behind{
+                Float3IR{.x = -6.0F, .y = 0.0F, .z = 0.0F}};
+            const std::array<bool, 1> live{true};
+            const HitscanResult r = ResolveHitscan(origin, forward, behind,
+                live, 20.0F, 100.0F, no_walls);
+            Check(!r.hit,
+                "an enemy behind the shooter is not hit even when its hit "
+                "sphere contains the muzzle");
+
+            // The same enemy, the same overlapping radius, in front: still hit,
+            // so the guard rejects only what is behind rather than everything
+            // the origin happens to be inside of.
+            const std::array<Float3IR, 1> ahead{
+                Float3IR{.x = 6.0F, .y = 0.0F, .z = 0.0F}};
+            const HitscanResult front = ResolveHitscan(origin, forward, ahead,
+                live, 20.0F, 100.0F, no_walls);
+            Check(front.hit && front.target == 0U,
+                "an enemy ahead is still hit when its hit sphere contains the "
+                "muzzle");
+        }
+
         // A short `alive` span is fail-soft: uncovered entries count as alive.
         {
             const std::array<bool, 1> only_first{false};

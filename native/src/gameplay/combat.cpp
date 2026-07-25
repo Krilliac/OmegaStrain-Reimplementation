@@ -114,6 +114,14 @@ HitscanResult ResolveHitscan(const asset::Float3IR& origin,
         // Ray/sphere: project the centre onto the ray, then the half-chord.
         const asset::Float3IR to_centre = Sub(centre, origin);
         const float along = Dot(to_centre, ray);
+        // The centre must lie ahead of the origin. Without this a target whose
+        // sphere merely CONTAINS the origin is hit no matter which way the shot
+        // was aimed: the entry point is behind, so the exit point below is taken
+        // instead, and the exit of a sphere centred behind you is still in front
+        // of you. With a hit radius comparable to the actor spacing that let a
+        // shot kill an enemy standing at the shooter's back.
+        if (!(along > 0.0F))
+            continue;
         const float perp2 = Dot(to_centre, to_centre) - along * along;
         if (perp2 > radius2)
             continue; // the ray passes outside the sphere
