@@ -60,6 +60,15 @@ constexpr runtime::RenderMeshColorRgba8 kDiagnosticActorMeshColor{
     .blue = 224U,
     .alpha = 255U,
 };
+// Combat S2: a dead actor -- the player or an enemy -- is drawn dark slate,
+// deliberately distinct from the live player's magenta kDiagnosticActorMeshColor
+// and from every NPC stealth-state colour, so a death is observable on screen.
+constexpr runtime::RenderMeshColorRgba8 kDeadActorMeshColor{
+    .red = 56U,
+    .green = 56U,
+    .blue = 72U,
+    .alpha = 255U,
+};
 
 class DiagnosticSceneRollbackGuard final
 {
@@ -135,9 +144,33 @@ constexpr float kPlayerCamHeight = 70.0F;  // follow-camera offset along +Z
     return m;
 }
 
+// Combat S2 player-weapon wiring constants.
+//
+// The player fires from eye height along the follow camera's own aim. That
+// camera has a fixed orientation (eye at -Y/+Z of the player, looking back down
+// at it) and the host pointer sample drives only the flat 2D target/fire cue, so
+// the follow view IS this build's aim representation and there is no second one:
+// the aim is the horizontal component of its eye->target vector, which is world
+// +Y for every player position. It is flattened because the camera looks DOWN at
+// the player -- the unflattened forward would drive every shot into the floor.
+constexpr asset::Float3IR kPlayerAimDirection{.x = 0.0F, .y = 1.0F, .z = 0.0F};
+// The muzzle sits at the same eye height the NPC vision ray already uses
+// (NpcVisionParams::eye_height, along the world up-axis) rather than a second,
+// invented constant.
+constexpr float kPlayerEyeHeight = gameplay::NpcVisionParams{}.eye_height;
+
 // The enemy NPC marker is drawn a bit larger than the player so it reads clearly
 // against the dense level from the follow camera.
 constexpr float kNpcMeshScale = 20.0F;
+// Hitscan target sphere for an enemy: the size its marker is actually drawn at,
+// so what is shot at is what is seen. A PROJECT value -- per-actor hit shapes
+// live with the authentic character data, not in the .SO.
+constexpr float kNpcHitRadius = kNpcMeshScale;
+// The player's shot reaches exactly as far as the pre-culled collision set the
+// occlusion test runs against (kPlayerCullRadius around the player), so a shot
+// can never travel past geometry that was culled away and therefore could not
+// have blocked it. Also a PROJECT value.
+constexpr float kPlayerFireRange = kPlayerCullRadius;
 [[nodiscard]] asset::Matrix4x4IR NpcMeshTransform(
     const asset::Float3IR& p) noexcept
 {
@@ -3557,8 +3590,11 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                     }
                 }
             }
+            // Combat S2: the fire binding is HELD (not WasPressed) because the
+            // player weapon is cooldown-gated -- holding it is automatic fire.
             auto refreshed_actor_draw_list = RefreshDiagnosticActorDrawList(
-                input_snapshot.pointer_position(), camera_input);
+                input_snapshot.pointer_position(), camera_input,
+                input_snapshot.IsHeld(kDebugFireAction));
             if (!refreshed_actor_draw_list)
             {
                 (void)ContainOpeningMovieAudio();
@@ -4681,7 +4717,7 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
 
 std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
     const std::optional<runtime::PointerPositionQ16>& pointer_position,
-    const runtime::FreeFlyInput& camera_input)
+    const runtime::FreeFlyInput& camera_input, const bool fire_held)
 {
     if (simulation_ == nullptr)
     {
@@ -4934,6 +4970,12 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                 {
                     DiagnosticScenePresentation::NpcRuntime &npc =
                         np.npcs[npc_index];
+                    // Combat S2: a dead guard stops planning, moving, seeing and
+                    // firing. It stays in the vector so every index (and the
+                    // parallel hitscan target array below) keeps its identity;
+                    // it is drawn in the dead-actor colour instead.
+                    if (!npc.health.alive)
+                        continue;
                     // Pursue the last-seen spot while Chasing/Searching; else patrol.
                     gameplay::NpcPatrolPlan plan;
                     if (gameplay::NpcPursuing(npc.awareness.state) &&
@@ -4981,6 +5023,42 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                             "npc " + std::to_string(npc_index) + ": " +
                                 state_name(prev_state) + " -> " +
                                 state_name(npc.awareness.state));
+                    // Combat S2: a guard that has COMMITTED to the chase and
+                    // still has clear line of sight aims up, then fires. The gate
+                    // is Chasing specifically, not NpcPursuing: Alerted is the
+                    // reaction delay before it commits, and Searching means it has
+                    // lost sight of the player, so neither may shoot.
+                    const bool engaging = npc.health.alive && sees &&
+                        npc.awareness.state == gameplay::NpcState::Chasing;
+                    const gameplay::WeaponStep npc_shot = gameplay::StepNpcWeapon(
+                        npc.weapon, engaging, kPlayerStepDt, np.weapon_params);
+                    npc.weapon = npc_shot.state;
+                    if (npc_shot.fired)
+                    {
+                        log_->Info("combat",
+                            "npc " + std::to_string(npc_index) +
+                                " FIRED at the player");
+                        if (np.player_health.alive)
+                        {
+                            const gameplay::HealthState before = np.player_health;
+                            np.player_health = gameplay::ApplyDamageToHealth(
+                                before, np.weapon_params.damage);
+                            log_->Info("combat",
+                                "player HIT by npc " + std::to_string(npc_index) +
+                                    " for " +
+                                    std::to_string(np.weapon_params.damage) +
+                                    "; hitpoints " +
+                                    std::to_string(before.hitpoints) + " -> " +
+                                    std::to_string(np.player_health.hitpoints));
+                            if (!np.player_health.alive)
+                                log_->Info("combat",
+                                    "PLAYER DEAD (killed by npc " +
+                                        std::to_string(npc_index) +
+                                        "); no further damage is applied -- "
+                                        "respawn and the mission fail flow are a "
+                                        "later slice");
+                        }
+                    }
                     log_->Info("npc",
                         "npc " + std::to_string(npc_index) + " pos=(" +
                             std::to_string(npc.state.position.x) + "," +
@@ -4988,6 +5066,66 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                             std::to_string(npc.state.position.z) + ") sees=" +
                             (sees ? "yes" : "no") + " state=" +
                             state_name(npc.awareness.state));
+                }
+            }
+
+            // Combat S2, player side: the existing fire binding (SPACE / left
+            // mouse -- kDebugFireAction) held this frame runs the player weapon.
+            // There is no aim ramp, only the cooldown, so holding it is automatic
+            // fire. A shot hitscans along the follow camera's aim from eye height
+            // against the LIVE enemies, occluded by the very same pre-culled
+            // collision triangles the player was just stepped against, and damages
+            // whatever it strikes. A dead player cannot shoot.
+            DiagnosticScenePresentation &fp = *diagnostic_scene_presentation_;
+            const gameplay::WeaponStep player_shot = gameplay::StepPlayerWeapon(
+                fp.player_weapon, fire_held && fp.player_health.alive,
+                kPlayerStepDt, fp.weapon_params);
+            fp.player_weapon = player_shot.state;
+            if (player_shot.fired)
+            {
+                const asset::Float3IR muzzle{
+                    .x = fp.player_state.position.x,
+                    .y = fp.player_state.position.y,
+                    .z = fp.player_state.position.z + kPlayerEyeHeight};
+                std::vector<asset::Float3IR> targets;
+                targets.reserve(fp.npcs.size());
+                // std::vector<bool> is a bit-proxy and cannot form the
+                // std::span<const bool> ResolveHitscan takes, so the parallel
+                // alive flags live in a plain contiguous buffer.
+                const std::unique_ptr<bool[]> target_alive =
+                    std::make_unique<bool[]>(fp.npcs.size());
+                for (std::size_t i = 0U; i < fp.npcs.size(); ++i)
+                {
+                    targets.push_back(fp.npcs[i].state.position);
+                    target_alive[i] = fp.npcs[i].health.alive;
+                }
+                const gameplay::HitscanResult scan = gameplay::ResolveHitscan(
+                    muzzle, kPlayerAimDirection, targets,
+                    std::span<const bool>{target_alive.get(), fp.npcs.size()},
+                    kNpcHitRadius, kPlayerFireRange, nearby);
+                log_->Info("combat",
+                    "player FIRED from (" + std::to_string(muzzle.x) + "," +
+                        std::to_string(muzzle.y) + "," +
+                        std::to_string(muzzle.z) + ") vs " +
+                        std::to_string(fp.npcs.size()) + " enemies");
+                if (scan.hit && scan.target < fp.npcs.size())
+                {
+                    DiagnosticScenePresentation::NpcRuntime &struck =
+                        fp.npcs[scan.target];
+                    const gameplay::HealthState before = struck.health;
+                    struck.health = gameplay::ApplyDamageToHealth(
+                        before, fp.weapon_params.damage);
+                    log_->Info("combat",
+                        "npc " + std::to_string(scan.target) + " HIT for " +
+                            std::to_string(fp.weapon_params.damage) +
+                            " at range " + std::to_string(scan.distance) +
+                            "; hitpoints " + std::to_string(before.hitpoints) +
+                            " -> " + std::to_string(struck.health.hitpoints));
+                    if (!struck.health.alive)
+                        log_->Info("combat",
+                            "npc " + std::to_string(scan.target) +
+                                " DEAD; it stops planning, moving, seeing and "
+                                "firing");
                 }
             }
         }
@@ -5040,7 +5178,11 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
         mesh_commands[mesh_command_count++] = runtime::RenderMeshDrawCommand{
             .mesh = diagnostic_scene_presentation_->actor_mesh_handle,
             .object_to_clip = *actor_object_to_clip,
-            .color = kDiagnosticActorMeshColor,
+            // Combat S2: a dead player is drawn in the dead-actor colour.
+            .color = player_active &&
+                    !diagnostic_scene_presentation_->player_health.alive
+                ? kDeadActorMeshColor
+                : kDiagnosticActorMeshColor,
             .raster_mode = runtime::RenderMeshRasterMode::Fill,
         };
         // Enemy NPC markers: the same cube mesh at each NPC's world position,
@@ -5060,7 +5202,11 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                     continue;
                 runtime::RenderMeshColorRgba8 npc_color{
                     .red = 40U, .green = 230U, .blue = 60U, .alpha = 255U}; // patrol
-                if (npc.awareness.state == gameplay::NpcState::Searching)
+                // Combat S2: death outranks the stealth-state colour, so a killed
+                // guard reads as dead on screen rather than frozen mid-alert.
+                if (!npc.health.alive)
+                    npc_color = kDeadActorMeshColor;
+                else if (npc.awareness.state == gameplay::NpcState::Searching)
                     npc_color = runtime::RenderMeshColorRgba8{
                         .red = 240U, .green = 220U, .blue = 40U, .alpha = 255U};
                 else if (npc.awareness.state == gameplay::NpcState::Alerted ||

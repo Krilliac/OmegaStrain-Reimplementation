@@ -14,6 +14,7 @@
 #include "omega/content/front_end_screen_bundle.h"
 #include "omega/frontend_presentation/retail_front_end_nav.h"
 #include "omega/gameplay/character_controller.h"
+#include "omega/gameplay/combat.h"
 #include "omega/gameplay/npc_ai.h"
 #include "omega/gameplay/mission_trigger.h"
 #include "omega/gameplay/objective_tracker.h"
@@ -243,10 +244,13 @@ private:
     // Target/fire cues use the current normalized host pointer sample, with a
     // deterministic center fallback. All texture and mesh resources remain
     // immutable and resident.
+    // `fire_held` is the existing kDebugFireAction binding (SPACE / left mouse)
+    // held this frame; it drives the Combat S2 player weapon.
     [[nodiscard]] std::expected<void, std::string>
     RefreshDiagnosticActorDrawList(
         const std::optional<runtime::PointerPositionQ16>& pointer_position,
-        const runtime::FreeFlyInput& camera_input = {});
+        const runtime::FreeFlyInput& camera_input = {},
+        bool fire_held = false);
     [[nodiscard]] const runtime::RenderDrawList& CurrentFrontEndDrawList() const noexcept;
     [[nodiscard]] runtime::RenderMeshDrawList CurrentFrontEndMeshDrawList() const noexcept;
 
@@ -352,9 +356,24 @@ private:
             gameplay::NpcVisionParams vision{};
             gameplay::NpcAwarenessState awareness{};
             gameplay::NpcAwarenessParams awareness_params{};
+            // Combat S2 runtime state: the retained weapon this guard aims and
+            // fires at the player with, and its hitpoints. A dead guard stops
+            // planning, moving, seeing and firing, is excluded from the player's
+            // hitscan, and is drawn in the dead-actor colour.
+            gameplay::WeaponState weapon{};
+            gameplay::HealthState health{};
         };
         bool npc_active = false;
         std::vector<NpcRuntime> npcs{};
+        // Combat S2, player side: the player's hitpoints and its retained weapon
+        // (no aim ramp -- the human aims), plus the weapon parameters BOTH sides
+        // fire with for now. Every number here is the combat.h WeaponParams
+        // PROJECT default; authentic stats await the WEAPONS.WDB decode. Respawn,
+        // a health HUD, and the mission fail/complete flow are a later slice --
+        // at zero hitpoints the player is simply dead.
+        gameplay::HealthState player_health{};
+        gameplay::WeaponState player_weapon{};
+        gameplay::WeaponParams weapon_params{};
     };
 
     // [game/main/render thread, startup] Validates the complete scene-to-command projection before
