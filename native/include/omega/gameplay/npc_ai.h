@@ -125,6 +125,23 @@ struct NpcAwarenessState
 // (Chasing or Searching) rather than follow its patrol route.
 [[nodiscard]] bool NpcPursuing(NpcState state) noexcept;
 
+// [any thread; reentrant] True when the NPC should plant itself and aim rather
+// than keep moving: Alerted or Chasing WITH the player in sight. A guard that
+// has committed to the player stops to bring its weapon up, which is what keeps
+// the player inside the cone long enough for the reaction delay plus the aim
+// ramp to finish -- a player who keeps walking crosses a cone in less time than
+// that, so a guard that also keeps walking can never complete a shot. Chasing
+// WITHOUT sight is false (it must walk to the last-seen spot to re-acquire,
+// which is what lets it get sight back); Searching is false (it must move to
+// hunt); Patrol is false. The .SO symbol table names SetAimMode / AimAt /
+// GetAimPercent as an aim behaviour distinct from locomotion, which is the
+// grounding for aiming being a separate mode -- it does NOT tell us retail's
+// exact stopping rule, which stays undecoded, so this policy is project-chosen.
+// Does NOT model strafing, cover, crouching, leaning or suppression, and does
+// not itself gate firing (line of sight and the weapon ramp remain the
+// caller's).
+[[nodiscard]] bool NpcHoldsPositionToAim(NpcState state, bool sees_player) noexcept;
+
 // [any thread; reentrant] Plans one pursuit step toward `target`: the horizontal
 // unit move (and matching facing), ignoring the up/z component so a z-climb
 // doesn't stall. Within `arrive_radius` horizontally (or non-finite) yields a

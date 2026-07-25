@@ -20,6 +20,7 @@ using omega::gameplay::NpcSeesPlayer;
 using omega::gameplay::NpcVisionParams;
 using omega::gameplay::NpcAwarenessParams;
 using omega::gameplay::NpcAwarenessState;
+using omega::gameplay::NpcHoldsPositionToAim;
 using omega::gameplay::NpcPursuing;
 using omega::gameplay::NpcState;
 using omega::gameplay::PlanNpcPatrol;
@@ -196,6 +197,30 @@ int main()
             "within arrive radius (horizontally) -> zero move, default facing");
         Check(!NpcPursuing(NpcState::Patrol) && NpcPursuing(NpcState::Chasing),
             "NpcPursuing: Patrol no, Chasing yes");
+    }
+
+    // --- Hold position to aim (every state x sight combination) ---
+    {
+        // In sight + committed -> plant and aim, so the aim ramp can finish
+        // before a walking player leaves the cone.
+        Check(NpcHoldsPositionToAim(NpcState::Alerted, true),
+            "Alerted + sees player -> holds position to aim");
+        Check(NpcHoldsPositionToAim(NpcState::Chasing, true),
+            "Chasing + sees player -> holds position to aim (shoots, not closes)");
+
+        // Everything else keeps moving.
+        Check(!NpcHoldsPositionToAim(NpcState::Chasing, false),
+            "Chasing without sight -> moves (pursues the last-seen position)");
+        Check(!NpcHoldsPositionToAim(NpcState::Alerted, false),
+            "Alerted without sight -> moves");
+        Check(!NpcHoldsPositionToAim(NpcState::Searching, true),
+            "Searching -> moves even with sight (the loop re-alerts it first)");
+        Check(!NpcHoldsPositionToAim(NpcState::Searching, false),
+            "Searching without sight -> moves (it must hunt)");
+        Check(!NpcHoldsPositionToAim(NpcState::Patrol, true),
+            "Patrol -> keeps walking its route even with sight");
+        Check(!NpcHoldsPositionToAim(NpcState::Patrol, false),
+            "Patrol without sight -> keeps walking its route");
     }
 
     if (failures != 0)

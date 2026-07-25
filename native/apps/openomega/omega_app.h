@@ -356,6 +356,12 @@ private:
             gameplay::NpcVisionParams vision{};
             gameplay::NpcAwarenessState awareness{};
             gameplay::NpcAwarenessParams awareness_params{};
+            // The sight result from the previous refresh, retained so the next
+            // one can decide (via NpcHoldsPositionToAim) whether this guard
+            // plants itself to aim BEFORE it plans and takes its move. The NPC
+            // has not moved since that test, so this is its sight at its current
+            // position; only the player has advanced one step.
+            bool sees_player = false;
             // Combat S2 runtime state: the retained weapon this guard aims and
             // fires at the player with, and its hitpoints. A dead guard stops
             // planning, moving, seeing and firing, is excluded from the player's

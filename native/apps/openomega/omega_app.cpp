@@ -4976,9 +4976,29 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                     // it is drawn in the dead-actor colour instead.
                     if (!npc.health.alive)
                         continue;
-                    // Pursue the last-seen spot while Chasing/Searching; else patrol.
+                    // A guard that has committed to the player and still has it
+                    // in sight plants itself and aims instead of walking on: it
+                    // takes a zero move but KEEPS TURNING to face the player, so
+                    // the player stays inside the cone for the whole reaction +
+                    // aim ramp. Without this the engagement is unreachable in
+                    // normal play -- a head-on pass through a cone is shorter
+                    // than the ramp, so only a stalled player ever got shot.
+                    // Otherwise: pursue the last-seen spot while
+                    // Chasing/Searching; else patrol.
                     gameplay::NpcPatrolPlan plan;
-                    if (gameplay::NpcPursuing(npc.awareness.state) &&
+                    if (gameplay::NpcHoldsPositionToAim(
+                            npc.awareness.state, npc.sees_player))
+                    {
+                        // PlanNpcPursuit's facing is the horizontal unit toward
+                        // the target; an arrive radius of 0 means it always
+                        // yields one. The move is then cleared -- only the
+                        // facing is taken.
+                        plan = gameplay::PlanNpcPursuit(npc.state.position,
+                            np.player_state.position, 0.0F, npc.facing);
+                        plan.move = asset::Float3IR{};
+                        plan.waypoint = npc.waypoint;
+                    }
+                    else if (gameplay::NpcPursuing(npc.awareness.state) &&
                         npc.awareness.has_last_seen)
                     {
                         plan = gameplay::PlanNpcPursuit(npc.state.position,
@@ -5004,6 +5024,7 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                     const bool sees = gameplay::NpcSeesPlayer(npc.state.position,
                         npc.facing, np.player_state.position, npc.vision,
                         npc_nearby);
+                    npc.sees_player = sees; // read by the aim hold next refresh
                     const gameplay::NpcState prev_state = npc.awareness.state;
                     npc.awareness = gameplay::StepNpcAwarenessLoop(npc.awareness,
                         sees, np.player_state.position, npc.awareness_params,

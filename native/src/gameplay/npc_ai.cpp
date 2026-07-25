@@ -199,6 +199,13 @@ bool NpcPursuing(const NpcState state) noexcept
     return state == NpcState::Chasing || state == NpcState::Searching;
 }
 
+bool NpcHoldsPositionToAim(const NpcState state, const bool sees_player) noexcept
+{
+    if (!sees_player)
+        return false; // no target in sight: keep patrolling / re-acquiring
+    return state == NpcState::Alerted || state == NpcState::Chasing;
+}
+
 NpcPatrolPlan PlanNpcPursuit(const asset::Float3IR& pos,
     const asset::Float3IR& target, const float arrive_radius,
     const asset::Float3IR& default_facing) noexcept
