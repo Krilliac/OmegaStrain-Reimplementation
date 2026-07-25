@@ -13,11 +13,13 @@ namespace
 {
 using omega::gameplay::AdvanceObjectives;
 using omega::gameplay::AreObjectivesComplete;
+using omega::gameplay::EvaluateMissionOutcome;
 using omega::gameplay::FindObjectiveIndex;
 using omega::gameplay::InitialObjectiveState;
 using omega::gameplay::IsObjectiveComplete;
 using omega::gameplay::MinskMissionData;
 using omega::gameplay::MissionData;
+using omega::gameplay::MissionOutcome;
 using omega::gameplay::ObjectiveChoice;
 using omega::gameplay::ObjectiveDef;
 using omega::gameplay::ObjectiveError;
@@ -44,6 +46,23 @@ constexpr std::array<ObjectiveDef, 3U> kSyntheticObjectives{{
 constexpr MissionData kSynthetic{
     .level_code = "TEST",
     .objectives = kSyntheticObjectives,
+};
+
+// A mission whose objective list is empty -- the shape a level that failed to
+// load would present. It must never read as a mission win.
+constexpr MissionData kEmptyMission{
+    .level_code = "EMPTY",
+    .objectives = {},
+};
+
+// A mission with nothing but an optional objective: no primary exists, so no
+// amount of optional progress can decide it.
+constexpr std::array<ObjectiveDef, 1U> kOptionalOnlyObjectives{{
+    {5U, "opt_only_menu", "opt_only_map", "", ObjectiveKind::Optional},
+}};
+constexpr MissionData kOptionalOnly{
+    .level_code = "OPTONLY",
+    .objectives = kOptionalOnlyObjectives,
 };
 
 [[nodiscard]] ObjectiveState Apply(const MissionData& mission, ObjectiveState state,
@@ -192,6 +211,102 @@ int main()
         Check(AdvanceObjectives(mission, mismatched, {ObjectiveChoice::Check, 1U}).error() ==
                   ObjectiveError::StateMissionMismatch,
             "a state/mission count mismatch is rejected");
+    }
+
+    // --- Mission outcome, derived from the objective set ---------------------
+    static_assert(noexcept(EvaluateMissionOutcome(kSynthetic, ObjectiveState{})),
+        "EvaluateMissionOutcome is noexcept");
+
+    // THE TRAP: an empty objective set is in progress, never a vacuous win --
+    // a level that failed to load must not report success.
+    {
+        const ObjectiveState empty_state = InitialObjectiveState(kEmptyMission);
+        Check(empty_state.count == 0U, "an empty mission has no objective slots");
+        Check(EvaluateMissionOutcome(kEmptyMission, empty_state) ==
+                  MissionOutcome::InProgress,
+            "an empty objective set is in progress, NOT succeeded");
+    }
+
+    // A mission with no primary objective cannot be won, however much of its
+    // optional content is complete.
+    {
+        ObjectiveState s = InitialObjectiveState(kOptionalOnly);
+        Check(EvaluateMissionOutcome(kOptionalOnly, s) == MissionOutcome::InProgress,
+            "an untouched optional-only mission is in progress");
+        s = Apply(kOptionalOnly, s, ObjectiveChoice::Add, 5U);
+        s = Apply(kOptionalOnly, s, ObjectiveChoice::Pass, 5U);
+        Check(s.status[0] == ObjectiveStatus::Complete, "the optional completed");
+        Check(EvaluateMissionOutcome(kOptionalOnly, s) == MissionOutcome::InProgress,
+            "a mission with no primary objective is never succeeded");
+    }
+
+    // A completed SECONDARY alone is not success: the primaries still decide.
+    {
+        ObjectiveState s = InitialObjectiveState(mission);
+        Check(EvaluateMissionOutcome(mission, s) == MissionOutcome::InProgress,
+            "an all-inactive mission is in progress");
+        s = Apply(mission, s, ObjectiveChoice::Add, 9U);
+        s = Apply(mission, s, ObjectiveChoice::Pass, 9U);
+        Check(EvaluateMissionOutcome(mission, s) == MissionOutcome::InProgress,
+            "a completed optional objective alone is not mission success");
+    }
+
+    // Mixed active/complete primaries are still in progress; all complete wins.
+    {
+        ObjectiveState s = InitialObjectiveState(mission);
+        s = Apply(mission, s, ObjectiveChoice::Add, 1U);
+        s = Apply(mission, s, ObjectiveChoice::Pass, 1U);
+        s = Apply(mission, s, ObjectiveChoice::Add, 2U);
+        Check(EvaluateMissionOutcome(mission, s) == MissionOutcome::InProgress,
+            "one primary complete and one still active is in progress");
+        s = Apply(mission, s, ObjectiveChoice::Pass, 2U);
+        Check(EvaluateMissionOutcome(mission, s) == MissionOutcome::Succeeded,
+            "every primary complete is mission success");
+
+        // The optional objective does not gate that success, in any status.
+        ObjectiveState with_optional = Apply(mission, s, ObjectiveChoice::Add, 9U);
+        Check(EvaluateMissionOutcome(mission, with_optional) == MissionOutcome::Succeeded,
+            "an active optional does not block success");
+        with_optional = Apply(mission, with_optional, ObjectiveChoice::Fail, 9U);
+        Check(with_optional.status[2] == ObjectiveStatus::Failed, "the optional failed");
+        Check(EvaluateMissionOutcome(mission, with_optional) == MissionOutcome::Succeeded,
+            "a FAILED optional does not fail the mission");
+    }
+
+    // Failure dominates: one failed primary is a failed mission even when every
+    // other primary completed -- and regardless of which slot failed.
+    {
+        ObjectiveState late = InitialObjectiveState(mission);
+        late = Apply(mission, late, ObjectiveChoice::Add, 1U);
+        late = Apply(mission, late, ObjectiveChoice::Pass, 1U);
+        late = Apply(mission, late, ObjectiveChoice::Add, 2U);
+        late = Apply(mission, late, ObjectiveChoice::Fail, 2U);
+        Check(late.status[0] == ObjectiveStatus::Complete &&
+                  late.status[1] == ObjectiveStatus::Failed,
+            "primary 1 complete, primary 2 failed");
+        Check(EvaluateMissionOutcome(mission, late) == MissionOutcome::Failed,
+            "a failed primary fails the mission even though the other completed");
+
+        ObjectiveState early = InitialObjectiveState(mission);
+        early = Apply(mission, early, ObjectiveChoice::Add, 1U);
+        early = Apply(mission, early, ObjectiveChoice::Fail, 1U);
+        early = Apply(mission, early, ObjectiveChoice::Add, 2U);
+        early = Apply(mission, early, ObjectiveChoice::Pass, 2U);
+        Check(early.status[0] == ObjectiveStatus::Failed &&
+                  early.status[1] == ObjectiveStatus::Complete,
+            "primary 1 failed, primary 2 complete");
+        Check(EvaluateMissionOutcome(mission, early) == MissionOutcome::Failed,
+            "failure dominates regardless of which primary slot failed");
+        Check(!AreObjectivesComplete(mission, early),
+            "a failed primary is not 'objectives complete' either");
+    }
+
+    // Fail-soft: a state that does not describe this mission decides nothing.
+    {
+        ObjectiveState mismatched = InitialObjectiveState(mission);
+        mismatched.count = 99U;
+        Check(EvaluateMissionOutcome(mission, mismatched) == MissionOutcome::InProgress,
+            "a state/mission count mismatch reads in progress, never a win");
     }
 
     // Determinism: the same sequence yields identical snapshots.

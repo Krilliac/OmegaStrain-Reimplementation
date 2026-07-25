@@ -53,6 +53,35 @@ constexpr CollisionTriangle kWall{
     .c = {.x = 20.0F, .y = 0.0F, .z = 400.0F},
 };
 
+// A nook: four near-vertical faces around the vertical axis, each with its base
+// 3 units out and leaning outward to 10 units at z = 400 -- about 1 degree off
+// vertical. A default-radius (4.0) character standing on kFloor inside this
+// overlaps all four faces at once, and because the nook is narrower than the
+// character no order of depenetration clears all four: the contact set is
+// over-constrained and the resolve's iteration budget can never satisfy it.
+// This is a synthetic reproduction of that shape, chosen to be the smallest
+// geometry that exhibits it -- it is not decoded level data.
+constexpr CollisionTriangle kNookPlusX{
+    .a = {.x = 3.0F, .y = -500.0F, .z = 0.0F},
+    .b = {.x = 3.0F, .y = 500.0F, .z = 0.0F},
+    .c = {.x = 10.0F, .y = 0.0F, .z = 400.0F},
+};
+constexpr CollisionTriangle kNookMinusX{
+    .a = {.x = -3.0F, .y = -500.0F, .z = 0.0F},
+    .b = {.x = -3.0F, .y = 500.0F, .z = 0.0F},
+    .c = {.x = -10.0F, .y = 0.0F, .z = 400.0F},
+};
+constexpr CollisionTriangle kNookPlusY{
+    .a = {.x = -500.0F, .y = 3.0F, .z = 0.0F},
+    .b = {.x = 500.0F, .y = 3.0F, .z = 0.0F},
+    .c = {.x = 0.0F, .y = 10.0F, .z = 400.0F},
+};
+constexpr CollisionTriangle kNookMinusY{
+    .a = {.x = -500.0F, .y = -3.0F, .z = 0.0F},
+    .b = {.x = 500.0F, .y = -3.0F, .z = 0.0F},
+    .c = {.x = 0.0F, .y = -10.0F, .z = 400.0F},
+};
+
 void TestClosestPointOnTriangle()
 {
     // A point above the interior projects straight down onto the face.
@@ -95,6 +124,60 @@ void TestFallsAndRestsOnFloor()
         "the grounded character has ~zero vertical velocity");
     Check(min_z >= params.radius - 0.2F,
         "the character never sinks meaningfully through the floor");
+}
+
+void TestStationaryCharacterDoesNotDriftUpward()
+{
+    // Regression. A character with zero move input, resting in an
+    // over-constrained contact set, was extruded upward a little on every step:
+    // the faces cannot all be satisfied, so the resolve never converged, ran its
+    // whole iteration budget every step, and each fixed-order push cycle netted
+    // the small upward component the near-vertical faces share. On TORONTO3 a
+    // guard holding position climbed several units over ~100 frames with x and y
+    // unchanged, rising out of its own vision cone.
+    //
+    // This pins NON-ACCUMULATION, not an exact z. Where the character settles is
+    // a property of the geometry and is not asserted; what is asserted is that
+    // wherever it settles, it stays there -- 600 further steps of standing still
+    // must not move it.
+    const std::array<CollisionTriangle, 5U> tris{
+        kFloor, kNookPlusX, kNookMinusX, kNookPlusY, kNookMinusY};
+    const CharacterControllerParams params{}; // defaults: radius 4, gravity 30
+
+    // Start already at rest height (one radius above kFloor), so the settle
+    // window only has to absorb the first contact with the nook faces.
+    CharacterState state{.position = {.x = 0.0F, .y = 0.0F, .z = 4.0F}};
+    constexpr int kSettleSteps = 10;
+    float settled_z = state.position.z;
+    float highest_z = state.position.z;
+    float lowest_z = state.position.z;
+    for (int step = 0; step < 600; ++step)
+    {
+        state = StepCharacter(state, CharacterInput{}, params,
+            std::span<const CollisionTriangle>{tris}, 1.0F / 60.0F);
+        if (step < kSettleSteps)
+            continue;
+        if (step == kSettleSteps)
+        {
+            settled_z = state.position.z;
+            highest_z = settled_z;
+            lowest_z = settled_z;
+            continue;
+        }
+        if (state.position.z > highest_z)
+            highest_z = state.position.z;
+        if (state.position.z < lowest_z)
+            lowest_z = state.position.z;
+    }
+
+    Check(highest_z - settled_z <= 0.25F,
+        "a stationary character wedged in a nook does not creep upward");
+    Check(settled_z - lowest_z <= 0.25F,
+        "a stationary character wedged in a nook does not creep downward");
+    Check(state.grounded,
+        "the stationary character is still standing on the floor after 600 steps");
+    Check(state.position.z <= params.radius + 0.25F,
+        "the character rests on the floor, not part-way up the nook faces");
 }
 
 void TestStopsAtWall()
@@ -224,6 +307,7 @@ int main()
 {
     TestClosestPointOnTriangle();
     TestFallsAndRestsOnFloor();
+    TestStationaryCharacterDoesNotDriftUpward();
     TestStopsAtWall();
     TestSlidesAlongWall();
     TestAirborneNotGrounded();

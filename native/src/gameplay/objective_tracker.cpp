@@ -142,4 +142,38 @@ bool AreObjectivesComplete(
     }
     return has_primary;
 }
+
+MissionOutcome EvaluateMissionOutcome(
+    const MissionData& mission, const ObjectiveState& state) noexcept
+{
+    const std::size_t count = mission.objectives.size() < kMaxMissionObjectives
+                                  ? mission.objectives.size()
+                                  : kMaxMissionObjectives;
+    // Fail-soft: a state that does not describe this mission decides nothing.
+    if (state.count != count)
+        return MissionOutcome::InProgress;
+
+    bool has_primary = false;
+    bool all_primaries_complete = true;
+    for (std::size_t index = 0U; index < count; ++index)
+    {
+        // Secondary/optional objectives never decide the mission -- neither
+        // their completion nor their failure is read here.
+        if (mission.objectives[index].kind != ObjectiveKind::Primary)
+            continue;
+        has_primary = true;
+        const ObjectiveStatus status = state.status[index];
+        // Failure dominates: a single failed primary is a failed mission
+        // regardless of what the other objectives did, or of slot order.
+        if (status == ObjectiveStatus::Failed)
+            return MissionOutcome::Failed;
+        if (status != ObjectiveStatus::Complete)
+            all_primaries_complete = false;   // still Inactive or Active
+    }
+    // No primary objectives (an empty or unloaded objective set) is in progress,
+    // NOT a vacuous success: a level that failed to load must never read as won.
+    if (!has_primary || !all_primaries_complete)
+        return MissionOutcome::InProgress;
+    return MissionOutcome::Succeeded;
+}
 } // namespace omega::gameplay

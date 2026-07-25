@@ -85,6 +85,8 @@ bool NpcSeesPlayer(const asset::Float3IR& npc_pos,
     if (!(facing_len2 > 0.0F))
         return false;
 
+    // Range is measured centre-to-centre, unchanged by the eye offset below:
+    // the eye is a sighting detail, not extra reach.
     const asset::Float3IR to_player = Sub(player_pos, npc_pos);
     const float dist2 = Dot(to_player, to_player);
     if (dist2 > params.range * params.range)
@@ -92,25 +94,39 @@ bool NpcSeesPlayer(const asset::Float3IR& npc_pos,
     if (!(dist2 > 0.0F))
         return true; // coincident: trivially seen
 
-    const float dist = std::sqrt(dist2);
-    // cos(angle) between the facing and the direction to the player.
-    const float cos_angle =
-        Dot(to_player, npc_facing) / (dist * std::sqrt(facing_len2));
-    if (cos_angle < params.cos_half_angle)
-        return false; // outside the vision cone
-
-    // Line of sight: eye (raised along up) -> player. Blocked if any triangle
-    // intersects the segment.
+    // One origin for BOTH remaining gates: the eye, `eye_height` along `up`
+    // from the NPC's centre. The cone used to be judged from the centre while
+    // the ray was traced from the eye, so the two disagreed by eye_height and
+    // the function could accept an angle it then tested along a different line.
     const asset::Float3IR eye = Add(npc_pos,
         asset::Float3IR{.x = params.up.x * params.eye_height,
             .y = params.up.y * params.eye_height,
             .z = params.up.z * params.eye_height});
-    const asset::Float3IR target = Add(player_pos,
-        asset::Float3IR{.x = params.up.x * params.eye_height,
-            .y = params.up.y * params.eye_height,
-            .z = params.up.z * params.eye_height});
+    if (!Finite(eye))
+        return false; // non-finite up / eye_height: no usable sighting origin
+
+    // ...and one target: the player's centre, which is what the kinematic
+    // controller tracks. The ray used to aim at player_pos + up*eye_height,
+    // which is ABOVE the player (the controller's sphere is radius-tall, so its
+    // top sits well below centre + eye_height), so overhead geometry could
+    // block a sight line that an eye-to-torso look clears. PROJECT decision:
+    // retail's sensing model is undecoded, so centre-mass is chosen because it
+    // is the one point on the player this code already has.
+    const asset::Float3IR to_aim = Sub(player_pos, eye);
+    const float aim_dist2 = Dot(to_aim, to_aim);
+    if (!(aim_dist2 > 0.0F))
+        return true; // the player's centre sits exactly at the eye: seen
+
+    // cos(angle) between the facing and the eye->player-centre direction.
+    const float cos_angle = Dot(to_aim, npc_facing) /
+        (std::sqrt(aim_dist2) * std::sqrt(facing_len2));
+    if (cos_angle < params.cos_half_angle)
+        return false; // outside the vision cone
+
+    // Line of sight along the very segment the cone just accepted. Blocked if
+    // any triangle intersects it.
     return std::ranges::none_of(triangles, [&](const CollisionTriangle& triangle) {
-        return SegmentIntersectsTriangle(eye, target, triangle); // occluded
+        return SegmentIntersectsTriangle(eye, player_pos, triangle); // occluded
     });
 }
 

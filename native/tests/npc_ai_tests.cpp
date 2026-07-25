@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <span>
 #include <string_view>
 
@@ -94,6 +95,79 @@ int main()
         Check(NpcSeesPlayer(npc, facing, Float3IR{.x = 30.0F}, params,
                   std::span<const CollisionTriangle>(blockers)),
             "player in front of the wall (nearer than it) -> still seen");
+    }
+
+    // --- Vision: the cone and the LOS ray share ONE origin (the eye) and one
+    // target (the player's centre). Each case below is chosen so that it would
+    // have come out differently when the cone was judged from the NPC's centre
+    // while the ray ran eye -> player + up*eye_height. ---
+    {
+        const NpcVisionParams params{
+            .range = 200.0F, .cos_half_angle = 0.5F, .eye_height = 8.0F};
+        // Both characters stand on a floor at z = 0. The kinematic controller's
+        // sphere has radius 4, so a grounded centre sits at z = 4 and the top of
+        // the character at z = 8; the NPC's eye is therefore at z = 12.
+        const Float3IR npc{.x = 0.0F, .y = 0.0F, .z = 4.0F};
+        const Float3IR facing{.x = 1.0F, .y = 0.0F, .z = 0.0F};
+        const Float3IR player{.x = 60.0F, .y = 0.0F, .z = 4.0F};
+
+        // A lintel: the wall ABOVE a doorway, filling the plane x = 50 from
+        // z = 10 upward. Everything below z = 10 is the open doorway.
+        const std::array<CollisionTriangle, 1U> lintel{CollisionTriangle{
+            .a = Float3IR{.x = 50.0F, .y = -50.0F, .z = 10.0F},
+            .b = Float3IR{.x = 50.0F, .y = 50.0F, .z = 10.0F},
+            .c = Float3IR{.x = 50.0F, .y = 0.0F, .z = 60.0F}}};
+        // eye (z=12) -> player centre (z=4) crosses x = 50 at z ~= 5.3, under
+        // the lintel. Aiming at player + up*eye_height instead would run the ray
+        // flat at z = 12 -- above the player's own head -- straight into it.
+        Check(NpcSeesPlayer(npc, facing, player, params,
+                  std::span<const CollisionTriangle>(lintel)),
+            "eye->centre sight line passes under a lintel the old eye->raised "
+            "ray flew into -> seen");
+        // The same lintel must still occlude a line that genuinely runs through
+        // it, so the case above is a geometry fix and not a blanket weakening.
+        const Float3IR balcony{.x = 60.0F, .y = 0.0F, .z = 30.0F};
+        Check(!NpcSeesPlayer(npc, facing, balcony, params,
+                  std::span<const CollisionTriangle>(lintel)),
+            "a player up on a balcony is still occluded by the same lintel");
+
+        // Cone origin, downward: judged from the eye a target almost underfoot
+        // is steeply below the eye-line. From the NPC's centre this same target
+        // read as dead ahead (cos = 1). Documented consequence, not an accident.
+        Check(!NpcSeesPlayer(npc, facing, Float3IR{.x = 4.0F, .y = 0.0F, .z = 4.0F},
+                  params, {}),
+            "4 units ahead at the NPC's own height is ~63 deg below the eye-line "
+            "-> outside the 60 deg cone");
+        Check(NpcSeesPlayer(npc, facing, Float3IR{.x = 10.0F, .y = 0.0F, .z = 4.0F},
+                  params, {}),
+            "10 units ahead at the same height is inside the eye cone -> seen");
+
+        // Cone origin, upward: the flip runs both ways. This target is outside a
+        // cone measured from the centre (cos ~= 0.447) and inside one measured
+        // from the higher eye (cos ~= 0.64).
+        Check(NpcSeesPlayer(npc, facing, Float3IR{.x = 10.0F, .y = 0.0F, .z = 24.0F},
+                  params, {}),
+            "target on a ledge above is inside the eye cone (it was outside a "
+            "cone measured from the NPC's centre)");
+
+        // Range stayed centre-to-centre: this player is exactly `range` from the
+        // NPC's centre but 200.16 from its eye, so an eye-measured range would
+        // have rejected it.
+        Check(NpcSeesPlayer(npc, facing, Float3IR{.x = 200.0F, .y = 0.0F, .z = 4.0F},
+                  params, {}),
+            "exactly `range` centre-to-centre is in range (the eye offset grants "
+            "no reach)");
+        Check(!NpcSeesPlayer(npc, facing, Float3IR{.x = 201.0F, .y = 0.0F, .z = 4.0F},
+                  params, {}),
+            "one unit past `range` -> not seen");
+
+        // A non-finite eye leaves no usable sighting origin: fail soft to "cannot
+        // see" like the other non-finite inputs, rather than letting a NaN angle
+        // slip through the cone comparison.
+        const NpcVisionParams broken{.range = 200.0F, .cos_half_angle = 0.5F,
+            .eye_height = std::numeric_limits<float>::infinity()};
+        Check(!NpcSeesPlayer(npc, facing, player, broken, {}),
+            "non-finite eye height -> cannot see");
     }
 
     // --- Awareness transition ---

@@ -57,7 +57,9 @@ struct CharacterControllerParams
     float move_speed = 40.0F;
     // A contact surface is "walkable" (grounds the character, cancelling downward
     // velocity) when its resolve normal dotted with `up` is at least this. ~0.5
-    // is a 60-degree walkable slope limit.
+    // is a 60-degree walkable slope limit. It also gates lifting: only a walkable
+    // contact may raise the character. A steeper face is a blocker -- it pushes
+    // the character out of itself horizontally and never upward.
     float walkable_normal_dot = 0.5F;
     // Sphere-vs-mesh penetration resolve passes per step (multiple contacts).
     std::uint32_t resolve_iterations = 4U;
@@ -82,6 +84,26 @@ struct CharacterControllerParams
 // velocity. Brute-force over all triangles (v1; caller may pre-cull). Non-finite
 // inputs are ignored per-component; the state passes through safely. Pure value
 // math -- no allocation, no retained state.
+//
+// The resolve is deliberately one-directional about height, so that a character
+// standing still stays still: (1) a contact shallower than the internal contact
+// band is treated as touching -- it grounds and slides but moves nothing, and
+// does not keep the iteration loop running; (2) only a walkable contact (see
+// `walkable_normal_dot`) may raise the character, so faces too steep to stand on
+// push it sideways out of themselves and never up; (3) contact may cancel motion
+// into a surface but never reverse it, so the resolve cannot hand the character
+// more upward velocity than it arrived with. Together these make the resting
+// position non-accumulating even where the contact set is over-constrained (a
+// sphere overlapping several faces that cannot all be satisfied at once, which
+// the iteration budget can never clear).
+//
+// What this does NOT model: it is not a solver -- an over-constrained contact
+// set is not resolved, only prevented from extruding the character upward, and
+// the character may keep overlapping such geometry and jitter horizontally
+// inside it. Contacts are resolved in triangle order (Gauss-Seidel), so the
+// final position depends on the order of `triangles`. There is no sweep: a
+// character moving further than its radius in one step can pass through a
+// surface. There is no step-up, ledge-grab, crouch or jump.
 [[nodiscard]] CharacterState StepCharacter(
     CharacterState state, const CharacterInput& input,
     const CharacterControllerParams& params,

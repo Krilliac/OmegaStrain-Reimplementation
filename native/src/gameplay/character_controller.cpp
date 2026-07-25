@@ -55,6 +55,15 @@ using asset::Float3IR;
 {
     return std::isfinite(a.x) && std::isfinite(a.y) && std::isfinite(a.z);
 }
+
+// Contact band in world units. A sphere whose surface is within this of a
+// triangle is touching it, not penetrating it: the resolve records the contact
+// (grounding, sliding) but moves the character nowhere. Without the band every
+// settled character counts as "still colliding" and the resolve loop spends its
+// whole iteration budget on it on every step. This is a project value chosen to
+// sit far below the per-step sink of gravity (radius-relative, ~1e-4 of a body);
+// there is no retail figure for it.
+constexpr float kContactSkin = 1.0e-4F;
 } // namespace
 
 Float3IR ClosestPointOnTriangle(
@@ -147,6 +156,9 @@ CharacterState StepCharacter(
     velocity = Sub(velocity, Scale(up, params.gravity * dt));
 
     Float3IR position = Add(state.position, Scale(velocity, dt));
+    // The along-up velocity entering the resolve, kept for the no-launch clamp
+    // after the loop.
+    const float entry_along_up = Dot(velocity, up);
 
     // Resolve the sphere against the mesh: push out of penetration along the
     // contact normal and remove the into-surface velocity (slide).
@@ -155,7 +167,7 @@ CharacterState StepCharacter(
         params.resolve_iterations > 0U ? params.resolve_iterations : 1U;
     for (std::uint32_t iteration = 0U; iteration < iterations; ++iteration)
     {
-        bool any_contact = false;
+        bool any_penetration = false;
         for (const CollisionTriangle& triangle : triangles)
         {
             const Float3IR closest = ClosestPointOnTriangle(position, triangle);
@@ -171,15 +183,43 @@ CharacterState StepCharacter(
             const Float3IR normal =
                 distance > 1.0e-6F ? Scale(offset, 1.0F / distance) : face_normal;
 
-            position = Add(position, Scale(normal, radius - distance));
+            const bool walkable = Dot(normal, up) >= params.walkable_normal_dot;
+            if (walkable)
+                grounded = true;
             const float into = Dot(velocity, normal);
             if (into < 0.0F)
                 velocity = Sub(velocity, Scale(normal, into));
-            if (Dot(normal, up) >= params.walkable_normal_dot)
-                grounded = true;
-            any_contact = true;
+
+            // Touching, not penetrating: grounded and sliding already recorded
+            // above; move nothing, and do not keep the iteration loop alive for
+            // it.
+            const float depth = radius - distance;
+            if (depth <= kContactSkin)
+                continue;
+
+            Float3IR push = Scale(normal, depth);
+            if (!walkable)
+            {
+                // A face too steep to stand on is a blocker, not a lift: it may
+                // push the character sideways out of itself, never upward. That
+                // is what keeps a stationary character in a tight spot still.
+                // When several near-vertical faces overlap the sphere at once
+                // their constraints cannot all be satisfied, so no iteration
+                // count ever clears them and the fixed-order push cycle repeats
+                // in full on every step; each cycle nets the small upward
+                // component those faces share, so the character is extruded
+                // upward a little every step, without bound, while its
+                // horizontal position only cycles. Requiring a walkable normal
+                // before any lift removes that upward bias -- the residual
+                // cycling is horizontal, and the floor pins the height.
+                const float lift = Dot(push, up);
+                if (lift > 0.0F)
+                    push = Sub(push, Scale(up, lift));
+            }
+            position = Add(position, push);
+            any_penetration = true;
         }
-        if (!any_contact)
+        if (!any_penetration)
             break;
     }
 
@@ -190,6 +230,16 @@ CharacterState StepCharacter(
         if (residual < 0.0F)
             velocity = Sub(velocity, Scale(up, residual));
     }
+    // Contact removes velocity into a surface; it must never reverse it into
+    // velocity out of one. Chaining the per-contact removals above can rotate a
+    // purely downward velocity into an upward one (two contacts whose normals
+    // are not parallel are enough), and the grounded clamp only cancels a
+    // DOWNWARD residual, so that gained upward velocity survives into the next
+    // step through `along_up` and contact keeps feeding a resting character.
+    const float exit_along_up = Dot(velocity, up);
+    const float allowed_along_up = entry_along_up > 0.0F ? entry_along_up : 0.0F;
+    if (exit_along_up > allowed_along_up)
+        velocity = Sub(velocity, Scale(up, exit_along_up - allowed_along_up));
 
     return CharacterState{
         .position = position, .velocity = velocity, .grounded = grounded};

@@ -26,13 +26,16 @@ enum class NpcAwareness : std::uint8_t
 };
 
 // Vision parameters. `range` and the cone half-angle (as its cosine) gate what
-// the NPC can perceive; `eye_height` raises the ray origin along the up-axis so
-// the line-of-sight test isn't buried in the floor.
+// the NPC can perceive; `eye_height` raises the NPC's sighting origin along the
+// up-axis so the tests aren't buried in the floor. BOTH the cone and the
+// line-of-sight ray are taken from that one eye point (see NpcSeesPlayer), so
+// the two gates always agree about where the NPC is looking from. The 8.0 is a
+// PROJECT value -- retail's sensing numbers are undecoded.
 struct NpcVisionParams
 {
     float range = 200.0F;
     float cos_half_angle = 0.5F; // 60-degree half-angle cone
-    float eye_height = 8.0F;     // along the world up-axis (+Z for MINSK)
+    float eye_height = 8.0F;     // above npc_pos, along up (+Z for MINSK)
     asset::Float3IR up{.x = 0.0F, .y = 0.0F, .z = 1.0F};
 
     [[nodiscard]] bool operator==(const NpcVisionParams&) const = default;
@@ -58,12 +61,36 @@ struct NpcPatrolPlan
     const asset::Float3IR& a, const asset::Float3IR& b,
     const CollisionTriangle& t) noexcept;
 
-// [any thread; reentrant] Can the NPC (at `npc_pos`, looking along unit
-// `npc_facing`) currently see the player (at `player_pos`)? True iff the player
-// is within `range`, inside the facing cone (dot(dir_to_player, facing) >=
-// cos_half_angle), AND no `triangles` block the eye->player segment. Non-finite
-// / zero-length facing -> false (cannot see). Brute-force LOS over `triangles`
-// (caller pre-culls). No allocation.
+// [any thread; reentrant] Can the NPC (at `npc_pos`, its CENTRE, looking along
+// unit `npc_facing`) currently see the player (at `player_pos`, the player's
+// centre)? Three gates, applied in order:
+//   1. range -- |player_pos - npc_pos| <= `range`, measured CENTRE to CENTRE;
+//      the eye offset below is a sighting detail and grants no extra reach.
+//   2. cone -- dot(normalize(player_pos - eye), normalize(npc_facing)) >=
+//      `cos_half_angle`, judged FROM THE EYE (npc_pos + up*eye_height), not
+//      from the chest.
+//   3. line of sight -- no triangle in `triangles` intersects the segment
+//      eye -> player_pos, i.e. the exact segment the cone gate just accepted.
+// Gates 2 and 3 deliberately share one origin (the eye) and one target (the
+// player's centre) so the function is geometrically coherent: it can no longer
+// accept an angle measured along one line and then trace occlusion along
+// another. Aiming at the player's CENTRE rather than at player_pos +
+// up*eye_height is a PROJECT decision (retail's sensing model is undecoded):
+// the raised point lies above the player's head -- the kinematic controller's
+// sphere is only radius-tall -- where overhead geometry blocks sight lines a
+// plausible eye-to-torso look clears. One consequence is documented rather
+// than special-cased: at very short range the eye->centre direction tips
+// steeply downward, so a target almost underfoot can fall outside the cone.
+// Non-finite inputs, a zero-length facing, a non-positive `range` or a
+// non-finite eye (non-finite `up`/`eye_height`) -> false (cannot see);
+// coincident centres, or a player centre exactly at the eye, -> true.
+// Brute-force LOS over `triangles` (caller pre-culls). No allocation.
+// What this does NOT model: no peripheral falloff (the cone edge is a hard
+// binary cut, with no confidence ramp toward it); no per-limb or partial
+// visibility (the player is a single point, so cover either blocks the whole
+// sighting or none of it); no lighting, shadow, crouch or other stealth
+// modifiers; no hearing; and no time-to-notice -- awareness ramping is
+// StepNpcAwarenessLoop's job, not this predicate's.
 [[nodiscard]] bool NpcSeesPlayer(
     const asset::Float3IR& npc_pos, const asset::Float3IR& npc_facing,
     const asset::Float3IR& player_pos, const NpcVisionParams& params,

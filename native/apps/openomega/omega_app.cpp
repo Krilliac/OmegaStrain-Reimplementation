@@ -22,6 +22,7 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
@@ -2189,8 +2190,34 @@ OmegaApp::CreateWithTextureConfigAndOpeningMoviePlayback(
                             asset::Float3IR{.x = at.x, .y = at.y - 5.0F, .z = at.z}};
                     npc.waypoint = 1U;
                     npc.facing = asset::Float3IR{.x = 0.0F, .y = -1.0F, .z = 0.0F};
+                    // The sensor range is a PROJECT value. Retail's guard sight
+                    // distance is undecoded -- the AI tuning lives with the
+                    // rest of the unread game data, not in the .SO symbol table
+                    // that grounds the model's shape -- so this number is
+                    // chosen, not recovered.
+                    //
+                    // It is chosen for detection reachability weighed against a
+                    // per-frame cost. This same value is reused below as the
+                    // radius handed to SelectNearbyCollisionTriangles, and that
+                    // cull result is swept twice per guard per frame: once as
+                    // brute-force line-of-sight occluders, and once as the
+                    // movement-collision set fed to StepCharacter. So raising it
+                    // enlarges both, which is why the header default (200.0F) is
+                    // deliberately not used here.
+                    //
+                    // Why 22 stopped working: it was tuned in 90234f0, when the
+                    // only guards were project-placed directly on the player's
+                    // forward corridor. 5ab7a38 replaced them with the scattered
+                    // authentic DATA.POP roster and did not revisit the range,
+                    // after which scripted-walk runs on MINSK observed no
+                    // sighting at all. 60 is the smallest change that restores
+                    // reachability without touching any other gate.
+                    //
+                    // The cost of 60 has NOT been measured -- it is a judgement
+                    // that a ~2.7x radius stays affordable, and it should be
+                    // profiled rather than trusted.
                     npc.vision = gameplay::NpcVisionParams{
-                        .range = 22.0F, .cos_half_angle = 0.5F, .eye_height = 8.0F};
+                        .range = 60.0F, .cos_half_angle = 0.5F, .eye_height = 8.0F};
                     diagnostic_scene_presentation->npcs.push_back(std::move(npc));
                 };
                 // Authentic enemy placement decoded from the level's DATA.POP GOB
@@ -5133,13 +5160,68 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                                         "later slice");
                         }
                     }
+                    // Per-NPC diagnostic. pos/sees/state alone cannot explain a
+                    // missed sighting, so also report the distance to the
+                    // player and WHICH gate rejected it. NpcSeesPlayer applies
+                    // its gates in a fixed order -- finiteness, then range,
+                    // then the facing cone, then line of sight -- and returns
+                    // on the first failure, so the same tests are recomputed
+                    // here, in that order, purely for the log (npc_ai is not
+                    // touched). The LOS outcome is INFERRED rather than re-run:
+                    // if every earlier gate passes and the NPC still does not
+                    // see, the occlusion sweep is the only remaining reason,
+                    // and re-running it would double the brute-force triangle
+                    // cost per NPC per frame.
+                    const float gate_dx =
+                        np.player_state.position.x - npc.state.position.x;
+                    const float gate_dy =
+                        np.player_state.position.y - npc.state.position.y;
+                    const float gate_dz =
+                        np.player_state.position.z - npc.state.position.z;
+                    const float gate_dist2 = gate_dx * gate_dx +
+                        gate_dy * gate_dy + gate_dz * gate_dz;
+                    const float gate_dist = std::sqrt(gate_dist2);
+                    const float gate_facing_len2 =
+                        npc.facing.x * npc.facing.x +
+                        npc.facing.y * npc.facing.y +
+                        npc.facing.z * npc.facing.z;
+                    // cos(angle) between the facing and the direction to the
+                    // player. A coincident player or a degenerate facing has no
+                    // meaningful angle; 1.0 keeps the cone gate from being
+                    // reported as the failure in those cases (they are reported
+                    // by the earlier gates instead).
+                    const float gate_cos =
+                        (gate_dist2 > 0.0F && gate_facing_len2 > 0.0F)
+                            ? (gate_dx * npc.facing.x + gate_dy * npc.facing.y +
+                                  gate_dz * npc.facing.z) /
+                                (gate_dist * std::sqrt(gate_facing_len2))
+                            : 1.0F;
+                    const char *const gate = [&]() -> const char * {
+                        if (sees)
+                            return "-";
+                        if (!std::isfinite(gate_dist2) ||
+                            !std::isfinite(gate_facing_len2))
+                            return "nonfinite";
+                        if (!(gate_facing_len2 > 0.0F))
+                            return "facing";
+                        if (gate_dist2 > npc.vision.range * npc.vision.range)
+                            return "range";
+                        if (gate_cos < npc.vision.cos_half_angle)
+                            return "cone";
+                        return "los";
+                    }();
                     log_->Info("npc",
                         "npc " + std::to_string(npc_index) + " pos=(" +
                             std::to_string(npc.state.position.x) + "," +
                             std::to_string(npc.state.position.y) + "," +
-                            std::to_string(npc.state.position.z) + ") sees=" +
-                            (sees ? "yes" : "no") + " state=" +
-                            state_name(npc.awareness.state));
+                            std::to_string(npc.state.position.z) + ") dist=" +
+                            std::to_string(gate_dist) + " range=" +
+                            std::to_string(npc.vision.range) + " cos=" +
+                            std::to_string(gate_cos) + " cos_min=" +
+                            std::to_string(npc.vision.cos_half_angle) +
+                            " occluders=" + std::to_string(npc_nearby.size()) +
+                            " sees=" + (sees ? "yes" : "no") + " gate=" + gate +
+                            " state=" + state_name(npc.awareness.state));
                 }
             }
 

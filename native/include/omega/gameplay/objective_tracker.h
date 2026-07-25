@@ -106,4 +106,32 @@ enum class ObjectiveError : std::uint8_t
 // complete).
 [[nodiscard]] bool AreObjectivesComplete(
     const MissionData& mission, const ObjectiveState& state) noexcept;
+
+// Mission-level outcome derived from the per-objective statuses. Project-owned
+// and deterministic: this is NOT a recovered retail end-of-mission result. The
+// retail summary bookkeeping (rank/score, agent experience, unlock flags, the
+// debrief screen) is not modelled -- only the win/lose/undecided decision is.
+enum class MissionOutcome : std::uint8_t
+{
+    InProgress,   // no decision yet
+    Succeeded,    // every primary objective Complete
+    Failed,       // at least one primary objective Failed
+};
+
+// [any thread; reentrant] Derives the mission outcome from the objective set.
+// Only ObjectiveKind::Primary objectives decide a mission: a secondary/optional
+// objective in ANY status -- including Failed -- neither blocks success nor
+// fails the mission. Failure dominates: one Failed primary yields Failed even
+// when every other primary is Complete. Succeeded requires at least one primary
+// objective and every primary Complete; a primary still Inactive or Active
+// leaves the mission InProgress. A mission with no primary objectives at all --
+// including an empty objective set, e.g. a level whose objectives failed to
+// load -- is InProgress, never a vacuous Succeeded. Fail-soft: a state whose
+// count does not describe this mission decides nothing and reads InProgress
+// (the same mismatch rejection AreObjectivesComplete applies).
+// Not modelled here: player death, lives/respawn, mission timers, alarm state,
+// abort/extraction, objective scoring, and any HUD/audio reaction -- this is
+// the pure decision only. Allocates nothing; retains no state or references.
+[[nodiscard]] MissionOutcome EvaluateMissionOutcome(
+    const MissionData& mission, const ObjectiveState& state) noexcept;
 } // namespace omega::gameplay
