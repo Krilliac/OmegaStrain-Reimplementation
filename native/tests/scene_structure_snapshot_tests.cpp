@@ -126,5 +126,5 @@ int main()
     Check(!omega::runtime::BuildSceneStructureSnapshot(invalid_reference),
           "an unavailable renderer mesh reference fails closed");
 
-    return failures;
+    return failures == 0 ? 0 : 1;
 }

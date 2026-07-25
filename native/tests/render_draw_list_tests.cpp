@@ -153,9 +153,10 @@ void CheckContractAndErrors()
         RenderSourceRectPixels{0U, 0U, 1U, 1U}, FullTarget(),
         RenderTextureFitMode::Contain, 1U, 1U)));
 
-    Check(omega::runtime::kMaximumRenderTextureBlitsPerFrame == 16U &&
-              omega::runtime::kNormalizedRenderExtent == 65'536U,
-        "draw-list constants are fixed");
+    // The draw-list constants are frozen. Each is asserted separately so drift in
+    // one is diagnosed by name, and at compile time rather than at run time.
+    static_assert(omega::runtime::kMaximumRenderTextureBlitsPerFrame == 16U);
+    static_assert(omega::runtime::kNormalizedRenderExtent == 65'536U);
 
     struct ExpectedError
     {
@@ -192,16 +193,20 @@ void CheckContractAndErrors()
 
 void CheckFramePacketClearColor()
 {
-    const RenderClearColorRgba8 generic_zero;
-    Check(generic_zero ==
-              RenderClearColorRgba8{
-                  .red = 0U,
-                  .green = 0U,
-                  .blue = 0U,
-                  .alpha = 0U,
-              },
-        "generic clear color value defaults to zero");
+    // The generic clear color value defaults to zero. RenderClearColorRgba8 is a
+    // literal type, so this is a compile-time property rather than a run-time one.
+    constexpr RenderClearColorRgba8 generic_zero;
+    static_assert(generic_zero ==
+        RenderClearColorRgba8{
+            .red = 0U,
+            .green = 0U,
+            .blue = 0U,
+            .alpha = 0U,
+        });
 
+    // This one stays a run-time check on purpose: RenderDrawList declares an
+    // out-of-line non-constexpr default constructor, so a RenderFramePacket cannot
+    // be a constant expression and empty() genuinely exercises that constructor.
     const RenderFramePacket defaults;
     Check(defaults.clear_color == omega::runtime::kDefaultRenderClearColor &&
               defaults.draw_list.empty() && defaults.mesh_draw_list.empty(),

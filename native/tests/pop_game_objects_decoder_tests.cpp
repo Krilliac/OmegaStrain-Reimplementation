@@ -162,8 +162,11 @@ int main()
                           a.position.z == 30.0F,
                     "first spawn id/model/position");
                 const auto& b = decoded->npc_spawns[1];
+                // All three components: leaving .y unchecked would let a
+                // dropped or mis-strided second-record Y pass.
                 Check(b.id == 0x0802U && b.model == "minsk_sniper.skl" &&
-                          b.position.x == -5.0F && b.position.z == -7.0F,
+                          b.position.x == -5.0F && b.position.y == -6.0F &&
+                          b.position.z == -7.0F,
                     "second spawn id/model/position");
             }
         }
@@ -221,7 +224,12 @@ int main()
         if (decoded && decoded->nav_nodes.size() == 2U)
         {
             const auto& n0 = decoded->nav_nodes[0];
+            // All three components, as for the NPC spawns above: an x-only
+            // check would let a dropped or mis-strided Y/Z pass. The fixture
+            // writes these literals bit-for-bit and the decoder reads them back
+            // unchanged, so the exact compares hold.
             Check(n0.id == 4777U && n0.position.x == -20.1F &&
+                      n0.position.y == -4.2F && n0.position.z == 0.8F &&
                       n0.links.size() == 3U,
                 "nav node 0 id / position / link count");
             Check(n0.links.size() == 3U && n0.links[0].neighbor == 1U &&
@@ -231,6 +239,13 @@ int main()
             Check(decoded->nav_nodes[1].links.size() == 1U &&
                       decoded->nav_nodes[1].links[0].neighbor == 0U,
                 "nav node 1 single link to node 0");
+            // The second record's own id and position were previously unchecked,
+            // so only its link survived as evidence that the walker strided onto
+            // it correctly.
+            const auto& n1 = decoded->nav_nodes[1];
+            Check(n1.id == 4778U && n1.position.x == 5.0F &&
+                      n1.position.y == 6.0F && n1.position.z == 7.0F,
+                "nav node 1 id / position");
         }
     }
 

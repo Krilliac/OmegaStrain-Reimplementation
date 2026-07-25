@@ -180,10 +180,12 @@ void CheckErrorContract()
                   "packed-24 transfer debug image error is unknown",
         "unknown error values use fixed identity-free fallbacks");
 
+    // The independent synthetic source and output defaults are frozen. Each budget
+    // is asserted separately so drift in one is diagnosed by name, and at compile
+    // time rather than at run time.
     constexpr Packed24TransferDebugImageLimits defaults;
-    Check(defaults.maximum_source_bytes == 48ULL * 1024ULL * 1024ULL &&
-              defaults.maximum_output_bytes == 64ULL * 1024ULL * 1024ULL,
-        "the independent synthetic source and output defaults are frozen");
+    static_assert(defaults.maximum_source_bytes == 48ULL * 1024ULL * 1024ULL);
+    static_assert(defaults.maximum_output_bytes == 64ULL * 1024ULL * 1024ULL);
 }
 
 void CheckValidationPriority()

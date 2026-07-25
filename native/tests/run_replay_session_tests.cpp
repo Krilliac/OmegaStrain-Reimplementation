@@ -726,8 +726,19 @@ void CheckCreatePriorityAndPairRetention()
     constexpr std::array<nanoseconds, 1U> elapsed{milliseconds{5}};
 
     RunCaptureTracePair invalid_source = BuildPair(actions, 1U, elapsed);
+    // The baseline is captured while the pair is still LIVE. Observing the
+    // moved-from source instead would record the fully consumed state, so
+    // "rejection did not consume the pair" would be unfalsifiable against it:
+    // a Create() that swallowed the inert source would still observe as inert.
+    // The falsifiable half of that property is the independently retained
+    // owner, which every rejection below is now checked against - it still
+    // holds the complete live metadata, and the moved-from source is pinned to
+    // the concrete documented inert state rather than to itself.
+    const PairObservation live_observation = ObservePair(invalid_source);
     RunCaptureTracePair retained_owner = std::move(invalid_source);
-    const PairObservation inert_observation = ObservePair(invalid_source);
+    Check(ObservePair(retained_owner) == live_observation &&
+              ObservePair(invalid_source) == PairObservation{},
+        "moving a capture pair transfers its complete metadata and zeroes the source");
 
     RunReplaySessionConfig invalid_scheduler{};
     invalid_scheduler.maximum_entities = 0U;
@@ -736,7 +747,8 @@ void CheckCreatePriorityAndPairRetention()
     CheckError(scheduler_priority, RunReplayOperation::Create,
         RunReplayErrorCode::InvalidSchedulerConfig,
         "scheduler validation precedes capacity and replay validation");
-    Check(ObservePair(invalid_source) == inert_observation,
+    Check(ObservePair(invalid_source) == PairObservation{} &&
+              ObservePair(retained_owner) == live_observation,
         "scheduler rejection leaves observable pair metadata unchanged");
 
     RunReplaySessionConfig invalid_capacity = ValidConfig();
@@ -746,7 +758,8 @@ void CheckCreatePriorityAndPairRetention()
     CheckError(capacity_priority, RunReplayOperation::Create,
         RunReplayErrorCode::InvalidEntityCapacity,
         "capacity validation precedes world creation and replay validation");
-    Check(ObservePair(invalid_source) == inert_observation,
+    Check(ObservePair(invalid_source) == PairObservation{} &&
+              ObservePair(retained_owner) == live_observation,
         "capacity rejection leaves observable pair metadata unchanged");
 
     replay_session_test_allocation::Arm(0U);
@@ -756,7 +769,8 @@ void CheckCreatePriorityAndPairRetention()
     CheckError(world_priority, RunReplayOperation::Create,
         RunReplayErrorCode::SimulationWorldCreateFailed,
         "world creation precedes replay validation");
-    Check(ObservePair(invalid_source) == inert_observation,
+    Check(ObservePair(invalid_source) == PairObservation{} &&
+              ObservePair(retained_owner) == live_observation,
         "world failure leaves observable pair metadata unchanged");
 
     auto replay_failure =
@@ -765,7 +779,8 @@ void CheckCreatePriorityAndPairRetention()
         RunReplayErrorCode::ReplayCreateFailed,
         "replay creation retains its exact nested leaf error",
         RunCaptureReplayErrorCode::InvalidInputTrace);
-    Check(ObservePair(invalid_source) == inert_observation,
+    Check(ObservePair(invalid_source) == PairObservation{} &&
+              ObservePair(retained_owner) == live_observation,
         "replay rejection leaves observable pair metadata unchanged");
     auto retained_created =
         RunReplaySession::Create(std::move(retained_owner), ValidConfig());

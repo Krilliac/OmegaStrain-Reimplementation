@@ -210,10 +210,65 @@ int main()
 
     const auto privacy_code = ScreenshotErrorCodeName(
         ScreenshotErrorCode::UnsafePath);
-    Check(privacy_code == "unsafe-path" &&
-              privacy_code.find(test_root.path().filename().string()) ==
-                  std::string_view::npos,
-        "public screenshot errors remain categorical and path-free");
+    Check(privacy_code == "unsafe-path",
+        "the unsafe-path rejection keeps its pinned categorical name");
+
+    // Compile-time proof that the public failure channel cannot carry text at
+    // all: the error side of the writer's std::expected is the bare one-byte
+    // enum, so no host path can ride out on a message or detail field. There is
+    // no message/detail channel in this API to leak through -- the only text is
+    // the categorical name above -- and these fire if the error type ever grows
+    // a std::string or std::filesystem::path payload. Only the success side
+    // carries a path (ScreenshotWriteResult::path, a private caller-owned
+    // diagnostic that OmegaApp deliberately does not print).
+    static_assert(std::is_same_v<
+        std::remove_cvref_t<decltype(unsafe)>::error_type,
+        ScreenshotErrorCode>);
+    static_assert(std::is_same_v<
+        std::remove_cvref_t<decltype(invalid)>::error_type,
+        ScreenshotErrorCode>);
+    static_assert(std::is_enum_v<ScreenshotErrorCode>);
+    static_assert(sizeof(ScreenshotErrorCode) == 1U);
+
+    // Path-leak guard on the text a real failure actually surfaces. The
+    // rejected directory above genuinely contained the temp-directory name, and
+    // this renders *that* runtime-derived error through the one text channel
+    // callers have -- the same token OmegaApp logs as
+    // "private BMP write failed [<name>]". Asserting the leak check against a
+    // pinned enumerator instead cannot fail: once the name is known to equal a
+    // fixed literal, no substring test on it has anything left to prove.
+    const std::string temp_root_name = test_root.path().filename().string();
+    const std::string temp_root_path = test_root.path().string();
+    Check(!temp_root_name.empty() && !temp_root_path.empty(),
+        "the leak guard has a non-empty rejected-path fragment to search for");
+    if (!unsafe)
+    {
+        const std::string_view surfaced = ScreenshotErrorCodeName(
+            unsafe.error());
+        Check(surfaced.find(temp_root_name) == std::string_view::npos &&
+                  surfaced.find(temp_root_path) == std::string_view::npos,
+            "the surfaced rejection text carries no fragment of the rejected "
+            "host path");
+    }
+
+    // Every public error name -- not just the pinned one above -- must stay a
+    // bare kebab-case category. A later edit that folded any host path fragment
+    // into a name (a separator, a drive colon, a dot-dot, whitespace) fails
+    // here. InternalFailure is the last enumerator, so walking the underlying
+    // values covers every code, including any added later.
+    constexpr unsigned kLastScreenshotErrorCode =
+        static_cast<unsigned>(ScreenshotErrorCode::InternalFailure);
+    for (unsigned raw = 0U; raw <= kLastScreenshotErrorCode; ++raw)
+    {
+        const std::string_view name = ScreenshotErrorCodeName(
+            static_cast<ScreenshotErrorCode>(raw));
+        Check(!name.empty() &&
+                  name.find_first_of("/\\:") == std::string_view::npos &&
+                  name.find("..") == std::string_view::npos &&
+                  name.find_first_not_of("abcdefghijklmnopqrstuvwxyz-") ==
+                      std::string_view::npos,
+            "every public screenshot error name stays a path-free category");
+    }
 
     return failures == 0 ? 0 : 1;
 }

@@ -173,7 +173,9 @@ int main() {
           "callback demand concurrent with the first queue is retained on the "
           "next advance");
 
-    const OpeningMovieAudioClockState started_before_error = started->state;
+    // Non-const on purpose: the paired check below must be able to observe an
+    // unintended mutation of the caller's fixture.
+    OpeningMovieAudioClockState started_before_error = started->state;
     const OpeningMovieAudioClockResult repeated =
         omega::app::StartOpeningMovieAudioClock(started_before_error,
                                                 valid_start_signals);
@@ -185,7 +187,9 @@ int main() {
   OpeningMovieAudioClockStartSignals unchanged_generation = valid_start_signals;
   unchanged_generation.after_queue.session_generation =
       unchanged_generation.before_queue.session_generation;
-  const OpeningMovieAudioClockState default_before_unchanged{};
+  // Non-const on purpose: the paired check below must be able to observe an
+  // unintended mutation of the caller's fixture.
+  OpeningMovieAudioClockState default_before_unchanged{};
   const OpeningMovieAudioClockResult unchanged_generation_result =
       omega::app::StartOpeningMovieAudioClock(default_before_unchanged,
                                               unchanged_generation);
@@ -229,7 +233,10 @@ int main() {
                  OpeningMovieAudioClockError::StartTimelineMovedBackward),
         "the timeline cannot move backward across the first queue operation");
 
-  const OpeningMovieAudioClockState running{
+  // Non-const on purpose: the paired check below must be able to observe an
+  // unintended mutation of the caller's fixture. running_before_errors stays const
+  // so it remains an immutable oracle.
+  OpeningMovieAudioClockState running{
       .started = true,
       .session_generation = 3U,
       .baseline_frames = 1'000U,
@@ -376,7 +383,9 @@ int main() {
         "the 17+47983 partition is exactly equivalent to one-shot conversion");
   }
 
-  const OpeningMovieAudioClockState zero_remainder_overflow_state{
+  // Non-const on purpose: the paired check below must be able to observe an
+  // unintended mutation of the caller's fixture.
+  OpeningMovieAudioClockState zero_remainder_overflow_state{
       .started = true,
       .session_generation = 9U,
   };
@@ -405,7 +414,9 @@ int main() {
         "one frame above the multiplication boundary fails without "
         "caller-state mutation");
 
-  const OpeningMovieAudioClockState remainder_overflow_state{
+  // Non-const on purpose: the paired check below must be able to observe an
+  // unintended mutation of the caller's fixture.
+  OpeningMovieAudioClockState remainder_overflow_state{
       .started = true,
       .session_generation = 10U,
       .nanosecond_remainder = 47'999U,
