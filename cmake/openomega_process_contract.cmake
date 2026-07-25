@@ -562,11 +562,11 @@ run_openomega_case(config_empty_root FALSE ""
     "--config=${empty_root_config}" --frames=0
 )
 run_openomega_case(config_invalid_level FALSE ""
-    "content launch profile [invalid-level-code]: content.level_code must contain 1 to 32 ASCII alphanumeric characters\n"
+    "content launch profile [invalid-level-code]: content.level_code must name one of the known level codes\n"
     "--config=${invalid_level_config}" --frames=0
 )
 run_openomega_case(config_invalid_even_with_direct_cli FALSE ""
-    "content launch profile [invalid-level-code]: content.level_code must contain 1 to 32 ASCII alphanumeric characters\n"
+    "content launch profile [invalid-level-code]: content.level_code must name one of the known level codes\n"
     "--config=${invalid_level_config}" "--data-root=${empty_data_root}" --frames=0
 )
 run_openomega_case(configured_root_reaches_startup FALSE ""

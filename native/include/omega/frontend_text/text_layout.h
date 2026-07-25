@@ -57,6 +57,28 @@ enum class TextEllipsisMode : std::uint8_t {
   LiteralThreeDots,
 };
 
+// Where a laid-out glyph quad's top edge sits relative to its line origin.
+//
+// `LineOrigin` places the glyph cell's top edge exactly on the line origin, so
+// a caller that supplies the font's own cell height as `line_origin_step` and
+// centers vertically reproduces the measured retail placement: across the
+// retail captures the glyph cell is centered in the authored widget rectangle
+// (menu title in a 37.95-unit box, an on-line label in a 19.66-unit box, and a
+// navigation hint in a 30.15-unit box all land within 1.7 canonical units of
+// (rectangle.height - cell_height) / 2, while top- or bottom-aligned models
+// miss by 7 to 13 units).
+//
+// `ObservedByte17Offset` is the earlier, unproven hypothesis that the unnamed
+// FNT header byte 17 is a vertical placement metric; it subtracts that byte
+// from the line origin (see FntV3IR::ApplyObservedByte17VerticalPlacement).
+// It is retained because the typographic meaning of byte 17 is still unproven
+// and no measurement has ruled the byte out as *some* metric -- only as this
+// placement rule.
+enum class GlyphVerticalOrigin : std::uint8_t {
+  LineOrigin,
+  ObservedByte17Offset,
+};
+
 // Optional pair adjustments are supplied independently of FntV3IR because the
 // complete retail pair-table serialization is not yet proven. The value is an
 // advance delta in canonical GUI units and may be positive or negative.
@@ -92,6 +114,16 @@ struct TextLayoutOptions {
   TextEllipsisMode ellipsis_mode;
   std::span<const SignedPairAdjustment> pair_adjustments;
   TextLayoutLimits limits;
+
+  // Constant inter-glyph tracking in canonical GUI units, added to the advance
+  // of every RENDERED glyph (never to a space, which keeps the FNT's own space
+  // byte). The atlas UV span alone is not the retail advance: measured against
+  // the retail captures the per-glyph advance exceeds the UV span by a constant
+  // that does not scale with glyph width or font size. Defaults to zero so a
+  // caller must opt in to a value it can justify; the retail front end passes
+  // its measured constant.
+  float glyph_tracking = 0.0F;
+  GlyphVerticalOrigin vertical_origin = GlyphVerticalOrigin::LineOrigin;
 };
 
 struct TextGlyphQuad {

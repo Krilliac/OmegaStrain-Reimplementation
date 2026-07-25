@@ -1,5 +1,7 @@
 #include "omega/runtime/runtime_settings.h"
 
+#include "omega/content/retail_level_table.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -36,7 +38,7 @@ constexpr std::string_view kMissingDataRootMessage =
 constexpr std::string_view kInvalidDataRootMessage =
     "content.data_root must be a non-empty valid path";
 constexpr std::string_view kInvalidLevelCodeMessage =
-    "content.level_code must contain 1 to 32 ASCII alphanumeric characters";
+    "content.level_code must name one of the known level codes";
 constexpr std::string_view kInvalidOpeningMovieMemberMessage =
     "content.opening_movie_member must be a non-empty bounded value";
 constexpr std::string_view kInvalidOptionsMessage =
@@ -73,22 +75,16 @@ constexpr std::string_view kDefaultProfileResolutionError =
     return ContentLaunchProfileError{.code = code, .message = std::string(message)};
 }
 
+// A level code is accepted only when it names an entry of the decoded reference
+// level table. This deliberately replaces the previous "any 1 to 32 ASCII
+// alphanumeric bytes" rule, which accepted a typo and then used it verbatim as
+// a directory name, so the failure surfaced late and unhelpfully inside I/O.
+// The membership check is allocation-free and ASCII case-insensitive, so it is
+// applied before normalization. There is no escape hatch for synthetic codes:
+// anything the shipping runtime would reject must also be rejected in tests.
 [[nodiscard]] bool IsValidContentLevelCode(const std::string_view value) noexcept
 {
-    if (value.empty() || value.size() > 32U)
-        return false;
-    for (const unsigned char character : value)
-    {
-        const bool upper = character >= static_cast<unsigned char>('A') &&
-                           character <= static_cast<unsigned char>('Z');
-        const bool lower = character >= static_cast<unsigned char>('a') &&
-                           character <= static_cast<unsigned char>('z');
-        const bool digit = character >= static_cast<unsigned char>('0') &&
-                           character <= static_cast<unsigned char>('9');
-        if (!upper && !lower && !digit)
-            return false;
-    }
-    return true;
+    return content::IsRetailLevelCode(value);
 }
 
 [[nodiscard]] std::string NormalizeContentLevelCode(const std::string_view value)

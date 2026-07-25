@@ -117,18 +117,33 @@ ValidVerticalAlignment(const VerticalTextAlignment alignment) noexcept {
   return false;
 }
 
+[[nodiscard]] bool
+ValidVerticalOrigin(const GlyphVerticalOrigin origin) noexcept {
+  switch (origin) {
+  case GlyphVerticalOrigin::LineOrigin:
+  case GlyphVerticalOrigin::ObservedByte17Offset:
+    return true;
+  }
+  return false;
+}
+
+// A space advances by the FNT's own space byte and is never tracked: in the
+// retail captures a glyph-then-space pair advances by exactly one tracking
+// step, not two, so the constant belongs to the rendered glyph.
 [[nodiscard]] std::expected<float, TextLayoutError>
 AdvanceFor(const retail::FntV3IR &font, const char32_t codepoint,
-           const float atlas_width,
+           const float atlas_width, const float glyph_tracking,
            const std::optional<std::size_t> input_index) noexcept {
   const auto advance = font.AdvanceForCodepoint(
       static_cast<std::uint32_t>(codepoint), atlas_width);
   if (!advance)
     return std::unexpected(
         Error(TextLayoutErrorCode::UnsupportedCodepoint, input_index));
-  if (!std::isfinite(*advance))
+  const float tracked =
+      codepoint == U' ' ? *advance : *advance + glyph_tracking;
+  if (!std::isfinite(tracked))
     return std::unexpected(Error(TextLayoutErrorCode::Overflow, input_index));
-  return *advance;
+  return tracked;
 }
 
 [[nodiscard]] float
@@ -146,7 +161,7 @@ FindPairAdjustment(const std::vector<PairLookupEntry> &pairs,
 
 [[nodiscard]] std::expected<float, TextLayoutError>
 MeasureItems(const retail::FntV3IR &font, const std::span<const TextItem> items,
-             const float atlas_width,
+             const float atlas_width, const float glyph_tracking,
              const std::vector<PairLookupEntry> &pairs) noexcept {
   float advance = 0.0F;
   for (std::size_t index = 0; index < items.size(); ++index) {
@@ -158,8 +173,9 @@ MeasureItems(const retail::FntV3IR &font, const std::span<const TextItem> items,
         return std::unexpected(
             Error(TextLayoutErrorCode::Overflow, items[index].source_index));
     }
-    const auto item_advance = AdvanceFor(
-        font, items[index].codepoint, atlas_width, items[index].source_index);
+    const auto item_advance =
+        AdvanceFor(font, items[index].codepoint, atlas_width, glyph_tracking,
+                   items[index].source_index);
     if (!item_advance)
       return std::unexpected(item_advance.error());
     if (!AddFinite(advance, *item_advance, advance))

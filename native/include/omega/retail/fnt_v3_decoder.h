@@ -42,6 +42,13 @@ struct FntV3IR {
   [[nodiscard]] std::optional<float>
   AdvanceForCodepoint(std::uint32_t codepoint,
                       float atlas_width) const noexcept;
+  // Every glyph record of a v3 font stores the same vertical span: measured
+  // over all 177 records of each shipped retail font, CALLOUT/DEFAULT/LARGEFNT
+  // give exactly 17/19/27 texels of their own atlas with no outlier. This
+  // returns that shared row height in atlas texels, or nullopt when the font
+  // carries no glyph records or the records disagree.
+  [[nodiscard]] std::optional<float>
+  LineCellHeight(float atlas_height) const noexcept;
   [[nodiscard]] float
   ApplyObservedByte17VerticalPlacement(float source_y) const noexcept;
 

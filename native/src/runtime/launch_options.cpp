@@ -1,9 +1,11 @@
 #include "omega/runtime/launch_options.h"
 
+#include "omega/content/retail_level_table.h"
 #include "omega/runtime/run_capture_session.h"
 
 #include <algorithm>
 #include <charconv>
+#include <string>
 #include <limits>
 #include <system_error>
 #include <utility>
@@ -37,24 +39,6 @@ static_assert(kMaximumRunCaptureSessionFrames <=
     while (!value.empty() && (value.back() == ' ' || value.back() == '\t'))
         value.remove_suffix(1U);
     return value;
-}
-
-[[nodiscard]] bool IsSafeLevelCode(const std::string_view value) noexcept
-{
-    if (value.empty() || value.size() > 32U)
-        return false;
-    for (const unsigned char character : value)
-    {
-        const bool upper = character >= static_cast<unsigned char>('A') &&
-                           character <= static_cast<unsigned char>('Z');
-        const bool lower = character >= static_cast<unsigned char>('a') &&
-                           character <= static_cast<unsigned char>('z');
-        const bool digit = character >= static_cast<unsigned char>('0') &&
-                           character <= static_cast<unsigned char>('9');
-        if (!upper && !lower && !digit)
-            return false;
-    }
-    return true;
 }
 
 [[nodiscard]] bool IsSafeDiagnosticOptionName(
@@ -163,19 +147,15 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
                 return std::unexpected("--level may be specified only once");
             saw_level = true;
             const std::string_view value = argument.substr(kLevelPrefix.size());
-            if (!IsSafeLevelCode(value))
-                return std::unexpected(
-                    "--level requires 1 to 32 ASCII letters or digits");
-            std::string normalized;
-            normalized.reserve(value.size());
-            for (const unsigned char character : value)
-            {
-                const bool lower = character >= static_cast<unsigned char>('a') &&
-                                   character <= static_cast<unsigned char>('z');
-                normalized.push_back(
-                    static_cast<char>(lower ? character - ('a' - 'A') : character));
-            }
-            result.level_code = std::move(normalized);
+            // Reject an unknown level here, at the earliest boundary, rather
+            // than letting a typo reach content I/O and fail late as a missing
+            // directory. The diagnostic deliberately does not echo the input.
+            const auto level_index = content::FindRetailLevelIndex(value);
+            if (!level_index)
+                return std::unexpected("--level requires a known level code");
+            // The table entry is the canonical uppercase spelling, so matching
+            // it is what normalizes the caller's case.
+            result.level_code = std::string(content::RetailLevelCodeAt(*level_index));
             continue;
         }
         if (argument.starts_with(kOpeningMoviePrefix))

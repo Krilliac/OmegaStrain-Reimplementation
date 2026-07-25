@@ -286,6 +286,19 @@ FntV3IR::AdvanceForCodepoint(const std::uint32_t codepoint,
   return std::isfinite(width) ? std::optional<float>{width} : std::nullopt;
 }
 
+std::optional<float>
+FntV3IR::LineCellHeight(const float atlas_height) const noexcept {
+  if (glyphs.empty() || !std::isfinite(atlas_height) || atlas_height < 0.0F)
+    return std::nullopt;
+  const float span = glyphs.front().v_bottom - glyphs.front().v_top;
+  for (const FntV3GlyphIR &glyph : glyphs) {
+    if (glyph.v_bottom - glyph.v_top != span)
+      return std::nullopt;
+  }
+  const float height = atlas_height * span;
+  return std::isfinite(height) ? std::optional<float>{height} : std::nullopt;
+}
+
 float FntV3IR::ApplyObservedByte17VerticalPlacement(
     const float source_y) const noexcept {
   return source_y - static_cast<float>(raw_byte_17);

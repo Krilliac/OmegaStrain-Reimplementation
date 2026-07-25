@@ -869,8 +869,11 @@ makes malformed configured content fatal even when direct CLI would otherwise wi
 The resolver returns `expected<optional<ContentLaunchProfile>, ContentLaunchProfileError>`. Neither
 configured content key means no configured profile. A configured level without a root is
 `missing-data-root`; an empty root or exception while converting its opaque bytes to a native
-`filesystem::path` is `invalid-data-root`. A configured level must be 1 to 32 ASCII alphanumeric
-bytes and is copied uppercase, otherwise it is `invalid-level-code`. Once configuration is valid, a
+`filesystem::path` is `invalid-data-root`. A configured level must name one of the eighteen entries
+decoded from the reference level-name table (`analysis/elf/level-name-table.md`, E-0129); it is
+matched without ASCII case sensitivity and copied in the table's uppercase spelling, otherwise it is
+`invalid-level-code`. This supersedes the earlier E-0074 rule that accepted any 1-to-32-byte ASCII
+alphanumeric string, which let a mistyped level reach content I/O before failing. Once configuration is valid, a
 direct root and its optional direct level replace that whole tuple; the configured level is never
 inherited. Programmatically inconsistent direct options return defensive `invalid-options`.
 Diagnostics are fixed, sanitized strings and do not include path or invalid level bytes.
