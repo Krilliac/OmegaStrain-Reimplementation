@@ -30,3 +30,10 @@ __pycache__/
 
 # Third-party source/build trees are managed separately.
 /third_party/
+
+# Agent scratch: nested worktrees checked out under .claude are working copies,
+# not project sources.
+/.claude/worktrees/
+# JetBrains ReSharper / Visual Studio inspection exports (large, regenerable).
+/issues.xml
+*.DotSettings.user

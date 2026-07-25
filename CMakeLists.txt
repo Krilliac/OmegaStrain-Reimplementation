@@ -115,6 +115,7 @@ add_library(omega_gameplay STATIC
     native/src/gameplay/mission_trigger.cpp
     native/src/gameplay/character_controller.cpp
     native/src/gameplay/npc_ai.cpp
+    native/src/gameplay/combat.cpp
 )
 target_include_directories(omega_gameplay PUBLIC native/include)
 target_link_libraries(omega_gameplay PUBLIC omega_simulation)
@@ -2208,6 +2209,20 @@ if(BUILD_TESTING)
             -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
     endif()
     add_test(NAME omega_npc_ai_tests COMMAND omega_npc_ai_tests)
+
+    add_executable(omega_combat_tests
+        native/tests/combat_tests.cpp
+    )
+    target_link_libraries(omega_combat_tests PRIVATE omega_gameplay)
+    if(MSVC)
+        target_compile_options(omega_combat_tests PRIVATE
+            /W4 /WX /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8)
+    else()
+        target_compile_options(omega_combat_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
+    endif()
+    add_test(NAME omega_combat_tests COMMAND omega_combat_tests)
+    set_tests_properties(omega_combat_tests PROPERTIES TIMEOUT 5)
     set_tests_properties(omega_npc_ai_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_mission_trigger_tests
