@@ -102,6 +102,59 @@ template <typename Predicate>
     return false;
 }
 
+// Exercises multiple in-flight color uploads without an intermediate idle
+// barrier. Alternating lists makes stale/corrupt transfer reuse observable to
+// backend validation while keeping the production counters deterministic.
+[[nodiscard]] bool RenderAlternatingMeshBurst(omega::app::SdlGpuHost& host,
+    omega::runtime::RenderFramePacket& packet,
+    const omega::runtime::RenderMeshDrawList& first,
+    const omega::runtime::RenderMeshDrawList& second)
+{
+    constexpr std::uint64_t required_mesh_frames = 64U;
+    constexpr std::uint32_t maximum_attempts = 512U;
+    const auto deadline = Clock::now() + std::chrono::seconds(5);
+    const omega::app::GpuHostSnapshot before = host.Snapshot();
+    std::uint64_t observed_mesh_frames = 0U;
+
+    for (std::uint32_t attempt = 0U;
+         attempt < maximum_attempts && Clock::now() < deadline &&
+         observed_mesh_frames < required_mesh_frames;
+         ++attempt)
+    {
+        packet.mesh_draw_list =
+            (observed_mesh_frames & 1U) == 0U ? first : second;
+        SDL_PumpEvents();
+        auto rendered = host.RenderFrame(packet);
+        if (!rendered)
+        {
+            std::cerr << "omega_sdl_gpu_mesh_smoke: mesh transfer reuse burst failed: "
+                      << rendered.error() << '\n';
+            return false;
+        }
+        ++packet.rendered_frame_index;
+        const omega::app::GpuHostSnapshot current = host.Snapshot();
+        if (current.mesh_submissions < before.mesh_submissions ||
+            current.mesh_submissions - before.mesh_submissions >
+                required_mesh_frames)
+        {
+            std::cerr << "omega_sdl_gpu_mesh_smoke: mesh transfer reuse counters escaped their bound\n";
+            return false;
+        }
+        observed_mesh_frames =
+            current.mesh_submissions - before.mesh_submissions;
+    }
+
+    const omega::app::GpuHostSnapshot after = host.Snapshot();
+    if (observed_mesh_frames != required_mesh_frames ||
+        after.successful_mesh_draws !=
+            before.successful_mesh_draws + required_mesh_frames)
+    {
+        std::cerr << "omega_sdl_gpu_mesh_smoke: mesh transfer reuse burst did not submit its exact draw count\n";
+        return false;
+    }
+    return true;
+}
+
 // Which texel of the 2x2 checker (each quadrant a solid 4x4 block of an 8x8 texture) a readback
 // pixel came from. The textured pixel shader multiplies the sampled albedo by a uniform key-light
 // term, so absolute levels are not fixed; the CHANNEL STRUCTURE identifies the texel that was read.
@@ -814,6 +867,12 @@ int main()
         return 1;
     }
 
+    if (!RenderAlternatingMeshBurst(
+            host, packet, *fill_draw_list, *wireframe_draw_list))
+    {
+        return 1;
+    }
+
     auto released = host.ReleaseRenderMesh(*uploaded);
     if (!released)
         return Fail("mesh release failed", released.error());
@@ -849,10 +908,10 @@ int main()
     const omega::app::GpuHostSnapshot final = host.Snapshot();
     if (final.successful_mesh_uploads != 2U ||
         final.successful_mesh_upload_logical_bytes != 144U ||
-        final.successful_mesh_releases != 2U || final.mesh_submissions != 2U ||
-        final.successful_mesh_draws != 2U ||
+        final.successful_mesh_releases != 2U || final.mesh_submissions != 66U ||
+        final.successful_mesh_draws != 66U ||
         final.rejected_nondefault_mesh_handles != 1U ||
-        final.frame_submissions != 2U + final.unavailable_swapchain_submissions ||
+        final.frame_submissions != 66U + final.unavailable_swapchain_submissions ||
         final.successful_uploads != 1U ||
         final.successful_upload_logical_bytes != 4U ||
         final.successful_releases != 1U || !TexturePoolIsEmpty(final.textures) ||

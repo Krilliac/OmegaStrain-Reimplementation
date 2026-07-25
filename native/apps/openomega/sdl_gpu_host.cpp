@@ -298,6 +298,8 @@ public:
         transfer_ = transfer;
     }
 
+    void Dismiss() noexcept { transfer_ = nullptr; }
+
 private:
     SDL_GPUDevice* device_ = nullptr;
     SDL_GPUTransferBuffer* transfer_ = nullptr;
@@ -983,6 +985,11 @@ struct SdlGpuHost::Impl
                 SDL_ReleaseGPUBuffer(device, mesh_color_buffer);
                 mesh_color_buffer = nullptr;
             }
+            if (mesh_color_transfer != nullptr)
+            {
+                SDL_ReleaseGPUTransferBuffer(device, mesh_color_transfer);
+                mesh_color_transfer = nullptr;
+            }
             if (mesh_fill_pipeline != nullptr)
             {
                 SDL_ReleaseGPUGraphicsPipeline(device, mesh_fill_pipeline);
@@ -1038,6 +1045,7 @@ struct SdlGpuHost::Impl
     SDL_Window* window = nullptr;
     SDL_GPUDevice* device = nullptr;
     SDL_GPUBuffer* mesh_color_buffer = nullptr;
+    SDL_GPUTransferBuffer* mesh_color_transfer = nullptr;
     SDL_GPUGraphicsPipeline* mesh_fill_pipeline = nullptr;
     SDL_GPUGraphicsPipeline* mesh_wireframe_pipeline = nullptr;
     // Textured fill variant + its sampler. Null when the backend has no DXIL
@@ -1075,6 +1083,10 @@ struct SdlGpuHost::Impl
     std::uint64_t mesh_submissions = 0U;
     std::uint64_t successful_mesh_draws = 0U;
     std::uint64_t rejected_nondefault_mesh_handles = 0U;
+    // RenderFrame is main-thread-only. Retaining this bounded error storage
+    // removes one reserve/free pair from every successful warmed frame; an error
+    // moves the message to the caller and the next frame replenishes the scratch.
+    std::string render_frame_error_scratch;
 
     // Resolves an optional mesh-draw albedo texture handle to its backend
     // texture. Fail-soft: a default/invalid handle or any pool/slot miss returns
@@ -1094,7 +1106,8 @@ struct SdlGpuHost::Impl
     }
 
     [[nodiscard]] std::expected<void, std::string> EnsureMeshPipelines(
-        SDL_GPUTextureFormat target_format, bool need_fill, bool need_wireframe);
+        SDL_GPUTextureFormat target_format, bool need_fill, bool need_wireframe,
+        bool need_color_transfer);
 
     // Makes mesh_depth_texture exactly width x height, recreating it when the
     // extent changed, and hands the result back through depth_texture.
@@ -1151,7 +1164,7 @@ bool SdlGpuHost::Impl::EnsureMeshDepthTexture(const std::uint32_t width,
 
 std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
     const SDL_GPUTextureFormat target_format, const bool need_fill,
-    const bool need_wireframe)
+    const bool need_wireframe, const bool need_color_transfer)
 {
     if (target_format == SDL_GPU_TEXTUREFORMAT_INVALID)
         return std::unexpected("render mesh target format is invalid");
@@ -1161,15 +1174,19 @@ std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
     const bool create_wireframe =
         need_wireframe && (!same_format || mesh_wireframe_pipeline == nullptr);
     const bool create_color_buffer = mesh_color_buffer == nullptr;
-    if (!create_fill && !create_wireframe && !create_color_buffer)
+    const bool create_color_transfer =
+        need_color_transfer && mesh_color_transfer == nullptr;
+    if (!create_fill && !create_wireframe && !create_color_buffer &&
+        !create_color_transfer)
         return {};
+
+    constexpr std::size_t color_buffer_bytes =
+        runtime::kMaximumRenderMeshDrawsPerFrame * sizeof(MeshColorRgbF);
+    static_assert(color_buffer_bytes <= std::numeric_limits<std::uint32_t>::max());
 
     SDL_GPUBuffer* new_color_buffer = nullptr;
     if (create_color_buffer)
     {
-        constexpr std::size_t color_buffer_bytes =
-            runtime::kMaximumRenderMeshDrawsPerFrame * sizeof(MeshColorRgbF);
-        static_assert(color_buffer_bytes <= std::numeric_limits<std::uint32_t>::max());
         const SDL_GPUBufferCreateInfo color_buffer_info{
             .usage = SDL_GPU_BUFFERUSAGE_VERTEX,
             .size = static_cast<std::uint32_t>(color_buffer_bytes),
@@ -1180,6 +1197,23 @@ std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
             return std::unexpected(SdlError("render mesh color buffer create"));
     }
     BufferGuard color_guard(device, new_color_buffer);
+
+    SDL_GPUTransferBuffer* new_color_transfer = nullptr;
+    if (create_color_transfer)
+    {
+        const SDL_GPUTransferBufferCreateInfo transfer_info{
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            .size = static_cast<std::uint32_t>(color_buffer_bytes),
+            .props = 0,
+        };
+        new_color_transfer = SDL_CreateGPUTransferBuffer(device, &transfer_info);
+        if (new_color_transfer == nullptr)
+        {
+            return std::unexpected(
+                SdlError("render mesh color transfer-buffer create"));
+        }
+    }
+    TransferBufferGuard color_transfer_guard(device, new_color_transfer);
 
     SDL_GPUGraphicsPipeline* new_fill = nullptr;
     SDL_GPUGraphicsPipeline* new_wireframe = nullptr;
@@ -1289,6 +1323,11 @@ std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
     {
         mesh_color_buffer = new_color_buffer;
         color_guard.Dismiss();
+    }
+    if (new_color_transfer != nullptr)
+    {
+        mesh_color_transfer = new_color_transfer;
+        color_transfer_guard.Dismiss();
     }
     return {};
 }
@@ -2451,7 +2490,8 @@ SdlGpuHost::ReadbackFrameRgba8(const runtime::RenderFramePacket& packet,
         if (!mesh_draws.empty())
         {
             auto pipelines =
-                impl_->EnsureMeshPipelines(format, need_fill, need_wireframe);
+                impl_->EnsureMeshPipelines(
+                    format, need_fill, need_wireframe, false);
             if (!pipelines)
                 return std::unexpected(std::move(pipelines.error()));
             // The readback target extent is known here, before acquisition, so
@@ -2790,41 +2830,26 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
                 return std::unexpected("render frame texture filter mode is invalid");
         }
 
-        SDL_GPUTransferBuffer* mesh_color_transfer = nullptr;
-        TransferBufferGuard mesh_color_transfer_guard(impl_->device, nullptr);
         if (!mesh_draws.empty())
         {
             const SDL_GPUTextureFormat target_format =
                 SDL_GetGPUSwapchainTextureFormat(impl_->device, impl_->window);
             auto pipelines = impl_->EnsureMeshPipelines(
-                target_format, need_fill_pipeline, need_wireframe_pipeline);
+                target_format, need_fill_pipeline, need_wireframe_pipeline, true);
             if (!pipelines)
                 return pipelines;
 
             const std::size_t color_bytes = mesh_draws.size() * sizeof(MeshColorRgbF);
-            const SDL_GPUTransferBufferCreateInfo transfer_info{
-                .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-                .size = static_cast<std::uint32_t>(color_bytes),
-                .props = 0,
-            };
-            mesh_color_transfer =
-                SDL_CreateGPUTransferBuffer(impl_->device, &transfer_info);
-            if (mesh_color_transfer == nullptr)
-            {
-                return std::unexpected(
-                    SdlError("render frame mesh color transfer-buffer create"));
-            }
-            mesh_color_transfer_guard.Reset(mesh_color_transfer);
-
-            void* mapped =
-                SDL_MapGPUTransferBuffer(impl_->device, mesh_color_transfer, false);
+            void* mapped = SDL_MapGPUTransferBuffer(
+                impl_->device, impl_->mesh_color_transfer, true);
             if (mapped == nullptr)
             {
                 return std::unexpected(
                     SdlError("render frame mesh color transfer-buffer map"));
             }
             std::memcpy(mapped, mesh_colors.data(), color_bytes);
-            SDL_UnmapGPUTransferBuffer(impl_->device, mesh_color_transfer);
+            SDL_UnmapGPUTransferBuffer(
+                impl_->device, impl_->mesh_color_transfer);
         }
 
         // Convert the project-owned packet value before acquiring GPU work. The
@@ -2833,7 +2858,8 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
 
         // Reserve all error storage before acquiring the command buffer. The active command
         // path below uses only fixed-capacity values and bounded writes into this existing buffer.
-        std::string post_acquire_error;
+        std::string& post_acquire_error = impl_->render_frame_error_scratch;
+        post_acquire_error.clear();
         post_acquire_error.reserve(kPostAcquireErrorCapacity);
 
         SDL_GPUCommandBuffer* gpu_commands = SDL_AcquireGPUCommandBuffer(impl_->device);
@@ -2906,7 +2932,7 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
             {
                 const std::uint32_t color_bytes = static_cast<std::uint32_t>(
                     mesh_draws.size() * sizeof(MeshColorRgbF));
-                if (!RecordMeshColorUpload(gpu_commands, mesh_color_transfer,
+                if (!RecordMeshColorUpload(gpu_commands, impl_->mesh_color_transfer,
                         impl_->mesh_color_buffer, color_bytes))
                 {
                     SetSdlErrorBounded(post_acquire_error,
