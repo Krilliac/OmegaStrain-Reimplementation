@@ -120,7 +120,7 @@ struct FrontEndRoute final
     return true;
 }
 
-enum class OpeningMovieArchiveState
+enum class OpeningMovieArchiveState : std::uint8_t
 {
     Missing,
     Unavailable,

@@ -71,9 +71,7 @@ struct DecodedMember
 
 [[nodiscard]] bool HasSuffix(const std::string& normalized_path, const std::string_view suffix)
 {
-    return normalized_path.size() >= suffix.size() &&
-           normalized_path.compare(
-               normalized_path.size() - suffix.size(), suffix.size(), suffix) == 0;
+    return normalized_path.ends_with(suffix);
 }
 
 [[nodiscard]] std::optional<ModelMemberKind> ClassifySuffix(const std::string& normalized_path)

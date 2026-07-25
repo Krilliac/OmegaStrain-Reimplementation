@@ -45,11 +45,10 @@ constexpr std::array<std::string_view, 16> kContainerFactories{
 
 [[nodiscard]] constexpr bool IsContainerFactory(
     const std::string_view factory) noexcept {
-  for (const std::string_view container : kContainerFactories) {
-    if (factory == container)
-      return true;
-  }
-  return false;
+  return std::ranges::any_of(kContainerFactories,
+                             [factory](const std::string_view container) {
+                               return factory == container;
+                             });
 }
 constexpr std::string_view kVertexTrack = "VERTEX";
 constexpr std::string_view kOpacityTrack = "OPACITY";

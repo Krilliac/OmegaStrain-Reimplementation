@@ -60,8 +60,7 @@ std::expected<Rgba8VideoFrame, std::string> ConvertNv12ToRgba8(
     std::uint64_t output_bytes = 0U;
     if (!Multiply(frame.width, frame.height, pixel_count) ||
         !Multiply(pixel_count, 4U, output_bytes) || output_bytes > maximum_output_bytes ||
-        output_bytes > kMaximumNv12Rgba8OutputBytes ||
-        output_bytes > std::numeric_limits<std::size_t>::max())
+        output_bytes > kMaximumNv12Rgba8OutputBytes)
     {
         return std::unexpected("NV12 RGBA8 output exceeds the byte limit");
     }

@@ -6,7 +6,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <new>
 #include <optional>
 #include <span>
@@ -299,9 +298,9 @@ DecodeMetadata(const SaveRecord &record) {
   }
 
   const std::uint32_t name_bytes = LoadU32(bytes, 12U);
+  // The kCharacterDisplayNameMaxBytes cap is tested first, so name_bytes is far
+  // too small for the header addition that follows it to overflow std::size_t.
   if (name_bytes == 0U || name_bytes > kCharacterDisplayNameMaxBytes ||
-      name_bytes > std::numeric_limits<std::size_t>::max() -
-                       kEncodedMetadataHeaderBytes ||
       record.value.size() != kEncodedMetadataHeaderBytes + name_bytes) {
     return std::unexpected(
         MakeError(CharacterCatalogErrorCode::CorruptMetadata,

@@ -1,5 +1,6 @@
 #include "omega/asset/model_ir_validate.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -54,12 +55,8 @@ struct Usage
 
 [[nodiscard]] bool IsFiniteMatrix(const Matrix4x4IR& matrix) noexcept
 {
-    for (const float value : matrix.row_major)
-    {
-        if (!std::isfinite(value))
-            return false;
-    }
-    return true;
+    return std::ranges::all_of(
+        matrix.row_major, [](const float value) { return std::isfinite(value); });
 }
 
 [[nodiscard]] ModelIrResult<void> CheckUsage(

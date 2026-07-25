@@ -157,7 +157,7 @@ struct ActivationArray {
       if (values[index] != nullptr)
         values[index]->Release();
     }
-    CoTaskMemFree(values);
+    CoTaskMemFree(static_cast<void *>(values));
   }
 };
 
@@ -446,14 +446,11 @@ public:
             ? *observed_duration
             : static_cast<std::int64_t>(cadence_duration);
 
-    std::int64_t timestamp = 0;
-    if (!previous_end_) {
-      timestamp = observed_timestamp.value_or(0);
-    } else if (observed_timestamp && *observed_timestamp > *previous_end_) {
-      timestamp = *observed_timestamp;
-    } else {
-      timestamp = *previous_end_;
-    }
+    const std::int64_t timestamp =
+        !previous_end_ ? observed_timestamp.value_or(0)
+        : observed_timestamp && *observed_timestamp > *previous_end_
+            ? *observed_timestamp
+            : *previous_end_;
     if (timestamp <= std::numeric_limits<std::int64_t>::max() - duration)
       previous_end_ = timestamp + duration;
     else
@@ -522,8 +519,7 @@ CopyNv12Frame(IMFSample &sample, const OutputFormat &format,
   const std::uint64_t frame_bytes = luma_bytes + luma_bytes / 2U;
   if (frame_bytes == 0U ||
       frame_bytes > kMediaFoundationH262MaximumFrameBytes ||
-      frame_bytes > std::numeric_limits<DWORD>::max() ||
-      frame_bytes > std::numeric_limits<std::size_t>::max()) {
+      frame_bytes > std::numeric_limits<DWORD>::max()) {
     return std::unexpected(MakeError(ErrorCode::UnsupportedOutputLayout, 0,
                                      "decoded NV12 frame size is unsupported"));
   }
@@ -654,6 +650,10 @@ struct MediaFoundationH262Decoder::Impl {
 
   Impl(const Impl &) = delete;
   Impl &operator=(const Impl &) = delete;
+  // The COM/MF teardown in ~Impl is bound to the creating thread, so the
+  // instance is pinned in place and only ever owned through a unique_ptr.
+  Impl(Impl &&) = delete;
+  Impl &operator=(Impl &&) = delete;
 
   [[nodiscard]] bool IsCurrentThread() const noexcept {
     return detail::MediaFoundationH262LifetimeThreadMatches(

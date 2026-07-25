@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <new>
 #include <optional>
@@ -37,8 +38,15 @@ constexpr std::uint64_t kMaxCallableParameters = 1ULL << 11;  // observed aggreg
 constexpr std::size_t kGlobalFieldCount = 4;
 constexpr std::size_t kCallableFieldCount = 10;
 
-struct SoParseError
+// Internal control-flow carrier for the recursive-descent parser: every throw is
+// caught by InspectSoModule and turned back into a SoDecodeError. It derives from
+// std::exception so that an escape past that handler is still catchable generically.
+struct SoParseError : std::exception
 {
+    explicit SoParseError(const SoDecodeError value) noexcept : error(value) {}
+
+    [[nodiscard]] const char* what() const noexcept override { return "SO module parse error"; }
+
     SoDecodeError error;
 };
 

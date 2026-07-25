@@ -41,7 +41,7 @@ constexpr std::uint64_t kMaximumAggregateNestedHogBytes = 16ULL * 1024ULL * 1024
 constexpr std::size_t kMaximumNestedDepth = 32;
 constexpr int kMaximumFilesystemDepth = 32;
 
-enum class InputKind
+enum class InputKind : std::uint8_t
 {
     Other,
     Hog,
@@ -204,7 +204,7 @@ struct VerificationStats
 {
     if (size > kMaximumAssetBytes)
         return std::unexpected("asset span exceeds read safety limit");
-    if (size > std::numeric_limits<std::size_t>::max() ||
+    if (!std::in_range<std::size_t>(size) ||
         offset > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max()) ||
         size > static_cast<std::uint64_t>(std::numeric_limits<std::streamsize>::max()))
         return std::unexpected("asset span does not fit host file APIs");

@@ -6,7 +6,6 @@
 #include <exception>
 #include <limits>
 #include <mutex>
-#include <new>
 #include <utility>
 #include <vector>
 
@@ -147,7 +146,6 @@ struct AssetService::Impl
     void PublishLoaded(const std::size_t index, const std::uint64_t generation,
         content::LoadedLevelTexture loaded)
     {
-        bool notify = false;
         {
             const std::lock_guard<std::mutex> lock(mutex);
             Slot& slot = slots[index];
@@ -174,10 +172,8 @@ struct AssetService::Impl
             if (in_flight_requests == 0U)
                 std::terminate();
             --in_flight_requests;
-            notify = true;
         }
-        if (notify)
-            idle.notify_all();
+        idle.notify_all();
     }
 
     void PublishWorkerFailureNoexcept(

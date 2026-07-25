@@ -6,8 +6,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <cstdio>
-#include <cstring>
+#include <cstdio> // POSIX declares ::renameat here
 #include <limits>
 #include <map>
 #include <new>
@@ -1034,8 +1033,7 @@ DecodeSnapshot(const std::span<const std::byte> bytes,
     if (flags != 0U || reserved != 0U || schema_version == 0U ||
         revision == 0U || revision > decoded.generation || key_bytes == 0U ||
         key_bytes > limits.max_key_bytes ||
-        value_bytes64 > limits.max_value_bytes ||
-        value_bytes64 > std::numeric_limits<std::size_t>::max()) {
+        value_bytes64 > limits.max_value_bytes) {
       return std::unexpected(
           MakeError(SaveDatabaseErrorCode::CorruptSnapshot,
                     "save database record fields are invalid"));
@@ -1124,8 +1122,9 @@ DecodeSnapshot(const std::span<const std::byte> bytes,
   if (ok) {
     file_size = (static_cast<std::uint64_t>(information.nFileSizeHigh) << 32U) |
                 information.nFileSizeLow;
-    ok = file_size <= config.limits.max_file_bytes &&
-         file_size <= std::numeric_limits<std::size_t>::max();
+    // max_file_bytes is a std::size_t, so passing it also proves the size is
+    // representable as one.
+    ok = file_size <= config.limits.max_file_bytes;
   }
   if (ok)
     bytes.resize(static_cast<std::size_t>(file_size));
@@ -1180,8 +1179,9 @@ DecodeSnapshot(const std::span<const std::byte> bytes,
             status.st_nlink == 1 && status.st_size >= 0;
   if (ok) {
     file_size = static_cast<std::uint64_t>(status.st_size);
-    ok = file_size <= config.limits.max_file_bytes &&
-         file_size <= std::numeric_limits<std::size_t>::max();
+    // max_file_bytes is a std::size_t, so passing it also proves the size is
+    // representable as one.
+    ok = file_size <= config.limits.max_file_bytes;
   }
   if (ok)
     bytes.resize(static_cast<std::size_t>(file_size));
@@ -1427,8 +1427,10 @@ SaveDatabase::Open(SaveDatabaseConfig config) {
 
     Slot selected_slot = Slot::A;
     DecodedSnapshot selected;
-    if (a.status == SlotReadStatus::Valid &&
-        b.status == SlotReadStatus::Valid) {
+    // A valid status always carries a decoded snapshot, but the payload is
+    // tested alongside the status so no branch dereferences it unchecked.
+    if (a.status == SlotReadStatus::Valid && a.snapshot &&
+        b.status == SlotReadStatus::Valid && b.snapshot) {
       if (a.snapshot->generation == b.snapshot->generation &&
           a.snapshot->records != b.snapshot->records) {
         return std::unexpected(
@@ -1441,11 +1443,14 @@ SaveDatabase::Open(SaveDatabaseConfig config) {
       } else {
         selected = std::move(*a.snapshot);
       }
-    } else if (a.status == SlotReadStatus::Valid) {
+    } else if (a.status == SlotReadStatus::Valid && a.snapshot) {
       selected = std::move(*a.snapshot);
-    } else {
+    } else if (b.snapshot) {
       selected_slot = Slot::B;
       selected = std::move(*b.snapshot);
+    } else {
+      return std::unexpected(MakeError(SaveDatabaseErrorCode::CorruptSnapshot,
+                                       "save database has no valid snapshot"));
     }
 
     auto impl = std::make_unique<Impl>(std::move(*database_lock));

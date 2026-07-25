@@ -142,10 +142,13 @@ struct ScanSummary
     return {};
 }
 
+// `visitor` is invoked once per record, so it is taken by value rather than as a
+// forwarding reference: forwarding it would move from the same object on every
+// iteration.
 template <typename Visitor>
 [[nodiscard]] asset::DecodeResult<ScanSummary> ScanRecords(
     const std::span<const std::byte> bytes, const std::uint64_t logical_end,
-    Visitor&& visitor)
+    Visitor visitor)
 {
     ScanSummary summary;
     std::optional<SklLineEnding> observed_line_ending;

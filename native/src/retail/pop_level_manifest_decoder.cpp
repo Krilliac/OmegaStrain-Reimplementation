@@ -184,6 +184,9 @@ namespace
         if (entry.name.size() > limits.maximum_string_bytes)
             return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,
                 "DATA.HOG entry exceeds decoder string limit"));
+        // Charged twice on purpose: the normalized directory keeps both the full name and its
+        // stem, each at most `entry.name.size()` bytes. AddWithinLimit accumulates into
+        // `scratch_bytes`, so the two identical-looking calls are not redundant.
         if (!AddWithinLimit(scratch_bytes, entry.name.size(), limits.maximum_scratch_bytes) ||
             !AddWithinLimit(scratch_bytes, entry.name.size(), limits.maximum_scratch_bytes))
             return std::unexpected(Error(asset::DecodeErrorCode::LimitExceeded,

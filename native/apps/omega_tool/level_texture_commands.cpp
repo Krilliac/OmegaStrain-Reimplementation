@@ -41,7 +41,7 @@ constexpr std::size_t kMaximumLevelDirectories = 1U << 12U;
 constexpr std::uint32_t kMaximumTreeDepth = 32U;
 constexpr std::size_t kMaximumLevelCodeBytes = 32U;
 
-enum class ErrorCategory : std::size_t
+enum class ErrorCategory : std::uint8_t
 {
     DiscoveryInvalidRoot,
     DiscoveryUnsafeEntry,
@@ -643,7 +643,7 @@ void PrintErrors(const ErrorCounts& errors)
     return complete ? 0 : 2;
 }
 
-enum class AssetErrorCategory : std::size_t
+enum class AssetErrorCategory : std::uint8_t
 {
     DiscoveryInvalidRoot,
     DiscoveryUnsafeEntry,
@@ -969,6 +969,12 @@ struct AssetWorkerGate
 
 struct AssetWorkerGateGuard
 {
+    AssetWorkerGateGuard() = default;
+    AssetWorkerGateGuard(const AssetWorkerGateGuard&) = delete;
+    AssetWorkerGateGuard& operator=(const AssetWorkerGateGuard&) = delete;
+    AssetWorkerGateGuard(AssetWorkerGateGuard&&) = delete;
+    AssetWorkerGateGuard& operator=(AssetWorkerGateGuard&&) = delete;
+
     ~AssetWorkerGateGuard()
     {
         if (gate)

@@ -181,7 +181,7 @@ LastSpace(const std::vector<TextItem> &items) noexcept {
 [[nodiscard]] bool HasNonSpaceBefore(const std::vector<TextItem> &items,
                                      const std::size_t end) noexcept {
   return std::any_of(
-      items.begin(), items.begin() + end,
+      items.begin(), items.begin() + static_cast<std::ptrdiff_t>(end),
       [](const TextItem &item) { return item.codepoint != U' '; });
 }
 
@@ -451,10 +451,11 @@ TextLayoutResult LayoutRetailText(const retail::FntV3IR &font,
       if (options.wrap_mode == TextWrapMode::SpacesAndExplicitNewlines &&
           current_advance > options.rectangle.width && last_space &&
           HasNonSpaceBefore(current, *last_space)) {
+        const auto break_offset = static_cast<std::ptrdiff_t>(*last_space);
         std::vector<TextItem> line_items(current.begin(),
-                                         current.begin() + *last_space);
+                                         current.begin() + break_offset);
         TrimTrailingSpaces(line_items);
-        std::vector<TextItem> remainder(current.begin() + *last_space + 1U,
+        std::vector<TextItem> remainder(current.begin() + break_offset + 1,
                                         current.end());
         TrimLeadingSpaces(remainder);
         // Retail consumes the boundary space while choosing the break and

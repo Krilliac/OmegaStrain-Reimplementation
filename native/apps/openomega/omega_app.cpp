@@ -2397,6 +2397,8 @@ void OmegaApp::ReleaseDiagnosticScenePresentation() noexcept
             }
             catch (...)
             {
+                // Destruction remains noexcept even if bounded shutdown logging
+                // cannot allocate.
             }
         }
     }
@@ -2566,6 +2568,8 @@ void OmegaApp::ReleaseCharacterPresentation(
         }
         catch (...)
         {
+            // Release remains noexcept even if bounded shutdown logging cannot
+            // allocate.
         }
     }
 }

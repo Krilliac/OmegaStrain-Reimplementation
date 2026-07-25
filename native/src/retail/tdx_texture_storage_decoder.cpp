@@ -760,17 +760,17 @@ asset::DecodeResult<DecodedTdxTextureStorage> DecodeTdxTextureStorageMeasured(
         }
         if (layout->palette)
         {
+            const PaletteLayout& source = *layout->palette;
             asset::TexturePaletteStorageIR palette{
-                .width = layout->palette->width,
-                .height = layout->palette->height,
+                .width = source.width,
+                .height = source.height,
             };
-            palette.entries.resize(layout->palette->entry_count);
-            for (std::uint32_t entry = 0; entry < layout->palette->entry_count; ++entry)
+            palette.entries.resize(source.entry_count);
+            for (std::uint32_t entry = 0; entry < source.entry_count; ++entry)
             {
                 for (std::size_t channel = 0; channel < 4; ++channel)
                     palette.entries[entry][channel] = block[static_cast<std::size_t>(
-                        layout->palette->data_offset + static_cast<std::uint64_t>(entry) * 4U +
-                        channel)];
+                        source.data_offset + static_cast<std::uint64_t>(entry) * 4U + channel)];
             }
             output_block.palette = std::move(palette);
         }

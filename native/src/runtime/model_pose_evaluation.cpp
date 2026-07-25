@@ -80,10 +80,12 @@ namespace
     return result;
 }
 
+// The accessor is invoked once per joint, never consumed, so it is taken by const
+// reference rather than by forwarding reference.
 template <typename LocalTransformAt>
 [[nodiscard]] asset::ModelIrResult<asset::GlobalPoseIR> EvaluateLocalTransforms(
     const asset::SkeletonIR& skeleton, const std::size_t local_transform_count,
-    LocalTransformAt&& local_transform_at, const asset::DecodeLimits& limits)
+    const LocalTransformAt& local_transform_at, const asset::DecodeLimits& limits)
 {
     const std::size_t joint_count = skeleton.joints.size();
     if (joint_count > asset::kMaximumSkeletonJoints)

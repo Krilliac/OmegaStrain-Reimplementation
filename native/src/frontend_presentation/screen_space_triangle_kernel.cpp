@@ -200,11 +200,14 @@ BuildSample(const OwnedTriangle& triangle, const std::int32_t x,
     return sample;
 }
 
+// `visitor` is invoked once per covered sample, so it is taken by const
+// reference rather than as a forwarding reference: forwarding it would move
+// from the same callable on every pixel of the scan.
 template <typename SampleVisitor>
 [[nodiscard]] std::expected<std::uint64_t, ScreenSpaceTriangleError>
 WalkCoverage(const OwnedTriangle& triangle, const ScreenSpaceClipRect clip,
     const std::uint64_t maximum_covered_pixels,
-    SampleVisitor&& visitor) noexcept
+    const SampleVisitor& visitor) noexcept
 {
     const double minimum_y = std::min(
         {triangle.vertices[0U].y, triangle.vertices[1U].y,

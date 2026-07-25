@@ -39,8 +39,13 @@ struct JobService::Impl
         workers.clear();
     }
 
+    // Every worker thread captures this Impl by reference for its whole lifetime, so the
+    // object must stay pinned. The move operations were already suppressed by the
+    // user-declared destructor; deleting them states that contract instead of implying it.
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
+    Impl(Impl&&) = delete;
+    Impl& operator=(Impl&&) = delete;
 
     void RunWorker();
 

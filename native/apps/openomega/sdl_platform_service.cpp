@@ -29,6 +29,14 @@ struct SdlPlatformService::Impl
             SDL_Quit();
     }
 
+    // Sole ownership of the SDL global-subsystem shutdown: a copy would call
+    // SDL_Quit() twice. Only ever reached through the owning unique_ptr.
+    Impl() = default;
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+    Impl(Impl&&) = delete;
+    Impl& operator=(Impl&&) = delete;
+
     bool initialized = false;
 };
 

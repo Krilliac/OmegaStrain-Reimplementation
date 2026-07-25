@@ -380,9 +380,9 @@ private:
     return chain;
   }
 
-  [[nodiscard]] std::expected<DecodedEntry, Ps2MemoryCardReadError>
+  [[nodiscard]] static std::expected<DecodedEntry, Ps2MemoryCardReadError>
   DecodeEntry(const std::span<const std::byte> bytes,
-              const std::uint64_t logical_offset) const {
+              const std::uint64_t logical_offset) {
     DecodedEntry entry{
         .mode = ReadU16(bytes, 0U),
         .length = ReadU32(bytes, 4U),
@@ -483,9 +483,9 @@ private:
     return entries;
   }
 
-  [[nodiscard]] bool
+  [[nodiscard]] static bool
   HasDotEntries(const std::vector<DecodedEntry> &entries, const bool root,
-                const std::size_t expected_parent_entry = 0U) const {
+                const std::size_t expected_parent_entry = 0U) {
     if (entries.size() < 2U)
       return false;
     const auto &dot = entries[0];

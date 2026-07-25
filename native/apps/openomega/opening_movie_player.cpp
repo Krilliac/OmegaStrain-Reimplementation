@@ -303,7 +303,7 @@ OpeningMoviePlayer::OpeningMoviePlayer(std::unique_ptr<Impl> impl) noexcept
 
 OpeningMoviePlayer::OpeningMoviePlayer(OpeningMoviePlayer &&) noexcept =
     default;
-OpeningMoviePlayer::~OpeningMoviePlayer() = default;
+OpeningMoviePlayer::~OpeningMoviePlayer() noexcept = default;
 
 std::expected<OpeningMoviePlayer, OpeningMoviePlayerError>
 OpeningMoviePlayer::Create(const std::filesystem::path &path) {
@@ -390,11 +390,10 @@ OpeningMoviePlayer::Advance(const std::chrono::nanoseconds elapsed) {
     if (auto error = impl_->AdvanceClock(elapsed))
       return impl_->Fail(*error);
 
-    bool frame_updated = false;
     auto published = impl_->PublishDueFrame();
     if (!published)
       return impl_->Fail(published.error());
-    frame_updated = *published;
+    bool frame_updated = *published;
 
     std::size_t feed_count = 0U;
     while (impl_->queued_frames.empty() && !impl_->decoder_drained &&

@@ -206,7 +206,6 @@ Preflight(const asset::TextureStorageIR &storage,
 
   std::uint64_t texel_count = 0U;
   std::uint64_t rounded_texel_count = 0U;
-  std::uint64_t packed_index_bytes = 0U;
   std::uint64_t source_bytes = 0U;
   std::uint64_t output_bytes = 0U;
   if (!Multiply(storage.width, storage.height, texel_count) ||
@@ -215,7 +214,7 @@ Preflight(const asset::TextureStorageIR &storage,
     return std::unexpected(
         Error(TdxIndexed4CandidateDebugImageErrorCode::SourceByteSizeOverflow));
   }
-  packed_index_bytes = rounded_texel_count / 2U;
+  const std::uint64_t packed_index_bytes = rounded_texel_count / 2U;
   if (!Multiply(texel_count, 4U, output_bytes)) {
     return std::unexpected(
         Error(TdxIndexed4CandidateDebugImageErrorCode::OutputByteSizeOverflow));

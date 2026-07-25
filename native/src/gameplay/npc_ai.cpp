@@ -1,5 +1,6 @@
 #include "omega/gameplay/npc_ai.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace omega::gameplay
@@ -108,12 +109,9 @@ bool NpcSeesPlayer(const asset::Float3IR& npc_pos,
         asset::Float3IR{.x = params.up.x * params.eye_height,
             .y = params.up.y * params.eye_height,
             .z = params.up.z * params.eye_height});
-    for (const CollisionTriangle& triangle : triangles)
-    {
-        if (SegmentIntersectsTriangle(eye, target, triangle))
-            return false; // occluded
-    }
-    return true;
+    return std::ranges::none_of(triangles, [&](const CollisionTriangle& triangle) {
+        return SegmentIntersectsTriangle(eye, target, triangle); // occluded
+    });
 }
 
 NpcAwareness StepNpcAwareness(const NpcAwareness prev, const bool sees_player) noexcept

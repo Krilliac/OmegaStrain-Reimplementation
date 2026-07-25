@@ -20,6 +20,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace omega::tool
@@ -112,8 +113,7 @@ constexpr int kMaximumCorpusDepth = 32;
     if (end < 0)
         return std::unexpected("unable to determine POP file size");
     const auto size = static_cast<std::uint64_t>(end);
-    if (size > kMaximumPopBytes ||
-        size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) ||
+    if (size > kMaximumPopBytes || !std::in_range<std::size_t>(size) ||
         size > static_cast<std::uint64_t>(std::numeric_limits<std::streamsize>::max()))
         return std::unexpected("POP file exceeds the tool's read limit");
 

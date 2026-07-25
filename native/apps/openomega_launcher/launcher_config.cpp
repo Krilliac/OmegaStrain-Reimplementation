@@ -301,7 +301,7 @@ enum class TemporaryWriteResult : std::uint8_t
     {
         for (std::size_t attempt = 0U; attempt < 64U; ++attempt)
         {
-            const std::filesystem::path temporary =
+            std::filesystem::path temporary =
                 MakeTemporaryPath(target, next_nonce.fetch_add(1U, std::memory_order_relaxed));
             switch (WriteTemporaryFile(temporary, bytes))
             {

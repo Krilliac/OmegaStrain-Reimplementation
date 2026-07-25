@@ -35,7 +35,7 @@ struct ParsedPacket
     std::uint32_t data_reference = 0;
 };
 
-enum class StoredTransferCountRule
+enum class StoredTransferCountRule : std::uint8_t
 {
     PayloadQwords,
     TwicePayloadQwords,
@@ -359,10 +359,10 @@ enum class StoredTransferCountRule
                                                       const std::vector<std::byte>& gs_memory)
 {
     const std::uint16_t palette_width = plan.palette_upload.width;
-    for (std::uint16_t logical_index = 0; logical_index < image.palette.size(); ++logical_index)
+    for (std::size_t logical_index = 0; logical_index < image.palette.size(); ++logical_index)
     {
-        const std::uint16_t source_ordinal =
-            PaletteSourceOrdinal(image.source_encoding, logical_index);
+        const std::uint16_t source_ordinal = PaletteSourceOrdinal(
+            image.source_encoding, static_cast<std::uint16_t>(logical_index));
         const std::uint32_t source_x = source_ordinal % palette_width;
         const std::uint32_t source_y = source_ordinal / palette_width;
         const auto word_address =
@@ -457,7 +457,7 @@ std::optional<std::uint32_t> GsPsmt4NibbleAddress(const std::uint16_t base_point
 
 namespace
 {
-enum class FrontEndTdxDependencyScope
+enum class FrontEndTdxDependencyScope : std::uint8_t
 {
     Direct,
     BoundExternalVisual,

@@ -17,7 +17,7 @@ constexpr std::uint32_t kHeaderSize = 0x14;
 constexpr std::uint64_t kMaximumDirectorySize = 64ULL * 1024ULL * 1024ULL;
 constexpr std::uint32_t kMaximumEntryCount = 1U << 20U;
 constexpr std::size_t kMaximumNameLength = 4096;
-constexpr std::size_t kPaddingValidationChunkSize = 64U * 1024U;
+constexpr std::size_t kPaddingValidationChunkSize = std::size_t{64} * 1024U;
 
 struct ParsedDirectory
 {

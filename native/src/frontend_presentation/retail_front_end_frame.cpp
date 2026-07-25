@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <new>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -124,8 +125,7 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
     std::optional<RetailFrontendVisualInstanceState> instance;
     if (!node.animation_tracks.empty())
     {
-        auto cloned = CloneRetailFrontendVisualInstance(node);
-        if (cloned)
+        if (auto cloned = CloneRetailFrontendVisualInstance(node))
         {
             const RetailFrontendTimelineInput timeline_input{
                 .live_tick = animation_tick,
@@ -528,7 +528,7 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
     const content::FrontEndScreenBundle& bundle,
     const std::string_view member) noexcept
 {
-    for (const auto& [scope_name, scope] : bundle.visual_scopes())
+    for (const auto& scope : bundle.visual_scopes() | std::views::values)
     {
         if (const auto* const texture = scope.FindTexture(member))
             return texture;

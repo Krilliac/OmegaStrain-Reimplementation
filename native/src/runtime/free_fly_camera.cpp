@@ -212,13 +212,10 @@ FreeFlyInput ParseFreeFlyScript(
                 input.forward += 1.0F;
             else if (token == "back")
                 input.forward -= 1.0F;
-            else if (token == "left")
+            // "left"/"right" are aliases for yaw turning; strafing has its own tokens.
+            else if (token == "left" || token == "yawleft")
                 input.yaw_delta -= step;
-            else if (token == "right")
-                input.yaw_delta += step;
-            else if (token == "yawleft")
-                input.yaw_delta -= step;
-            else if (token == "yawright")
+            else if (token == "right" || token == "yawright")
                 input.yaw_delta += step;
             else if (token == "strafeleft")
                 input.strafe -= 1.0F;

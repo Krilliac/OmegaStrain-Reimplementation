@@ -90,9 +90,12 @@ Error(const asset::DecodeErrorCode code, std::string message,
 [[nodiscard]] std::int8_t ReadS8(const std::span<const std::byte> bytes,
                                  const std::uint64_t offset) noexcept {
   const std::uint8_t value = ReadU8(bytes, offset);
-  const std::int16_t widened = value <= 0x7FU
-                                   ? static_cast<std::int16_t>(value)
-                                   : static_cast<std::int16_t>(value) - 0x100;
+  // The sign-extension arithmetic promotes to int, so narrow back to the 16-bit
+  // intermediate explicitly: 0x80..0xFF maps to -128..-1, always representable.
+  const int extended = value <= 0x7FU
+                           ? static_cast<int>(value)
+                           : static_cast<int>(value) - 0x100;
+  const std::int16_t widened = static_cast<std::int16_t>(extended);
   return static_cast<std::int8_t>(widened);
 }
 

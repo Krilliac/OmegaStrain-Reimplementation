@@ -44,7 +44,7 @@ constexpr std::uint64_t kMaximumPopBytes = 64ULL * 1024ULL * 1024ULL;
 constexpr std::uint64_t kMaximumTotalPopBytes =
     4ULL * 1024ULL * 1024ULL * 1024ULL;
 
-enum class ErrorCategory : std::size_t {
+enum class ErrorCategory : std::uint8_t {
   DiscoveryInvalidRoot,
   DiscoveryUnsafeEntry,
   DiscoveryLimitExceeded,
@@ -497,8 +497,7 @@ struct Discovery {
 [[nodiscard]] std::expected<std::vector<std::byte>, StablePathError>
 ReadStableBytes(const StablePathGuard &guard) {
   const std::uint64_t expected_size = guard.snapshot().size;
-  if (expected_size >
-      static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
+  if (!std::in_range<std::size_t>(expected_size))
     return std::unexpected(StablePathError::Io);
   std::vector<std::byte> bytes(static_cast<std::size_t>(expected_size));
 
@@ -679,8 +678,7 @@ ReadPopCandidate(const PopCandidate &candidate,
   const std::uint64_t expected_size = guard->snapshot().size;
   if (expected_size > kMaximumPopBytes ||
       expected_size > remaining_total_bytes ||
-      expected_size >
-          static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
+      !std::in_range<std::size_t>(expected_size))
     return std::unexpected(ErrorCategory::DiscoveryLimitExceeded);
 
   InvokeHook(hooks, PopPostTerrainCommandTestEvent::PopFileOpened,

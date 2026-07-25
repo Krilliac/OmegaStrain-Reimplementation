@@ -1,10 +1,11 @@
 #include "omega/retail/pop_game_objects_decoder.h"
 
-#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <optional>
 #include <string_view>
+#include <utility>
 
 namespace omega::retail
 {

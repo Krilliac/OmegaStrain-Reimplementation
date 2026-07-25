@@ -11,7 +11,7 @@ namespace omega::retail::detail
 {
 namespace
 {
-enum class MetadataRecordKind
+enum class MetadataRecordKind : std::uint8_t
 {
     P,
     Q,

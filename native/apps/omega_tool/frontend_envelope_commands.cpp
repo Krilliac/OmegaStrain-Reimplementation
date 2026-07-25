@@ -55,7 +55,7 @@ constexpr std::uint64_t kMaximumAggregateCandidateBytes =
 constexpr std::uint64_t kMaximumPathMetadataBytes = 64ULL * 1024ULL * 1024ULL;
 constexpr std::size_t kMaximumTreeDepth = 32U;
 constexpr std::size_t kMaximumNestedHogDepth = 32U;
-constexpr std::size_t kAuthenticatedChunkBytes = 64U * 1024U;
+constexpr std::size_t kAuthenticatedChunkBytes = 64ULL * 1024ULL;
 constexpr std::uint64_t kMaximumDiscoveryChunkDigests = 1ULL << 18U;
 constexpr std::size_t kSha256BlockBytes = 64U;
 static_assert(kMaximumDiscoveryChunkDigests * 32U == 8ULL * 1024ULL * 1024ULL);
@@ -68,7 +68,7 @@ enum class InputKind : std::uint8_t {
   Ie,
 };
 
-enum class RejectionKind : std::size_t {
+enum class RejectionKind : std::uint8_t {
   Truncated,
   Malformed,
   Overflow,
@@ -1004,9 +1004,8 @@ DiscoverTopLevelHogs(const std::filesystem::path &root,
 ReadRange(const archive::HogReadSource &source, const std::uint64_t offset,
           const std::uint64_t size,
           const AuthenticatedReadContext &authenticated_reads) {
-  if (source.read_exact == nullptr ||
-      size > std::numeric_limits<std::size_t>::max() || offset > source.size ||
-      size > source.size - offset)
+  if (source.read_exact == nullptr || !std::in_range<std::size_t>(size) ||
+      offset > source.size || size > source.size - offset)
     return std::unexpected(ScanError::MemberRead);
 
   std::vector<std::byte> bytes(static_cast<std::size_t>(size));

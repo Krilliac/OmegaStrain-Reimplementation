@@ -186,7 +186,7 @@ struct ScanSummary
         return std::unexpected(Error(asset::DecodeErrorCode::UnsupportedVariant,
             "MPEG-PS pack header is not MPEG-2 syntax", offset + 4U));
     }
-    const struct Marker
+    constexpr struct Marker
     {
         std::uint64_t relative_offset;
         std::uint8_t mask;
@@ -551,7 +551,7 @@ asset::DecodeResult<MpegProgramStreamDescriptor> InspectMpegProgramStream(
         (limits.maximum_output_bytes - sizeof(MpegProgramStreamDescriptor)) /
         sizeof(MpegProgramStreamPacketDescriptor);
     const std::uint64_t maximum_packets = std::min(
-        kMpegProgramStreamMaximumPacketDescriptors, std::min(maximum_by_items, maximum_by_output));
+        {kMpegProgramStreamMaximumPacketDescriptors, maximum_by_items, maximum_by_output});
 
     auto scan = ScanProgramStream(bytes, maximum_packets, nullptr, 0U);
     if (!scan)

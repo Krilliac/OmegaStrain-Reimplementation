@@ -896,6 +896,15 @@ struct SdlGpuHost::Impl
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
     }
 
+    // Sole owner of the device, window, textures, buffers and pipelines released
+    // above. The members are individually copyable, so without these deletions a
+    // copy would double-release every backend handle. Only ever reached through
+    // the owning unique_ptr.
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+    Impl(Impl&&) = delete;
+    Impl& operator=(Impl&&) = delete;
+
     runtime::RenderTexturePool texture_pool;
     std::vector<SDL_GPUTexture*> texture_slots;
     runtime::RenderMeshPool mesh_pool;

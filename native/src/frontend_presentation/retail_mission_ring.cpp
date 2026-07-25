@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 
 namespace omega::frontend::presentation
 {
@@ -16,7 +17,7 @@ namespace
 // retail mission-select screen shows. Values chosen to seat the ellipse in the
 // centre of the canonical 640x448 frame, wider than tall. These are a project
 // approximation of the retail 3D backdrop, not decoded geometry.
-constexpr float kPi = 3.14159265358979323846F;
+constexpr float kPi = std::numbers::pi_v<float>;
 constexpr std::uint32_t kSegments = 96U;   // angular tessellation (affine-safe)
 constexpr float kOuterRadius = 1.16F;
 constexpr float kInnerRadius = 0.60F;

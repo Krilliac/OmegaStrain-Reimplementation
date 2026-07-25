@@ -360,6 +360,9 @@ struct PendingRecord
         for (const std::uint32_t vertex_index : result.triangles[triangle_index].vertex_indices)
             include(result.vertices[vertex_index]);
     }
+    // Exact float equality is deliberate here: `observed` is built with std::min/std::max over the
+    // very floats the file stores, so a well-formed COL reproduces the stored extents bit for bit.
+    // A tolerance would accept leaf bounds the retail data never contains.
     if (observed.minimum.x != leaf.bounds.minimum.x ||
         observed.minimum.y != leaf.bounds.minimum.y ||
         observed.minimum.z != leaf.bounds.minimum.z ||
@@ -440,7 +443,7 @@ asset::DecodeResult<asset::SpatialMeshIR> DecodeColSpatialMesh(
                     has_parent[static_cast<std::size_t>(global)] = 1;
                 }
             }
-            result.nodes.push_back(std::move(node));
+            result.nodes.push_back(node);
         }
         if (has_parent[0] != 0)
             return std::unexpected(

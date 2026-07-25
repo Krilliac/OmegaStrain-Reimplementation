@@ -53,6 +53,16 @@ struct SdlAudioService::Impl
             SDL_QuitSubSystem(SDL_INIT_AUDIO);
     }
 
+    // Sole owner of the audio stream and the audio subsystem released above; the
+    // atomics already suppress the implicit copies, so state the rule instead of
+    // leaving it to depend on a member type. Only reached through the owning
+    // unique_ptr.
+    Impl() = default;
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+    Impl(Impl&&) = delete;
+    Impl& operator=(Impl&&) = delete;
+
     static void SDLCALL ProvidePlayback(void* userdata, SDL_AudioStream* stream,
         const int additional_amount, const int total_amount) noexcept
     {

@@ -413,6 +413,10 @@ class LauncherWindow final
 
     LauncherWindow(const LauncherWindow&) = delete;
     LauncherWindow& operator=(const LauncherWindow&) = delete;
+    // WindowProcedure parks this pointer in GWLP_USERDATA, so the object can never
+    // be relocated; spell the move operations out rather than leaving them implicit.
+    LauncherWindow(LauncherWindow&&) = delete;
+    LauncherWindow& operator=(LauncherWindow&&) = delete;
 
     ~LauncherWindow()
     {
@@ -474,7 +478,9 @@ class LauncherWindow final
         return true;
     }
 
-    [[nodiscard]] int RunMessageLoop() const
+    // Pumps the calling thread's queue rather than this window's, so it needs no
+    // instance state.
+    [[nodiscard]] static int RunMessageLoop()
     {
         MSG message{};
         while (true)
@@ -775,8 +781,16 @@ class LauncherWindow final
         FillRectangle(D2D1::RectF(0.0F, 90.0F, size.width, 92.0F), CyanColor());
         FillRectangle(D2D1::RectF(44.0F, 90.0F, 132.0F, 94.0F), AmberColor());
 
-        for (float x = 44.0F; x < size.width; x += 72.0F)
+        // Step the backdrop rules on an integer index: a float loop counter
+        // accumulates rounding drift across wide client areas. The negated compare
+        // keeps the original "draw nothing" behaviour for a degenerate width.
+        for (int index = 0;; ++index)
         {
+            const float x = 44.0F + (static_cast<float>(index) * 72.0F);
+            if (!(x < size.width))
+            {
+                break;
+            }
             DrawLine(D2D1::Point2F(x, 94.0F), D2D1::Point2F(x, size.height),
                      Rgba(27U, 52U, 65U, 0.24F), 1.0F);
         }
@@ -854,20 +868,20 @@ class LauncherWindow final
         }
     }
 
-    void FillRectangle(const D2D1_RECT_F& rectangle, const D2D1_COLOR_F color)
+    void FillRectangle(const D2D1_RECT_F& rectangle, const D2D1_COLOR_F color) const
     {
         brush_->SetColor(color);
         render_target_->FillRectangle(rectangle, brush_.Get());
     }
 
     void DrawLine(const D2D1_POINT_2F start, const D2D1_POINT_2F end, const D2D1_COLOR_F color,
-                  const float width)
+                  const float width) const
     {
         brush_->SetColor(color);
         render_target_->DrawLine(start, end, brush_.Get(), width);
     }
 
-    void DrawPanel(const D2D1_RECT_F& rectangle)
+    void DrawPanel(const D2D1_RECT_F& rectangle) const
     {
         brush_->SetColor(PanelColor());
         render_target_->FillRoundedRectangle(D2D1::RoundedRect(rectangle, 3.0F, 3.0F),
@@ -881,7 +895,8 @@ class LauncherWindow final
         const std::wstring_view text, IDWriteTextFormat* format, const D2D1_RECT_F& rectangle,
         const D2D1_COLOR_F color,
         const DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING,
-        const DWRITE_PARAGRAPH_ALIGNMENT paragraph_alignment = DWRITE_PARAGRAPH_ALIGNMENT_NEAR)
+        const DWRITE_PARAGRAPH_ALIGNMENT paragraph_alignment =
+            DWRITE_PARAGRAPH_ALIGNMENT_NEAR) const
     {
         if (text.empty())
         {
@@ -1023,7 +1038,7 @@ class LauncherWindow final
         }
     }
 
-    void HandleDpiChanged(const WPARAM wparam, const LPARAM lparam)
+    void HandleDpiChanged(const WPARAM wparam, const LPARAM lparam) const
     {
         const auto* suggested = reinterpret_cast<const RECT*>(lparam);
         (void)::SetWindowPos(window_, nullptr, suggested->left, suggested->top,
