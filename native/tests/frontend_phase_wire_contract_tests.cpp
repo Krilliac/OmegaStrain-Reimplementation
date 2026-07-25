@@ -75,11 +75,11 @@ struct LimitEntry
 };
 
 constexpr std::array<LimitEntry, 20> kHardLimits{{
-    {"fragment_bytes", 4U * 1024U * 1024U},
-    {"total_input_bytes", 32U * 1024U * 1024U},
+    {"fragment_bytes", 4ULL * 1024U * 1024U},
+    {"total_input_bytes", 32ULL * 1024U * 1024U},
     {"fragments", 8U},
-    {"manifest_bytes", 64U * 1024U},
-    {"site_map_bytes", 1024U * 1024U},
+    {"manifest_bytes", 64ULL * 1024U},
+    {"site_map_bytes", 1024ULL * 1024U},
     {"string_bytes", 256U},
     {"frames", 600U},
     {"sites", 4'096U},
@@ -91,10 +91,10 @@ constexpr std::array<LimitEntry, 20> kHardLimits{{
     {"edges", 131'072U},
     {"failure_records", 131'072U},
     {"lookup_work", 1'048'576U},
-    {"scratch_bytes", 16U * 1024U * 1024U},
-    {"private_output_bytes", 16U * 1024U * 1024U},
+    {"scratch_bytes", 16ULL * 1024U * 1024U},
+    {"private_output_bytes", 16ULL * 1024U * 1024U},
     {"public_aggregate_rows", 8U},
-    {"public_output_bytes", 4U * 1024U},
+    {"public_output_bytes", 4ULL * 1024U},
 }};
 
 using LimitValues = std::array<std::uint64_t, kHardLimits.size()>;

@@ -289,7 +289,7 @@ LevelManifestIR MakeManifest()
     return manifest;
 }
 
-enum class ContentFixtureKind
+enum class ContentFixtureKind : std::uint8_t
 {
     Standard,
     EmptyInventory,
@@ -739,11 +739,13 @@ void CheckOwnedTopologyImageComposition(const ContentFixture& fixture)
         second_image.emplace(std::move(*second_built));
     }
 
+    constexpr std::size_t one_block_rgba8_bytes =
+        static_cast<std::size_t>(32U) * 32U * 4U;
     const bool exact_dimensions = first_image->width == 32U && first_image->height == 32U &&
                                   second_image->width == 32U &&
                                   second_image->height == 32U &&
-                                  first_image->rgba8_pixels.size() == 32U * 32U * 4U &&
-                                  second_image->rgba8_pixels.size() == 32U * 32U * 4U;
+                                  first_image->rgba8_pixels.size() == one_block_rgba8_bytes &&
+                                  second_image->rgba8_pixels.size() == one_block_rgba8_bytes;
     Check(exact_dimensions,
         "both one-block public fixtures produce complete owned topology tiles");
     Check(Fnv1a64(first_image->pixels()) == 0x666d00371feff88dULL &&
@@ -1107,8 +1109,7 @@ void CheckHandleIdentityAndSourceValidation(const ContentFixture& fixture)
         if (temporary_created)
         {
             std::unique_ptr<AssetService> temporary = std::move(*temporary_created);
-            auto temporary_handle = temporary->Request(*source);
-            if (temporary_handle)
+            if (auto temporary_handle = temporary->Request(*source))
             {
                 temporary->WaitForIdle();
                 expired_asset = *temporary_handle;
@@ -1130,8 +1131,7 @@ void CheckHandleIdentityAndSourceValidation(const ContentFixture& fixture)
         Check(temporary_store.has_value(), "temporary source store opens");
         if (temporary_store)
         {
-            auto temporary_handle = temporary_store->HandleAt(0U);
-            if (temporary_handle)
+            if (auto temporary_handle = temporary_store->HandleAt(0U))
                 expired_source = *temporary_handle;
         }
     }

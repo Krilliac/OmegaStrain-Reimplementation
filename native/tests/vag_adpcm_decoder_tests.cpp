@@ -121,7 +121,8 @@ std::vector<std::byte> MakeVag(const std::uint32_t version, const std::span<cons
     WriteBe32(bytes, 0x0C, static_cast<std::uint32_t>(frames.size() * 16U));
     WriteBe32(bytes, 0x10, sample_rate);
     for (std::size_t index = 0; index < frames.size(); ++index)
-        std::ranges::copy(frames[index], bytes.begin() + 48U + index * 16U);
+        std::ranges::copy(frames[index],
+                          bytes.begin() + static_cast<std::ptrdiff_t>(48U + index * 16U));
     return bytes;
 }
 

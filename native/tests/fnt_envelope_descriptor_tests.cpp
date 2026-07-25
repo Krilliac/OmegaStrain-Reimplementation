@@ -1,7 +1,6 @@
 #include "omega/retail/fnt_envelope_descriptor.h"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>

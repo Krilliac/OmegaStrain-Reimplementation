@@ -318,7 +318,7 @@ void Check(const bool condition, const std::string_view message)
 }
 } // namespace
 
-void RunVirtualFileSystemTests()
+static void RunVirtualFileSystemTests()
 {
     auto normalized = omega::vfs::NormalizeGamePath("gamedata\\Minsk//scripts.hog");
     Check(normalized && *normalized == "GAMEDATA/MINSK/SCRIPTS.HOG", "game paths normalize");
@@ -448,6 +448,7 @@ void RunVirtualFileSystemTests()
 
     std::atomic<bool> concurrent_reads_ok = true;
     std::vector<std::thread> readers;
+    readers.reserve(8U);
     for (int thread_index = 0; thread_index < 8; ++thread_index)
     {
         readers.emplace_back([&iso_vfs, &concurrent_reads_ok] {

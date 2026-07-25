@@ -121,6 +121,11 @@ public:
         ++observation_->destruction_count;
     }
 
+    GeneratedOpeningMovie(const GeneratedOpeningMovie&) = delete;
+    GeneratedOpeningMovie& operator=(const GeneratedOpeningMovie&) = delete;
+    GeneratedOpeningMovie(GeneratedOpeningMovie&&) = delete;
+    GeneratedOpeningMovie& operator=(GeneratedOpeningMovie&&) = delete;
+
     [[nodiscard]] std::expected<OpeningMoviePlayerUpdate,
         OpeningMoviePlayerError>
     Advance(const std::chrono::nanoseconds) override

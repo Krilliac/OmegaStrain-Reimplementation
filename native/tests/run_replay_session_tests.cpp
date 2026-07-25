@@ -24,14 +24,14 @@
 namespace replay_session_test_allocation
 {
 inline constexpr std::size_t kDisabled = std::numeric_limits<std::size_t>::max();
-std::size_t allocations_before_failure = kDisabled;
+static std::size_t allocations_before_failure = kDisabled;
 
-void Arm(const std::size_t allocations_to_allow) noexcept
+static void Arm(const std::size_t allocations_to_allow) noexcept
 {
     allocations_before_failure = allocations_to_allow;
 }
 
-void Disarm() noexcept
+static void Disarm() noexcept
 {
     allocations_before_failure = kDisabled;
 }
@@ -155,10 +155,10 @@ static_assert(omega::app::PlanProjectDiagnosticActorMarkerDestination(Position3{
 
 [[noreturn]] void FailFixture(const std::string_view site) noexcept
 {
-    std::fputs("FAILED: run replay fixture: ", stderr);
-    std::fwrite(site.data(), sizeof(char), site.size(), stderr);
-    std::fputc('\n', stderr);
-    std::fflush(stderr);
+    static_cast<void>(std::fputs("FAILED: run replay fixture: ", stderr));
+    static_cast<void>(std::fwrite(site.data(), sizeof(char), site.size(), stderr));
+    static_cast<void>(std::fputc('\n', stderr));
+    static_cast<void>(std::fflush(stderr));
     std::_Exit(EXIT_FAILURE);
 }
 

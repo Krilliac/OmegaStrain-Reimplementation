@@ -56,6 +56,11 @@ public:
         std::filesystem::remove_all(path_, ignored);
     }
 
+    ScopedTestDirectory(const ScopedTestDirectory&) = delete;
+    ScopedTestDirectory& operator=(const ScopedTestDirectory&) = delete;
+    ScopedTestDirectory(ScopedTestDirectory&&) = delete;
+    ScopedTestDirectory& operator=(ScopedTestDirectory&&) = delete;
+
     ~ScopedTestDirectory()
     {
         std::error_code ignored;

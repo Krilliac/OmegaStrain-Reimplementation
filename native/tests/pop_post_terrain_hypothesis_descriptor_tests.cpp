@@ -208,7 +208,8 @@ int PopPostTerrainHypothesisDescriptorFailureCount()
     {
         const auto begin = static_cast<std::size_t>(extent.opaque_region.offset);
         const auto end = begin + static_cast<std::size_t>(extent.opaque_region.size);
-        std::fill(mutated_opaque.begin() + begin, mutated_opaque.begin() + end,
+        std::fill(mutated_opaque.begin() + static_cast<std::ptrdiff_t>(begin),
+            mutated_opaque.begin() + static_cast<std::ptrdiff_t>(end),
             std::byte{0x3C});
     }
     std::fill(mutated_opaque.end() - 8, mutated_opaque.end(), std::byte{0x69});
@@ -238,8 +239,9 @@ int PopPostTerrainHypothesisDescriptorFailureCount()
 
     auto zero_nonempty = MakePop();
     zero_nonempty.bytes.insert(
-        zero_nonempty.bytes.begin() + zero_nonempty.marker_offsets[9], 4,
-        std::byte{0x42});
+        zero_nonempty.bytes.begin() +
+            static_cast<std::ptrdiff_t>(zero_nonempty.marker_offsets[9]),
+        4, std::byte{0x42});
     CheckError(omega::retail::InspectPopPostTerrainHypotheses(zero_nonempty.bytes),
         omega::asset::DecodeErrorCode::UnsupportedVariant,
         "zero word with a nonempty opaque extent is unsupported");

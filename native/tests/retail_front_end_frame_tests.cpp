@@ -146,7 +146,6 @@ namespace
 using omega::asset::Float3IR;
 using omega::asset::FrontendColorRgba8IR;
 using omega::asset::FrontendTriangleIR;
-using omega::asset::FrontendUvIR;
 using omega::asset::FrontendVisualNodeIR;
 using omega::asset::FrontendWidgetBindingIR;
 using omega::asset::FrontendWidgetIR;

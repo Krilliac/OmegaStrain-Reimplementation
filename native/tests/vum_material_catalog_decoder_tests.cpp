@@ -43,9 +43,9 @@ void WriteMaterial(
     WriteText(bytes, offset, "MTRL");
     WriteU32(bytes, offset + 68U, 0xFFFFFFFFU);
     WriteU32(bytes, offset + 84U, 0xFFFFFFFFU);
-    constexpr std::uint32_t inactive = 0xFFFFFFFFU;
     for (std::size_t slot = 0; slot < 3; ++slot)
     {
+        constexpr std::uint32_t inactive = 0xFFFFFFFFU;
         WriteU32(bytes, offset + 56U + slot * 4U,
             slot < name_indices.size() ? name_indices[slot] : inactive);
         WriteU32(bytes, offset + 72U + slot * 4U, inactive);

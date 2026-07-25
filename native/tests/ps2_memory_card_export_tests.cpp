@@ -290,7 +290,7 @@ void CheckLimitsAndCapacity() {
   oversized.files.push_back(omega::compat::Ps2MemoryCardOpaqueFile{
       .name = "capacity.bin",
       .mode = kFileMode,
-      .bytes = std::vector<std::byte>(8U * 1024U * 1024U),
+      .bytes = std::vector<std::byte>(std::size_t{8U} * 1024U * 1024U),
   });
   CheckError(
       omega::compat::CreatePs2MemoryCardLogicalImage(oversized),

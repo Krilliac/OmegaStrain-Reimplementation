@@ -16,7 +16,6 @@ namespace
 {
 using omega::app::FrontEndCapabilities;
 using omega::app::FrontEndCharacterSlot;
-using omega::app::FrontEndCharacterStartupModel;
 using omega::app::FrontEndCommand;
 using omega::app::FrontEndCommandType;
 using omega::app::FrontEndInputEdges;

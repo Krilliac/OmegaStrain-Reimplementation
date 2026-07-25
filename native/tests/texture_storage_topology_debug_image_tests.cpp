@@ -305,7 +305,8 @@ void CheckCanonicalImage()
     const std::size_t palette = CountColor(*first, kPaletteColor);
     Check(background == 2667U && border == 372U && topology == 23U &&
               palette == 10U &&
-              background + border + topology + palette == first->width * first->height,
+              background + border + topology + palette ==
+                  static_cast<std::size_t>(first->width) * first->height,
         "the canonical fixture has the frozen four-color population");
     Check(Fnv1a64(*first) == 0xb56c8db088c5a9feULL,
         "the canonical fixture has the frozen FNV-1a-64 signature");

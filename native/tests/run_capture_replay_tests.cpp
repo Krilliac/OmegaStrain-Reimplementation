@@ -23,14 +23,14 @@
 namespace replay_test_allocation
 {
 inline constexpr std::size_t kDisabled = std::numeric_limits<std::size_t>::max();
-std::size_t allocations_before_failure = kDisabled;
+static std::size_t allocations_before_failure = kDisabled;
 
-void Arm(const std::size_t allocations_to_allow) noexcept
+static void Arm(const std::size_t allocations_to_allow) noexcept
 {
     allocations_before_failure = allocations_to_allow;
 }
 
-void Disarm() noexcept
+static void Disarm() noexcept
 {
     allocations_before_failure = kDisabled;
 }
@@ -84,7 +84,6 @@ using omega::runtime::RunCaptureReplayOperation;
 using omega::runtime::RunCaptureReplaySession;
 using omega::runtime::RunCaptureSession;
 using omega::runtime::RunCaptureSessionConfig;
-using omega::runtime::RunCaptureSessionError;
 using omega::runtime::RunCaptureTerminalInput;
 using omega::runtime::RunCaptureTracePair;
 using omega::simulation::SimulationStepResult;
@@ -100,10 +99,10 @@ constexpr PointerPositionQ16 kSecondPointerPosition{
 
 [[noreturn]] void FailFixture(const std::string_view site) noexcept
 {
-    std::fputs("FAILED: replay test fixture: ", stderr);
-    std::fwrite(site.data(), sizeof(char), site.size(), stderr);
-    std::fputc('\n', stderr);
-    std::fflush(stderr);
+    static_cast<void>(std::fputs("FAILED: replay test fixture: ", stderr));
+    static_cast<void>(std::fwrite(site.data(), sizeof(char), site.size(), stderr));
+    static_cast<void>(std::fputc('\n', stderr));
+    static_cast<void>(std::fflush(stderr));
     std::_Exit(EXIT_FAILURE);
 }
 

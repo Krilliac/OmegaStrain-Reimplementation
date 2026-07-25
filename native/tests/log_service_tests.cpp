@@ -320,7 +320,7 @@ int LogServiceFailureCount()
         const std::string line = StderrLogSink::FormatLine(record);
         Check(line == "[7] +1234ns WARNING NET: a?b?c?d\n",
             "control bytes are replaced so a record cannot split the line");
-        Check(std::count(line.begin(), line.end(), '\n') == 1 && line.back() == '\n',
+        Check(std::ranges::count(line, '\n') == 1 && line.back() == '\n',
             "each record renders as exactly one terminated line");
 
         using omega::runtime::LogSeverityName;

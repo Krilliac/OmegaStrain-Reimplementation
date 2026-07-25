@@ -671,7 +671,7 @@ NestedFixture MakeNestedFixture(const std::uint8_t seed)
         HogMember{.name = "Textures.HOG", .payload = fixture.texture_hog},
     });
     SourceLocator source = DirectSource("GAMEDATA/TEST/PACK.HOG");
-    source.hog_entries.push_back("textures.hog");
+    source.hog_entries.emplace_back("textures.hog");
     fixture.manifest = MakeManifest({std::move(source)});
     return fixture;
 }

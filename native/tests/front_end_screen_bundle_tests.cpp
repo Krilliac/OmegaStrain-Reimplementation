@@ -475,7 +475,7 @@ void WriteTdxTransferControlPrefix(std::vector<std::byte>& bytes, const std::siz
         upload_width, upload_height, primary_bytes);
     WriteTdxPacket(bytes, kTdxPaletteObject, 0U, 1U, 16U, 16U, palette_bytes);
 
-    for (std::uint32_t index = 0; index < 256U; ++index)
+    for (std::size_t index = 0; index < 256U; ++index)
     {
         bytes[kTdxPaletteData + index * 4U] = static_cast<std::byte>(index & 0xFFU);
         bytes[kTdxPaletteData + index * 4U + 1U] = static_cast<std::byte>(seed);
@@ -729,7 +729,7 @@ struct FixturePaths final
     std::filesystem::create_directories(root / "GAMEDATA" / "COMMON", error);
     if (error)
         return std::nullopt;
-    const FixturePaths paths{
+    FixturePaths paths{
         .front_end_hog = root / "GAMEDATA" / "FRONTEND" / "NTSC.HOG",
         .font_hog = root / "GAMEDATA" / "COMMON" / "FONTS.HOG",
         .strings = root / "GAMEDATA" / "COMMON" / "STRINGS.DAT",

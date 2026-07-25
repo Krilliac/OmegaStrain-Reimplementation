@@ -32,6 +32,10 @@
 namespace {
 int failures = 0;
 
+// Physical chunk size the raw HOG scanner reads with; sized as std::size_t so
+// the fixture arithmetic below never multiplies in a narrower type.
+constexpr std::size_t kRawHogChunkBytes = static_cast<std::size_t>(64U) * 1024U;
+
 void Check(const bool condition, const std::string_view message) {
   if (!condition) {
     std::cerr << "FAILED: " << message << '\n';
@@ -207,8 +211,11 @@ public:
 
 private:
   std::ostream &stream_;
-  std::streambuf *original_ = nullptr;
+  // buffer_ must precede original_: the constructor's initializer for
+  // original_ calls buffer_.rdbuf(), and members are initialized in
+  // declaration order.
   std::ostringstream buffer_;
+  std::streambuf *original_ = nullptr;
   bool active_ = true;
 };
 
@@ -337,7 +344,7 @@ void CheckAuthenticatedChunkBoundaries() {
       HogMember{.name = "VALID.GUI", .payload = MakeGui()},
       HogMember{.name = "VALID.IE", .payload = MakeIe()},
   });
-  Check(hog.size() > 64U * 1024U && tree.ready() &&
+  Check(hog.size() > kRawHogChunkBytes && tree.ready() &&
             tree.Add("FRONTEND.HOG", hog),
         "multi-chunk HOG with a boundary-spanning candidate is written");
   if (!tree.ready())
@@ -706,7 +713,7 @@ void CountAuthenticatedChunkReads(const std::filesystem::path &path,
 void CheckPaddedNestedAuthenticationAllowance() {
   TempTree tree("padded-nested-authentication-allowance");
   auto nested = MakeAcceptedFrontendHog();
-  nested.resize(nested.size() + 2U * 64U * 1024U, std::byte{0});
+  nested.resize(nested.size() + 2U * kRawHogChunkBytes, std::byte{0});
   const auto outer = MakeHog({
       HogMember{.name = "NESTED.HOG", .payload = std::move(nested)},
   });
@@ -724,7 +731,7 @@ void CheckPaddedNestedAuthenticationAllowance() {
                    });
   const ExpectedFamily accepted{.candidates = 1, .accepted = 1};
   const std::size_t physical_chunks =
-      (outer.size() + 64U * 1024U - 1U) / (64U * 1024U);
+      (outer.size() + kRawHogChunkBytes - 1U) / kRawHogChunkBytes;
   Check(run.exit_code == 0 &&
             run.standard_output == BuildReport(accepted, accepted, accepted) &&
             run.standard_error.empty(),
@@ -761,7 +768,7 @@ void CheckAuthenticatedChunkCacheBoundsTinyMemberWork() {
   fnt.rejected[0] = member_count;
   const ExpectedFamily accepted{.candidates = 1, .accepted = 1};
   const std::size_t physical_chunks =
-      (hog.size() + 64U * 1024U - 1U) / (64U * 1024U);
+      (hog.size() + kRawHogChunkBytes - 1U) / kRawHogChunkBytes;
   const bool report_matches =
       run.exit_code == 2 &&
       run.standard_output == BuildReport(fnt, accepted, accepted) &&

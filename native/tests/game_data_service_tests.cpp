@@ -191,7 +191,7 @@ std::vector<std::byte> MakeHog(
 bool WriteSparseSingleMemberHog(const std::filesystem::path& path,
     const std::string_view member_name, const std::uint32_t payload_bytes)
 {
-    const std::size_t names_offset = 0x14U + 2U * sizeof(std::uint32_t);
+    constexpr std::size_t names_offset = 0x14U + 2U * sizeof(std::uint32_t);
     const std::size_t names_end = names_offset + member_name.size() + 1U;
     const std::size_t data_offset = (names_end + 15U) & ~std::size_t{15U};
     std::vector<std::byte> prefix(data_offset, std::byte{0});
@@ -1198,7 +1198,7 @@ int GameDataServiceFailureCount()
     constexpr std::string_view primary_texture_game_path = "GAMEDATA/MINSK/TEX.HOG";
     constexpr std::string_view map_texture_game_path = "GAMEDATA/MINSK/MAPTEX.HOG";
     constexpr std::string_view resolved_cell_entry = "CELL.HOG";
-    const std::uint64_t exact_manifest_output_bytes =
+    constexpr std::uint64_t exact_manifest_output_bytes =
         sizeof(omega::asset::LevelManifestIR) + data_hog_game_path.size() +
         sizeof(omega::asset::LevelCellSourceIR) + resolved_cell_entry.size() +
         2U * sizeof(omega::asset::SourceLocator) + primary_texture_game_path.size() +

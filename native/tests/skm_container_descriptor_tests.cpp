@@ -30,7 +30,7 @@ struct ChunkSpec
     for (const auto& [qword_count, secondary_count] : chunks)
     {
         (void)secondary_count;
-        logical_bytes += 16U * qword_count;
+        logical_bytes += std::size_t{16U} * qword_count;
     }
 
     std::vector<std::byte> bytes(logical_bytes, std::byte{0});

@@ -59,8 +59,7 @@ CountWarmCoverageTones(const omega::runtime::DebugImage &image) {
     if (red > green && green > blue && red > 70U)
       observed_red[red] = true;
   }
-  return static_cast<std::size_t>(
-      std::count(observed_red.begin(), observed_red.end(), true));
+  return static_cast<std::size_t>(std::ranges::count(observed_red, true));
 }
 
 void CheckRejected(const omega::runtime::TacticalMenuImageModel &model,

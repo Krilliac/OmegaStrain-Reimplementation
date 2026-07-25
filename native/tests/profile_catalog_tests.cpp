@@ -23,7 +23,6 @@ using namespace std::string_view_literals;
 
 using omega::persistence::SaveDatabase;
 using omega::persistence::SaveDatabaseConfig;
-using omega::persistence::SaveDatabaseError;
 using omega::persistence::SaveMutation;
 using omega::profiles::ProfileCatalog;
 using omega::profiles::ProfileCatalogError;
@@ -108,6 +107,8 @@ public:
 
   TempDirectory(const TempDirectory &) = delete;
   TempDirectory &operator=(const TempDirectory &) = delete;
+  TempDirectory(TempDirectory &&) = delete;
+  TempDirectory &operator=(TempDirectory &&) = delete;
 
   [[nodiscard]] const std::filesystem::path &path() const noexcept {
     return root_;

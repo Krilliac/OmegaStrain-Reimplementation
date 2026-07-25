@@ -171,8 +171,6 @@ void TestParseScript()
     Check(Near(opposed.yaw_delta, 0.0F) && opposed.forward == 0.0F,
         "opposed turns cancel and unknown tokens are ignored");
 }
-} // namespace
-
 void TestLookAtViewMatrix()
 {
     // Camera 10 units back along -Y, looking at the origin, world up = +Z.
@@ -193,6 +191,7 @@ void TestLookAtViewMatrix()
     Check(Near(m.row_major[3], 0.0F) && Near(m.row_major[7], 0.0F),
           "look-at centres the eye's right/up view coordinates");
 }
+} // namespace
 
 int main()
 {

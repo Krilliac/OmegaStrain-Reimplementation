@@ -31,7 +31,6 @@ using omega::app::NativePersistence;
 using omega::app::NativePersistenceStartupError;
 using omega::app::NativePersistenceStartupErrorCode;
 using omega::persistence::SaveDatabase;
-using omega::persistence::SaveDatabaseErrorCode;
 using omega::persistence::SaveDatabaseLimits;
 using omega::persistence::SaveMutation;
 using omega::persistence::SaveWriteCondition;
@@ -196,6 +195,8 @@ public:
 
     TempDirectory(const TempDirectory&) = delete;
     TempDirectory& operator=(const TempDirectory&) = delete;
+    TempDirectory(TempDirectory&&) = delete;
+    TempDirectory& operator=(TempDirectory&&) = delete;
 
     [[nodiscard]] const std::filesystem::path& path() const noexcept
     {

@@ -175,7 +175,8 @@ int main()
     bool all_truncations_rejected = true;
     for (std::size_t size = 0; size < complete_archive.size(); ++size)
     {
-        std::vector<std::byte> truncated(complete_archive.begin(), complete_archive.begin() + size);
+        std::vector<std::byte> truncated(complete_archive.begin(),
+            complete_archive.begin() + static_cast<std::ptrdiff_t>(size));
         if (omega::archive::HogArchive::FromBytes(std::move(truncated)))
             all_truncations_rejected = false;
     }

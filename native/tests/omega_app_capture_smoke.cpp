@@ -2294,7 +2294,7 @@ ResolveDeveloperDiagnosticsWindow() noexcept
             };
         }
     }
-    SDL_free(windows);
+    SDL_free(static_cast<void*>(windows));
     return resolved;
 }
 

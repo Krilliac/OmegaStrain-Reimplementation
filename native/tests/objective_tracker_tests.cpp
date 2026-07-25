@@ -21,7 +21,6 @@ using omega::gameplay::MissionData;
 using omega::gameplay::ObjectiveChoice;
 using omega::gameplay::ObjectiveDef;
 using omega::gameplay::ObjectiveError;
-using omega::gameplay::ObjectiveEvent;
 using omega::gameplay::ObjectiveKind;
 using omega::gameplay::ObjectiveState;
 using omega::gameplay::ObjectiveStatus;

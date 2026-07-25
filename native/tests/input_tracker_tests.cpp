@@ -92,6 +92,7 @@ void TableValidationChecks()
         "bindings naming an unknown device enumerator are rejected");
 
     std::vector<InputBinding> at_budget;
+    at_budget.reserve(InputBindingTable::kMaxBindings);
     for (std::size_t index = 0; index < InputBindingTable::kMaxBindings; ++index)
         at_budget.push_back(InputBinding{.device = InputDevice::Keyboard,
             .code = static_cast<std::uint16_t>(index),

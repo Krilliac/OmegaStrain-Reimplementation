@@ -198,8 +198,6 @@ void TestBuildLevelCollisionTriangles()
     Check(triangles.size() > 1U && triangles[1].a == cell1.vertices[0],
         "level collision spans multiple cells");
 }
-} // namespace
-
 void TestSelectNearbyCollisionTriangles()
 {
     const CollisionTriangle near_tri{
@@ -220,6 +218,7 @@ void TestSelectNearbyCollisionTriangles()
         tris, Float3IR{.x = 3.0F, .y = 3.0F, .z = 5.0F}, 0.0F, out);
     Check(out.empty(), "broadphase with radius 0 selects nothing");
 }
+} // namespace
 
 int main()
 {

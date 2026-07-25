@@ -190,7 +190,7 @@ int PopLevelManifestDecoderFailureCount()
         scratch_entries.size() *
             (2U * sizeof(std::string) + 5U * sizeof(void*)) +
         2U * (scratch_entries[0].name.size() + scratch_entries[1].name.size()) +
-        2U * exact_scratch_limits.maximum_string_bytes +
+        2ULL * exact_scratch_limits.maximum_string_bytes +
         std::string_view("CELL_A.VUM").size() + std::string_view("cell_b.vum").size();
     exact_scratch_limits.maximum_scratch_bytes = exact_scratch_bytes;
     Check(omega::retail::DecodePopLevelManifest(
@@ -210,7 +210,7 @@ int PopLevelManifestDecoderFailureCount()
               MakePop(), MakeEntries(), maximum_depth_source)
               .has_value(),
         "source chain may use the exact nesting-depth boundary after cell resolution");
-    maximum_depth_source.hog_entries.push_back("TOO_DEEP.HOG");
+    maximum_depth_source.hog_entries.emplace_back("TOO_DEEP.HOG");
     CheckError(omega::retail::DecodePopLevelManifest(
                    MakePop(), MakeEntries(), maximum_depth_source),
         omega::asset::DecodeErrorCode::LimitExceeded,

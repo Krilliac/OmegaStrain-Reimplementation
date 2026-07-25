@@ -166,7 +166,7 @@ void WriteTransferControlPrefix(std::vector<std::byte>& bytes, const std::size_t
     WritePacket(bytes, kPaletteObject, base_pointer, 1U, palette_width, palette_height,
                 palette_bytes);
 
-    for (std::uint32_t index = 0; index < palette_bytes / 4U; ++index)
+    for (std::size_t index = 0; index < palette_bytes / 4U; ++index)
     {
         bytes[kPaletteData + index * 4U] = static_cast<std::byte>(index & 0xFFU);
         bytes[kPaletteData + index * 4U + 1U] = std::byte{0x22};

@@ -78,7 +78,7 @@ void CheckError(const DecodeResult& result, const omega::asset::DecodeErrorCode 
         Check(false, message);
         return;
     }
-    Check(result.error().code == code && result.error().message.find("PAR") == 0, message);
+    Check(result.error().code == code && result.error().message.starts_with("PAR"), message);
     Check(result.error().message.find('/') == std::string::npos &&
               result.error().message.find('\\') == std::string::npos,
           "PAR errors contain no filesystem path");

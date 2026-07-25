@@ -234,7 +234,7 @@ int JobServiceFailureCount()
                 auto submitted = service->Submit(
                     [&order_mutex, &order, index]
                     {
-                        const std::lock_guard<std::mutex> lock(order_mutex);
+                        const std::scoped_lock lock(order_mutex);
                         order.push_back(index);
                     });
                 if (!submitted)

@@ -120,7 +120,7 @@ void WriteU32(std::vector<std::byte>& bytes, const std::size_t offset, const std
 }
 } // namespace
 
-void RunModelMemberSourceTests()
+static void RunModelMemberSourceTests()
 {
     const auto unique_suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /

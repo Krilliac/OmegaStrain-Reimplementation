@@ -154,12 +154,14 @@ void TestSharedEdgesAndClipping()
     for (std::size_t index = 0U; index < first.count; ++index)
     {
         const auto& sample = first.samples[index];
-        ++visits[static_cast<std::size_t>(sample.y * 2 + sample.x)];
+        ++visits[static_cast<std::size_t>(sample.y) * 2U +
+                 static_cast<std::size_t>(sample.x)];
     }
     for (std::size_t index = 0U; index < second.count; ++index)
     {
         const auto& sample = second.samples[index];
-        ++visits[static_cast<std::size_t>(sample.y * 2 + sample.x)];
+        ++visits[static_cast<std::size_t>(sample.y) * 2U +
+                 static_cast<std::size_t>(sample.x)];
     }
     Check(visits == std::array<std::uint32_t, 4U>{1U, 1U, 1U, 1U},
         "a shared diagonal has neither duplicate nor missing samples");

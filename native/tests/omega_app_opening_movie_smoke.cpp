@@ -420,6 +420,8 @@ public:
 
     TempDirectory(const TempDirectory&) = delete;
     TempDirectory& operator=(const TempDirectory&) = delete;
+    TempDirectory(TempDirectory&&) = delete;
+    TempDirectory& operator=(TempDirectory&&) = delete;
 
     [[nodiscard]] const std::filesystem::path& path() const noexcept
     {

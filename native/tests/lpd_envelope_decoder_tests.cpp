@@ -77,7 +77,8 @@ void WriteU32(std::vector<std::byte>& bytes, const std::size_t offset, const std
     for (const std::uint32_t count : counts)
         entry_count += count;
 
-    constexpr std::size_t header_bytes = omega::retail::kLpdHeaderWordCount * 4U;
+    constexpr std::size_t header_bytes =
+        static_cast<std::size_t>(omega::retail::kLpdHeaderWordCount) * 4U;
     std::vector<std::byte> bytes(header_bytes + entry_count * 4U + zero_tail_bytes, std::byte{0});
     WriteU32(bytes, 0, omega::retail::kLpdHeaderWordCount);
     for (std::size_t track_index = 0; track_index < counts.size(); ++track_index)
@@ -176,9 +177,9 @@ int main()
 
     const Counts empty_counts{};
     const auto empty = omega::retail::DecodeLpdEnvelope(MakeLpd(empty_counts));
-    Check(empty && std::all_of(empty->tracks.begin(), empty->tracks.end(),
-                               [](const omega::asset::LpdTrackIR& track)
-                               { return track.entries.empty(); }),
+    Check(empty && std::ranges::all_of(empty->tracks,
+                                       [](const omega::asset::LpdTrackIR& track)
+                                       { return track.entries.empty(); }),
           "LPD accepts the exact fixed header with all source-track counts zero");
 
     const auto owned = [&]()
@@ -261,7 +262,8 @@ int main()
         "header truncation");
 
     bool all_header_prefixes_truncated = true;
-    for (std::size_t size = 0; size < omega::retail::kLpdHeaderWordCount * 4U; ++size)
+    for (std::size_t size = 0;
+         size < static_cast<std::size_t>(omega::retail::kLpdHeaderWordCount) * 4U; ++size)
     {
         const auto result =
             omega::retail::DecodeLpdEnvelope(std::span<const std::byte>(exact_bytes.data(), size));
@@ -274,7 +276,8 @@ int main()
           "every LPD header prefix is rejected at its earliest missing byte");
 
     bool all_payload_prefixes_truncated = true;
-    constexpr std::size_t header_bytes = omega::retail::kLpdHeaderWordCount * 4U;
+    constexpr std::size_t header_bytes =
+        static_cast<std::size_t>(omega::retail::kLpdHeaderWordCount) * 4U;
     for (std::size_t size = header_bytes; size < exact_bytes.size(); ++size)
     {
         const auto result =
