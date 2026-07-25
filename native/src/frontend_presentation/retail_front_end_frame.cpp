@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <new>
 #include <optional>
 #include <ranges>
@@ -77,11 +78,55 @@ inline constexpr std::uint32_t kMaximumVisualTreeDepth = 64U;
     return std::isfinite(signed_twice_area) && signed_twice_area != 0.0;
 }
 
+// One GUI widget's ownership of one IE visual node.
+//
+// The .GUI widget tree is the scene graph; the paired .IE documents hold the art
+// it places. A widget's binding names a resource and carries the authored
+// transform for it, so the node that binding resolves to draws under THAT
+// widget's accumulated placement -- not under the placement it would inherit
+// from whichever IE node happens to contain it. Resolving only the ROOT widget's
+// binding left every child widget's art at its authored IE-local origin.
+struct VisualNodeClaim
+{
+    // The widget whose binding made the claim. The bundle owns the widget
+    // document for the whole compose, so the address is stable.
+    const asset::FrontendWidgetIR* owner = nullptr;
+    // The scope the binding selected. It owns the node AND the texture members
+    // that node samples, so a widget instancing a resource out of another scope
+    // samples that scope's members, not the screen's same-named ones.
+    const content::FrontEndVisualScope* scope = nullptr;
+    // parent_widget_world * this widget's binding transform, exactly the
+    // hierarchical composition FrontendWidgetBindingIR documents (parent *
+    // local). The IE->raster axis bridge is the top of that chain and is applied
+    // exactly ONCE, at the root (see ComposeRetailFrontEndFrame).
+    AffineTransform12 world{};
+    // Whether the screen state being composed draws the owning widget's subtree
+    // at all (see IsWidgetSubtreeDrawn). A gated claim still SUPPRESSES the node:
+    // a hidden widget's art must not reappear drawn by its IE ancestor instead.
+    bool drawn = false;
+    // Set once the claim has been consumed, so a node reachable both through its
+    // IE parent and through its own widget is emitted exactly once per claim.
+    bool emitted = false;
+};
+
+// Every claim made on a node, in widget preorder. A node can carry more than
+// one: two widgets naming the same shared resource resolve to the same node and
+// each instances it at its own placement.
+using VisualNodeClaimMap =
+    std::map<const asset::FrontendVisualNodeIR*, std::vector<VisualNodeClaim>>;
+
 // Depth-first preorder over the retail IE visual tree: each node emits its own
 // triangles under its accumulated world transform (parent_world * local), THEN
 // recurses into its children, matching the retail render order recovered from
 // the disassembly. A node whose declared texture member is not resolvable falls
 // back to the untextured vertex-color path.
+//
+// `claims` redirects CHILDREN only: the entry node is the one whose claim the
+// caller just consumed. A claimed child is still emitted HERE, in its authored
+// IE sibling position, but under its owning widget's placement instead of the
+// inherited one -- so painter order across mixed claimed/unclaimed siblings
+// stays the authored IE order. Deferring claimed siblings to a later widget-tree
+// pass would silently move them on top of their unclaimed neighbours.
 //
 // Animation (Phase 3b): a node carrying animation_tracks is evaluated at
 // `animation_tick` via the retail timeline primitive; its interpolated positions
@@ -99,7 +144,37 @@ inline constexpr std::uint32_t kMaximumVisualTreeDepth = 64U;
 void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
     const asset::FrontendVisualNodeIR& node,
     const AffineTransform12& parent_world, const std::uint32_t depth,
-    const std::uint32_t animation_tick,
+    const std::uint32_t animation_tick, VisualNodeClaimMap& claims,
+    RetailFrontEndFrameDiagnostics* const diag,
+    std::vector<RetailFrontEndRasterTriangle>& out);
+
+// Emits `node` once per not-yet-consumed claim on it, in widget preorder, each
+// instance under its owning widget's placement and in its owning scope. A gated
+// claim (its widget's subtree is not drawn in this screen state) is consumed
+// without drawing, which is what keeps a hidden widget's art from being drawn by
+// its IE ancestor instead.
+void AppendClaimedVisualNode(const asset::FrontendVisualNodeIR& node,
+    std::vector<VisualNodeClaim>& node_claims, const std::uint32_t depth,
+    const std::uint32_t animation_tick, VisualNodeClaimMap& claims,
+    RetailFrontEndFrameDiagnostics* const diag,
+    std::vector<RetailFrontEndRasterTriangle>& out)
+{
+    for (auto& claim : node_claims)
+    {
+        if (claim.emitted)
+            continue;
+        claim.emitted = true;
+        if (!claim.drawn || claim.scope == nullptr)
+            continue;
+        AppendVisualNodeTriangles(*claim.scope, node, claim.world, depth,
+            animation_tick, claims, diag, out);
+    }
+}
+
+void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
+    const asset::FrontendVisualNodeIR& node,
+    const AffineTransform12& parent_world, const std::uint32_t depth,
+    const std::uint32_t animation_tick, VisualNodeClaimMap& claims,
     RetailFrontEndFrameDiagnostics* const diag,
     std::vector<RetailFrontEndRasterTriangle>& out)
 {
@@ -250,8 +325,166 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
     }
 
     for (const auto& child : node.children)
-        AppendVisualNodeTriangles(
-            scope, child, *world, depth + 1U, animation_tick, diag, out);
+    {
+        const auto claim_entry = claims.find(&child);
+        if (claim_entry == claims.end())
+        {
+            AppendVisualNodeTriangles(scope, child, *world, depth + 1U,
+                animation_tick, claims, diag, out);
+            continue;
+        }
+        // Owned by a widget: draw it in this authored sibling position (so the
+        // painter order over these children is unchanged) but at its owning
+        // widget's placement rather than the one inherited from this node.
+        AppendClaimedVisualNode(child, claim_entry->second, depth + 1U,
+            animation_tick, claims, diag, out);
+    }
+}
+
+// A widget subtree the composed screen draws at all. Two gates, both applied to
+// the WHOLE subtree exactly as authored invisibility is:
+//
+//  * `runtime_hidden_groups` -- widgets a screen authors visible but its runtime
+//    does not draw in the state this project composes (the call site carries the
+//    per-screen evidence); and
+//  * the authored `visible` flag, with `force_visible_group` re-enabling exactly
+//    ONE authored-hidden group for a screen's grounded default state.
+//
+// The retail hub authors its mutually exclusive lanes -- each sub-option submenu
+// and the online vs offline nav bars -- as vis=0 container groups it toggles by
+// live state. The visual and text passes share this gate so a lane's art and its
+// labels appear and disappear together; gating only the text left every lane's
+// interface-element art stacked on the screen at once.
+[[nodiscard]] bool IsWidgetSubtreeDrawn(const asset::FrontendWidgetIR& widget,
+    const std::string_view force_visible_group,
+    const std::span<const std::string_view> runtime_hidden_groups) noexcept
+{
+    for (const std::string_view hidden : runtime_hidden_groups)
+    {
+        if (!hidden.empty() && widget.identifier == hidden)
+            return false;
+    }
+    return widget.visible || widget.identifier == force_visible_group;
+}
+
+// Depth-first preorder over the GUI widget tree, recording which IE node each
+// widget's binding owns and the placement it owns it at.
+//
+// `world` is the caller-composed world transform of THIS widget: the axis bridge
+// at the top of the chain, then every ancestor binding, then this widget's own.
+// Children compose parent * local onto it, which is the hierarchy rule
+// FrontendWidgetBindingIR publishes and the same rule the presentation-
+// requirements inspector applies to the same documents. A widget with no binding
+// contributes no transform of its own and passes `world` straight through.
+//
+// Gated-out subtrees are collected too, with drawn=false: a hidden widget does
+// not draw its resource, and its IE ancestor must not draw it in its place
+// either. `ancestors_drawn` carries the gate down so one hidden ancestor
+// suppresses the whole widget subtree, exactly as the text pass culls it.
+//
+// Fail-soft, matching the rest of the walk: a widget whose binding will not
+// compose to a finite transform drops that widget's subtree rather than the
+// screen.
+void CollectVisualNodeClaims(const content::FrontEndScreenBundle& bundle,
+    const asset::FrontendWidgetIR& widget, const std::uint32_t depth,
+    const bool parentless, const AffineTransform12& world,
+    const bool ancestors_drawn, const std::string_view force_visible_group,
+    const std::span<const std::string_view> runtime_hidden_groups,
+    VisualNodeClaimMap& claims)
+{
+    if (depth >= kMaximumVisualTreeDepth)
+        return;
+    const bool drawn = ancestors_drawn &&
+        IsWidgetSubtreeDrawn(widget, force_visible_group, runtime_hidden_groups);
+
+    if (widget.binding)
+    {
+        const auto* const scope =
+            bundle.FindVisualScope(widget.binding->scope_reference);
+        const auto* const node = bundle.ResolveVisualBinding(widget, parentless);
+        if (scope != nullptr && node != nullptr)
+        {
+            claims[node].push_back(VisualNodeClaim{
+                .owner = &widget,
+                .scope = scope,
+                .world = world,
+                .drawn = drawn,
+                .emitted = false,
+            });
+        }
+    }
+
+    for (const auto& child : widget.children)
+    {
+        AffineTransform12 child_world = world;
+        if (child.binding)
+        {
+            const auto composed = ComposeAffineTransforms(world,
+                AffineTransform12{
+                    .column_vectors = child.binding->transform_values});
+            if (!composed)
+                continue;
+            child_world = *composed;
+        }
+        CollectVisualNodeClaims(bundle, child, depth + 1U, false, child_world,
+            drawn, force_visible_group, runtime_hidden_groups, claims);
+    }
+}
+
+// Depth-first preorder over the GUI widget tree, emitting the art of every claim
+// the IE walk did not already consume.
+//
+// The ROOT widget comes first, and its claim starts the walk of the screen's own
+// IE document; every claim on a node inside that document is consumed there, in
+// the node's authored sibling position (see AppendVisualNodeTriangles). What
+// reaches this pass afterwards is what that walk cannot reach: widgets that
+// instance a resource out of ANOTHER scope, which is not in the screen's own IE
+// document at all, and nodes under a scope no drawn claim entered. Those have no
+// authored IE sibling position relative to the screen, so they are submitted at
+// their own widget's place in the widget preorder.
+//
+// Gating is not re-tested here: it was resolved once per widget in
+// CollectVisualNodeClaims and travels on the claim, so a gated claim is consumed
+// without drawing wherever it is reached. Recursion continues through gated
+// widgets for exactly that reason.
+void AppendWidgetVisualTriangles(const content::FrontEndScreenBundle& bundle,
+    const asset::FrontendWidgetIR& widget, const std::uint32_t depth,
+    const bool parentless, VisualNodeClaimMap& claims,
+    const std::uint32_t animation_tick,
+    RetailFrontEndFrameDiagnostics* const diag,
+    std::vector<RetailFrontEndRasterTriangle>& out)
+{
+    if (depth >= kMaximumVisualTreeDepth)
+        return;
+
+    if (widget.binding)
+    {
+        if (const auto* const node =
+                bundle.ResolveVisualBinding(widget, parentless);
+            node != nullptr)
+        {
+            const auto claim_entry = claims.find(node);
+            if (claim_entry != claims.end())
+            {
+                for (auto& claim : claim_entry->second)
+                {
+                    if (claim.owner != &widget || claim.emitted)
+                        continue;
+                    claim.emitted = true;
+                    if (!claim.drawn || claim.scope == nullptr)
+                        continue;
+                    AppendVisualNodeTriangles(*claim.scope, *node, claim.world,
+                        0U, animation_tick, claims, diag, out);
+                }
+            }
+        }
+    }
+
+    for (const auto& child : widget.children)
+    {
+        AppendWidgetVisualTriangles(bundle, child, depth + 1U, false, claims,
+            animation_tick, diag, out);
+    }
 }
 
 // ---- Phase 2: GUI text pass ----------------------------------------------
@@ -370,32 +603,9 @@ void AppendGuiTextTriangles(const content::FrontEndScreenBundle& bundle,
     if (depth >= kMaximumVisualTreeDepth)
         return;
 
-    // Widgets a screen authors visible but its runtime does not draw in the
-    // state this project composes. The retail front end gates these on live
-    // state (a bonus mission's lock status, an online session) that no decoded
-    // artefact models yet; without that gate their text lands on top of the
-    // screen. The list is grounded, not guessed: every one of the reference
-    // capture's 168 draws is accounted for in analysis/formats/MISSION-RING.md
-    // and none of them is this text. Culling matches the whole subtree, as
-    // authored invisibility does.
-    for (const std::string_view hidden : runtime_hidden_groups)
-    {
-        if (!hidden.empty() && widget.identifier == hidden)
-            return;
-    }
-
-    // A widget marked not-visible hides its ENTIRE subtree. The retail Command
-    // Center hub authors its mutually-exclusive lanes -- each sub-option submenu
-    // (personnel/mission/zeus/media_files groups) and the online vs offline nav
-    // bars (onlinebutton_grp with Messages, offlinebutton_grp without) -- as vis=0
-    // container groups it toggles by runtime state. Recursing into an invisible
-    // container drew every lane at once (overlapping submenu labels + doubled nav
-    // hints). Culling the subtree matches the retail default. force_visible_group
-    // re-enables exactly ONE authored-hidden group for a screen's grounded default
-    // state: the hub shows its offline nav bar (offlinebutton_grp), matching the
-    // retail command-center-mission-select DrawDump frame (Previous/Select icons,
-    // single-player offline mode, no Messages lane).
-    if (!widget.visible && widget.identifier != force_visible_group)
+    // The same subtree gate the visual pass applies (see IsWidgetSubtreeDrawn),
+    // so a lane's art and its labels appear and disappear together.
+    if (!IsWidgetSubtreeDrawn(widget, force_visible_group, runtime_hidden_groups))
         return;
 
 #if defined(_MSC_VER)
@@ -637,12 +847,14 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
     // (screen-vertical in Z, depth in Y): project(x,y,z) = (320+x, 224-z, ...).
     // kInterfaceElementAxisBridge performs exactly that IE->raster axis swap
     // ((x,y,z)->(x,z,y+1)), so project o bridge = (320+x, 223-y, depth-from-z) --
-    // the natural convention. It must be applied OUTERMOST (after every node's
-    // world transform), so it is the top-of-chain parent: composing it with the
-    // root binding transform keeps it outermost through the whole preorder walk
-    // (ComposeAffineTransforms(parent, local) = parent*local, parent applied last).
-    // Without it, flat menu geometry (constant Z) collapses to horizontal lines and
-    // the kernel rejects ~every triangle as degenerate.
+    // the natural convention. It must be applied OUTERMOST (after every world
+    // transform), so it is the top of the chain and is composed EXACTLY ONCE,
+    // here: ComposeAffineTransforms(parent, local) = parent*local, so making it
+    // the root parent keeps it outermost through both the widget hierarchy and
+    // the IE node hierarchy below it, and no binding re-applies it. Without it,
+    // flat menu geometry (constant Z) collapses to horizontal lines and the
+    // kernel rejects ~every triangle as degenerate; applying it twice collapses
+    // the same geometry the same way.
     const AffineTransform12 binding_transform{
         .column_vectors = root_widget.binding->transform_values,
     };
@@ -651,10 +863,58 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
     if (!bridged_initial_world)
         return std::unexpected(RetailFrontEndFrameError::TransformFailure);
     const AffineTransform12 initial_world = *bridged_initial_world;
+
+    // Which authored lanes this screen state draws. Both gates feed the visual
+    // pass and the text pass alike (see IsWidgetSubtreeDrawn).
+    //
+    // force_visible_group re-enables exactly ONE authored-hidden group for a
+    // screen's grounded default state: the hub shows its offline nav bar
+    // (offlinebutton_grp), matching the retail command-center-mission-select
+    // DrawDump frame (Previous/Select icons, single-player offline mode, no
+    // Messages lane).
+    const std::string_view force_visible_group =
+        bundle.key() == content::FrontEndScreenKey::CommandCenter
+            ? std::string_view("offlinebutton_grp")
+            : std::string_view();
+    // The hub's authored-visible, runtime-gated widgets. `bonusmissions` holds
+    // the "$BonusMissionT" popup ("To unlock this bonus mission ...") plus its
+    // list; retail raises it only for a locked bonus mission, and drawn
+    // unconditionally it strikes straight across the mission ring.
+    // `label_region` / `value_region` are the Region row; the reference frame's
+    // label block (draws 12 and 157) is Agent and Rank only. All three are absent
+    // from every draw of the reference capture of exactly this screen state,
+    // which is the evidence for culling them here; none is absent from the screen
+    // in every state, so this is a state model, not a claim that the widgets are
+    // unused.
+    static constexpr std::array<std::string_view, 3U>
+        kCommandCenterRuntimeHiddenGroups{
+            "bonusmissions", "label_region", "value_region"};
+    const std::span<const std::string_view> runtime_hidden_groups =
+        bundle.key() == content::FrontEndScreenKey::CommandCenter
+            ? std::span<const std::string_view>(kCommandCenterRuntimeHiddenGroups)
+            : std::span<const std::string_view>();
+
     std::vector<RetailFrontEndRasterTriangle> triangles;
     try
     {
-        AppendVisualNodeTriangles(*scope, *root_visual, initial_world, 0U,
+        // Interface-element pass, in two steps.
+        //
+        // First resolve what each widget owns and where: one claim per bound
+        // widget, carrying the parent*local placement of its whole binding chain
+        // (rooted at the once-composed axis bridge) and the gate for its screen
+        // state. Then walk. The walk is still the authored IE preorder -- the
+        // order the retail submission stream follows -- and a claimed node is
+        // emitted in its authored sibling position, only at its owner's
+        // placement instead of the inherited one. Art no IE walk can reach
+        // (resources instanced out of another scope) follows in widget preorder.
+        //
+        // So a child widget's art lands at that widget's placement rather than at
+        // its authored IE-local origin, each claim draws exactly once, and
+        // layering across siblings is unchanged.
+        VisualNodeClaimMap claims;
+        CollectVisualNodeClaims(bundle, root_widget, 0U, true, initial_world,
+            true, force_visible_group, runtime_hidden_groups, claims);
+        AppendWidgetVisualTriangles(bundle, root_widget, 0U, true, claims,
             animation_tick, diagnostics, triangles);
         // Command Center mission-select ring, reconstructed from the measured
         // geometry in analysis/formats/MISSION-RING.md (band quad extent plus the
@@ -686,31 +946,8 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
         // Phase 2 GUI text pass. Glyph quads are appended AFTER all IE geometry
         // so the submission-ordinal depth pass below ranks them highest and they
         // draw on top of the screen art. Text is a decoration over a valid IE
-        // screen; it never gates composition. Invisible (vis=0) widget subtrees
-        // are culled here; the hub re-enables its offline nav group for the
-        // grounded default state (see AppendGuiTextTriangles).
-        const std::string_view force_visible_group =
-            bundle.key() == content::FrontEndScreenKey::CommandCenter
-                ? std::string_view("offlinebutton_grp")
-                : std::string_view();
-        // The hub's authored-visible, runtime-gated widgets. `bonusmissions`
-        // holds the "$BonusMissionT" popup ("To unlock this bonus mission ...")
-        // plus its list; retail raises it only for a locked bonus mission, and
-        // drawn unconditionally it strikes straight across the mission ring.
-        // `label_region` / `value_region` are the Region row; the reference
-        // frame's label block (draws 12 and 157) is Agent and Rank only. Both
-        // are absent from every draw of the reference capture of exactly this
-        // screen state, which is the evidence for culling them here; neither is
-        // absent from the screen in every state, so this is a state model, not
-        // a claim that the widgets are unused.
-        static constexpr std::array<std::string_view, 3U>
-            kCommandCenterRuntimeHiddenGroups{
-                "bonusmissions", "label_region", "value_region"};
-        const std::span<const std::string_view> runtime_hidden_groups =
-            bundle.key() == content::FrontEndScreenKey::CommandCenter
-                ? std::span<const std::string_view>(
-                      kCommandCenterRuntimeHiddenGroups)
-                : std::span<const std::string_view>();
+        // screen; it never gates composition. It walks the same widget tree under
+        // the same subtree gate the visual pass used.
         AppendGuiTextTriangles(bundle, bundle.widget_document().root, 0U,
             selected_widget_identifier, force_visible_group,
             runtime_hidden_groups, diagnostics, triangles);

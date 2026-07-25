@@ -298,6 +298,272 @@ void Check(const bool condition, const std::string_view message)
         RetailFrontEndPresentationCapabilityTestAccess::Make(true));
 }
 
+// ---- Widget-binding placement fixtures ------------------------------------
+
+// A pure translation in the twelve-coefficient column-vector form: identity
+// basis, translation in C3. Used for both widget bindings and node-local
+// transforms, which take the same form (FrontendWidgetBindingIR documents both,
+// and both compose parent * local).
+//
+// Everything below stays in interface-element space (x horizontal, y vertical,
+// z depth) because the compositor applies kInterfaceElementAxisBridge exactly
+// once, at the top of the chain. A point that ends at interface-element
+// (x, y, z) therefore rasterizes at (320 + x, 223 - y).
+[[nodiscard]] std::array<float, 12> TranslationTransform(
+    const float translate_x, const float translate_y, const float translate_z)
+{
+    return std::array<float, 12>{
+        1.0F, 0.0F, 0.0F,
+        0.0F, 1.0F, 0.0F,
+        0.0F, 0.0F, 1.0F,
+        translate_x, translate_y, translate_z,
+    };
+}
+
+struct PlacedChildOptions final
+{
+    // Authors the child widget vis=0, which must cull the ART it owns as well as
+    // its text -- and must not hand the node back to its IE parent's walk.
+    bool visible_child = true;
+    // Moves the child's art into a SECOND visual scope that the child widget
+    // names, the way a screen instances a shared shell resource that is not in
+    // its own interface-element document at all.
+    bool second_scope = false;
+    // Interposes a vis=0 container widget between the root and the child, so the
+    // child is authored visible but has a hidden ancestor.
+    bool hidden_ancestor = false;
+};
+
+// Root full-screen quad plus one child quad whose widget binding translates it
+// away from the frame centre. Resolving only the root binding would leave the
+// child at its authored interface-element origin (the frame centre, where
+// MakeQuad puts it); its own binding places it at
+// x [480, 560], y [343, 403].
+[[nodiscard]] FrontEndScreenBundle MakePlacedChildBundle(
+    const FrontendColorRgba8IR root_color,
+    const FrontendColorRgba8IR child_color,
+    const PlacedChildOptions options = {})
+{
+    FrontendVisualNodeIR root_visual =
+        MakeQuad("ROOT_root", 320.0F, 224.0F, root_color);
+    FrontendVisualNodeIR child_visual =
+        MakeQuad("LOGO", 40.0F, 30.0F, child_color);
+
+    FrontEndScreenBundle::VisualScopeMap scopes;
+    if (options.second_scope)
+    {
+        FrontendVisualNodeIR shell_root =
+            FrontendVisualNodeIR{.identifier = "SHELL_root",
+                .transform_values = kIdentityAffineTransform12.column_vectors};
+        shell_root.children.push_back(std::move(child_visual));
+        scopes.emplace("SHELL",
+            FrontEndScreenBundleTestAccess::MakeScope(
+                omega::asset::FrontendVisualDocumentIR{
+                    .root = std::move(shell_root)},
+                FrontEndVisualScope::ResourceSet{"SHELL_root", "LOGO"},
+                FrontEndVisualScope::TextureMap{}));
+    }
+    else
+    {
+        root_visual.children.push_back(std::move(child_visual));
+    }
+    scopes.emplace("TITLE",
+        FrontEndScreenBundleTestAccess::MakeScope(
+            omega::asset::FrontendVisualDocumentIR{
+                .root = std::move(root_visual)},
+            FrontEndVisualScope::ResourceSet{"ROOT_root", "LOGO"},
+            FrontEndVisualScope::TextureMap{}));
+
+    FrontendWidgetIR root_widget = MakeWidget("ROOT");
+    FrontendWidgetIR child_widget = MakeWidget("LOGO");
+    child_widget.visible = options.visible_child;
+    child_widget.binding = FrontendWidgetBindingIR{
+        .scope_reference =
+            options.second_scope ? std::string("SHELL") : std::string(),
+        .transform_values = TranslationTransform(200.0F, -150.0F, 0.0F),
+    };
+    if (options.hidden_ancestor)
+    {
+        FrontendWidgetIR hidden_group = MakeWidget("HIDDEN_GROUP");
+        hidden_group.visible = false;
+        // The group binds nothing of its own; it exists only to hide its
+        // subtree, exactly as the authored lane containers do.
+        hidden_group.binding.reset();
+        hidden_group.children.push_back(std::move(child_widget));
+        root_widget.children.push_back(std::move(hidden_group));
+    }
+    else
+    {
+        root_widget.children.push_back(std::move(child_widget));
+    }
+
+    return FrontEndScreenBundleTestAccess::MakeBundle(FrontEndScreenKey::Title,
+        omega::asset::FrontendWidgetDocumentIR{.root = std::move(root_widget)},
+        "TITLE", std::move(scopes),
+        RetailFrontEndPresentationCapabilityTestAccess::Make(true));
+}
+
+// Root quad, then a `buttons_grp`-shaped nesting: a container widget translated
+// +80 in x owning an empty interface-element container node, and inside it a
+// child widget translated a further +20 owning the art. Hierarchical composition
+// is parent * local (FrontendWidgetBindingIR), so the art lands at +100 --
+// x [412, 428] -- not at the child's own +20 (x [332, 348]) and not at the
+// parent's +80 alone (x [392, 408]).
+[[nodiscard]] FrontEndScreenBundle MakeNestedTranslationBundle(
+    const FrontendColorRgba8IR root_color,
+    const FrontendColorRgba8IR child_color)
+{
+    FrontendVisualNodeIR root_visual =
+        MakeQuad("ROOT_root", 320.0F, 224.0F, root_color);
+    FrontendVisualNodeIR group_visual{.identifier = "GROUP",
+        .transform_values = kIdentityAffineTransform12.column_vectors};
+    group_visual.children.push_back(MakeQuad("LOGO", 8.0F, 40.0F, child_color));
+    root_visual.children.push_back(std::move(group_visual));
+
+    FrontEndScreenBundle::VisualScopeMap scopes;
+    scopes.emplace("TITLE",
+        FrontEndScreenBundleTestAccess::MakeScope(
+            omega::asset::FrontendVisualDocumentIR{
+                .root = std::move(root_visual)},
+            FrontEndVisualScope::ResourceSet{"ROOT_root", "GROUP", "LOGO"},
+            FrontEndVisualScope::TextureMap{}));
+
+    FrontendWidgetIR root_widget = MakeWidget("ROOT");
+    FrontendWidgetIR group_widget = MakeWidget("GROUP");
+    group_widget.binding = FrontendWidgetBindingIR{
+        .transform_values = TranslationTransform(80.0F, 0.0F, 0.0F)};
+    FrontendWidgetIR child_widget = MakeWidget("LOGO");
+    child_widget.binding = FrontendWidgetBindingIR{
+        .transform_values = TranslationTransform(20.0F, 0.0F, 0.0F)};
+    group_widget.children.push_back(std::move(child_widget));
+    root_widget.children.push_back(std::move(group_widget));
+
+    return FrontEndScreenBundleTestAccess::MakeBundle(FrontEndScreenKey::Title,
+        omega::asset::FrontendWidgetDocumentIR{.root = std::move(root_widget)},
+        "TITLE", std::move(scopes),
+        RetailFrontEndPresentationCapabilityTestAccess::Make(true));
+}
+
+// Root quad with two overlapping children in authored interface-element order:
+// CLAIMED (a widget owns it, identity placement, x [220, 340]) then UNCLAIMED
+// (no widget names it, x [300, 420]). The authored order must survive the mix,
+// so the emission order is ROOT, CLAIMED, UNCLAIMED and the later UNCLAIMED wins
+// the overlap at x [300, 340].
+[[nodiscard]] FrontEndScreenBundle MakeMixedSiblingBundle(
+    const FrontendColorRgba8IR root_color,
+    const FrontendColorRgba8IR claimed_color,
+    const FrontendColorRgba8IR unclaimed_color)
+{
+    FrontendVisualNodeIR root_visual =
+        MakeQuad("ROOT_root", 320.0F, 224.0F, root_color);
+    FrontendVisualNodeIR claimed = MakeQuad("CLAIMED", 60.0F, 40.0F,
+        claimed_color);
+    claimed.transform_values = TranslationTransform(-40.0F, 0.0F, 0.0F);
+    FrontendVisualNodeIR unclaimed = MakeQuad("UNCLAIMED", 60.0F, 40.0F,
+        unclaimed_color);
+    unclaimed.transform_values = TranslationTransform(40.0F, 0.0F, 0.0F);
+    root_visual.children.push_back(std::move(claimed));
+    root_visual.children.push_back(std::move(unclaimed));
+
+    FrontEndScreenBundle::VisualScopeMap scopes;
+    scopes.emplace("TITLE",
+        FrontEndScreenBundleTestAccess::MakeScope(
+            omega::asset::FrontendVisualDocumentIR{
+                .root = std::move(root_visual)},
+            // UNCLAIMED is deliberately absent: an unbound node is not a
+            // resource any widget can name, so nothing claims it.
+            FrontEndVisualScope::ResourceSet{"ROOT_root", "CLAIMED"},
+            FrontEndVisualScope::TextureMap{}));
+
+    FrontendWidgetIR root_widget = MakeWidget("ROOT");
+    root_widget.children.push_back(MakeWidget("CLAIMED"));
+
+    return FrontEndScreenBundleTestAccess::MakeBundle(FrontEndScreenKey::Title,
+        omega::asset::FrontendWidgetDocumentIR{.root = std::move(root_widget)},
+        "TITLE", std::move(scopes),
+        RetailFrontEndPresentationCapabilityTestAccess::Make(true));
+}
+
+// Two widgets naming the SAME resource in a shared scope, each at its own
+// placement: one instance at x [140, 200] and one at x [440, 500]. Both bindings
+// resolve to one node, so the compositor must instance it per claiming widget
+// rather than draw it once.
+[[nodiscard]] FrontEndScreenBundle MakeSharedResourceBundle(
+    const FrontendColorRgba8IR root_color,
+    const FrontendColorRgba8IR panel_color)
+{
+    FrontendVisualNodeIR shell_root{.identifier = "SHELL_root",
+        .transform_values = kIdentityAffineTransform12.column_vectors};
+    shell_root.children.push_back(MakeQuad("PANEL", 30.0F, 20.0F, panel_color));
+
+    FrontEndScreenBundle::VisualScopeMap scopes;
+    scopes.emplace("SHELL",
+        FrontEndScreenBundleTestAccess::MakeScope(
+            omega::asset::FrontendVisualDocumentIR{
+                .root = std::move(shell_root)},
+            FrontEndVisualScope::ResourceSet{"PANEL"},
+            FrontEndVisualScope::TextureMap{}));
+    scopes.emplace("TITLE",
+        FrontEndScreenBundleTestAccess::MakeScope(
+            omega::asset::FrontendVisualDocumentIR{
+                .root = MakeQuad("ROOT_root", 320.0F, 224.0F, root_color)},
+            FrontEndVisualScope::ResourceSet{"ROOT_root"},
+            FrontEndVisualScope::TextureMap{}));
+
+    const auto make_instance = [](std::string identifier,
+                                   const float translate_x) {
+        FrontendWidgetIR instance = MakeWidget(std::move(identifier));
+        instance.binding = FrontendWidgetBindingIR{
+            .scope_reference = "SHELL",
+            .resource_reference = "PANEL",
+            .transform_values = TranslationTransform(translate_x, 0.0F, 0.0F),
+        };
+        return instance;
+    };
+    FrontendWidgetIR root_widget = MakeWidget("ROOT");
+    root_widget.children.push_back(make_instance("INSTANCE_LEFT", -150.0F));
+    root_widget.children.push_back(make_instance("INSTANCE_RIGHT", 150.0F));
+
+    return FrontEndScreenBundleTestAccess::MakeBundle(FrontEndScreenKey::Title,
+        omega::asset::FrontendWidgetDocumentIR{.root = std::move(root_widget)},
+        "TITLE", std::move(scopes),
+        RetailFrontEndPresentationCapabilityTestAccess::Make(true));
+}
+
+// A Command Center screen whose one child widget is authored VISIBLE and owns
+// art. Naming it after a group the composed screen state does not draw
+// (kCommandCenterRuntimeHiddenGroups in the compositor) must cull that art;
+// any other identifier must draw it.
+[[nodiscard]] FrontEndScreenBundle MakeRuntimeGatedBundle(
+    const std::string& group_identifier, const FrontendColorRgba8IR root_color,
+    const FrontendColorRgba8IR group_color)
+{
+    FrontendVisualNodeIR root_visual =
+        MakeQuad("ROOT_root", 320.0F, 224.0F, root_color);
+    root_visual.children.push_back(
+        MakeQuad(group_identifier, 40.0F, 30.0F, group_color));
+
+    FrontEndScreenBundle::VisualScopeMap scopes;
+    scopes.emplace("CMDCENTR",
+        FrontEndScreenBundleTestAccess::MakeScope(
+            omega::asset::FrontendVisualDocumentIR{
+                .root = std::move(root_visual)},
+            FrontEndVisualScope::ResourceSet{"ROOT_root", group_identifier},
+            FrontEndVisualScope::TextureMap{}));
+
+    FrontendWidgetIR root_widget = MakeWidget("ROOT");
+    FrontendWidgetIR group_widget = MakeWidget(group_identifier);
+    group_widget.binding = FrontendWidgetBindingIR{
+        .transform_values = TranslationTransform(200.0F, -150.0F, 0.0F)};
+    root_widget.children.push_back(std::move(group_widget));
+
+    return FrontEndScreenBundleTestAccess::MakeBundle(
+        FrontEndScreenKey::CommandCenter,
+        omega::asset::FrontendWidgetDocumentIR{.root = std::move(root_widget)},
+        "CMDCENTR", std::move(scopes),
+        RetailFrontEndPresentationCapabilityTestAccess::Make(true));
+}
+
 [[nodiscard]] std::array<std::uint8_t, 4U> Pixel(
     const omega::frontend::presentation::OwnedRgba8Frame& frame,
     const std::uint32_t x, const std::uint32_t y)
@@ -633,6 +899,212 @@ int main()
         Check(min_x < 320.0F && max_x > 320.0F && min_y < 246.0F &&
                   max_y > 246.0F,
             "mission ring spans the frame centre");
+    }
+
+    // ---- Widget-owned interface-element placement -------------------------
+    //
+    // A CHILD widget's own binding transform places the interface-element art it
+    // owns. Resolving only the root binding left every child's art at its
+    // authored interface-element origin (here: the frame centre) instead of at
+    // the widget's placement.
+    {
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto placed = ComposeRetailFrontEndFrame(
+            MakePlacedChildBundle(root_color, child_color), {}, &diagnostics);
+        Check(placed.has_value(), "a placed child widget composes");
+        if (placed)
+        {
+            const auto at_placement = Pixel(*placed, 520U, 373U);
+            Check(at_placement[0U] > 150U && at_placement[1U] < 110U &&
+                      at_placement[2U] < 110U,
+                "child art draws where its OWN binding transform places it");
+            const auto at_centre = Pixel(*placed, 320U, 224U);
+            Check(at_centre[0U] < 90U && at_centre[2U] > 30U,
+                "child art no longer draws at its authored IE-local origin");
+            const auto just_outside = Pixel(*placed, 470U, 373U);
+            Check(just_outside[0U] < 90U && just_outside[2U] > 30U,
+                "the placed child quad ends at its transformed left edge");
+        }
+        // Exactly one draw per claim: the root quad's two triangles plus the
+        // child quad's two. The child node is reachable from its interface-
+        // element parent as well as from its own widget, and draws once.
+        Check(diagnostics.ie_triangles_emitted == 4U,
+            "each claimed visual node is emitted exactly once");
+    }
+
+    // Hierarchical composition is parent * local, as FrontendWidgetBindingIR
+    // documents: a widget translated +80 holding a child translated +20 puts the
+    // child's art at +100. Treating a binding as an absolute placement would put
+    // it at +20, and dropping the child's own binding would put it at +80; both
+    // land where the falsification pixels below require the root background.
+    {
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto nested = ComposeRetailFrontEndFrame(
+            MakeNestedTranslationBundle(root_color, child_color), {},
+            &diagnostics);
+        Check(nested.has_value(), "a nested widget translation composes");
+        if (nested)
+        {
+            const auto at_sum = Pixel(*nested, 420U, 223U);
+            Check(at_sum[0U] > 150U && at_sum[1U] < 110U && at_sum[2U] < 110U,
+                "nested bindings compose: child art lands at parent + child");
+            const auto at_child_only = Pixel(*nested, 340U, 223U);
+            Check(at_child_only[0U] < 90U && at_child_only[2U] > 30U,
+                "the child's own translation alone does not place its art");
+            const auto at_parent_only = Pixel(*nested, 400U, 223U);
+            Check(at_parent_only[0U] < 90U && at_parent_only[2U] > 30U,
+                "the parent's translation alone does not place its art");
+        }
+        // The empty container node contributes no triangles, so this is the root
+        // quad plus the child quad -- and the axis bridge, applied once at the
+        // top of the chain, is not re-applied by either binding (a second
+        // exchange would flatten the quad and the kernel would drop it).
+        Check(diagnostics.ie_triangles_emitted == 4U,
+            "a nested claim chain emits the root and the placed child once");
+    }
+
+    // Authored interface-element painter order survives a mix of claimed and
+    // unclaimed siblings. ROOT's children are [CLAIMED, UNCLAIMED]; emission is
+    // ROOT, CLAIMED, UNCLAIMED, so the later UNCLAIMED covers CLAIMED where they
+    // overlap. Deferring claimed siblings to a widget-tree pass after the walk
+    // would emit ROOT, UNCLAIMED, CLAIMED and silently invert the overlap.
+    {
+        const FrontendColorRgba8IR unclaimed_color{
+            .red = 40U, .green = 200U, .blue = 70U, .alpha = 255U};
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto mixed = ComposeRetailFrontEndFrame(
+            MakeMixedSiblingBundle(root_color, child_color, unclaimed_color),
+            {}, &diagnostics);
+        Check(mixed.has_value(), "mixed claimed/unclaimed siblings compose");
+        if (mixed)
+        {
+            const auto overlap = Pixel(*mixed, 320U, 223U);
+            Check(overlap[1U] > 150U && overlap[0U] < 110U,
+                "the later authored sibling stays on top of the claimed one");
+            const auto claimed_only = Pixel(*mixed, 260U, 223U);
+            Check(claimed_only[0U] > 150U && claimed_only[1U] < 110U,
+                "the claimed sibling still draws where nothing covers it");
+            const auto unclaimed_only = Pixel(*mixed, 380U, 223U);
+            Check(unclaimed_only[1U] > 150U && unclaimed_only[0U] < 110U,
+                "the unclaimed sibling draws under its inherited placement");
+        }
+        Check(diagnostics.ie_triangles_emitted == 6U,
+            "root, claimed and unclaimed siblings each emit their quad once");
+    }
+
+    // A widget naming a resource in ANOTHER visual scope instances that scope's
+    // art at the widget's own placement. A walk of the screen's own interface-
+    // element document alone never reaches such a resource.
+    {
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto instanced = ComposeRetailFrontEndFrame(
+            MakePlacedChildBundle(root_color, child_color,
+                PlacedChildOptions{.second_scope = true}),
+            {}, &diagnostics);
+        Check(instanced.has_value(), "a cross-scope instanced child composes");
+        if (instanced)
+        {
+            const auto at_placement = Pixel(*instanced, 520U, 373U);
+            Check(at_placement[0U] > 150U && at_placement[1U] < 110U &&
+                      at_placement[2U] < 110U,
+                "art from another visual scope draws at the widget placement");
+        }
+        Check(diagnostics.ie_triangles_emitted == 4U,
+            "cross-scope instancing emits the root and the instanced quad once");
+    }
+
+    // Two widgets naming the SAME shared resource each instance it at their own
+    // placement, so one node yields two draws rather than one.
+    {
+        const FrontendColorRgba8IR panel_color{
+            .red = 40U, .green = 200U, .blue = 70U, .alpha = 255U};
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto shared = ComposeRetailFrontEndFrame(
+            MakeSharedResourceBundle(root_color, panel_color), {},
+            &diagnostics);
+        Check(shared.has_value(), "a shared instanced resource composes");
+        if (shared)
+        {
+            const auto left = Pixel(*shared, 170U, 223U);
+            const auto right = Pixel(*shared, 470U, 223U);
+            Check(left[1U] > 150U && left[0U] < 110U,
+                "the first widget instances the shared resource at its place");
+            Check(right[1U] > 150U && right[0U] < 110U,
+                "the second widget instances the same resource at its place");
+            const auto between = Pixel(*shared, 320U, 223U);
+            Check(between[1U] < 110U && between[2U] > 30U,
+                "the shared resource does not draw between the two instances");
+        }
+        Check(diagnostics.ie_triangles_emitted == 6U,
+            "one shared node claimed twice emits two instances");
+    }
+
+    // A not-visible widget culls the ART it owns as well as its text, and the
+    // culled node is NOT handed back to its interface-element parent's walk.
+    {
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto culled = ComposeRetailFrontEndFrame(
+            MakePlacedChildBundle(root_color, child_color,
+                PlacedChildOptions{.visible_child = false}),
+            {}, &diagnostics);
+        Check(culled.has_value(), "an invisible child widget still composes");
+        if (culled)
+        {
+            const auto at_placement = Pixel(*culled, 520U, 373U);
+            Check(at_placement[0U] < 90U && at_placement[2U] > 30U,
+                "an invisible widget draws no art at its placement");
+            const auto at_centre = Pixel(*culled, 320U, 224U);
+            Check(at_centre[0U] < 90U && at_centre[2U] > 30U,
+                "an invisible widget's art is not drawn by the root walk either");
+        }
+        Check(diagnostics.ie_triangles_emitted == 2U,
+            "only the root quad is emitted when the child widget is invisible");
+    }
+
+    // One hidden ancestor culls the whole widget subtree below it, so a visible
+    // widget inside a vis=0 group draws neither at its own placement nor at the
+    // origin its interface-element parent would inherit to it.
+    {
+        RetailFrontEndFrameDiagnostics diagnostics;
+        const auto culled = ComposeRetailFrontEndFrame(
+            MakePlacedChildBundle(root_color, child_color,
+                PlacedChildOptions{.hidden_ancestor = true}),
+            {}, &diagnostics);
+        Check(culled.has_value(),
+            "a visible widget under a hidden group still composes");
+        if (culled)
+        {
+            const auto at_placement = Pixel(*culled, 520U, 373U);
+            Check(at_placement[0U] < 90U && at_placement[2U] > 30U,
+                "a hidden ancestor culls its subtree's art at its placement");
+            const auto at_centre = Pixel(*culled, 320U, 224U);
+            Check(at_centre[0U] < 90U && at_centre[2U] > 30U,
+                "a hidden ancestor's subtree art is not drawn by the root walk");
+        }
+        Check(diagnostics.ie_triangles_emitted == 2U,
+            "only the root quad is emitted under a hidden ancestor");
+    }
+
+    // The runtime-hidden gate reaches the art too, not only the text: a Command
+    // Center group the composed state does not draw contributes no interface-
+    // element geometry. The control names the identical widget something else
+    // and it draws, so this is the gate and not the fixture.
+    {
+        RetailFrontEndFrameDiagnostics gated_diagnostics;
+        const auto gated = ComposeRetailFrontEndFrame(
+            MakeRuntimeGatedBundle("bonusmissions", root_color, child_color), {},
+            &gated_diagnostics);
+        Check(gated.has_value(), "a runtime-gated hub screen composes");
+        Check(gated_diagnostics.ie_triangles_emitted == 2U,
+            "a runtime-hidden group contributes no interface-element art");
+
+        RetailFrontEndFrameDiagnostics drawn_diagnostics;
+        const auto drawn = ComposeRetailFrontEndFrame(
+            MakeRuntimeGatedBundle("mission_grp", root_color, child_color), {},
+            &drawn_diagnostics);
+        Check(drawn.has_value(), "the ungated control screen composes");
+        Check(drawn_diagnostics.ie_triangles_emitted == 4U,
+            "the same widget draws its art when it is not runtime-hidden");
     }
 
     if (failures != 0)
