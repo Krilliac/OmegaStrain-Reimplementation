@@ -607,9 +607,47 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
     return SDL_CreateGPUShader(device, &create_info);
 }
 
+// Picks the depth-stencil format the mesh pass will use, once, at device setup.
+// SDL requires the render pass depth target and the bound pipeline to agree on
+// this format, so it is resolved in exactly one place and stored on Impl rather
+// than recomputed at each creation site. D32_FLOAT is preferred (highest depth
+// precision of the three, no stencil plane to clear); D24_UNORM_S8_UINT and
+// D16_UNORM are the conventional fallbacks. Returns
+// SDL_GPU_TEXTUREFORMAT_INVALID when the device supports none of them, in which
+// case the mesh pass runs depth-less exactly as it did before -- fail-soft, the
+// same posture the textured pipeline takes on a backend without DXIL.
+[[nodiscard]] SDL_GPUTextureFormat ResolveMeshDepthFormat(SDL_GPUDevice* device) noexcept
+{
+    constexpr std::array candidates{
+        SDL_GPU_TEXTUREFORMAT_D32_FLOAT,
+        SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT,
+        SDL_GPU_TEXTUREFORMAT_D16_UNORM,
+    };
+    for (const SDL_GPUTextureFormat candidate : candidates)
+    {
+        if (SDL_GPUTextureSupportsFormat(device, candidate, SDL_GPU_TEXTURETYPE_2D,
+                SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
+        {
+            return candidate;
+        }
+    }
+    return SDL_GPU_TEXTUREFORMAT_INVALID;
+}
+
+// True for the one ResolveMeshDepthFormat candidate that carries a stencil
+// plane. The stencil load/store ops must only be filled in for that format: the
+// D3D12 backend turns a CLEAR stencil load op into D3D12_CLEAR_FLAG_STENCIL,
+// which is invalid against a depth-only view.
+[[nodiscard]] constexpr bool MeshDepthFormatHasStencil(
+    const SDL_GPUTextureFormat format) noexcept
+{
+    return format == SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
+}
+
 [[nodiscard]] SDL_GPUGraphicsPipeline* CreateMeshPipeline(SDL_GPUDevice* device,
     SDL_GPUShader* vertex_shader, SDL_GPUShader* fragment_shader,
-    const SDL_GPUTextureFormat target_format, const SDL_GPUFillMode fill_mode) noexcept
+    const SDL_GPUTextureFormat target_format, const SDL_GPUTextureFormat depth_format,
+    const SDL_GPUFillMode fill_mode) noexcept
 {
     constexpr std::array vertex_buffers{
         SDL_GPUVertexBufferDescription{
@@ -659,6 +697,11 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
         .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
         .rasterizer_state = {
             .fill_mode = fill_mode,
+            // cull_mode stays NONE. The decoded COL/VUM geometry has unproven
+            // triangle winding, so enabling backface culling could silently
+            // delete surfaces. Depth testing below fixes the ordering defect on
+            // its own; culling is a separate decision that needs winding
+            // evidence first.
             .cull_mode = SDL_GPU_CULLMODE_NONE,
             .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
             .enable_depth_clip = true,
@@ -666,9 +709,21 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
         .multisample_state = {
             .sample_count = SDL_GPU_SAMPLECOUNT_1,
         },
+        // Standard less-than depth test with writes enabled: without it the 3D
+        // view resolves purely by submission order and distant geometry paints
+        // over near geometry. Disabled only when the device supports no depth
+        // format at all, which also drops the depth-stencil target below so the
+        // pipeline still matches the (then depth-less) render pass.
+        .depth_stencil_state = {
+            .compare_op = SDL_GPU_COMPAREOP_LESS,
+            .enable_depth_test = depth_format != SDL_GPU_TEXTUREFORMAT_INVALID,
+            .enable_depth_write = depth_format != SDL_GPU_TEXTUREFORMAT_INVALID,
+        },
         .target_info = {
             .color_target_descriptions = &color_target,
             .num_color_targets = 1U,
+            .depth_stencil_format = depth_format,
+            .has_depth_stencil_target = depth_format != SDL_GPU_TEXTUREFORMAT_INVALID,
         },
         .props = 0,
     };
@@ -702,14 +757,34 @@ static_assert(ToShaderMatrix(kShaderMatrixConversionInput) ==
     const std::span<const ResolvedMeshDraw> resolved_draws,
     SDL_GPUBuffer* color_buffer, SDL_GPUGraphicsPipeline* fill_pipeline,
     SDL_GPUGraphicsPipeline* wireframe_pipeline,
-    SDL_GPUGraphicsPipeline* textured_pipeline, SDL_GPUSampler* sampler) noexcept
+    SDL_GPUGraphicsPipeline* textured_pipeline, SDL_GPUSampler* sampler,
+    SDL_GPUTexture* depth_texture, const SDL_GPUTextureFormat depth_format) noexcept
 {
     SDL_GPUColorTargetInfo target{};
     target.texture = destination;
     target.clear_color = clear_color;
     target.load_op = SDL_GPU_LOADOP_CLEAR;
     target.store_op = SDL_GPU_STOREOP_STORE;
-    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1U, nullptr);
+
+    // Depth attachment for this 3D pass only; the 2D HUD/front-end passes stay
+    // depth-less. Cleared to the far plane each frame and discarded afterwards
+    // (STOREOP_DONT_CARE) because nothing outside the pass reads depth -- it
+    // exists solely to order this pass's own triangles. depth_texture is null
+    // only when the device supports no depth format, and the pipelines were
+    // then built without a depth-stencil target to match.
+    SDL_GPUDepthStencilTargetInfo depth_target{};
+    depth_target.texture = depth_texture;
+    depth_target.clear_depth = 1.0F;
+    depth_target.load_op = SDL_GPU_LOADOP_CLEAR;
+    depth_target.store_op = SDL_GPU_STOREOP_DONT_CARE;
+    if (MeshDepthFormatHasStencil(depth_format))
+    {
+        depth_target.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
+        depth_target.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+    }
+
+    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1U,
+        depth_texture != nullptr ? &depth_target : nullptr);
     if (pass == nullptr)
         return false;
 
@@ -886,6 +961,13 @@ struct SdlGpuHost::Impl
                 SDL_ReleaseGPUSampler(device, mesh_sampler);
                 mesh_sampler = nullptr;
             }
+            if (mesh_depth_texture != nullptr)
+            {
+                SDL_ReleaseGPUTexture(device, mesh_depth_texture);
+                mesh_depth_texture = nullptr;
+                mesh_depth_width = 0U;
+                mesh_depth_height = 0U;
+            }
             if (window_claimed && window != nullptr)
                 SDL_ReleaseWindowFromGPUDevice(device, window);
             SDL_DestroyGPUDevice(device);
@@ -921,6 +1003,18 @@ struct SdlGpuHost::Impl
     SDL_GPUGraphicsPipeline* mesh_textured_pipeline = nullptr;
     SDL_GPUSampler* mesh_sampler = nullptr;
     SDL_GPUTextureFormat mesh_pipeline_format = SDL_GPU_TEXTUREFORMAT_INVALID;
+    // Depth-stencil format resolved once at device setup (ResolveMeshDepthFormat)
+    // and shared by pipeline creation and depth-texture creation so the two can
+    // never disagree. SDL_GPU_TEXTUREFORMAT_INVALID means the device offers no
+    // usable depth format and the mesh pass runs depth-less.
+    SDL_GPUTextureFormat mesh_depth_format = SDL_GPU_TEXTUREFORMAT_INVALID;
+    // Depth target for the mesh pass, created on first use and recreated when
+    // the required extent changes (the swapchain is resizable, and the readback
+    // path picks its own extent per call). Its dimensions are tracked here
+    // because SDL exposes no way to query them back from the texture.
+    SDL_GPUTexture* mesh_depth_texture = nullptr;
+    std::uint32_t mesh_depth_width = 0U;
+    std::uint32_t mesh_depth_height = 0U;
     std::string driver;
     std::uint64_t successful_uploads = 0U;
     std::uint64_t successful_upload_logical_bytes = 0U;
@@ -959,7 +1053,59 @@ struct SdlGpuHost::Impl
 
     [[nodiscard]] std::expected<void, std::string> EnsureMeshPipelines(
         SDL_GPUTextureFormat target_format, bool need_fill, bool need_wireframe);
+
+    // Makes mesh_depth_texture exactly width x height, recreating it when the
+    // extent changed, and hands the result back through depth_texture.
+    // Returns false only for a genuine creation failure (the caller reports
+    // SDL_GetError); a device with no usable depth format is not a failure and
+    // yields true with a null depth_texture, matching the depth-less pipelines
+    // built for that case.
+    [[nodiscard]] bool EnsureMeshDepthTexture(std::uint32_t width,
+        std::uint32_t height, SDL_GPUTexture*& depth_texture) noexcept;
 };
+
+bool SdlGpuHost::Impl::EnsureMeshDepthTexture(const std::uint32_t width,
+    const std::uint32_t height, SDL_GPUTexture*& depth_texture) noexcept
+{
+    depth_texture = nullptr;
+    if (mesh_depth_format == SDL_GPU_TEXTUREFORMAT_INVALID)
+        return true;
+    if (width == 0U || height == 0U)
+        return false;
+
+    if (mesh_depth_texture != nullptr && mesh_depth_width == width &&
+        mesh_depth_height == height)
+    {
+        depth_texture = mesh_depth_texture;
+        return true;
+    }
+
+    const SDL_GPUTextureCreateInfo depth_info{
+        .type = SDL_GPU_TEXTURETYPE_2D,
+        .format = mesh_depth_format,
+        .usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+        .width = width,
+        .height = height,
+        .layer_count_or_depth = 1U,
+        .num_levels = 1U,
+        .sample_count = SDL_GPU_SAMPLECOUNT_1,
+        .props = 0,
+    };
+    SDL_GPUTexture* created = SDL_CreateGPUTexture(device, &depth_info);
+    if (created == nullptr)
+        return false;
+
+    // Only drop the previous target once the replacement exists, so a failed
+    // resize leaves the old (wrong-sized) texture untouched rather than leaving
+    // the host with no depth target at all.
+    if (mesh_depth_texture != nullptr)
+        SDL_ReleaseGPUTexture(device, mesh_depth_texture);
+    mesh_depth_texture = created;
+    mesh_depth_width = width;
+    mesh_depth_height = height;
+    depth_texture = created;
+    return true;
+}
 
 std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
     const SDL_GPUTextureFormat target_format, const bool need_fill,
@@ -1010,7 +1156,8 @@ std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
         if (create_fill)
         {
             new_fill = CreateMeshPipeline(device, *created_vertex_shader,
-                *created_fragment_shader, target_format, SDL_GPU_FILLMODE_FILL);
+                *created_fragment_shader, target_format, mesh_depth_format,
+                SDL_GPU_FILLMODE_FILL);
             if (new_fill == nullptr)
                 return std::unexpected(SdlError("render mesh fill pipeline create"));
         }
@@ -1019,7 +1166,8 @@ std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
         if (create_wireframe)
         {
             new_wireframe = CreateMeshPipeline(device, *created_vertex_shader,
-                *created_fragment_shader, target_format, SDL_GPU_FILLMODE_LINE);
+                *created_fragment_shader, target_format, mesh_depth_format,
+                SDL_GPU_FILLMODE_LINE);
             if (new_wireframe == nullptr)
                 return std::unexpected(SdlError("render mesh wireframe pipeline create"));
         }
@@ -1037,7 +1185,8 @@ std::expected<void, std::string> SdlGpuHost::Impl::EnsureMeshPipelines(
             if (textured_vertex != nullptr && textured_fragment != nullptr)
             {
                 new_textured = CreateMeshPipeline(device, textured_vertex,
-                    textured_fragment, target_format, SDL_GPU_FILLMODE_FILL);
+                    textured_fragment, target_format, mesh_depth_format,
+                    SDL_GPU_FILLMODE_FILL);
             }
             if (textured_vertex != nullptr)
                 SDL_ReleaseGPUShader(device, textured_vertex);
@@ -1154,6 +1303,10 @@ std::expected<SdlGpuHost, std::string> SdlGpuHost::Create(
     if (!SDL_ClaimWindowForGPUDevice(impl->device, impl->window))
         return std::unexpected(SdlError("SDL_ClaimWindowForGPUDevice"));
     impl->window_claimed = true;
+
+    // Resolved once here so every mesh pipeline and every mesh depth texture
+    // agree on the format for the life of the device.
+    impl->mesh_depth_format = ResolveMeshDepthFormat(impl->device);
 
     const char* driver = SDL_GetGPUDeviceDriver(impl->device);
     impl->driver = driver != nullptr ? driver : "unknown";
@@ -2201,12 +2354,18 @@ SdlGpuHost::ReadbackFrameRgba8(const runtime::RenderFramePacket& packet,
         }
         if (SDL_GPUTextureFormatTexelBlockSize(format) != 4U)
             return std::unexpected("mesh readback RGBA8 texel size is not four bytes");
+        SDL_GPUTexture* mesh_depth = nullptr;
         if (!mesh_draws.empty())
         {
             auto pipelines =
                 impl_->EnsureMeshPipelines(format, need_fill, need_wireframe);
             if (!pipelines)
                 return std::unexpected(std::move(pipelines.error()));
+            // The readback target extent is known here, before acquisition, so
+            // the depth target is created alongside the pipelines and the
+            // post-acquisition path stays allocation-free.
+            if (!impl_->EnsureMeshDepthTexture(width, height, mesh_depth))
+                return std::unexpected(SdlError("mesh readback depth target create"));
         }
 
         const SDL_GPUTextureCreateInfo texture_info{
@@ -2301,7 +2460,7 @@ SdlGpuHost::ReadbackFrameRgba8(const runtime::RenderFramePacket& packet,
                       resolved_draws.data(), mesh_draws.size()},
                   impl_->mesh_color_buffer, impl_->mesh_fill_pipeline,
                   impl_->mesh_wireframe_pipeline, impl_->mesh_textured_pipeline,
-                  impl_->mesh_sampler);
+                  impl_->mesh_sampler, mesh_depth, impl_->mesh_depth_format);
         if (!recorded_target)
         {
             SetSdlErrorBounded(post_acquire_error, "mesh readback render-pass begin");
@@ -2665,6 +2824,25 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
                 }
             }
 
+            // The swapchain extent is only known after acquisition, so the mesh
+            // depth target is sized here; EnsureMeshDepthTexture recreates it
+            // whenever the window resizes. Failure follows the same
+            // submit-the-acquired-buffer-then-report path as the neighbouring
+            // post-acquisition failures.
+            SDL_GPUTexture* mesh_depth = nullptr;
+            if (!mesh_draws.empty() &&
+                !impl_->EnsureMeshDepthTexture(width, height, mesh_depth))
+            {
+                SetSdlErrorBounded(
+                    post_acquire_error, "render frame mesh depth target create");
+                if (!command_guard.Submit())
+                {
+                    AppendSdlErrorBounded(post_acquire_error,
+                        "command-buffer submit after mesh depth target failure");
+                }
+                return std::unexpected(std::move(post_acquire_error));
+            }
+
             const bool recorded_target = mesh_draws.empty()
                                              ? RecordClearPass(
                                                    gpu_commands, swapchain, clear_color)
@@ -2677,7 +2855,8 @@ std::expected<void, std::string> SdlGpuHost::RenderFrame(
                                                    impl_->mesh_fill_pipeline,
                                                    impl_->mesh_wireframe_pipeline,
                                                    impl_->mesh_textured_pipeline,
-                                                   impl_->mesh_sampler);
+                                                   impl_->mesh_sampler, mesh_depth,
+                                                   impl_->mesh_depth_format);
             if (!recorded_target)
             {
                 SetSdlErrorBounded(post_acquire_error, "SDL_BeginGPURenderPass");

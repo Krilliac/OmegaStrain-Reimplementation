@@ -287,6 +287,136 @@ int main()
     if (host.Snapshot() != before_readback)
         return Fail("asymmetric transform readback mutated production counters or residency");
 
+    // Depth-occlusion proof.
+    //
+    // The shared triangle mesh is drawn twice at two different clip-space depths that cover
+    // exactly the same pixels, and the NEAR layer is submitted FIRST with the FAR layer SECOND.
+    // That ordering is deliberate and must not be "tidied" into far-first/near-second: with the
+    // far layer first, submission order alone leaves the near color on screen, so such a test
+    // passes identically with no depth-stencil target bound at all and proves nothing. With the
+    // near layer first, submission order and depth order disagree, so the near color can only
+    // survive if SDL_GPU_COMPAREOP_LESS is genuinely testing against a bound, depth-written
+    // attachment. This case therefore fails on the depth-less behavior and passes on the fixed
+    // behavior, which is the only property that makes it worth having.
+    constexpr omega::runtime::RenderClearColorRgba8 opaque_near_red{
+        .red = 255U,
+        .green = 0U,
+        .blue = 0U,
+        .alpha = 255U,
+    };
+    constexpr omega::runtime::RenderClearColorRgba8 opaque_far_blue{
+        .red = 0U,
+        .green = 0U,
+        .blue = 255U,
+        .alpha = 255U,
+    };
+    // Row-major, column-vector transforms whose only effect is a clip-space Z translation: the
+    // mesh's own Z of 0.5 becomes 0.25 (near) and 0.75 (far). X and Y stay identity in both, so
+    // the two layers rasterize exactly the same pixels and the assertions below are about depth
+    // rather than about coverage. The near/far colors share no nonzero channel, so a partial
+    // overwrite cannot masquerade as either color.
+    constexpr omega::asset::Matrix4x4IR near_depth_transform{
+        .row_major = {
+            1.0F, 0.0F, 0.0F, 0.0F,
+            0.0F, 1.0F, 0.0F, 0.0F,
+            0.0F, 0.0F, 1.0F, -0.25F,
+            0.0F, 0.0F, 0.0F, 1.0F,
+        },
+    };
+    constexpr omega::asset::Matrix4x4IR far_depth_transform{
+        .row_major = {
+            1.0F, 0.0F, 0.0F, 0.0F,
+            0.0F, 1.0F, 0.0F, 0.0F,
+            0.0F, 0.0F, 1.0F, 0.25F,
+            0.0F, 0.0F, 0.0F, 1.0F,
+        },
+    };
+    auto near_depth_command = fill_command;
+    near_depth_command.object_to_clip = near_depth_transform;
+    near_depth_command.color = omega::runtime::RenderMeshColorRgba8{
+        .red = 255U,
+        .green = 0U,
+        .blue = 0U,
+        .alpha = 255U,
+    };
+    auto far_depth_command = fill_command;
+    far_depth_command.object_to_clip = far_depth_transform;
+    far_depth_command.color = omega::runtime::RenderMeshColorRgba8{
+        .red = 0U,
+        .green = 0U,
+        .blue = 255U,
+        .alpha = 255U,
+    };
+
+    // Control pass: the far layer alone. It establishes the exact pixel set the far layer is
+    // able to paint, so the ordered pass below cannot pass merely because the far draw was
+    // dropped, mistransformed, or clipped away rather than depth-rejected.
+    const std::array far_only_commands{far_depth_command};
+    auto far_only_draw_list =
+        omega::runtime::RenderMeshDrawList::Create(far_only_commands);
+    if (!far_only_draw_list)
+        return Fail("far-only depth control draw-list creation failed");
+    packet.mesh_draw_list = *far_only_draw_list;
+    auto far_only_readback = omega::app::detail::SdlGpuHostTestAccess::
+        ReadbackMeshesForTesting(host, packet);
+    if (!far_only_readback)
+        return Fail("far-only depth control readback failed", far_only_readback.error());
+    std::array<bool, 64U> covered_by_far_layer{};
+    std::size_t far_control_pixels = 0U;
+    for (std::size_t index = 0U; index < far_only_readback->size(); ++index)
+    {
+        const omega::runtime::RenderClearColorRgba8 pixel = (*far_only_readback)[index];
+        if (pixel == opaque_far_blue)
+        {
+            covered_by_far_layer[index] = true;
+            ++far_control_pixels;
+        }
+        else if (pixel != opaque_black)
+            return Fail("far-only depth control readback contained an unexpected RGBA8 pixel");
+    }
+    if (far_control_pixels < 8U)
+        return Fail("far-only depth control covered too few pixels to prove depth ordering");
+    if (host.Snapshot() != before_readback)
+        return Fail("far-only depth control readback mutated production counters or residency");
+
+    // The discriminating pass: NEAR first, FAR second. See the note above before reordering.
+    const std::array depth_ordered_commands{near_depth_command, far_depth_command};
+    auto depth_ordered_draw_list =
+        omega::runtime::RenderMeshDrawList::Create(depth_ordered_commands);
+    if (!depth_ordered_draw_list)
+        return Fail("near-then-far depth draw-list creation failed");
+    packet.mesh_draw_list = *depth_ordered_draw_list;
+    auto depth_readback = omega::app::detail::SdlGpuHostTestAccess::
+        ReadbackMeshesForTesting(host, packet);
+    if (!depth_readback)
+        return Fail("near-then-far depth readback failed", depth_readback.error());
+    std::size_t depth_near_pixels = 0U;
+    for (std::size_t index = 0U; index < depth_readback->size(); ++index)
+    {
+        const omega::runtime::RenderClearColorRgba8 pixel = (*depth_readback)[index];
+        if (pixel == opaque_far_blue)
+        {
+            return Fail(
+                "the far mesh painted over the near mesh: the depth test or the depth-stencil "
+                "target is not active for the mesh pass");
+        }
+        if (covered_by_far_layer[index])
+        {
+            if (pixel != opaque_near_red)
+            {
+                return Fail(
+                    "a pixel covered by both depth layers did not keep the near mesh color");
+            }
+            ++depth_near_pixels;
+        }
+        else if (pixel != opaque_black && pixel != opaque_near_red)
+            return Fail("near-then-far depth readback contained an unexpected RGBA8 pixel");
+    }
+    if (depth_near_pixels != far_control_pixels)
+        return Fail("the near mesh did not cover the whole region the far mesh covers");
+    if (host.Snapshot() != before_readback)
+        return Fail("near-then-far depth readback mutated production counters or residency");
+
     packet.mesh_draw_list = *fill_draw_list;
 
     constexpr omega::runtime::RenderClearColorRgba8 opaque_blue{
@@ -457,6 +587,7 @@ int main()
     std::cout << "omega_sdl_gpu_mesh_smoke: passed driver=" << driver
               << " uploads=2 releases=2 mesh_frames=2 mesh_draws=2 colored_pixels="
               << green_pixels << " transformed_pixels=" << transformed_green_pixels
+              << " depth_occluded_pixels=" << depth_near_pixels
               << " surviving_overlay_pixels=" << surviving_green_pixels
               << " unavailable="
               << final.unavailable_swapchain_submissions << '\n';
