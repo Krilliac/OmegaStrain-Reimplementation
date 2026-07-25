@@ -5032,7 +5032,8 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
             const gameplay::CharacterInput move_input{
                 .move = asset::Float3IR{
                     .x = camera_input.strafe, .y = camera_input.forward, .z = 0.0F}};
-            std::vector<gameplay::CollisionTriangle> nearby;
+            std::vector<gameplay::CollisionTriangle>& nearby =
+                diagnostic_scene_presentation_->player_nearby_scratch;
             gameplay::SelectNearbyCollisionTriangles(
                 diagnostic_scene_presentation_->player_collision,
                 diagnostic_scene_presentation_->player_state.position,
@@ -5078,12 +5079,15 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                 diagnostic_scene_presentation_->player_params.radius);
             const gameplay::CharacterState& pp =
                 diagnostic_scene_presentation_->player_state;
-            log_->Info("player",
-                "pos=(" + std::to_string(pp.position.x) + "," +
-                    std::to_string(pp.position.y) + "," +
-                    std::to_string(pp.position.z) +
-                    ") grounded=" + (pp.grounded ? "yes" : "no") +
-                    " nearby=" + std::to_string(nearby.size()));
+            if (log_->WouldWrite(runtime::LogSeverity::Debug))
+            {
+                log_->Debug("player",
+                    "pos=(" + std::to_string(pp.position.x) + "," +
+                        std::to_string(pp.position.y) + "," +
+                        std::to_string(pp.position.z) +
+                        ") grounded=" + (pp.grounded ? "yes" : "no") +
+                        " nearby=" + std::to_string(nearby.size()));
+            }
 
             // Enemy NPCs: each patrols (or, once alerted, pursues the player's
             // last-seen position) kinematically vs the same level COL, then tests
@@ -5094,6 +5098,10 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
             if (diagnostic_scene_presentation_->npc_active)
             {
                 DiagnosticScenePresentation &np = *diagnostic_scene_presentation_;
+                std::vector<gameplay::CollisionTriangle>& npc_nearby =
+                    np.npc_nearby_scratch;
+                const bool log_npc_steps =
+                    log_->WouldWrite(runtime::LogSeverity::Debug);
                 for (std::size_t npc_index = 0U; npc_index < np.npcs.size();
                      ++npc_index)
                 {
@@ -5144,7 +5152,6 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                     if (plan.facing.x != 0.0F || plan.facing.y != 0.0F ||
                         plan.facing.z != 0.0F)
                         npc.facing = plan.facing;
-                    std::vector<gameplay::CollisionTriangle> npc_nearby;
                     gameplay::SelectNearbyCollisionTriangles(np.player_collision,
                         npc.state.position, npc.vision.range, npc_nearby);
                     npc.state = gameplay::StepCharacter(npc.state,
@@ -5209,6 +5216,8 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                                         "later slice");
                         }
                     }
+                    if (!log_npc_steps)
+                        continue;
                     // Per-NPC diagnostic. pos/sees/state alone cannot explain a
                     // missed sighting, so also report the distance to the
                     // player and WHICH gate rejected it.
@@ -5291,7 +5300,7 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
                             return "cone";
                         return "los";
                     }();
-                    log_->Info("npc",
+                    log_->Debug("npc",
                         "npc " + std::to_string(npc_index) + " pos=(" +
                             std::to_string(npc.state.position.x) + "," +
                             std::to_string(npc.state.position.y) + "," +

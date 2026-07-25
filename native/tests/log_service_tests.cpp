@@ -123,6 +123,17 @@ int LogServiceFailureCount()
         Check(service.has_value(), "a Warning-floor service is created");
         if (service)
         {
+            Check(!service->WouldWrite(LogSeverity::Trace) &&
+                      !service->WouldWrite(LogSeverity::Debug) &&
+                      !service->WouldWrite(LogSeverity::Info) &&
+                      service->WouldWrite(LogSeverity::Warning) &&
+                      service->WouldWrite(LogSeverity::Error),
+                "WouldWrite reports the severity floor without emitting");
+            Check(!service->WouldWrite(static_cast<LogSeverity>(200)),
+                "WouldWrite rejects an undefined severity");
+            Check(service->written_count() == 0U &&
+                      service->dropped_count() == 0U,
+                "WouldWrite does not mutate record counters");
             service->Trace("floor", "dropped");
             service->Debug("floor", "dropped");
             service->Info("floor", "dropped");
@@ -359,6 +370,10 @@ int LogServiceFailureCount()
                           source->max_message_bytes() == 0 &&
                           source->minimum_severity() == LogSeverity::Info,
                     "a moved-from service reports empty budgets and the default floor");
+                Check(!source->WouldWrite(LogSeverity::Error),
+                    "a moved-from service preflights every severity as disabled");
+                Check(moved.WouldWrite(LogSeverity::Error),
+                    "the move target retains its severity preflight");
                 moved.Write(LogSeverity::Error, "core", "after move target");
                 Check((*ring)->consumed_count() == 1 && moved.written_count() == 1,
                     "the move target owns the sinks and the counters");

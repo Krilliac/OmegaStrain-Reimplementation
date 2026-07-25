@@ -166,6 +166,12 @@ public:
     void Warning(std::string_view category, std::string_view message);
     void Error(std::string_view category, std::string_view message);
 
+    // [any thread; immutable after Create()] Cheap preflight for callers whose
+    // message construction is itself material. Returns false for an undefined
+    // severity and for a moved-from service. It does not mutate the dropped
+    // counter; only an attempted Write() is a dropped record.
+    [[nodiscard]] bool WouldWrite(LogSeverity severity) const noexcept;
+
     // [any thread; immutable after Create()]
     [[nodiscard]] LogSeverity minimum_severity() const noexcept;
     [[nodiscard]] std::size_t max_category_bytes() const noexcept;

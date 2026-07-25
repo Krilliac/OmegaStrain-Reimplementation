@@ -134,6 +134,7 @@ CharacterState StepCharacter(
         return state;
 
     const float radius = params.radius > 0.0F ? params.radius : 1.0F;
+    const float radius_squared = radius * radius;
     const Float3IR up =
         Normalized(params.up, Float3IR{.x = 0.0F, .y = 0.0F, .z = 1.0F});
 
@@ -170,9 +171,37 @@ CharacterState StepCharacter(
         bool any_penetration = false;
         for (const CollisionTriangle& triangle : triangles)
         {
+            // Exact broadphase for the current resolve position. Callers may
+            // supply a deliberately generous candidate list for another use
+            // (diagnostic LOS currently does); rejecting an expanded triangle
+            // AABB here avoids the Voronoi-region query and square root for every
+            // triangle the sphere cannot possibly touch. This does not reorder
+            // contacts or remove any possible sphere/triangle intersection.
+            const float minimum_x =
+                std::min({triangle.a.x, triangle.b.x, triangle.c.x}) - radius;
+            const float maximum_x =
+                std::max({triangle.a.x, triangle.b.x, triangle.c.x}) + radius;
+            const float minimum_y =
+                std::min({triangle.a.y, triangle.b.y, triangle.c.y}) - radius;
+            const float maximum_y =
+                std::max({triangle.a.y, triangle.b.y, triangle.c.y}) + radius;
+            const float minimum_z =
+                std::min({triangle.a.z, triangle.b.z, triangle.c.z}) - radius;
+            const float maximum_z =
+                std::max({triangle.a.z, triangle.b.z, triangle.c.z}) + radius;
+            if (position.x < minimum_x || position.x > maximum_x ||
+                position.y < minimum_y || position.y > maximum_y ||
+                position.z < minimum_z || position.z > maximum_z)
+            {
+                continue;
+            }
+
             const Float3IR closest = ClosestPointOnTriangle(position, triangle);
             const Float3IR offset = Sub(position, closest);
-            const float distance = Length(offset);
+            const float distance_squared = Dot(offset, offset);
+            if (distance_squared >= radius_squared)
+                continue;
+            const float distance = std::sqrt(distance_squared);
             if (distance >= radius)
                 continue;
 

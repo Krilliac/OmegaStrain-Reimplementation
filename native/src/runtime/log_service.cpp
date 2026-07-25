@@ -252,6 +252,13 @@ void LogService::Error(const std::string_view category, const std::string_view m
     Write(LogSeverity::Error, category, message);
 }
 
+bool LogService::WouldWrite(const LogSeverity severity) const noexcept
+{
+    return impl_ && IsKnownSeverity(severity) &&
+           std::to_underlying(severity) >=
+               std::to_underlying(impl_->minimum_severity);
+}
+
 LogSeverity LogService::minimum_severity() const noexcept
 {
     return impl_ ? impl_->minimum_severity : LogSeverity::Info;

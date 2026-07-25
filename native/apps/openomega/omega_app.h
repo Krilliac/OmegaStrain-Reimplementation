@@ -329,6 +329,12 @@ private:
         gameplay::CharacterState player_state{};
         gameplay::CharacterControllerParams player_params{};
         std::vector<gameplay::CollisionTriangle> player_collision{};
+        // Per-frame collision candidates are scratch, retained so the player and
+        // the serial NPC loop do not allocate and release thousands of copied
+        // triangles every refresh. Each selector clears its destination before
+        // use; no span escapes the synchronous step/sight calls.
+        std::vector<gameplay::CollisionTriangle> player_nearby_scratch{};
+        std::vector<gameplay::CollisionTriangle> npc_nearby_scratch{};
         // Objective triggers (OPENOMEGA_PLAYER): the live objective state + the
         // project-placed world-space trigger volumes. When the player enters a
         // trigger, the linked objective completes and hud_texture is rebuilt.
