@@ -1,5 +1,6 @@
 #include "omega/runtime/model_pose_evaluation.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -50,15 +51,29 @@ namespace
     return true;
 }
 
+[[nodiscard]] bool IsFiniteFloat3(const asset::Float3IR& value) noexcept
+{
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+// Narrows a double accumulator back to float only when it is finite and inside the representable
+// float range, so an out-of-range accumulator can never be laundered into an infinity.
+[[nodiscard]] bool NarrowToFloat(const double value, float& narrowed) noexcept
+{
+    constexpr double float_max = static_cast<double>(std::numeric_limits<float>::max());
+    if (!std::isfinite(value) || value > float_max || value < -float_max)
+        return false;
+    narrowed = static_cast<float>(value);
+    return true;
+}
+
 // Mirrors the finite-checked composition used by omega::runtime::ComposeObjectToClip
 // (scene_transform.cpp): standard row-major 4x4 product, rejecting a non-finite or
 // out-of-float-range accumulator before it is ever narrowed back to float.
-[[nodiscard]] asset::ModelIrResult<asset::Matrix4x4IR> MultiplyFinite(
-    const asset::Matrix4x4IR& left, const asset::Matrix4x4IR& right,
-    const std::size_t joint_index)
+[[nodiscard]] std::optional<asset::Matrix4x4IR> MultiplyChecked(
+    const asset::Matrix4x4IR& left, const asset::Matrix4x4IR& right) noexcept
 {
     asset::Matrix4x4IR result;
-    constexpr double float_max = static_cast<double>(std::numeric_limits<float>::max());
     for (std::size_t row = 0; row < 4; ++row)
     {
         for (std::size_t column = 0; column < 4; ++column)
@@ -69,15 +84,40 @@ namespace
                 value += static_cast<double>(left.row_major[(row * 4) + inner]) *
                          static_cast<double>(right.row_major[(inner * 4) + column]);
             }
-            if (!std::isfinite(value) || value > float_max || value < -float_max)
-            {
-                return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
-                    "model pose composition produced a non-finite transform", joint_index));
-            }
-            result.row_major[(row * 4) + column] = static_cast<float>(value);
+            if (!NarrowToFloat(value, result.row_major[(row * 4) + column]))
+                return std::nullopt;
         }
     }
     return result;
+}
+
+[[nodiscard]] asset::ModelIrResult<asset::Matrix4x4IR> MultiplyFinite(
+    const asset::Matrix4x4IR& left, const asset::Matrix4x4IR& right,
+    const std::size_t joint_index)
+{
+    const std::optional<asset::Matrix4x4IR> product = MultiplyChecked(left, right);
+    if (!product.has_value())
+    {
+        return std::unexpected(Error(asset::DecodeErrorCode::Malformed,
+            "model pose composition produced a non-finite transform", joint_index));
+    }
+    return *product;
+}
+
+// Transforms a position by a row-major matrix as an affine point (implicit w = 1). The matrix's
+// fourth row is deliberately ignored: the skinning palette is treated as affine, so there is no
+// projective component and no perspective divide.
+[[nodiscard]] double TransformPointComponent(
+    const asset::Matrix4x4IR& matrix, const std::size_t row,
+    const asset::Float3IR& position) noexcept
+{
+    return (static_cast<double>(matrix.row_major[(row * 4) + 0]) *
+               static_cast<double>(position.x)) +
+           (static_cast<double>(matrix.row_major[(row * 4) + 1]) *
+               static_cast<double>(position.y)) +
+           (static_cast<double>(matrix.row_major[(row * 4) + 2]) *
+               static_cast<double>(position.z)) +
+           static_cast<double>(matrix.row_major[(row * 4) + 3]);
 }
 
 // The accessor is invoked once per joint, never consumed, so it is taken by const
@@ -177,5 +217,92 @@ asset::ModelIrResult<asset::GlobalPoseIR> EvaluatePose(
             return pose.joint_local_transforms[index];
         },
         limits);
+}
+
+std::expected<void, SkinningError> ComposeSkinningMatrices(
+    const std::span<const asset::Matrix4x4IR> joint_global_transforms,
+    const std::span<const asset::Matrix4x4IR> inverse_bind_transforms,
+    const std::span<asset::Matrix4x4IR> skinning_matrices) noexcept
+{
+    if (joint_global_transforms.size() != inverse_bind_transforms.size() ||
+        joint_global_transforms.size() != skinning_matrices.size())
+    {
+        return std::unexpected(SkinningError::CountMismatch);
+    }
+
+    for (std::size_t index = 0; index < joint_global_transforms.size(); ++index)
+    {
+        const asset::Matrix4x4IR& global_transform = joint_global_transforms[index];
+        const asset::Matrix4x4IR& inverse_bind = inverse_bind_transforms[index];
+        if (!IsFiniteMatrix(global_transform) || !IsFiniteMatrix(inverse_bind))
+            return std::unexpected(SkinningError::NonFiniteInput);
+
+        const std::optional<asset::Matrix4x4IR> skinning_matrix =
+            MultiplyChecked(global_transform, inverse_bind);
+        if (!skinning_matrix.has_value())
+            return std::unexpected(SkinningError::NonFiniteResult);
+        skinning_matrices[index] = *skinning_matrix;
+    }
+    return {};
+}
+
+asset::Float3IR SkinVertexPosition(
+    const asset::Float3IR& bind_position,
+    const std::span<const asset::Matrix4x4IR> skinning_matrices,
+    const asset::SkinInfluenceIR& influences) noexcept
+{
+    if (!IsFiniteFloat3(bind_position))
+        return bind_position;
+
+    const std::size_t influence_count = std::min<std::size_t>(
+        static_cast<std::size_t>(influences.used_influences),
+        asset::kMaximumSkinInfluencesPerVertex);
+
+    double accumulated_x = 0.0;
+    double accumulated_y = 0.0;
+    double accumulated_z = 0.0;
+    double total_weight = 0.0;
+    for (std::size_t slot = 0; slot < influence_count; ++slot)
+    {
+        // Out-of-range joint index: skipped fail-soft and never dereferenced.
+        if (static_cast<std::size_t>(influences.joint_indices[slot]) >= skinning_matrices.size())
+            continue;
+
+        const float weight = influences.weights[slot];
+        if (!std::isfinite(weight))
+            return bind_position;
+
+        const asset::Matrix4x4IR& skinning_matrix =
+            skinning_matrices[static_cast<std::size_t>(influences.joint_indices[slot])];
+        if (!IsFiniteMatrix(skinning_matrix))
+            return bind_position;
+
+        const double scaled_weight = static_cast<double>(weight);
+        accumulated_x +=
+            scaled_weight * TransformPointComponent(skinning_matrix, 0U, bind_position);
+        accumulated_y +=
+            scaled_weight * TransformPointComponent(skinning_matrix, 1U, bind_position);
+        accumulated_z +=
+            scaled_weight * TransformPointComponent(skinning_matrix, 2U, bind_position);
+        total_weight += scaled_weight;
+    }
+
+    // Defensive normalisation. A total that is non-finite, or too small to divide by (zero total
+    // weight, no surviving influence, or weights that cancel), falls back to the unskinned
+    // position; it must never collapse the vertex to the model origin.
+    if (!std::isfinite(total_weight) ||
+        std::fabs(total_weight) < static_cast<double>(kMinimumSkinTotalWeight))
+    {
+        return bind_position;
+    }
+
+    asset::Float3IR skinned;
+    if (!NarrowToFloat(accumulated_x / total_weight, skinned.x) ||
+        !NarrowToFloat(accumulated_y / total_weight, skinned.y) ||
+        !NarrowToFloat(accumulated_z / total_weight, skinned.z))
+    {
+        return bind_position;
+    }
+    return skinned;
 }
 } // namespace omega::runtime

@@ -463,6 +463,50 @@ DirectoryWorkspaceUpperBound(
     }
     return {};
 }
+
+[[nodiscard]] std::string_view TerminalMemberName(
+    const asset::SourceLocator& locator) noexcept
+{
+    // Every locator Open stores gains exactly one terminal .TDX member component. The empty view
+    // is unreachable for stored locators and can never match a query, because a normalized query
+    // is never empty.
+    return locator.hog_entries.empty()
+        ? std::string_view{}
+        : std::string_view(locator.hog_entries.back());
+}
+
+// PROJECT ENGINEERING POLICY helper for
+// LevelTextureNameCandidatePolicy::NormalizedExactThenOneTerminalExtensionElision. It reproduces
+// the offline measurement's transformation exactly (analysis/formats/VUM.md, "Exact-first
+// one-terminal-extension candidate family"): a syntactic extension requires a dot after the first
+// character of the final component and at least one character after that dot. Directory components
+// are preserved and no second extension is removed. It is a string operation only and asserts
+// nothing about retail naming.
+[[nodiscard]] std::string_view StripOneTerminalExtension(
+    const std::string_view value) noexcept
+{
+    const std::size_t separator = value.rfind('/');
+    const std::size_t component_begin =
+        separator == std::string_view::npos ? 0U : separator + 1U;
+    const std::string_view final_component = value.substr(component_begin);
+    const std::size_t extension = final_component.rfind('.');
+    if (extension == std::string_view::npos || extension == 0U ||
+        extension + 1U == final_component.size())
+        return value;
+    return value.substr(0, component_begin + extension);
+}
+
+[[nodiscard]] bool IsKnownNameCandidatePolicy(
+    const LevelTextureNameCandidatePolicy policy) noexcept
+{
+    switch (policy)
+    {
+    case LevelTextureNameCandidatePolicy::NormalizedExactTerminalMember:
+    case LevelTextureNameCandidatePolicy::NormalizedExactThenOneTerminalExtensionElision:
+        return true;
+    }
+    return false;
+}
 } // namespace
 
 struct LevelTextureStore::Impl
@@ -496,6 +540,8 @@ std::string_view LevelTextureStoreErrorCodeName(const LevelTextureStoreErrorCode
         return "foreign-service";
     case LevelTextureStoreErrorCode::InvalidHandle:
         return "invalid-handle";
+    case LevelTextureStoreErrorCode::NameNotFound:
+        return "name-not-found";
     }
     return "unknown";
 }
@@ -749,6 +795,71 @@ std::expected<LevelTextureHandle, LevelTextureStoreError> LevelTextureStore::Han
             .code = LevelTextureStoreErrorCode::InvalidHandle,
         });
     return LevelTextureHandle(impl_->store_identity, index);
+}
+
+std::expected<std::string_view, LevelTextureStoreError>
+LevelTextureStore::TerminalMemberNameAt(const std::size_t index) const noexcept
+{
+    if (!impl_ || index >= impl_->locators.size())
+        return std::unexpected(LevelTextureStoreError{
+            .code = LevelTextureStoreErrorCode::InvalidHandle,
+        });
+    return TerminalMemberName(impl_->locators[index]);
+}
+
+std::expected<LevelTextureHandle, LevelTextureStoreError>
+LevelTextureStore::FindHandleByNameCandidate(
+    const std::string_view texture_name,
+    const LevelTextureNameCandidatePolicy policy) const
+{
+    if (!impl_)
+        return std::unexpected(Error(LevelTextureStoreErrorCode::InvalidHandle,
+            "level texture store is unavailable"));
+    if (!IsKnownNameCandidatePolicy(policy))
+        return std::unexpected(Error(LevelTextureStoreErrorCode::InvalidConfiguration,
+            "level texture name candidate policy is not a known policy"));
+
+    auto normalized = NormalizeName(texture_name, impl_->limits);
+    if (!normalized)
+        return std::unexpected(normalized.error());
+
+    // Exact first, exactly as the measured candidate family orders it: full normalized equality is
+    // tested before any transformation, so an exact candidate always takes precedence.
+    std::size_t candidate_index = 0;
+    std::uint64_t candidate_count = 0;
+    for (std::size_t index = 0; index < impl_->locators.size(); ++index)
+    {
+        if (TerminalMemberName(impl_->locators[index]) != std::string_view(*normalized))
+            continue;
+        if (candidate_count == 0)
+            candidate_index = index;
+        ++candidate_count;
+    }
+
+    if (candidate_count == 0 &&
+        policy == LevelTextureNameCandidatePolicy::NormalizedExactThenOneTerminalExtensionElision)
+    {
+        // Both sides are transformed independently, and only once. This is the named policy, not a
+        // silent retry: a caller that selected the exact policy never reaches this branch.
+        const std::string_view elided_name = StripOneTerminalExtension(*normalized);
+        for (std::size_t index = 0; index < impl_->locators.size(); ++index)
+        {
+            if (StripOneTerminalExtension(TerminalMemberName(impl_->locators[index])) !=
+                elided_name)
+                continue;
+            if (candidate_count == 0)
+                candidate_index = index;
+            ++candidate_count;
+        }
+    }
+
+    if (candidate_count == 0)
+        return std::unexpected(Error(LevelTextureStoreErrorCode::NameNotFound,
+            "level texture name has no candidate under the selected policy"));
+    if (candidate_count > 1)
+        return std::unexpected(Error(LevelTextureStoreErrorCode::DuplicateReference,
+            "level texture name has more than one candidate under the selected policy"));
+    return HandleAt(candidate_index);
 }
 
 const LevelTextureOperationUsage& LevelTextureStore::open_usage() const noexcept

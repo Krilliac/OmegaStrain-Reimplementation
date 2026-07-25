@@ -28,6 +28,7 @@ using omega::asset::LevelManifestIR;
 using omega::asset::SourceLocator;
 using omega::content::GameDataService;
 using omega::content::LevelTextureHandle;
+using omega::content::LevelTextureNameCandidatePolicy;
 using omega::content::LevelTextureOperationUsage;
 using omega::content::LevelTextureStore;
 using omega::content::LevelTextureStoreConfig;
@@ -971,6 +972,189 @@ void CheckHandleAndStorageOwnership()
     }
 }
 
+// The candidate policy under test is a PROJECT ENGINEERING POLICY, not a decoded retail rule.
+// These checks pin the policy's own lexical behaviour on synthetic fixtures only; they assert
+// nothing about retail naming, material records, or any real corpus.
+void CheckNameCandidateLookup()
+{
+    constexpr auto exact_policy = LevelTextureNameCandidatePolicy::NormalizedExactTerminalMember;
+    constexpr auto elision_policy =
+        LevelTextureNameCandidatePolicy::NormalizedExactThenOneTerminalExtensionElision;
+
+    TempTree tree("name-candidates");
+    const auto hidden_tdx = MakeDirect24Tdx(0x84);
+    const auto exact_tdx = MakeDirect24Tdx(0x81);
+    const auto layered_tdx = MakeDirect24Tdx(0x82);
+    const auto shared_tdx = MakeDirect24Tdx(0x83);
+    const auto hog = MakeHog({
+        HogMember{.name = "Exact.TDX", .payload = exact_tdx},
+        HogMember{.name = "Layered.A.TDX", .payload = layered_tdx},
+        HogMember{.name = ".Hidden.TDX", .payload = hidden_tdx},
+        HogMember{.name = "notes.bin", .payload = {std::byte{0x01}}},
+    });
+    const auto first_shared_hog =
+        MakeHog({HogMember{.name = "Shared.TDX", .payload = shared_tdx}});
+    const auto second_shared_hog =
+        MakeHog({HogMember{.name = "shared.tdx", .payload = shared_tdx}});
+    const auto nameless_hog =
+        MakeHog({HogMember{.name = "notes.bin", .payload = {std::byte{0x02}}}});
+    Check(tree.ready() && tree.WriteGameFile("TEX.HOG", hog) &&
+              tree.WriteGameFile("AMB_ONE.HOG", first_shared_hog) &&
+              tree.WriteGameFile("AMB_TWO.HOG", second_shared_hog) &&
+              tree.WriteGameFile("NONAME.HOG", nameless_hog),
+          "name-candidate fixture is written");
+    auto service_open = OpenService(tree);
+    Check(service_open.has_value(), "name-candidate service opens");
+    if (!service_open)
+        return;
+    GameDataService service = std::move(*service_open);
+    auto store_open = OpenStore(service, MakeManifest({DirectSource("GAMEDATA/TEST/TEX.HOG")}));
+    Check(store_open.has_value(), "name-candidate store opens");
+    if (!store_open)
+        return;
+    LevelTextureStore store = std::move(*store_open);
+    Check(store.size() == 3, "only .TDX members become name-addressable handles");
+
+    const auto resolved_seed = [&store, &service](
+                                   const std::string_view name,
+                                   const LevelTextureNameCandidatePolicy policy)
+        -> std::optional<std::uint8_t>
+    {
+        auto handle = store.FindHandleByNameCandidate(name, policy);
+        if (!handle)
+            return std::nullopt;
+        auto loaded = store.Load(service, *handle);
+        if (!loaded)
+            return std::nullopt;
+        return FirstStorageByte(loaded->storage);
+    };
+
+    // Exact-name hits. Normalization of case and separators is common to both policies.
+    Check(resolved_seed("Exact.TDX", exact_policy) == std::uint8_t{0x81},
+          "an exact terminal member name resolves under the exact policy");
+    Check(resolved_seed("exact.tdx", exact_policy) == std::uint8_t{0x81},
+          "the exact policy compares normalized names");
+    Check(resolved_seed("Exact.TDX", elision_policy) == std::uint8_t{0x81},
+          "an exact candidate resolves before any extension elision is attempted");
+    Check(resolved_seed("Layered.A.TDX", exact_policy) == std::uint8_t{0x82},
+          "a multi-dot member name resolves exactly");
+
+    // Documented not-found result.
+    auto missing = store.FindHandleByNameCandidate("MISSING.TDX", exact_policy);
+    CheckError(missing, LevelTextureStoreErrorCode::NameNotFound,
+               "an unmatched name reports the documented not-found result");
+    if (!missing)
+        Check(Sanitized(missing.error(), tree.root()),
+              "not-found diagnostics disclose no queried name or source identity");
+    CheckError(store.FindHandleByNameCandidate("MISSING.TDX", elision_policy),
+               LevelTextureStoreErrorCode::NameNotFound,
+               "the elision policy also reports the documented not-found result");
+    CheckError(store.FindHandleByNameCandidate("NOTES.BIN", elision_policy),
+               LevelTextureStoreErrorCode::NameNotFound,
+               "a non-TDX container member is never name-addressable");
+
+    // The named elision is caller-selected, never applied on the exact policy's behalf.
+    CheckError(store.FindHandleByNameCandidate("EXACT", exact_policy),
+               LevelTextureStoreErrorCode::NameNotFound,
+               "the exact policy never removes a terminal extension");
+    Check(resolved_seed("EXACT", elision_policy) == std::uint8_t{0x81},
+          "the elision policy removes one terminal extension from the stored member name");
+    Check(resolved_seed("Exact.MATERIAL", elision_policy) == std::uint8_t{0x81},
+          "the elision policy removes one terminal extension from the queried name as well");
+    Check(resolved_seed("Layered.A.B", elision_policy) == std::uint8_t{0x82},
+          "at most one extension is removed from the queried name");
+    CheckError(store.FindHandleByNameCandidate("LAYERED", elision_policy),
+               LevelTextureStoreErrorCode::NameNotFound,
+               "a second extension is never removed from the stored member name");
+    CheckError(store.FindHandleByNameCandidate("EXACT.", elision_policy),
+               LevelTextureStoreErrorCode::NameNotFound,
+               "a trailing dot is not a syntactic extension");
+    Check(resolved_seed(".HIDDEN", elision_policy) == std::uint8_t{0x84},
+          "a leading dot is not a syntactic extension of the queried name");
+    Check(resolved_seed(".Hidden.TDX", exact_policy) == std::uint8_t{0x84},
+          "a leading-dot member name still resolves exactly");
+
+    // Lookup agrees with HandleAt for a name obtained from the store itself.
+    CheckError(store.TerminalMemberNameAt(store.size()), LevelTextureStoreErrorCode::InvalidHandle,
+               "an out-of-range terminal member name is rejected");
+    for (std::size_t index = 0; index < store.size(); ++index)
+    {
+        auto name = store.TerminalMemberNameAt(index);
+        auto by_index = store.HandleAt(index);
+        Check(name && by_index, "each handle index reports its terminal member name");
+        if (!name || !by_index)
+            continue;
+        auto by_name = store.FindHandleByNameCandidate(*name, exact_policy);
+        Check(by_name.has_value(), "a name obtained from the store resolves back to a handle");
+        if (!by_name)
+            continue;
+        auto indexed_load = store.Load(service, *by_index);
+        auto named_load = store.Load(service, *by_name);
+        Check(indexed_load && named_load && indexed_load->storage == named_load->storage &&
+                  SameUsage(indexed_load->usage, named_load->usage),
+              "name lookup agrees with HandleAt for a name obtained from the store");
+        auto elided_name = store.FindHandleByNameCandidate(*name, elision_policy);
+        Check(elided_name.has_value(),
+              "exact precedence makes a stored name resolve under the elision policy too");
+        if (!elided_name || !indexed_load)
+            continue;
+        auto elided_load = store.Load(service, *elided_name);
+        Check(elided_load && elided_load->storage == indexed_load->storage,
+              "both policies agree on a name obtained from the store");
+    }
+
+    // Invalid input and invalid policy are distinct from not-found.
+    CheckError(store.FindHandleByNameCandidate("", exact_policy),
+               LevelTextureStoreErrorCode::InvalidReference, "an empty name is rejected");
+    CheckError(store.FindHandleByNameCandidate("../ESCAPE.TDX", elision_policy),
+               LevelTextureStoreErrorCode::InvalidReference,
+               "a relative component is rejected before any comparison");
+    CheckError(store.FindHandleByNameCandidate(std::string(4097, 'N'), exact_policy),
+               LevelTextureStoreErrorCode::LimitExceeded,
+               "a name above the store string limit is rejected");
+    CheckError(store.FindHandleByNameCandidate(
+                   "EXACT.TDX", static_cast<LevelTextureNameCandidatePolicy>(0xFFU)),
+               LevelTextureStoreErrorCode::InvalidConfiguration,
+               "an unrecognized candidate policy is rejected");
+
+    // More than one candidate is reported, never arbitrarily resolved.
+    auto ambiguous_store =
+        OpenStore(service, MakeManifest({DirectSource("GAMEDATA/TEST/AMB_ONE.HOG"),
+                                         DirectSource("GAMEDATA/TEST/AMB_TWO.HOG")}));
+    Check(ambiguous_store && ambiguous_store->size() == 2,
+          "two containers contribute the same terminal member name");
+    if (ambiguous_store)
+    {
+        auto ambiguous = ambiguous_store->FindHandleByNameCandidate("SHARED.TDX", exact_policy);
+        CheckError(ambiguous, LevelTextureStoreErrorCode::DuplicateReference,
+                   "an exactly ambiguous name is reported rather than resolved");
+        if (!ambiguous)
+            Check(Sanitized(ambiguous.error(), tree.root()),
+                  "ambiguous-name diagnostics disclose no name or source identity");
+        CheckError(ambiguous_store->FindHandleByNameCandidate("SHARED", elision_policy),
+                   LevelTextureStoreErrorCode::DuplicateReference,
+                   "an elided ambiguous name is reported rather than resolved");
+    }
+
+    auto nameless_store =
+        OpenStore(service, MakeManifest({DirectSource("GAMEDATA/TEST/NONAME.HOG")}));
+    Check(nameless_store && nameless_store->size() == 0,
+          "a container with no TDX member yields an empty store");
+    if (nameless_store)
+        CheckError(nameless_store->FindHandleByNameCandidate("EXACT.TDX", elision_policy),
+                   LevelTextureStoreErrorCode::NameNotFound,
+                   "an empty store admits no name candidate");
+
+    LevelTextureStore moved = std::move(store);
+    Check(moved.TerminalMemberNameAt(0).has_value(),
+          "move construction preserves terminal member names");
+    CheckError(store.TerminalMemberNameAt(0), LevelTextureStoreErrorCode::InvalidHandle,
+               "a moved-from store reports no terminal member name");
+    CheckError(store.FindHandleByNameCandidate("EXACT.TDX", exact_policy),
+               LevelTextureStoreErrorCode::InvalidHandle,
+               "a moved-from store resolves no name candidate");
+}
+
 void CheckServiceIdentityBeforeIo()
 {
     const auto tdx = MakeDirect24Tdx(0x51);
@@ -1201,6 +1385,7 @@ int main()
     CheckEmptyInvalidAndFailureSurfaces();
     CheckOpenAndLoadBudgets();
     CheckHandleAndStorageOwnership();
+    CheckNameCandidateLookup();
     CheckServiceIdentityBeforeIo();
     CheckMutableFilesAndSanitizedDecodeErrors();
     CheckConcurrentLoads();
@@ -1222,7 +1407,9 @@ int main()
               omega::content::LevelTextureStoreErrorCodeName(
                   LevelTextureStoreErrorCode::ForeignService) == "foreign-service" &&
               omega::content::LevelTextureStoreErrorCodeName(
-                  LevelTextureStoreErrorCode::InvalidHandle) == "invalid-handle",
+                  LevelTextureStoreErrorCode::InvalidHandle) == "invalid-handle" &&
+              omega::content::LevelTextureStoreErrorCodeName(
+                  LevelTextureStoreErrorCode::NameNotFound) == "name-not-found",
           "every public store error code has a stable diagnostic name");
 
     if (failures == 0)

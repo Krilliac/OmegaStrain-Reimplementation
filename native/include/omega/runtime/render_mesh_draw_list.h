@@ -131,6 +131,35 @@ private:
     std::uint32_t count_ = 0U;
 };
 
+// [any thread; reentrant] Conservative frustum test: is the axis-aligned box spanning
+// [minimum, maximum] possibly visible under `object_to_clip`?
+//
+// The box's eight corners are transformed to homogeneous clip space using this project's
+// convention -- row-major storage, column-vector multiply, left-handed with a Direct3D clip
+// volume of -w <= x <= w, -w <= y <= w, 0 <= z <= w (see runtime::PerspectiveProjection,
+// runtime::ComposeObjectToClip, and the mul(ModelViewProj, position) in the mesh vertex
+// shader). The box is rejected only when all eight corners lie strictly outside the SAME
+// clip plane. Corners are compared homogeneously and are never divided by w, so a box that
+// spans the camera plane -- where w changes sign -- is still classified correctly.
+//
+// The test is conservative in one direction only: it NEVER reports a visible box as
+// invisible, and it is allowed to report an invisible box as visible. A box whose corners
+// are each outside a different plane -- most importantly a large box that encloses the
+// camera -- is reported visible, which is correct; the common "any corner is outside" test
+// wrongly rejects it and makes the room around the camera disappear.
+//
+// This does NOT model: occlusion (a box fully hidden behind other geometry is still
+// reported visible), per-triangle or mesh-shape culling (only the box is considered, never
+// the geometry inside it), clipping of any kind (nothing is split or trimmed -- the result
+// is a single yes/no), and it derives no screen extent, distance, or level of detail. It is
+// a pure predicate: it reads no state, allocates nothing, and touches no GPU resource.
+//
+// Fail soft: a non-finite matrix, a non-finite box bound, or an inverted box (any minimum
+// component greater than its maximum) returns true (visible). A zero-extent box -- a point,
+// or a flat box such as a floor quad -- is well formed and is tested like any other.
+[[nodiscard]] bool IsBoxPossiblyVisible(const asset::Matrix4x4IR& object_to_clip,
+    const asset::Float3IR& minimum, const asset::Float3IR& maximum) noexcept;
+
 static_assert(sizeof(RenderMeshColorRgba8) == 4U);
 static_assert(std::is_trivially_copyable_v<RenderMeshColorRgba8>);
 static_assert(std::is_standard_layout_v<RenderMeshColorRgba8>);

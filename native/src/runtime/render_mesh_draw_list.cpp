@@ -1,7 +1,9 @@
 #include "omega/runtime/render_mesh_draw_list.h"
 
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 
 namespace omega::runtime
@@ -27,6 +29,11 @@ namespace
     return true;
 }
 
+[[nodiscard]] bool IsFinite(const asset::Float3IR& value) noexcept
+{
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
 [[nodiscard]] constexpr bool IsValidRasterMode(const RenderMeshRasterMode mode) noexcept
 {
     switch (mode)
@@ -36,6 +43,67 @@ namespace
         return true;
     }
     return false;
+}
+
+// One rejection bit per half-space of the Direct3D clip volume this project's projection
+// produces: -w <= x <= w, -w <= y <= w, 0 <= z <= w. A box is rejected only when every one
+// of its corners sets the same bit, so these bits are combined with AND, never OR.
+constexpr std::uint32_t kOutsideLeft = 1U << 0U;
+constexpr std::uint32_t kOutsideRight = 1U << 1U;
+constexpr std::uint32_t kOutsideBottom = 1U << 2U;
+constexpr std::uint32_t kOutsideTop = 1U << 3U;
+constexpr std::uint32_t kOutsideNear = 1U << 4U;
+constexpr std::uint32_t kOutsideFar = 1U << 5U;
+constexpr std::uint32_t kOutsideEveryPlane = kOutsideLeft | kOutsideRight | kOutsideBottom |
+                                             kOutsideTop | kOutsideNear | kOutsideFar;
+
+// Clip component `row` of the point (x, y, z, 1). Row-major storage with a column-vector
+// multiply means component i is row i of the matrix dotted with the point, matching
+// ComposeObjectToClip and the shader's mul(ModelViewProj, position). Accumulated in double
+// like MultiplyMatrices, so finite float inputs cannot overflow the intermediate.
+[[nodiscard]] double ClipComponent(const asset::Matrix4x4IR& object_to_clip,
+    const std::size_t row, const double x, const double y, const double z) noexcept
+{
+    return static_cast<double>(object_to_clip.row_major[row * 4U + 0U]) * x +
+           static_cast<double>(object_to_clip.row_major[row * 4U + 1U]) * y +
+           static_cast<double>(object_to_clip.row_major[row * 4U + 2U]) * z +
+           static_cast<double>(object_to_clip.row_major[row * 4U + 3U]);
+}
+
+// The set of clip planes this single corner lies strictly outside of. Comparisons stay
+// homogeneous (x against -w and +w rather than x/w against -1 and +1) so a corner behind
+// the camera, where w is negative, is not silently mirrored into the frustum.
+[[nodiscard]] std::uint32_t CornerOutsideMask(const asset::Matrix4x4IR& object_to_clip,
+    const double x, const double y, const double z) noexcept
+{
+    const double clip_x = ClipComponent(object_to_clip, 0U, x, y, z);
+    const double clip_y = ClipComponent(object_to_clip, 1U, x, y, z);
+    const double clip_z = ClipComponent(object_to_clip, 2U, x, y, z);
+    const double clip_w = ClipComponent(object_to_clip, 3U, x, y, z);
+
+    // A corner that cannot be evaluated claims no half-space, so it can never contribute to
+    // a rejection. Double accumulation of finite float inputs cannot actually reach this,
+    // but the guard keeps the "strictly outside" rule true by construction.
+    if (!std::isfinite(clip_x) || !std::isfinite(clip_y) || !std::isfinite(clip_z) ||
+        !std::isfinite(clip_w))
+    {
+        return 0U;
+    }
+
+    std::uint32_t mask = 0U;
+    if (clip_x < -clip_w)
+        mask |= kOutsideLeft;
+    if (clip_x > clip_w)
+        mask |= kOutsideRight;
+    if (clip_y < -clip_w)
+        mask |= kOutsideBottom;
+    if (clip_y > clip_w)
+        mask |= kOutsideTop;
+    if (clip_z < 0.0)
+        mask |= kOutsideNear;
+    if (clip_z > clip_w)
+        mask |= kOutsideFar;
+    return mask;
 }
 } // namespace
 
@@ -65,5 +133,42 @@ std::expected<RenderMeshDrawList, RenderMeshDrawListError> RenderMeshDrawList::C
     }
     result.count_ = static_cast<std::uint32_t>(commands.size());
     return result;
+}
+
+bool IsBoxPossiblyVisible(const asset::Matrix4x4IR& object_to_clip,
+    const asset::Float3IR& minimum, const asset::Float3IR& maximum) noexcept
+{
+    if (!IsFinite(object_to_clip) || !IsFinite(minimum) || !IsFinite(maximum))
+        return true;
+    // An inverted box spans no volume, so there is nothing to reject on its behalf.
+    if (!(minimum.x <= maximum.x) || !(minimum.y <= maximum.y) || !(minimum.z <= maximum.z))
+        return true;
+
+    const std::array<double, 2U> xs{
+        static_cast<double>(minimum.x), static_cast<double>(maximum.x)};
+    const std::array<double, 2U> ys{
+        static_cast<double>(minimum.y), static_cast<double>(maximum.y)};
+    const std::array<double, 2U> zs{
+        static_cast<double>(minimum.z), static_cast<double>(maximum.z)};
+
+    // Intersect the outside-sets of all eight corners. A plane may reject the box only if
+    // every corner is strictly outside that same plane; a corner outside no plane, or a set
+    // of corners outside different planes, leaves the intersection empty.
+    std::uint32_t shared_outside = kOutsideEveryPlane;
+    for (const double z : zs)
+    {
+        for (const double y : ys)
+        {
+            for (const double x : xs)
+            {
+                shared_outside &= CornerOutsideMask(object_to_clip, x, y, z);
+                if (shared_outside == 0U)
+                    return true;
+            }
+        }
+    }
+
+    // Some plane has every corner strictly on its outside: the box cannot be visible.
+    return false;
 }
 } // namespace omega::runtime

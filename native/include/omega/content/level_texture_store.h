@@ -81,6 +81,10 @@ enum class LevelTextureStoreErrorCode
     DecodeFailed,
     ForeignService,
     InvalidHandle,
+    // Documented not-found result of the lexical name-candidate policy below. It reports only
+    // that the selected policy admitted no candidate; it is not a claim that no retail texture
+    // corresponds to the queried name.
+    NameNotFound,
 };
 
 [[nodiscard]] std::string_view LevelTextureStoreErrorCodeName(
@@ -128,12 +132,47 @@ struct LoadedLevelTexture
     LevelTextureOperationUsage usage;
 };
 
+// PROJECT ENGINEERING POLICY. This selects which purely lexical candidate rule the store applies
+// when a caller asks it to resolve a name to a handle. Both alternatives are project choices. This
+// is NOT a decoded retail fact: nothing here claims that retail code performs a name lookup, that a
+// catalog/material name is a texture name, that a material record binds a texture, that either
+// texture-container class has priority, or that a matched member is the texture retail would have
+// used. The policy compares strings; it decides nothing about a cell, mesh, draw, placement,
+// visibility state, or renderer resource.
+//
+// PROVENANCE OF THE MEASUREMENT, not of a retail rule. The project measured the extension-eliding
+// alternative offline over the extracted disc: 34,267 of 34,267 VUM material-catalog name
+// occurrences resolved to exactly one direct .TDX member, with zero unmatched and zero ambiguous
+// names, reproducibly and byte-identically across two confirmed passes. The measurement, its
+// counts, and its explicit statement that it establishes no retail alias rule live in
+// analysis/formats/VUM.md ("Exact-first one-terminal-extension candidate family", including the
+// nonclaim paragraph) and analysis/formats/TDX.md. That is offline lexical coherence and nothing
+// more; retail name lookup, retail material-record consumption, and retail extension elision all
+// remain unobserved.
+enum class LevelTextureNameCandidatePolicy : std::uint8_t
+{
+    // Full normalized equality against the stored terminal member name. No transformation of
+    // either side.
+    NormalizedExactTerminalMember,
+    // Full normalized equality first; only when that admits no candidate, at most one syntactic
+    // extension is removed independently from the final component of BOTH the queried name and
+    // each stored terminal member name, and one further exact comparison is made. A syntactic
+    // extension requires a dot after the first character of the final component and at least one
+    // character after that dot, so ".HIDDEN", "NAME." and an extensionless component are left
+    // unchanged while "A.B.C" becomes "A.B". Directory components are never removed and a second
+    // extension is never stripped. The elision is a named, caller-selected part of this policy --
+    // never a hidden fixup applied on the caller's behalf.
+    NormalizedExactThenOneTerminalExtensionElision,
+};
+
 // Non-hot-reloadable, immutable level-scoped locator store. It weakly binds to one
 // GameDataService source identity and owns neither the service nor source bytes. Open inventories
 // only direct TDX members of the manifest's explicit texture sources; it does not traverse DATA
-// cells or nested containers. It provides no cache, async scheduling, renderer/GPU upload,
+// cells or nested containers. It provides no cache, async scheduling, renderer/GPU upload, retail
 // material/name binding, display-pixel expansion, palette/channel/swizzle policy, placement,
-// visibility, or draw semantics.
+// visibility, or draw semantics. Name-keyed access exists only as an explicitly caller-selected
+// lexical candidate policy (see LevelTextureNameCandidatePolicy); it reads no material record or
+// catalog and asserts no retail name rule.
 class LevelTextureStore final
 {
 public:
@@ -159,6 +198,30 @@ public:
     [[nodiscard]] std::expected<LevelTextureHandle, LevelTextureStoreError> HandleAt(
         std::size_t index) const noexcept;
     [[nodiscard]] const LevelTextureOperationUsage& open_usage() const noexcept;
+
+    // [any thread after Open(); immutable] Returns the normalized terminal container-member name
+    // this handle index was inventoried under. It is a container member name, not a claimed retail
+    // texture name, and it binds no material record. The view stays valid until the store that owns
+    // it is destroyed. Out-of-range and moved-from stores yield InvalidHandle, matching HandleAt.
+    [[nodiscard]] std::expected<std::string_view, LevelTextureStoreError> TerminalMemberNameAt(
+        std::size_t index) const noexcept;
+
+    // [any thread after Open(); immutable] PROJECT ENGINEERING POLICY, not a decoded retail
+    // binding. Resolves a name to a handle purely lexically under the caller-selected candidate
+    // policy, which has no default and must therefore be spelled at every call site. It compares
+    // only against the normalized terminal member names reported by TerminalMemberNameAt; it reads
+    // no material record, catalog, or manifest, and it claims no retail alias rule -- see
+    // LevelTextureNameCandidatePolicy for the measurement this policy was drawn from and for what
+    // that measurement explicitly does not establish. No I/O occurs.
+    //
+    // Returns InvalidReference when the name cannot be normalized, LimitExceeded when it exceeds
+    // this store's string limit, NameNotFound when the policy admits no candidate,
+    // DuplicateReference when it admits more than one, InvalidConfiguration for an unrecognized
+    // policy value, and InvalidHandle for a moved-from store. Diagnostics never repeat the queried
+    // name or any member name.
+    [[nodiscard]] std::expected<LevelTextureHandle, LevelTextureStoreError>
+    FindHandleByNameCandidate(
+        std::string_view texture_name, LevelTextureNameCandidatePolicy policy) const;
 
     // [any worker thread after Open(); reentrant and thread-safe] Validates the service binding,
     // weak store identity, and handle index before source I/O, then returns independently owned

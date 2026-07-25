@@ -27,6 +27,17 @@ namespace omega::frontend::presentation
 //      S/T/Q sampling is a later fidelity slice. Per-mission node tiles from
 //      ZEUS.HOG are Slice C.
 //
+// SCOPE -- what this producer deliberately does NOT model: it emits the ring
+// SURFACE BAND and nothing else. It does not position, order, anchor or scale
+// the hub's mission items or their text labels, and it exposes no per-item slot
+// or anchor geometry. Menu label placement comes entirely from the decoded GUI
+// widget rectangle (asset::FrontendWidgetIR::rectangle), laid out by
+// LayoutRetailText and emitted as glyph quads in the frame compositor's text
+// pass; no value produced here participates in it. What drives per-mission
+// item placement in the retail runtime is undecoded -- this module asserts
+// nothing about it, and must not be extended with a project-chosen item layout
+// dressed up as the ring's item positions.
+//
 // ring_texture may be null: the ring then renders untextured (a cool vertex
 // colour) and still reads as the ring surface. Appends to `out`; the caller
 // composites it FIRST (lowest submission ordinal) so the 2D shell draws over it.
