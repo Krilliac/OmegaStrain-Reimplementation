@@ -1099,10 +1099,13 @@ Studio's historical engine source or internal toolchain.
   With neither content key and no direct root, startup remains zero-file. `/openomega.cfg` is ignored
   because it can contain a private local path. This slice adds no ambient/default discovery,
   persistence, picker, filesystem probing in the resolver, asset semantics, retail UI, or
-  emulator-equivalence claim. Focused and full MSVC builds, `omega_core_tests`, the process
-  contract, 30/34/30 default/GPU/restored CTest, runtime-off checks with 27 registrations, the
-  157-file dependency gate, all 209 tooling tests, and Python compile-all passed. Publication
-  remains unclaimed.
+  emulator-equivalence claim. For the original E-0074 slice, focused and full MSVC builds,
+  `omega_core_tests`, the process contract, 30/34/30 default/GPU/restored CTest, runtime-off checks
+  with 27 registrations, the 157-file dependency gate, all 209 tooling tests, and Python
+  compile-all passed. E-0129 was initially cross-compiler checked with project MSVC/CMake/CTest
+  explicitly deferred; this integration has since passed serialized MSVC builds and focused CTest
+  for the table, core, and process contracts. Full local and hosted validation remains pending.
+  Publication remains unclaimed.
 - E-0075 adds an optional per-user default runtime profile without changing the configuration
   grammar or content precedence. After successful argument parsing and the help fast path, main
   captures only the host-family search roots when `--config` is absent. Absolute roots resolve

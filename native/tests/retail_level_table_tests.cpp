@@ -25,10 +25,8 @@ void Check(const bool condition, const std::string_view message)
 int main()
 {
     using omega::content::FindRetailLevelIndex;
-    using omega::content::IsBoundedConsumerLevelIndex;
     using omega::content::IsRetailLevelCode;
     using omega::content::kMaxRetailLevelCodeLength;
-    using omega::content::kRetailLevelBoundedConsumerCount;
     using omega::content::kRetailLevelCount;
     using omega::content::RetailLevelCodeAt;
     using omega::content::RetailLevelCodes;
@@ -37,10 +35,6 @@ int main()
 
     Check(kRetailLevelCount == 18U && codes.size() == kRetailLevelCount,
           "the decoded table exposes its full eighteen-entry storage extent");
-    Check(kRetailLevelBoundedConsumerCount == 17U &&
-              kRetailLevelBoundedConsumerCount < kRetailLevelCount,
-          "the narrower reference consumer bound excludes exactly the final entry");
-
     // The single worked example carried over from the argument-loader note.
     Check(RetailLevelCodeAt(9U) == "MINSK",
           "index 9 is MINSK, reproducing the recorded reference worked example");
@@ -123,16 +117,6 @@ int main()
               RetailLevelCodeAt(kRetailLevelCount + 1U).empty() &&
               RetailLevelCodeAt(static_cast<std::size_t>(-1)).empty(),
           "an out-of-range index yields an empty view rather than reading past the table");
-
-    // The narrower consumer bound predicate.
-    Check(IsBoundedConsumerLevelIndex(0U) &&
-              IsBoundedConsumerLevelIndex(kRetailLevelBoundedConsumerCount - 1U) &&
-              !IsBoundedConsumerLevelIndex(kRetailLevelBoundedConsumerCount) &&
-              !IsBoundedConsumerLevelIndex(kRetailLevelCount),
-          "the narrower consumer bound admits [0, 17) and nothing above it");
-    Check(!IsBoundedConsumerLevelIndex(kRetailLevelCount - 1U) &&
-              RetailLevelCodeAt(kRetailLevelCount - 1U) == "TRAINING",
-          "the final entry is the one excluded by the narrower consumer bound");
 
     // The span refers to stable static storage, not a per-call temporary.
     Check(RetailLevelCodes().data() == codes.data(),

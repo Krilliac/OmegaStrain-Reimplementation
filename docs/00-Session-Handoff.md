@@ -903,10 +903,13 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     `content launch profile [category]: message` after runtime-setting validation and before the
     existing E-0072 startup diagnostic. Only `/openomega.cfg` is newly ignored because it may hold a
     private path. This slice performs no ambient/default discovery, persistence, picker, path
-    existence check, asset decode, or retail inference. Focused/full MSVC, direct core and process
-    checks, 30/34/30 default/GPU/restored CTest, runtime-off direct/focused checks with 27
-    registrations, the 157-file dependency gate, all 209 tooling tests, and Python compile-all
-    passed. Publication remains unclaimed.
+    existence check, asset decode, or retail inference. For the original E-0074 slice,
+    focused/full MSVC, direct core and process checks, 30/34/30 default/GPU/restored CTest,
+    runtime-off direct/focused checks with 27 registrations, the 157-file dependency gate, all 209
+    tooling tests, and Python compile-all passed. E-0129 initially deferred project MSVC/CMake/CTest
+    in favor of supplemental cross-compiler checks; this integration has since passed serialized
+    MSVC builds and focused CTest for the table, core, and process contracts. Full local and hosted
+    validation remains pending. Publication remains unclaimed.
 
 60. E-0075 adds narrow per-user default-profile discovery at the composition root. A compile-time
     host classifier performs no I/O, and a separate pure lexical resolver accepts only captured

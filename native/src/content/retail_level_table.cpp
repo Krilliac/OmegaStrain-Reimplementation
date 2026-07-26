@@ -10,29 +10,28 @@ namespace omega::content
 {
 namespace
 {
-// Reference table order, recovered by chasing the eighteen pointers stored from
-// VA 0x0048C160 with stride four. The comment beside each entry is the entry
-// address, which is the only provenance carried into the native tree; it is not
-// an implementation address and nothing here indexes memory by it.
+// Reference table order from the sanitized evidence in
+// analysis/elf/level-name-table.md. No reference address or instruction-level
+// detail enters the native implementation.
 constexpr std::array<std::string_view, kRetailLevelCount> kRetailLevelCodes{
-    "TORONTO1", // 0x0048C160
-    "TORONTO2", // 0x0048C164
-    "TORONTO3", // 0x0048C168
-    "ITALY",    // 0x0048C16C
-    "BELARUS1", // 0x0048C170
-    "BELARUS2", // 0x0048C174
-    "KYRGSTAN", // 0x0048C178
-    "YEMEN1",   // 0x0048C17C
-    "YEMEN2",   // 0x0048C180
-    "MINSK",    // 0x0048C184  worked example from analysis/elf/argument-loader.md
-    "CHECHNYA", // 0x0048C188
-    "LORELEI",  // 0x0048C18C
-    "TOKYO",    // 0x0048C190
-    "MYANMAR",  // 0x0048C194
-    "ZURICH",   // 0x0048C198
-    "MNTNEGR1", // 0x0048C19C
-    "UKRAINE",  // 0x0048C1A0
-    "TRAINING", // 0x0048C1A4  admitted only by the wider consumer bound
+    "TORONTO1",
+    "TORONTO2",
+    "TORONTO3",
+    "ITALY",
+    "BELARUS1",
+    "BELARUS2",
+    "KYRGSTAN",
+    "YEMEN1",
+    "YEMEN2",
+    "MINSK",
+    "CHECHNYA",
+    "LORELEI",
+    "TOKYO",
+    "MYANMAR",
+    "ZURICH",
+    "MNTNEGR1",
+    "UKRAINE",
+    "TRAINING",
 };
 
 [[nodiscard]] constexpr char ToUpperAscii(const char value) noexcept
@@ -86,8 +85,4 @@ bool IsRetailLevelCode(const std::string_view code) noexcept
     return FindRetailLevelIndex(code).has_value();
 }
 
-bool IsBoundedConsumerLevelIndex(const std::size_t index) noexcept
-{
-    return index < kRetailLevelBoundedConsumerCount;
-}
 } // namespace omega::content
