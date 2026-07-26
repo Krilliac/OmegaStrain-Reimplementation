@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <limits>
 #include <new>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -361,7 +362,7 @@ RetailFrontEndRasterResult RasterizeRetailFrontEndTriangles(
     // A frontend screen draws long runs of triangles from one binding, and a
     // binding is immutable for the whole call, so the validated layout is
     // resolved once per distinct binding rather than once per triangle.
-    RetailFrontEndValidatedTexture validated_texture;
+    std::optional<RetailFrontEndValidatedTexture> validated_texture;
     const content::FrontEndTextureBinding* validated_binding = nullptr;
     for (const auto& triangle : triangles)
     {
@@ -400,10 +401,10 @@ RetailFrontEndRasterResult RasterizeRetailFrontEndTriangles(
                     ValidateRetailFrontEndTexture(*triangle.texture);
                 if (!layout)
                     return std::unexpected(MapTextureError(layout.error()));
-                validated_texture = *layout;
+                validated_texture.emplace(std::move(*layout));
                 validated_binding = triangle.texture;
             }
-            validated = &validated_texture;
+            validated = &*validated_texture;
         }
 
         const std::uint64_t remaining =

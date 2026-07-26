@@ -39,8 +39,17 @@ using omega::frontend::presentation::LookupRetailFrontEndTexel;
 using omega::frontend::presentation::RetailFrontEndTextureAlphaContribution;
 using omega::frontend::presentation::RetailFrontEndTextureSamplingError;
 using omega::frontend::presentation::RetailFrontEndTextureSamplingResult;
+using omega::frontend::presentation::RetailFrontEndValidatedTexture;
 using omega::frontend::presentation::SampleRetailFrontEndTextureBilinearRepeat;
 using omega::frontend::presentation::ValidateRetailFrontEndTexture;
+
+template <typename Type>
+concept ExposesMutableValidatedTextureLayout = requires(Type& value) {
+    value.indices_ = static_cast<const std::uint8_t*>(nullptr);
+    value.palette_size_ = 0U;
+    value.width_ = 0U;
+    value.height_ = 0U;
+};
 
 int failures = 0;
 
@@ -107,6 +116,20 @@ void TestPublicContract()
     static_assert(noexcept(SampleRetailFrontEndTextureBilinearRepeat(
         std::declval<const FrontEndTextureBinding&>(),
         std::declval<const omega::asset::FrontendUvIR&>())));
+    static_assert(!std::is_aggregate_v<RetailFrontEndValidatedTexture>);
+    static_assert(
+        !std::default_initializable<RetailFrontEndValidatedTexture>);
+    static_assert(
+        !ExposesMutableValidatedTextureLayout<
+            RetailFrontEndValidatedTexture>);
+    static_assert(!std::constructible_from<RetailFrontEndValidatedTexture,
+        const std::uint8_t*,
+        std::uint32_t,
+        std::uint32_t,
+        std::uint32_t,
+        RetailFrontEndTextureAlphaContribution,
+        std::array<omega::frontend::RgbaF, 256U>>);
+    static_assert(std::copyable<RetailFrontEndValidatedTexture>);
     static_assert(
         omega::frontend::presentation::kRetailFrontEndTextureMaximumDimension ==
         512U);
@@ -352,6 +375,20 @@ void TestValidatedLayoutMatchesTheBindingOverload()
             malformed_layout.error() ==
                 RetailFrontEndTextureSamplingError::InvalidIndexStorage,
         "hoisted validation fails closed on the same malformed storage");
+
+    const auto empty_layout = ValidateRetailFrontEndTexture(
+        MakeTexture(IndexedImageEncoding::Indexed4,
+            FrontEndTextureAlphaMode::UsesPaletteAlpha, 0U, 1U, {}));
+    Check(!empty_layout &&
+            empty_layout.error() ==
+                RetailFrontEndTextureSamplingError::EmptyImage,
+        "an invalid caller binding cannot produce a sampler token");
+    CheckError(SampleRetailFrontEndTextureBilinearRepeat(
+                   MakeTexture(IndexedImageEncoding::Indexed4,
+                       FrontEndTextureAlphaMode::UsesPaletteAlpha, 0U, 1U, {}),
+                   {.u = 0.0F, .v = 0.0F}),
+        RetailFrontEndTextureSamplingError::EmptyImage,
+        "the public binding sampler rejects invalid state before sampling");
 }
 
 void TestDeterminism()
