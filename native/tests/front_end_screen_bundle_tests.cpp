@@ -279,6 +279,7 @@ void AppendGuiNode(std::vector<std::byte>& bytes, const GuiNode& node)
     const std::string_view localized_reference = "$CreateAgent",
     const bool unsafe_scope = false, const bool wrong_resource_case = false,
     const std::size_t extra_scope_count = 0U,
+    const std::size_t sequential_scope_count = 0U,
     const bool omit_explicit_default_font = false)
 {
     const GuiNode localized{
@@ -330,6 +331,16 @@ void AppendGuiNode(std::vector<std::byte>& bytes, const GuiNode& node)
             .decorated = true,
             .scope_reference = "EXTRA_SCOPE_" + std::to_string(index),
             .resource_reference = "unused",
+        });
+    }
+    for (std::size_t index = 0; index < sequential_scope_count; ++index)
+    {
+        children.push_back(GuiNode{
+            .factory = "GuiWidget",
+            .identifier = "sequential_binding_" + std::to_string(index),
+            .decorated = true,
+            .scope_reference = "SEQUENTIAL_SCOPE_" + std::to_string(index),
+            .resource_reference = authored_resource,
         });
     }
     const GuiNode root{
@@ -572,12 +583,15 @@ struct FrontEndFixtureOptions final
     bool unsafe_scope = false;
     bool wrong_resource_case = false;
     std::size_t extra_scope_count = 0U;
+    std::size_t sequential_scope_count = 0U;
     bool omit_scoped_texture = false;
     bool unsafe_scoped_texture_reference = false;
     bool scoped_name_collision = false;
     bool omit_scope_archive = false;
     bool omit_scoped_visual = false;
     bool omit_explicit_default_font = false;
+    std::size_t minimum_screen_archive_bytes = 0U;
+    std::size_t minimum_scope_archive_bytes = 0U;
 };
 
 [[nodiscard]] std::vector<std::byte> MakeScreenHog(const ScreenSpec& screen,
@@ -592,6 +606,7 @@ struct FrontEndFixtureOptions final
                       changed && options.unsafe_scope,
                       changed && options.wrong_resource_case,
                       changed ? options.extra_scope_count : 0U,
+                      changed ? options.sequential_scope_count : 0U,
                       changed && options.omit_explicit_default_font)},
         HogMember{.name = std::string(screen.stem) + ".IE",
             .payload = MakeIe(screen.stem, screen.texture_basename,
@@ -605,13 +620,20 @@ struct FrontEndFixtureOptions final
             .payload = MakeTdx(screen.seed),
         });
     }
-    return MakeHog(members);
+    auto archive = MakeHog(members);
+    if (changed && archive.size() < options.minimum_screen_archive_bytes)
+        archive.resize(options.minimum_screen_archive_bytes, std::byte{0});
+    return archive;
 }
 
 [[nodiscard]] std::vector<std::byte> MakeSharedScopeHog(
-    const FrontEndFixtureOptions& options)
+    const FrontEndFixtureOptions& options,
+    const std::string_view scope_name = "SHAREDSCOPE",
+    const std::uint8_t seed_offset = 0U)
 {
-    IeNode root{.identifier = "shared_root"};
+    IeNode root{.identifier = scope_name == "SHAREDSCOPE"
+            ? "shared_root"
+            : std::string(scope_name) + "_root"};
     std::vector<HogMember> members;
     for (const auto& screen : kScreens)
     {
@@ -632,7 +654,9 @@ struct FrontEndFixtureOptions final
             members.push_back(HogMember{
                 .name = std::string(screen.texture_basename) + ".TDX",
                 .payload = MakeTdx(
-                    static_cast<std::uint8_t>(screen.seed + 0x40U), 1U),
+                    static_cast<std::uint8_t>(
+                        screen.seed + 0x40U + seed_offset),
+                    1U),
             });
         }
     }
@@ -647,7 +671,9 @@ struct FrontEndFixtureOptions final
     if (!options.omit_scoped_visual)
     {
         members.insert(members.begin(),
-            HogMember{.name = "SHAREDSCOPE.IE", .payload = std::move(document)});
+            HogMember{
+                .name = std::string(scope_name) + ".IE",
+                .payload = std::move(document)});
     }
     if (options.scoped_name_collision)
     {
@@ -656,7 +682,10 @@ struct FrontEndFixtureOptions final
             .payload = MakeTdx(0x77U),
         });
     }
-    return MakeHog(members);
+    auto archive = MakeHog(members);
+    if (archive.size() < options.minimum_scope_archive_bytes)
+        archive.resize(options.minimum_scope_archive_bytes, std::byte{0});
+    return archive;
 }
 
 [[nodiscard]] std::vector<std::byte> MakeFrontEndHog(
@@ -677,6 +706,16 @@ struct FrontEndFixtureOptions final
             .name = "SHAREDSCOPE.HOG",
             .payload = MakeSharedScopeHog(options),
         });
+        for (std::size_t index = 0U; index < options.sequential_scope_count; ++index)
+        {
+            const std::string scope_name =
+                "SEQUENTIAL_SCOPE_" + std::to_string(index);
+            members.push_back(HogMember{
+                .name = scope_name + ".HOG",
+                .payload = MakeSharedScopeHog(options, scope_name,
+                    static_cast<std::uint8_t>(index + 1U)),
+            });
+        }
     }
     return MakeHog(members);
 }
@@ -1190,13 +1229,61 @@ int main()
         omega::asset::DecodeErrorCode::LimitExceeded,
         "caller-tightened aggregate item limits cannot be reset by child decoders");
 
+    // Nested HOG spans are copied into independently owned archives. The screen
+    // copy remains live while the shared visual-scope copy is created, so two
+    // individually admissible copies must not each receive the whole operation
+    // allowance. Leave enough room for the first 5 MiB copy plus one 4 MiB
+    // transient texture decode, but not both retained 5 MiB archive copies.
+    constexpr std::size_t retained_archive_copy_bytes = 5U * 1024U * 1024U;
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog({.changed_screen = 0U,
+                  .minimum_screen_archive_bytes = retained_archive_copy_bytes,
+                  .minimum_scope_archive_bytes = retained_archive_copy_bytes})),
+        "aggregate retained-workspace fixture is written");
+    omega::asset::DecodeLimits retained_scratch_limits{
+        .maximum_input_bytes = 64ULL * 1024ULL * 1024ULL,
+        .maximum_output_bytes = 128ULL * 1024ULL * 1024ULL,
+        .maximum_scratch_bytes = 9ULL * 1024ULL * 1024ULL + 512ULL * 1024ULL,
+        .maximum_items = 64ULL * 1024ULL * 1024ULL,
+        .maximum_string_bytes = 4096U,
+        .maximum_nesting_depth = 16U,
+    };
+    const auto retained_scratch_failure =
+        Load(root, FrontEndScreenKey::Title, retained_scratch_limits);
+    CheckDecodeError(retained_scratch_failure,
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "concurrently retained archive copies share one scratch allowance");
+    Check(!retained_scratch_failure && retained_scratch_failure.error().decode_error &&
+              retained_scratch_failure.error().decode_error->message ==
+                  "front-end visual scope archive copy exceeded the shared front-end "
+                  "operation budget",
+        "aggregate retained scratch fails at the second independently valid archive copy");
+    Check(WriteBytes(paths->front_end_hog, MakeFrontEndHog()),
+        "valid front-end archive is restored after retained-workspace coverage");
+
+    // Loop-local scope archives, indexes, and reference sets die after each
+    // published scope. Two 5 MiB scopes therefore reuse one retained-workspace
+    // slice while cumulative input/item/output accounting remains in force.
+    Check(WriteBytes(paths->front_end_hog,
+              MakeFrontEndHog({.changed_screen = 0U,
+                  .sequential_scope_count = 1U,
+                  .minimum_scope_archive_bytes = retained_archive_copy_bytes})),
+        "sequential retained-workspace fixture is written");
+    const auto sequential_scopes =
+        Load(root, FrontEndScreenKey::Title, retained_scratch_limits);
+    Check(sequential_scopes && sequential_scopes->visual_scopes().size() == 3U &&
+              sequential_scopes->visual_scopes().contains("SHAREDSCOPE") &&
+              sequential_scopes->visual_scopes().contains("SEQUENTIAL_SCOPE_0"),
+        "two non-primary scopes reuse one live retained-workspace allowance");
+    Check(WriteBytes(paths->front_end_hog, MakeFrontEndHog()),
+        "valid front-end archive is restored after sequential-workspace coverage");
+
     // GS local-memory scratch is a PEAK (transient, reused-per-texture) bound,
     // not a cumulative pool. A screen composing more than one texture must decode
-    // with only a single 4 MiB GS workspace of scratch headroom; the prior code
-    // summed each texture's 4 MiB peak and so falsely exhausted the budget after
-    // enough textures, which broke multi-texture screens such as the Command
-    // Center hub. The synthetic Title screen composes a primary and a shared-scope
-    // texture, so a 4 MiB scratch ceiling proves the peak (not summed) semantics.
+    // with only a single 4 MiB GS workspace after reserving the retained baseline.
+    // The synthetic Title screen composes primary, shared-scope, and font-atlas
+    // textures, so 8 MiB leaves ample retained headroom but cannot hide a
+    // cumulative 12 MiB charge for three sequential decoder peaks.
     omega::asset::DecodeLimits peak_scratch_limits{
         .maximum_input_bytes = 64ULL * 1024ULL * 1024ULL,
         .maximum_output_bytes = 128ULL * 1024ULL * 1024ULL,
@@ -1205,9 +1292,13 @@ int main()
         .maximum_string_bytes = 4096U,
         .maximum_nesting_depth = 16U,
     };
+    CheckDecodeError(Load(root, FrontEndScreenKey::Title, peak_scratch_limits),
+        omega::asset::DecodeErrorCode::LimitExceeded,
+        "a transient decoder peak cannot overlap retained workspace without headroom");
+    peak_scratch_limits.maximum_scratch_bytes = 8ULL * 1024ULL * 1024ULL;
     Check(Load(root, FrontEndScreenKey::Title, peak_scratch_limits).has_value(),
-        "a multi-texture screen decodes within a single GS-workspace scratch "
-        "budget: transient scratch is peak, not summed per texture");
+        "a multi-texture screen reuses one transient GS workspace after retained "
+        "scratch is debited");
 
     if (const auto private_data = PrivateRetailDataPath())
     {
