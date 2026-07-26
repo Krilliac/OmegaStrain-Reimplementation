@@ -2147,16 +2147,15 @@ compose or publish a retail presentation.
 ## Native gameplay and render slices after E-0128 (2026-07-23 to 2026-07-25)
 
 The entries below record the work that landed after E-0128 and are the continuation of this file's
-milestone log. They cite commit hashes rather than evidence-ledger identifiers.
-`analysis/evidence/ledger.jsonl` currently holds 128 records and contains no record for any slice
-below, so assigning an `E-` number here would assert a ledger entry that does not exist. Writing
-those records is outstanding work, not a claim made by this section.
+milestone log. `analysis/evidence/ledger.jsonl` currently holds 129 records. The entries below use
+descriptive dates; unless an entry explicitly names an `E-` record, it does not claim evidence-ledger
+status.
 
-Each entry is written from the commit that landed it. Where a figure came from a live in-level run
-rather than from a tracked fixture or test, it is labelled as such, because those runs read private
-owner content and are not reproducible from this repository alone.
+Where a figure came from a live in-level run rather than from a tracked fixture or test, it is
+labelled as such, because those runs read private owner content and are not reproducible from this
+repository alone.
 
-### VUM visual-geometry decoder and level render (commits `7bf0d50`/`d210f39`, 2026-07-23)
+### VUM visual-geometry decoder and level render (2026-07-23)
 
 - `DecodeVumVisualGeometry` validates the VUM byte layout, isolates the final payload, and walks its
   VIF stream (NOP / STCYCL / STMOD / STMASK / STROW / FLUSH / MSCAL / UNPACK) into
@@ -2193,9 +2192,10 @@ material binding, no `.tdx` resolution, no draw or layer order, no GS register m
 rule, no triangle winding, and no PCSX2 or visual parity. The `/4096` and `/255` scales and the
 attribute-role assignment remain readings of the block shape, not observed retail constants.
 
-### Kinematic character controller and the walkable level (commits `59dbb89`/`e1ba18c`/`4329a2d`, 2026-07-24)
+### Kinematic character controller and the walkable level (2026-07-24)
 
-- `character_controller` is a dependency-free kinematic core: `CollisionTriangle`,
+- `character_controller` is a platform-neutral, project-owned kinematic core:
+  `CollisionTriangle`,
   `CharacterState{position, velocity, grounded}`, and
   `CharacterControllerParams{radius, up, gravity, move_speed, walkable_normal_dot,
   resolve_iterations}`. `ClosestPointOnTriangle` uses the Ericson Voronoi-region barycentric form.
@@ -2223,15 +2223,16 @@ attribute-role assignment remain readings of the block shape, not observed retai
   screen-space blit and would mis-project against the free-fly camera. The int64 simulation entity is
   never touched, so the int64-to-float question does not arise.
 - `OPENOMEGA_PLAYER=1` is off by default. CTest was 117/117 across these commits.
-- Honest gaps recorded at the time and not since closed: the player is a box rather than a capsule,
-  and the box controller pops `grounded=no` over ramps. Capsule shape, step-up, and slope tuning are
+- Honest gaps recorded at the time and not since closed: the player controller is a sphere rather
+  than a capsule, and the sphere controller pops `grounded=no` over ramps. Capsule shape, step-up,
+  and slope tuning are
   flagged follow-ups.
 
 This is a project-owned movement model matched to the host API's shape. It is not a retail movement,
 acceleration, friction, step-up, slope, capsule, or animation implementation, and no number in it is
 a recovered retail constant.
 
-### Objective/mission system and objective HUD (commits `2a51970`/`cb240a9`/`8670fe0`/`5c33e28`, 2026-07-24)
+### Objective/mission system and objective HUD (2026-07-24)
 
 - `mission_data.h` holds declarative project-owned mission data:
   `ObjectiveDef{id, menu_key, map_key, voice_cue, kind}` plus `MissionData`. The Minsk set is
@@ -2268,7 +2269,7 @@ This is a project-owned objective reducer over real script-derived identifiers. 
 retail trigger placement, beacon coordinate, checkpoint, mission flow, voice binding, primary/optional
 classification, HUD layout, or PCSX2 parity.
 
-### Stealth NPC AI: patrol, line of sight, chase, search (commits `90234f0`/`04c8a02`, 2026-07-24)
+### Stealth NPC AI: patrol, line of sight, chase, search (2026-07-24)
 
 - `npc_ai` is pure and deterministic. `SegmentIntersectsTriangle` is Moller-Trumbore clamped to the
   eye-to-player segment so only real occluders block. `NpcSeesPlayer` tests squared range, then the
@@ -2296,7 +2297,7 @@ This is the `.SO` stealth model's shape -- Spawn, Patrol, Awareness -- implement
 timings and distances. No reaction delay, cone angle, sensor range, search duration, patrol route, or
 coordination rule here is a recovered retail value, and none of it is a parity claim.
 
-### Authentic Minsk roster from POP `GOB:` and `NOD:` nav-graph patrol (commits `5ab7a38`/`86b1da1`, 2026-07-24)
+### Authentic Minsk roster from POP `GOB:` and `NOD:` nav-graph patrol (2026-07-24)
 
 - `DecodePopGameObjects` decodes the POP file's post-`TER:` region, which is 19 typed sections of
   `4-char tag + u32 count + body`. The NPC record layout is pinned as
@@ -2332,7 +2333,7 @@ This decodes placement and type and a nav-graph adjacency structure. It establis
 behaviour, patrol route, alert propagation, hotbox semantics, model binding, or animation, and the
 skipped variant records mean neither section is claimed as fully covered.
 
-### Combat S1 through S3 (commits `b2b767d`/`c2c3c4c`/`98c6af0`/`ede826c`/`795b441`, 2026-07-25)
+### Combat S1 through S3 (2026-07-25)
 
 - S1 is pure value math matching the model read off the `.SO` symbol table
   (`SetAimMode`/`GetAimPercent` aim ramp, then `ForceWeaponFire`, then `OnAIWeaponFiredMsg`;
@@ -2397,7 +2398,7 @@ skipped variant records mean neither section is claimed as fully covered.
 This is a project-owned combat model shaped by the `.SO` symbol table. It establishes no retail weapon
 statistic, damage value, accuracy model, aim behaviour, engagement rule, death flow, or PCSX2 parity.
 
-### Depth-tested mesh pass (commit `94fa0da`, 2026-07-25)
+### Depth-tested mesh pass (2026-07-25)
 
 - The 3D mesh pass had no depth buffer at all: `SDL_BeginGPURenderPass` was called with a null
   depth-stencil target and the pipelines declared none, so geometry resolved purely by submission
@@ -2429,7 +2430,7 @@ statistic, damage value, accuracy model, aim behaviour, engagement rule, death f
 This is a project renderer correctness fix. It establishes no retail depth range, precision, sort
 order, culling rule, render-state configuration, or PCSX2 equivalence.
 
-### Real decoded UVs reaching the GPU (commit `a4a6856`, 2026-07-25)
+### Real decoded UVs reaching the GPU (2026-07-25)
 
 - The pixel shader had been inventing its own texture coordinates: it derived a face normal from
   screen-space derivatives of the object position and triplanar-projected one texture at a hardcoded

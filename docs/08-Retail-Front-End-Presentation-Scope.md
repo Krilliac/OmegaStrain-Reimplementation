@@ -1,7 +1,14 @@
 # 08 — Retail Front-End Presentation: Implementation Scope
 
-Status: scoping draft (2026-07-23). Feeds planning for closing the
-`retail front-end presentation is unavailable` gate.
+> **Historical-snapshot boundary:** Sections 1–8 preserve the pre-implementation
+> scoping state captured on 2026-07-23. Their present-tense statements about the
+> retail gate, missing loader wiring, static untextured Title, and future phases
+> are not the current runtime status. The dated retail-front-end entries in
+> `docs/00-Session-Handoff.md` record the subsequently integrated gate wiring,
+> decoded textured/text/animated presentation, and navigation. Section 9 is the
+> current owner-observation command contract.
+
+Status: historical scoping snapshot with a current Section 9 observation contract.
 
 ## 1. Symptom and current behaviour
 
