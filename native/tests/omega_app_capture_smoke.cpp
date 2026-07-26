@@ -345,6 +345,14 @@ struct OmegaAppTestAccess final
             : kEmptyDrawList;
     }
 
+    [[nodiscard]] static runtime::RenderTextureHandle DiagnosticSceneHudTexture(
+        const OmegaApp& app) noexcept
+    {
+        return app.diagnostic_scene_presentation_
+            ? app.diagnostic_scene_presentation_->hud_texture
+            : runtime::RenderTextureHandle{};
+    }
+
     [[nodiscard]] static const runtime::RenderMeshDrawList&
     DiagnosticSceneMeshDrawList(const OmegaApp& app) noexcept
     {
@@ -377,6 +385,19 @@ struct OmegaAppTestAccess final
         if (!app.diagnostic_scene_presentation_)
             return std::nullopt;
         return app.diagnostic_scene_presentation_->environment_command_count;
+    }
+
+    [[nodiscard]] static std::optional<asset::Matrix4x4IR>
+    DiagnosticSceneEnvironmentLocalToWorld(
+        const OmegaApp& app, const std::size_t index) noexcept
+    {
+        if (!app.diagnostic_scene_presentation_ ||
+            index >= app.diagnostic_scene_presentation_->environment_command_count ||
+            index >=
+                app.diagnostic_scene_presentation_->environment_local_to_world.size())
+            return std::nullopt;
+        return app.diagnostic_scene_presentation_
+            ->environment_local_to_world[index];
     }
 
     [[nodiscard]] static bool SetDiagnosticSceneEnvironmentCommandCount(
@@ -417,9 +438,19 @@ struct OmegaAppTestAccess final
         if (environment_commands.size() != 1U || combined_commands.size() != 2U)
             return false;
 
+        asset::Matrix4x4IR distinct_second_local_to_world =
+            presentation.environment_local_to_world[0U];
+        distinct_second_local_to_world.row_major[3U] += 0.25F;
+        const auto distinct_second_object_to_clip =
+            runtime::ComposeObjectToClip(
+                presentation.camera, distinct_second_local_to_world);
+        if (!distinct_second_object_to_clip)
+            return false;
+
         runtime::RenderMeshDrawCommand distinct_second_command =
             environment_commands.front();
-        distinct_second_command.object_to_clip.row_major[3U] = 0.25F;
+        distinct_second_command.object_to_clip =
+            *distinct_second_object_to_clip;
         distinct_second_command.color.red = 111U;
         const std::array duplicated_environment{
             environment_commands.front(),
@@ -437,6 +468,8 @@ struct OmegaAppTestAccess final
         if (!environment_draw_list || !combined_draw_list)
             return false;
         presentation.environment_command_count = duplicated_environment.size();
+        presentation.environment_local_to_world[1U] =
+            distinct_second_local_to_world;
         presentation.environment_draw_list = std::move(*environment_draw_list);
         presentation.draw_list = std::move(*combined_draw_list);
         return true;
@@ -870,6 +903,36 @@ void Check(const bool condition, const std::string_view message)
             return false;
     }
     return true;
+}
+
+constexpr omega::runtime::RenderSourceRectQ16 kFullSceneHudSource{
+    .left = 0U,
+    .top = 0U,
+    .right = omega::runtime::kNormalizedRenderExtent,
+    .bottom = omega::runtime::kNormalizedRenderExtent,
+};
+
+constexpr omega::runtime::RenderTargetRectQ16 kSceneHudDestination{
+    .left = 512U,
+    .top = 512U,
+    .right = 19000U,
+    .bottom = 15000U,
+};
+
+[[nodiscard]] bool HasExactSceneHudTail(
+    const std::span<const omega::runtime::RenderTextureBlitCommand> commands,
+    const std::size_t marker_prefix_count,
+    const omega::runtime::RenderTextureHandle hud_texture) noexcept
+{
+    if (!hud_texture.valid() || commands.empty() ||
+        marker_prefix_count != commands.size() - 1U)
+        return false;
+    const omega::runtime::RenderTextureBlitCommand& hud =
+        commands[marker_prefix_count];
+    return hud.texture == hud_texture && hud.source == kFullSceneHudSource &&
+           hud.destination == kSceneHudDestination &&
+           hud.fit_mode == omega::runtime::RenderTextureFitMode::Contain &&
+           hud.filter_mode == omega::runtime::RenderTextureFilterMode::Nearest;
 }
 
 [[nodiscard]] bool MeshDrawListsEqual(
@@ -1847,21 +1910,21 @@ void CheckLevelContentPresentation(omega::app::OmegaApp& app)
     constexpr std::uint64_t kLevelContentPresentationLogicalBytes =
         2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 3ULL +
         32ULL * 32ULL * 4ULL + 1ULL * 1ULL * 4ULL +
-        16ULL * 16ULL * 4ULL;
+        16ULL * 16ULL * 4ULL + 88ULL * 72ULL * 4ULL;
     const auto assets = OmegaAppTestAccess::AssetSnapshot(app);
     const omega::app::GpuHostSnapshot initial_gpu =
         OmegaAppTestAccess::GpuSnapshot(app);
     Check(assets && IsAggregateEmpty(*assets, 64U),
         "LevelContent consumes and releases canonical texture zero before SDL upload");
-    Check(initial_gpu.successful_uploads == 7U &&
+    Check(initial_gpu.successful_uploads == 8U &&
               initial_gpu.successful_upload_logical_bytes ==
                   kLevelContentPresentationLogicalBytes &&
               initial_gpu.successful_releases == 0U &&
               initial_gpu.textures.reserved_slots == 0U &&
-              initial_gpu.textures.resident_slots == 7U &&
+              initial_gpu.textures.resident_slots == 8U &&
               initial_gpu.textures.resident_logical_bytes ==
                   kLevelContentPresentationLogicalBytes,
-        "the base, three cards, topology, actor marker, and strict transfer diagnostic own exactly 115,732 bytes");
+        "the base, three cards, topology, actor marker, objective HUD, and strict transfer diagnostic own exactly 141,076 bytes");
 
     const auto topology_texture =
         OmegaAppTestAccess::DiagnosticAssetTopologyTexture(app);
@@ -2072,7 +2135,8 @@ void CheckNonPackedLevelContentFallback(omega::app::OmegaApp& app,
     using omega::app::detail::OmegaAppTestAccess;
     constexpr std::uint64_t kTopologyOnlyPresentationLogicalBytes =
         2ULL * 2ULL * 4ULL + 128ULL * 72ULL * 4ULL * 3ULL +
-        32ULL * 32ULL * 4ULL + 1ULL * 1ULL * 4ULL;
+        32ULL * 32ULL * 4ULL + 1ULL * 1ULL * 4ULL +
+        88ULL * 72ULL * 4ULL;
     const auto assets = OmegaAppTestAccess::AssetSnapshot(app);
     const omega::app::GpuHostSnapshot gpu = OmegaAppTestAccess::GpuSnapshot(app);
     const auto topology_texture =
@@ -2102,15 +2166,15 @@ void CheckNonPackedLevelContentFallback(omega::app::OmegaApp& app,
     Check(assets && IsAggregateEmpty(*assets, 64U) && topology_texture.valid() &&
               !transfer_texture.valid(),
         "non-Packed24 LevelContent restores assets and retains only topology presentation");
-    Check(gpu.successful_uploads == 6U &&
+    Check(gpu.successful_uploads == 7U &&
               gpu.successful_upload_logical_bytes ==
                   kTopologyOnlyPresentationLogicalBytes &&
               gpu.successful_releases == 0U &&
               gpu.textures.reserved_slots == 0U &&
-              gpu.textures.resident_slots == 6U &&
+              gpu.textures.resident_slots == 7U &&
               gpu.textures.resident_logical_bytes ==
                   kTopologyOnlyPresentationLogicalBytes,
-        "non-Packed24 LevelContent preserves the six-upload 114,708-byte fallback");
+        "non-Packed24 LevelContent preserves the seven-upload 140,052-byte fallback");
     Check(commands.size() == 2U &&
               commands[0].texture == OmegaAppTestAccess::DiagnosticTexture(app) &&
               commands[0].source == full_source &&
@@ -2994,6 +3058,30 @@ void CheckDiagnosticSceneMissionActivation(
         const omega::app::GpuHostSnapshot initial_gpu = Access::GpuSnapshot(*app);
         const auto scene_commands = Access::DiagnosticSceneMeshDrawList(*app).commands();
         const auto scene_overlay = Access::DiagnosticSceneOverlayDrawList(*app).commands();
+        const auto initial_camera = Access::DiagnosticSceneCamera(*app);
+        const auto initial_environment_local_to_world =
+            Access::DiagnosticSceneEnvironmentLocalToWorld(*app, 0U);
+        std::optional<omega::asset::Matrix4x4IR>
+            initial_environment_object_to_clip;
+        if (initial_camera && initial_environment_local_to_world)
+        {
+            const auto composed = omega::runtime::ComposeObjectToClip(
+                *initial_camera, *initial_environment_local_to_world);
+            if (composed)
+                initial_environment_object_to_clip = *composed;
+        }
+        std::optional<omega::asset::Matrix4x4IR> initial_actor_object_to_clip;
+        if (initial_camera)
+        {
+            const auto composed = omega::runtime::ComposeObjectToClip(
+                *initial_camera,
+                omega::app::PlanProjectDiagnosticActorMeshTransform(
+                    omega::simulation::Position3{}));
+            if (composed)
+                initial_actor_object_to_clip = *composed;
+        }
+        const omega::runtime::RenderTextureHandle scene_hud_texture =
+            Access::DiagnosticSceneHudTexture(*app);
         constexpr auto kObjectiveDestination =
             omega::app::PlanProjectDiagnosticObjectiveMarkerDestination(
                 omega::gameplay::DiagnosticProximityTriggerState{});
@@ -3018,9 +3106,12 @@ void CheckDiagnosticSceneMissionActivation(
                   initial_gpu.meshes.resident_triangle_indices == 6U &&
                   initial_gpu.meshes.resident_logical_bytes == 96U,
             "startup owns one environment mesh followed by one exact 48-byte actor mesh with no partial reservation");
-        Check(scene_commands.size() == 2U && scene_commands[0].mesh.valid() &&
+        Check(initial_environment_object_to_clip &&
+                  initial_actor_object_to_clip &&
+                  scene_commands.size() == 2U &&
+                  scene_commands[0].mesh.valid() &&
                    scene_commands[0].object_to_clip ==
-                       omega::asset::kIdentityMatrix4x4IR &&
+                       *initial_environment_object_to_clip &&
                   scene_commands[0].color ==
                       omega::runtime::RenderMeshColorRgba8{
                           .red = 112U,
@@ -3033,7 +3124,7 @@ void CheckDiagnosticSceneMissionActivation(
                   scene_commands[1].mesh.valid() &&
                   scene_commands[1].mesh != scene_commands[0].mesh &&
                   scene_commands[1].object_to_clip ==
-                      omega::asset::kIdentityMatrix4x4IR &&
+                      *initial_actor_object_to_clip &&
                   scene_commands[1].color ==
                       omega::runtime::RenderMeshColorRgba8{
                           .red = 255U,
@@ -3043,7 +3134,8 @@ void CheckDiagnosticSceneMissionActivation(
                       } &&
                   scene_commands[1].raster_mode ==
                       omega::runtime::RenderMeshRasterMode::Fill &&
-                   scene_overlay.size() == 1U &&
+                   HasExactSceneHudTail(
+                       scene_overlay, 1U, scene_hud_texture) &&
                    scene_overlay[0].texture ==
                        Access::DiagnosticActorMarkerTexture(*app) &&
                    scene_overlay[0].destination == *kObjectiveDestination &&
@@ -3054,7 +3146,7 @@ void CheckDiagnosticSceneMissionActivation(
                    Access::DiagnosticMissionLifecycleState(*app) ==
                        omega::gameplay::DiagnosticMissionLifecycleState{} &&
                    Access::CurrentFrontEndMeshDrawList(*app).empty(),
-            "the validated environment-plus-actor scene and armed objective remain resident but hidden behind Title");
+            "the validated camera-composed environment-plus-actor scene, armed objective, and objective HUD remain resident but hidden behind Title");
 
         const bool reached_briefing =
             PushKey(SDL_SCANCODE_DOWN, true) && app->Run(1).has_value() &&
@@ -3107,13 +3199,17 @@ void CheckDiagnosticSceneMissionActivation(
                   play_gpu.frame_submissions == briefing_gpu.frame_submissions + 1U &&
                    play_gpu.blit_submissions == briefing_gpu.blit_submissions + 1U &&
                    play_gpu.successful_blit_draws ==
-                       briefing_gpu.successful_blit_draws + 1U &&
+                       briefing_gpu.successful_blit_draws + 2U &&
                   play_gpu.mesh_submissions == briefing_gpu.mesh_submissions + 1U &&
                   play_gpu.successful_mesh_draws ==
                       briefing_gpu.successful_mesh_draws + 2U &&
                    Access::CurrentFrontEndMeshDrawList(*app).size() == 2U &&
-                   Access::DiagnosticSceneOverlayDrawList(*app).commands().size() == 1U &&
-                   Access::DiagnosticSceneOverlayDrawList(*app).commands()[0].destination ==
+                   HasExactSceneHudTail(
+                       Access::DiagnosticSceneOverlayDrawList(*app).commands(),
+                       1U, scene_hud_texture) &&
+                   Access::DiagnosticSceneOverlayDrawList(*app)
+                           .commands()[0]
+                           .destination ==
                        *kObjectiveDestination &&
                    SameProximityTriggerState(
                        Access::DiagnosticProximityTriggerState(*app), {}) &&
@@ -3126,13 +3222,15 @@ void CheckDiagnosticSceneMissionActivation(
                            omega::simulation::Position3{}} &&
                    DrawListsEqual(Access::CurrentFrontEndDrawList(*app),
                        Access::DiagnosticSceneOverlayDrawList(*app)),
-            "the positioned BriefingRoom mission click records the exact project pointer, publishes environment, actor, and armed objective, and emits no deploy-click activation or fire cue");
+            "the positioned BriefingRoom mission click records the exact project pointer, publishes environment, actor, armed objective, and objective HUD, and emits no deploy-click activation or fire cue");
 
         Check(PushMouseButton(SDL_BUTTON_LEFT, false) && app->Run(1).has_value(),
             "the diagnostic-scene mission click releases in Gameplay");
 
         const omega::runtime::RenderMeshDrawList before_movement =
             Access::CurrentFrontEndMeshDrawList(*app);
+        const auto movement_camera_before =
+            Access::DiagnosticSceneCamera(*app);
         const omega::app::GpuHostSnapshot movement_gpu_before =
             Access::GpuSnapshot(*app);
         const bool movement_queued =
@@ -3142,25 +3240,64 @@ void CheckDiagnosticSceneMissionActivation(
         const omega::runtime::RenderMeshDrawList after_movement =
             Access::CurrentFrontEndMeshDrawList(*app);
         const auto moved_position = Access::DebugLocomotionPosition(*app);
+        const auto movement_camera_after =
+            Access::DiagnosticSceneCamera(*app);
+        const auto movement_environment_local_to_world =
+            Access::DiagnosticSceneEnvironmentLocalToWorld(*app, 0U);
         const omega::app::GpuHostSnapshot movement_gpu_after =
             Access::GpuSnapshot(*app);
         const auto before_movement_commands = before_movement.commands();
         const auto after_movement_commands = after_movement.commands();
+        std::optional<omega::asset::Matrix4x4IR>
+            expected_movement_environment;
+        if (movement_camera_after && movement_environment_local_to_world)
+        {
+            const auto composed = omega::runtime::ComposeObjectToClip(
+                *movement_camera_after,
+                *movement_environment_local_to_world);
+            if (composed)
+                expected_movement_environment = *composed;
+        }
+        std::optional<omega::asset::Matrix4x4IR> expected_movement_actor;
+        if (movement_camera_after && moved_position)
+        {
+            const auto composed = omega::runtime::ComposeObjectToClip(
+                *movement_camera_after,
+                omega::app::PlanProjectDiagnosticActorMeshTransform(
+                    *moved_position));
+            if (composed)
+                expected_movement_actor = *composed;
+        }
         Check(movement_queued && movement && !movement->failure() &&
+                  movement_camera_before && movement_camera_after &&
+                  *movement_camera_after != *movement_camera_before &&
+                  expected_movement_environment && expected_movement_actor &&
                   moved_position &&
                   *moved_position == omega::simulation::Position3{.z = 1} &&
                   before_movement_commands.size() == 2U &&
                   after_movement_commands.size() == 2U &&
-                  after_movement_commands[0] == before_movement_commands[0] &&
+                  after_movement_commands[0].mesh ==
+                      before_movement_commands[0].mesh &&
+                  after_movement_commands[0].color ==
+                      before_movement_commands[0].color &&
+                  after_movement_commands[0].raster_mode ==
+                      before_movement_commands[0].raster_mode &&
+                  after_movement_commands[0].texture ==
+                      before_movement_commands[0].texture &&
+                  after_movement_commands[0].object_to_clip ==
+                      *expected_movement_environment &&
+                  after_movement_commands[0].object_to_clip !=
+                      before_movement_commands[0].object_to_clip &&
                   after_movement_commands[1].mesh ==
                       before_movement_commands[1].mesh &&
                   after_movement_commands[1].color ==
                       before_movement_commands[1].color &&
                   after_movement_commands[1].raster_mode ==
                       before_movement_commands[1].raster_mode &&
+                  after_movement_commands[1].texture ==
+                      before_movement_commands[1].texture &&
                   after_movement_commands[1].object_to_clip ==
-                      omega::app::PlanProjectDiagnosticActorMeshTransform(
-                          *moved_position) &&
+                      *expected_movement_actor &&
                   after_movement_commands[1].object_to_clip !=
                       before_movement_commands[1].object_to_clip &&
                   movement_gpu_after.successful_mesh_uploads ==
@@ -3172,12 +3309,16 @@ void CheckDiagnosticSceneMissionActivation(
                        movement_gpu_before, movement_gpu_after) &&
                    movement_gpu_after.successful_mesh_draws ==
                       movement_gpu_before.successful_mesh_draws + 2U &&
-                   Access::CurrentFrontEndDrawList(*app).commands().size() == 1U &&
-                   Access::CurrentFrontEndDrawList(*app).commands()[0].destination ==
+                   HasExactSceneHudTail(
+                       Access::CurrentFrontEndDrawList(*app).commands(),
+                       1U, scene_hud_texture) &&
+                   Access::CurrentFrontEndDrawList(*app)
+                           .commands()[0]
+                           .destination ==
                        *kObjectiveDestination &&
                    SameProximityTriggerState(
                        Access::DiagnosticProximityTriggerState(*app), {}),
-            "one keyboard simulation step keeps the environment prefix immutable and updates only the actor mesh transform without GPU resource churn");
+            "one keyboard simulation step reprojects the environment and actor through the live free-fly camera without GPU resource churn");
 
         Check(PushKey(SDL_SCANCODE_W, false) &&
                   Access::ArmNextRunElapsed(
@@ -3193,7 +3334,9 @@ void CheckDiagnosticSceneMissionActivation(
         const auto target_overlay =
             Access::DiagnosticSceneOverlayDrawList(*app).commands();
         Check(target_pressed && target_frame && !target_frame->failure() &&
-                   target_overlay.size() == 3U && moved_position &&
+                   HasExactSceneHudTail(
+                       target_overlay, 3U, scene_hud_texture) &&
+                   moved_position &&
                    target_overlay[0].texture ==
                        Access::DiagnosticActorMarkerTexture(*app) &&
                    target_overlay[1].texture ==
@@ -3224,7 +3367,8 @@ void CheckDiagnosticSceneMissionActivation(
                 std::optional<omega::runtime::PointerPositionQ16>{
                     kQuarterThreeQuarterPointer});
         Check(chord_pressed && chord_frame && !chord_frame->failure() &&
-                  chord_overlay.size() == 4U &&
+                  HasExactSceneHudTail(
+                      chord_overlay, 4U, scene_hud_texture) &&
                   chord_overlay[0].destination == *kObjectiveDestination &&
                   chord_overlay[1].destination == kExpectedTargetCues[0U] &&
                   chord_overlay[2].destination == kExpectedTargetCues[1U] &&
@@ -3241,7 +3385,9 @@ void CheckDiagnosticSceneMissionActivation(
         const auto fire_overlay =
             Access::DiagnosticSceneOverlayDrawList(*app).commands();
         Check(fire_pressed && fire_frame && !fire_frame->failure() &&
-                   fire_overlay.size() == 2U && moved_position &&
+                   HasExactSceneHudTail(
+                       fire_overlay, 2U, scene_hud_texture) &&
+                   moved_position &&
                    fire_overlay[0].texture ==
                        Access::DiagnosticActorMarkerTexture(*app) &&
                    fire_overlay[1].texture ==
@@ -3283,26 +3429,79 @@ void CheckDiagnosticSceneMissionActivation(
             Access::GpuSnapshot(*app);
         const auto dynamic_commands = after_dynamic_refresh.commands();
         const auto before_dynamic_commands = before_dynamic_refresh.commands();
-        std::optional<omega::asset::Matrix4x4IR> expected_dynamic_actor;
-        if (moved_position)
+        const auto refreshed_dynamic_camera =
+            Access::DiagnosticSceneCamera(*app);
+        const auto first_dynamic_environment_local_to_world =
+            Access::DiagnosticSceneEnvironmentLocalToWorld(*app, 0U);
+        const auto second_dynamic_environment_local_to_world =
+            Access::DiagnosticSceneEnvironmentLocalToWorld(*app, 1U);
+        std::optional<omega::asset::Matrix4x4IR>
+            expected_first_dynamic_environment;
+        if (refreshed_dynamic_camera &&
+            first_dynamic_environment_local_to_world)
         {
             const auto composed = omega::runtime::ComposeObjectToClip(
-                dynamic_camera,
+                *refreshed_dynamic_camera,
+                *first_dynamic_environment_local_to_world);
+            if (composed)
+                expected_first_dynamic_environment = *composed;
+        }
+        std::optional<omega::asset::Matrix4x4IR>
+            expected_second_dynamic_environment;
+        if (refreshed_dynamic_camera &&
+            second_dynamic_environment_local_to_world)
+        {
+            const auto composed = omega::runtime::ComposeObjectToClip(
+                *refreshed_dynamic_camera,
+                *second_dynamic_environment_local_to_world);
+            if (composed)
+                expected_second_dynamic_environment = *composed;
+        }
+        std::optional<omega::asset::Matrix4x4IR> expected_dynamic_actor;
+        if (refreshed_dynamic_camera && moved_position)
+        {
+            const auto composed = omega::runtime::ComposeObjectToClip(
+                *refreshed_dynamic_camera,
                 omega::app::PlanProjectDiagnosticActorMeshTransform(
                     *moved_position));
             if (composed)
                 expected_dynamic_actor = *composed;
         }
         Check(dynamic_refresh_ready && dynamic_refresh &&
-                  !dynamic_refresh->failure() && expected_dynamic_actor &&
+                  !dynamic_refresh->failure() && refreshed_dynamic_camera &&
+                  refreshed_dynamic_camera->view_to_clip ==
+                      dynamic_camera.view_to_clip &&
+                  expected_first_dynamic_environment &&
+                  expected_second_dynamic_environment &&
+                  expected_dynamic_actor &&
                   before_dynamic_commands.size() == 3U &&
                   dynamic_commands.size() == 3U &&
-                  dynamic_commands[0] == before_dynamic_commands[0] &&
-                  dynamic_commands[1] == before_dynamic_commands[1] &&
+                  dynamic_commands[0].mesh ==
+                      before_dynamic_commands[0].mesh &&
+                  dynamic_commands[0].color ==
+                      before_dynamic_commands[0].color &&
+                  dynamic_commands[0].raster_mode ==
+                      before_dynamic_commands[0].raster_mode &&
+                  dynamic_commands[0].texture ==
+                      before_dynamic_commands[0].texture &&
+                  dynamic_commands[0].object_to_clip ==
+                      *expected_first_dynamic_environment &&
+                  dynamic_commands[1].mesh ==
+                      before_dynamic_commands[1].mesh &&
+                  dynamic_commands[1].color ==
+                      before_dynamic_commands[1].color &&
+                  dynamic_commands[1].raster_mode ==
+                      before_dynamic_commands[1].raster_mode &&
+                  dynamic_commands[1].texture ==
+                      before_dynamic_commands[1].texture &&
+                  dynamic_commands[1].object_to_clip ==
+                      *expected_second_dynamic_environment &&
                   dynamic_commands[2].mesh == before_dynamic_commands[2].mesh &&
                   dynamic_commands[2].color == before_dynamic_commands[2].color &&
                   dynamic_commands[2].raster_mode ==
                       before_dynamic_commands[2].raster_mode &&
+                  dynamic_commands[2].texture ==
+                      before_dynamic_commands[2].texture &&
                   dynamic_commands[2].object_to_clip == *expected_dynamic_actor &&
                   dynamic_gpu_after.successful_mesh_uploads ==
                       dynamic_gpu_before.successful_mesh_uploads &&
@@ -3310,7 +3509,7 @@ void CheckDiagnosticSceneMissionActivation(
                       dynamic_gpu_before.successful_mesh_releases &&
                   dynamic_gpu_after.successful_mesh_draws ==
                       dynamic_gpu_before.successful_mesh_draws + 3U,
-            "refresh preserves a two-command environment prefix and composes the post-step actor through the retained camera");
+            "refresh reprojects a two-command environment prefix and the post-step actor through the live camera");
 
         const bool restored_after_dynamic = retained_camera &&
             Access::SetDiagnosticSceneCamera(*app, *retained_camera) &&
@@ -3542,7 +3741,8 @@ void CheckDiagnosticSceneMissionActivation(
                   crossed_actor_commands[4].destination ==
                       kExactTargetCues[1U] &&
                   crossed_actor_commands[5].destination == kExactFireCue &&
-                  crossed_overlay_commands.size() == 4U &&
+                  HasExactSceneHudTail(
+                      crossed_overlay_commands, 4U, scene_hud_texture) &&
                   crossed_overlay_commands[0].destination ==
                       *kTargetDestination &&
                   crossed_overlay_commands[1].destination ==
@@ -3585,7 +3785,8 @@ void CheckDiagnosticSceneMissionActivation(
                   crossing_release->result().executed_simulation_steps == 0U &&
                   Access::DiagnosticTargetFireState(*app) ==
                       omega::gameplay::DiagnosticTargetFireState{} &&
-                  crossing_release_overlay.size() == 1U &&
+                  HasExactSceneHudTail(
+                      crossing_release_overlay, 1U, scene_hud_texture) &&
                   crossing_release_overlay[0].destination ==
                       *kTargetDestination,
             "releasing the gated crossing chord leaves the ready target visible on the next zero-step input frame");
@@ -3614,7 +3815,8 @@ void CheckDiagnosticSceneMissionActivation(
                   miss_pointer == kQuarterThreeQuarterPointer &&
                   Access::DiagnosticTargetFireState(*app) ==
                       omega::gameplay::DiagnosticTargetFireState{} &&
-                  miss_overlay.size() == 4U &&
+                  HasExactSceneHudTail(
+                      miss_overlay, 4U, scene_hud_texture) &&
                   miss_overlay[0].destination == *kTargetDestination &&
                   miss_overlay[1].destination == kExpectedTargetCues[0U] &&
                   miss_overlay[2].destination == kExpectedTargetCues[1U] &&
@@ -3647,8 +3849,9 @@ void CheckDiagnosticSceneMissionActivation(
                   miss_release->result().executed_simulation_steps == 0U &&
                   Access::DiagnosticTargetFireState(*app) ==
                       omega::gameplay::DiagnosticTargetFireState{} &&
-                  Access::DiagnosticSceneOverlayDrawList(*app).commands().size() ==
-                      1U &&
+                  HasExactSceneHudTail(
+                      Access::DiagnosticSceneOverlayDrawList(*app).commands(),
+                      1U, scene_hud_texture) &&
                   Access::DiagnosticSceneOverlayDrawList(*app)
                           .commands()[0]
                           .destination == *kTargetDestination,
@@ -3805,8 +4008,9 @@ void CheckDiagnosticSceneMissionActivation(
                   Access::DebugLocomotionPosition(*app) ==
                       std::optional<omega::simulation::Position3>{
                           omega::simulation::Position3{}} &&
-                  Access::DiagnosticSceneOverlayDrawList(*app).commands().size() ==
-                      1U &&
+                  HasExactSceneHudTail(
+                      Access::DiagnosticSceneOverlayDrawList(*app).commands(),
+                      1U, scene_hud_texture) &&
                   Access::DiagnosticSceneOverlayDrawList(*app)
                           .commands()[0]
                           .destination == *kObjectiveDestination &&
