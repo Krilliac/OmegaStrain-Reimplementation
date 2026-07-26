@@ -335,15 +335,24 @@ void RunVirtualFileSystemTests()
     Check(!error, "temporary test directory is created");
     std::filesystem::create_directories(root / "physical" / "ZMEDIA", error);
     Check(!error, "directory-backed archive fixture directory is created");
-    std::filesystem::create_directories(root / "override", error);
+    const auto private_override = root / "private-owner-override";
+    std::filesystem::create_directories(private_override, error);
     Check(!error, "override test directory is created");
+
+    omega::vfs::VirtualFileSystem missing_directory_vfs;
+    const auto missing_directory_mount =
+        missing_directory_vfs.MountDirectory(root / "private-owner-missing-directory");
+    Check(!missing_directory_mount &&
+              missing_directory_mount.error() == "mount root is not a readable directory" &&
+              missing_directory_mount.error().find("private-owner") == std::string::npos,
+        "missing directory mount failures are exact and omit the owner path");
 
     {
         std::ofstream output(root / "physical" / "SYSTEM.CNF", std::ios::binary);
         output << "BOOT2";
     }
     {
-        std::ofstream output(root / "override" / "SYSTEM.CNF", std::ios::binary);
+        std::ofstream output(private_override / "SYSTEM.CNF", std::ios::binary);
         output << "NEW";
     }
     const auto archive_path = root / "SCRIPTS.HOG";
@@ -466,7 +475,7 @@ void RunVirtualFileSystemTests()
     omega::vfs::VirtualFileSystem iso_then_override;
     Check(iso_then_override.MountIso9660(iso_path).has_value(),
         "ISO fixture mounts before a newer extracted override");
-    Check(iso_then_override.MountDirectory(root / "override").has_value(),
+    Check(iso_then_override.MountDirectory(private_override).has_value(),
         "newer extracted override mounts after ISO fixture");
     iso_then_override.Freeze();
     const auto overridden_iso = iso_then_override.Read("SYSTEM.CNF");
@@ -695,11 +704,29 @@ void RunVirtualFileSystemTests()
     Check(!truncation_vfs.Read("SYSTEM.CNF"),
         "ISO truncation after mount is rejected before bytes are published");
 
+    const auto private_deleted_root = root / "private-owner-deleted-after-freeze";
+    std::filesystem::create_directories(private_deleted_root, error);
+    Check(!error, "delete-after-freeze directory fixture is created");
+    Check(WriteFile(private_deleted_root / "SECRET.BIN",
+              std::vector<std::byte>{std::byte{'X'}}),
+        "delete-after-freeze file fixture is written");
+    omega::vfs::VirtualFileSystem deleted_file_vfs;
+    Check(deleted_file_vfs.MountDirectory(private_deleted_root).has_value(),
+        "delete-after-freeze directory mounts");
+    deleted_file_vfs.Freeze();
+    Check(std::filesystem::remove(private_deleted_root / "SECRET.BIN", error) && !error,
+        "mounted directory file is deleted after freeze");
+    const auto deleted_file_size = deleted_file_vfs.FileSize("SECRET.BIN");
+    Check(!deleted_file_size &&
+              deleted_file_size.error() == "unable to determine mounted file size" &&
+              deleted_file_size.error().find("private-owner") == std::string::npos,
+        "deleted mounted-file failures are exact and omit the owner path");
+
     omega::vfs::VirtualFileSystem vfs;
     Check(vfs.MountDirectory(root / "physical").has_value(), "physical directory mounts");
     Check(!vfs.MountHog("UNSAFE", unsafe_archive_path), "escaping HOG entry paths are rejected");
     Check(vfs.MountHog("GAMEDATA/MINSK/SCRIPTS", archive_path).has_value(), "HOG mounts");
-    Check(vfs.MountDirectory(root / "override").has_value(), "newer override directory mounts");
+    Check(vfs.MountDirectory(private_override).has_value(), "newer override directory mounts");
     Check(!vfs.Read("SYSTEM.CNF"), "reads are rejected until mounts are frozen");
     Check(!vfs.Contains("SYSTEM.CNF"), "contains is unavailable until mounts are frozen");
     vfs.Freeze();
@@ -712,7 +739,12 @@ void RunVirtualFileSystemTests()
     const auto physical = vfs.Read("SYSTEM.CNF");
     Check(physical && physical->size() == 3 && (*physical)[0] == std::byte{'N'},
         "newer mounts override older physical payloads");
-    Check(!vfs.Read("SYSTEM.CNF", 2), "physical reads honor caller byte limits");
+    const auto bounded_physical = vfs.Read("SYSTEM.CNF", 2);
+    Check(!bounded_physical &&
+              bounded_physical.error() == "file range exceeds caller's read limit" &&
+              bounded_physical.error().find("private-owner") == std::string::npos &&
+              bounded_physical.error().find("SYSTEM.CNF") == std::string::npos,
+        "physical byte-limit failures are exact and omit the owner path");
     const auto embedded = vfs.Read("GAMEDATA/MINSK/SCRIPTS/TEST.SO");
     Check(embedded && embedded->size() == 4 && (*embedded)[0] == std::byte{'O'}, "HOG payload reads");
     Check(!vfs.Read("GAMEDATA/MINSK/SCRIPTS/TEST.SO", 3), "HOG reads honor caller byte limits");
