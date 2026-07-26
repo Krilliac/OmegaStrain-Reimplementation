@@ -2149,3 +2149,48 @@ compose or publish a retail presentation.
   implement the shared capture domain and immutable submission context. No `OMEGAFRPHASE0002`
   PCSX2 producer, owner capture, runtime consumer, named phase, grounded layer/text/animation order,
   retail semantic, frame parity, visual parity, or PCSX2 equivalence is claimed.
+
+## Canonical level diagnostic view camera (E-0130, 2026-07-26)
+
+- ADR 0007's `BuildCanonicalLevelScene`/`BuildCanonicalLevelRenderPages` preserve decoded per-cell
+  geometry and `SourceCellOrdinal` identity exactly, but both leave every cell and the scene camera
+  at the fixed project identity value. `OmegaApp` therefore still builds its only wired scene through
+  `BuildGlobalSpatialDiagnosticScene`, which discards per-cell identity by concatenating every
+  renderable cell into one flat mesh. The canonical per-cell path had no framing adapter that could
+  make its union visible in the established project clip volume without repeating that flattening,
+  so it remained unusable for any future per-cell render submission.
+- `BuildCanonicalLevelDiagnosticViewCamera` closes that specific gap. It is a stateless, reentrant
+  adapter over an unmodified `CanonicalLevelScene`: it validates every cell in source order (a
+  non-identity canonical placeholder transform or a non-finite coordinate is rejected before any
+  output is produced), measures the position union of only the cells that have both positions and
+  complete triangles, and publishes a `SceneCameraIR` pair plus the framed cell/position counts and
+  the selected decoded axis order. It reads canonical geometry only to frame it; it copies, discards,
+  or reorders no position, triangle index, or ordinal.
+- Axis selection reuses the accepted ADR 0005 rule verbatim: the two largest union extents lead, with
+  equal extents broken in X, then Y, then Z order, and the remaining axis becomes depth.
+  `world_to_view` centres the two leading axes on the union and rebases the remaining axis on its
+  minimum; `view_to_clip` applies one uniform scale that fits the larger leading extent into the
+  established ten-percent-inset clip span and maps the remaining axis into the same inset depth
+  range, falling back to the fixed diagnostic-depth constant when that axis has zero extent. An
+  unframed scene (no cell with both positions and complete triangles) publishes the identity camera
+  with zero counts rather than inventing an extent. Every intermediate translation and scale is
+  checked for finiteness and float representability before publication.
+- Generated fixtures cover an empty scene, a triangle-free-only scene, one hand-verified triangle
+  (asserting the exact composed `world_to_view`/`view_to_clip` values and the resulting clip-space
+  projection of all three vertices), the X-then-Y-then-Z tie-break, a nonzero depth extent, a
+  rejected non-identity cell transform, a rejected non-finite coordinate even in a triangle-free
+  cell, tighten-only limit enforcement, and both a non-representable planar scale and a
+  non-representable depth scale from a subnormal extent.
+- This slice adds no `OmegaApp`, host, or GPU consumer; no page-selection or paging policy; and no
+  retail camera, projection, axis meaning, handedness, up direction, field of view, depth range,
+  placement, visibility, or world-space claim. It was built entirely from tracked clean-room source
+  and project-generated fixtures; no owner or private input was accessed. The 408-file native-
+  dependency gate and the 617-blob public-tree gate passed. Local C++ compilation and CTest execution
+  remain pending: the machine was under a preflight RAM `CAUTION`/`STOP` for the whole session, so no
+  MSVC/CMake/CTest build was attempted, matching the E-0128 precedent for source-reviewed-only work.
+
+Still unclaimed: application wiring, canonical render-page consumption, GPU submission, retail
+camera/placement/visibility, or PCSX2 equivalence. The strongest remaining blocker to actually wiring
+loaded canonical geometry into a rendered frame is not this camera — it is the missing project-owned
+page-selection policy over `CanonicalLevelRenderPages` that ADR 0007 already names as future work, and
+which needs no additional owner-side observation to design.
