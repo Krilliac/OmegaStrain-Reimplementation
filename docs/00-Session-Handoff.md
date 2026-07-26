@@ -893,10 +893,13 @@ evolve into the independently designed OpenOmega engine and SDK without speculat
     source-order `--set` overrides. The resolver validates that configured tuple first, even when a
     direct CLI content pair will win. A direct root plus optional level then replaces the configured
     tuple atomically, so a root-only CLI selection cannot inherit a configured level. No content
-    keys and no direct root resolve to no profile and retain zero-file startup. Configured levels
-    require a nonempty representable native path, and every level is 1 to 32 ASCII alphanumeric
-    bytes normalized uppercase. Fixed, non-echoing errors use `missing-data-root`,
-    `invalid-data-root`, `invalid-level-code`, or defensive `invalid-options`; main presents them as
+    keys and no direct root resolve to no profile and retain zero-file startup. At E-0074,
+    configured levels required a nonempty representable native path and accepted 1 to 32 ASCII
+    alphanumeric bytes normalized uppercase. E-0129 supersedes that level rule: configured and
+    direct levels must name one of the eighteen decoded table entries, matched without ASCII case
+    sensitivity and normalized to the table's uppercase spelling. Fixed, non-echoing errors use
+    `missing-data-root`, `invalid-data-root`, `invalid-level-code`, or defensive `invalid-options`;
+    main presents them as
     `content launch profile [category]: message` after runtime-setting validation and before the
     existing E-0072 startup diagnostic. Only `/openomega.cfg` is newly ignored because it may hold a
     private path. This slice performs no ambient/default discovery, persistence, picker, path
