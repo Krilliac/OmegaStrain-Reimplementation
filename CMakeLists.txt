@@ -7,7 +7,14 @@ endif()
 project(OmegaStrainReimplementation VERSION 0.1.0 LANGUAGES CXX)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/OmegaSccache.cmake")
-omega_enable_sccache_worktree_partition()
+omega_enable_sccache_worktree_partition(
+    OMEGA_SCCACHE_PARTITION_COMPILE_DEFINITION)
+if(OMEGA_SCCACHE_PARTITION_COMPILE_DEFINITION)
+    # Keep the unused partition macro on every object edge.  Changing only a
+    # Ninja launcher rule does not reliably invalidate preexisting objects.
+    add_compile_definitions(
+        "${OMEGA_SCCACHE_PARTITION_COMPILE_DEFINITION}")
+endif()
 
 set(CMAKE_MSVC_RUNTIME_LIBRARY
     "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<CONFIG:Release>>:DLL>"
@@ -687,6 +694,9 @@ endif()
 if(BUILD_TESTING)
     add_test(NAME omega_sccache_worktree_partition_contract
         COMMAND "${CMAKE_COMMAND}"
+            "-DOMEGA_SCCACHE_CONTRACT_GENERATOR=${CMAKE_GENERATOR}"
+            "-DOMEGA_SCCACHE_CONTRACT_BUILD_DIRECTORY=${CMAKE_BINARY_DIR}"
+            "-DOMEGA_SCCACHE_CONTRACT_EXPECTED_COMPILE_DEFINITION=${OMEGA_SCCACHE_PARTITION_COMPILE_DEFINITION}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/omega_sccache_worktree_partition_contract.cmake"
     )
     set_tests_properties(omega_sccache_worktree_partition_contract PROPERTIES
