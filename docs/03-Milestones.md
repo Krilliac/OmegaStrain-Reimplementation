@@ -1384,7 +1384,7 @@ structural summaries (format version, chunk count, observed extents) rather than
 or keyframes. The project-owned `ModelIR`/`SkeletonIR`/`ClipIR` of ADR 0008 is an authoring-side IR
 with explicitly project-chosen bounds and is not fed from retail data. So every actor on screen,
 player and NPC alike, is a box or a cube.
-The player controller is a box rather than a capsule and pops ungrounded over ramps; step-up and
+The player controller is a sphere rather than a capsule and pops ungrounded over ramps; step-up and
 slope handling are unimplemented. There is no 3D mouse aim -- the follow view has a fixed orientation
 and the shot direction is the flattened eye-to-target vector. Accuracy falloff and hit-chance rolls
 are unimplemented, so fire is decided purely by line of sight, and every weapon and health number is
