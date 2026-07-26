@@ -60,6 +60,7 @@ int LaunchOptionsFailureCount()
               !defaults->config_path &&
               defaults->config_overrides.empty() && !defaults->capture_run &&
               !defaults->replay_capture && !defaults->probe_only &&
+              !defaults->start_diagnostic_play &&
               defaults->front_end_presentation_mode ==
                   omega::runtime::FrontEndPresentationMode::RetailRequired &&
               !defaults->show_help,
@@ -72,6 +73,25 @@ int LaunchOptionsFailureCount()
     CheckError(Parse({"--developer-diagnostics", "--developer-diagnostics"}),
         "--developer-diagnostics may be specified only once",
         "developer diagnostics are an exact once-only launch token");
+    auto diagnostic_start =
+        Parse({"--developer-diagnostics", "--start-diagnostic-play"});
+    Check(diagnostic_start && diagnostic_start->start_diagnostic_play &&
+              diagnostic_start->front_end_presentation_mode ==
+                  omega::runtime::FrontEndPresentationMode::DeveloperDiagnostics,
+        "the exact diagnostic-play token publishes one typed developer launch request");
+    CheckError(Parse({"--start-diagnostic-play", "--developer-diagnostics",
+                         "--start-diagnostic-play"}),
+        "--start-diagnostic-play may be specified only once",
+        "the diagnostic-play request is exact and once-only in either option order");
+    CheckError(Parse({"--start-diagnostic-play"}),
+        "--start-diagnostic-play requires --developer-diagnostics",
+        "normal retail-required launch cannot activate the project diagnostic scene");
+    auto diagnostic_screenshot = Parse({"--start-diagnostic-play",
+        "--screenshot-frame=1", "--frames=1", "--developer-diagnostics"});
+    Check(diagnostic_screenshot && diagnostic_screenshot->start_diagnostic_play &&
+              diagnostic_screenshot->screenshot_frame == 1 &&
+              diagnostic_screenshot->frame_limit == 1,
+        "the typed diagnostic start composes with its intended headless screenshot route");
 
     auto content = Parse({"--data-root=D:/Owned Game", "--level=minsk", "--probe-only"});
     Check(content && content->frame_limit == -1 && content->data_root &&
@@ -158,6 +178,16 @@ int LaunchOptionsFailureCount()
                          "--replay-capture", "--capture-run", "--frames=3"}),
         screenshot_capture_error,
         "capture replay rejects screenshot requests in reverse argument order");
+    constexpr std::string_view diagnostic_start_capture_error =
+        "--start-diagnostic-play cannot be combined with --capture-run";
+    CheckError(Parse({"--developer-diagnostics", "--start-diagnostic-play",
+                         "--capture-run", "--frames=1"}),
+        diagnostic_start_capture_error,
+        "capture rejects pre-input diagnostic launch state absent from its trace schema");
+    CheckError(Parse({"--replay-capture", "--frames=1", "--capture-run",
+                         "--start-diagnostic-play", "--developer-diagnostics"}),
+        diagnostic_start_capture_error,
+        "capture replay rejects diagnostic launch state in reverse option order");
 
     const std::string maximum_frames = "--frames=" +
         std::to_string(omega::runtime::kMaximumRunCaptureSessionFrames);
@@ -256,6 +286,9 @@ int LaunchOptionsFailureCount()
     CheckError(Parse({"--replay-capture=true", "--capture-run", "--frames=1"}),
         "unknown option: --replay-capture",
         "capture replay is an exact boolean token without an attached value");
+    CheckError(Parse({"--start-diagnostic-play=true", "--developer-diagnostics"}),
+        "unknown option: --start-diagnostic-play",
+        "diagnostic play start is an exact boolean token without an attached value");
 
     auto ordinary_zero = Parse({"--frames=0"});
     Check(ordinary_zero && ordinary_zero->frame_limit == 0 &&
@@ -296,6 +329,28 @@ int LaunchOptionsFailureCount()
         opening_source_ambiguity_error,
         {"C:/Private/movie.pss", "PrivateMember.pss"},
         "archive-member plus path selection is rejected in reverse order without identity data");
+    constexpr std::string_view diagnostic_start_movie_error =
+        "--start-diagnostic-play cannot be combined with --opening-movie";
+    CheckError(Parse({"--developer-diagnostics", "--start-diagnostic-play",
+                         "--opening-movie=C:/Owned Media/opening.pss"}),
+        diagnostic_start_movie_error,
+        "a direct diagnostic start cannot defer behind explicit movie playback");
+    CheckError(Parse({"--opening-movie=C:/Owned Media/opening.pss",
+                         "--start-diagnostic-play", "--developer-diagnostics"}),
+        diagnostic_start_movie_error,
+        "movie playback cannot overwrite a direct diagnostic start in reverse order");
+    constexpr std::string_view diagnostic_start_movie_member_error =
+        "--start-diagnostic-play cannot be combined with --opening-movie-member";
+    CheckError(Parse({"--start-diagnostic-play",
+                         "--opening-movie-member=IntroSynthetic.pss",
+                         "--developer-diagnostics"}),
+        diagnostic_start_movie_member_error,
+        "a direct diagnostic start cannot defer behind archive movie playback");
+    CheckError(Parse({"--developer-diagnostics",
+                         "--opening-movie-member=IntroSynthetic.pss",
+                         "--start-diagnostic-play"}),
+        diagnostic_start_movie_member_error,
+        "archive movie playback cannot overwrite a diagnostic start in reverse order");
     constexpr std::string_view opening_capture_error =
         "--opening-movie cannot be combined with --capture-run";
     CheckError(Parse({"--opening-movie=C:/Owned Media/opening.pss", "--capture-run", "--frames=1"}),
@@ -364,6 +419,14 @@ int LaunchOptionsFailureCount()
                          "--developer-diagnostics"}),
         "--probe-only cannot be combined with --developer-diagnostics",
         "headless retail-data probing does not enable project-authored presentation");
+    CheckError(Parse({"--probe-only", "--start-diagnostic-play",
+                         "--developer-diagnostics"}),
+        "--probe-only cannot be combined with --start-diagnostic-play",
+        "headless probing cannot activate a rendered diagnostic scene");
+    CheckError(Parse({"--developer-diagnostics", "--start-diagnostic-play",
+                         "--probe-only"}),
+        "--probe-only cannot be combined with --start-diagnostic-play",
+        "diagnostic start and probe remain mutually exclusive in reverse order");
     CheckError(Parse({"--replay-capture", "--capture-run", "--data-root=A",
                          "--probe-only", "--frames=1"}),
         "--probe-only cannot be combined with --frames",
@@ -413,6 +476,10 @@ int LaunchOptionsFailureCount()
         "capture replay cannot be combined with short help in any argument order");
     CheckError(Parse({"--help", "-h"}), "help may be requested only once",
         "long and short help aliases share the existing once-only contract");
+    CheckError(Parse({"--start-diagnostic-play", "--developer-diagnostics",
+                         "--help"}),
+        "--help cannot be combined with other options",
+        "standalone help cannot mask a diagnostic start request");
 
     const std::string_view usage = omega::runtime::LaunchUsage();
     Check(usage == "usage: openomega [-h|--help]\n"
@@ -421,7 +488,7 @@ int LaunchOptionsFailureCount()
                    "[--screenshot-frame=N] "
                    "[--data-root=PATH [--level=CODE]] [--probe-only] "
                    "[--opening-movie=PATH | --opening-movie-member=NAME] "
-                   "[--developer-diagnostics]\n",
-        "usage documents standalone help and probe plus nested replay and level dependencies");
+                   "[--developer-diagnostics [--start-diagnostic-play]]\n",
+        "usage documents standalone help plus nested diagnostic, replay, and level dependencies");
     return failures;
 }

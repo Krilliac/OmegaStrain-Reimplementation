@@ -104,6 +104,19 @@ struct OmegaAppTestAccess final
             debug_device, texture_config);
     }
 
+    [[nodiscard]] static std::expected<OmegaApp, std::string>
+    CreateWithPersistenceAndPresentation(
+        runtime::ConfigStore config, const runtime::RuntimeSettings& settings,
+        runtime::ContentStartupState content, NativePersistence persistence,
+        const bool debug_device,
+        const runtime::FrontEndPresentationMode presentation_mode)
+    {
+        return OmegaApp::CreateWithTextureConfig(std::move(config), settings,
+            std::move(content),
+            std::make_unique<NativePersistence>(std::move(persistence)),
+            debug_device, {}, std::nullopt, presentation_mode);
+    }
+
     [[nodiscard]] static std::expected<DiagnosticScenePresentationProbe, std::string>
     BuildDiagnosticScenePresentation(
         SdlGpuHost& host, const asset::SceneIR& scene)
@@ -517,6 +530,24 @@ struct OmegaAppTestAccess final
         const OmegaApp& app) noexcept
     {
         return app.front_end_state_;
+    }
+
+    [[nodiscard]] static FrontEndCapabilities Capabilities(
+        const OmegaApp& app) noexcept
+    {
+        return app.CurrentFrontEndCapabilities();
+    }
+
+    [[nodiscard]] static bool ProjectDiagnosticLaunchConsumed(
+        const OmegaApp& app) noexcept
+    {
+        return app.project_diagnostic_launch_consumed_;
+    }
+
+    [[nodiscard]] static bool ProjectDiagnosticPlayActive(
+        const OmegaApp& app) noexcept
+    {
+        return app.project_diagnostic_play_active_;
     }
 
     static void SetFrontEndState(
@@ -1300,6 +1331,238 @@ void InstallSyntheticSpatialTriangle(
             },
         },
     };
+}
+
+void CheckTypedDiagnosticPlayLaunch(
+    const GeneratedLevelContentTree& tree,
+    const omega::runtime::RuntimeSettings& settings)
+{
+    using Access = omega::app::detail::OmegaAppTestAccess;
+    constexpr omega::app::OmegaAppStartMode kDiagnosticStart =
+        omega::app::OmegaAppStartMode::ProjectDiagnosticPlay;
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(
+            tree.root() / "typed-diagnostic-start-no-scene");
+        auto config = omega::runtime::ParseConfigText("");
+        Check(persistence && config,
+            "the no-scene typed diagnostic-start fixture is ready");
+        if (!persistence || !config)
+            return;
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            omega::runtime::ContentStartupState{}, std::move(*persistence), false);
+        Check(app.has_value(),
+            "the no-scene typed diagnostic-start app composes");
+        if (!app)
+            return;
+
+        const auto front_end_before = Access::FrontEnd(*app);
+        const auto mission_before = Access::DiagnosticMissionLifecycleState(*app);
+        const auto generation_before = Access::PersistenceGeneration(*app);
+        const auto records_before = Access::PersistenceRecordCount(*app);
+        const auto bytes_before = Access::PersistenceLogicalValueBytes(*app);
+        constexpr auto kInvalidStartMode =
+            static_cast<omega::app::OmegaAppStartMode>(0xffU);
+        const auto invalid = app->Run(0, -1, kInvalidStartMode);
+        Check(!invalid && invalid.error() ==
+                  "diagnostic play launch failed: invalid-start-mode" &&
+                  Access::FrontEnd(*app) == front_end_before &&
+                  Access::DiagnosticMissionLifecycleState(*app) == mission_before &&
+                  !Access::ActiveProfile(*app) && !Access::ActiveCharacter(*app) &&
+                  !Access::PersistedConfirmedProfile(*app) &&
+                  !Access::PersistedConfirmedCharacter(*app) &&
+                  Access::PersistenceGeneration(*app) == generation_before &&
+                  Access::PersistenceRecordCount(*app) == records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) == bytes_before &&
+                  !Access::ProjectDiagnosticLaunchConsumed(*app) &&
+                  !Access::ProjectDiagnosticPlayActive(*app),
+            "an invalid typed start mode fails closed without front-end, mission, identity, persistence, or launch-state mutation");
+        const auto rejected = app->Run(0, -1, kDiagnosticStart);
+        Check(!rejected && rejected.error() ==
+                  "diagnostic play launch failed: project-scene-unavailable" &&
+                  Access::FrontEnd(*app) == front_end_before &&
+                  Access::DiagnosticMissionLifecycleState(*app) == mission_before &&
+                  !Access::ActiveProfile(*app) && !Access::ActiveCharacter(*app) &&
+                  !Access::PersistedConfirmedProfile(*app) &&
+                  !Access::PersistedConfirmedCharacter(*app) &&
+                  Access::PersistenceGeneration(*app) == generation_before &&
+                  Access::PersistenceRecordCount(*app) == records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) == bytes_before &&
+                  !Access::ProjectDiagnosticLaunchConsumed(*app) &&
+                  !Access::ProjectDiagnosticPlayActive(*app),
+            "a missing project scene fails closed without front-end, mission, identity, persistence, or launch-state mutation");
+    }
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(
+            tree.root() / "typed-diagnostic-start-retail");
+        auto config = omega::runtime::ParseConfigText("");
+        auto content = BuildLevelContentStartupState(tree);
+        Check(persistence && config && content,
+            "the retail-required typed diagnostic-start fixture is ready");
+        if (!persistence || !config || !content)
+            return;
+        InstallSyntheticSpatialTriangle(*content);
+        auto app = Access::CreateWithPersistenceAndPresentation(
+            std::move(*config), settings, std::move(*content),
+            std::move(*persistence), false,
+            omega::runtime::FrontEndPresentationMode::RetailRequired);
+        Check(app.has_value(),
+            "the retail-required typed diagnostic-start app composes");
+        if (!app)
+            return;
+
+        const auto front_end_before = Access::FrontEnd(*app);
+        const auto mission_before = Access::DiagnosticMissionLifecycleState(*app);
+        const auto generation_before = Access::PersistenceGeneration(*app);
+        const auto records_before = Access::PersistenceRecordCount(*app);
+        const auto bytes_before = Access::PersistenceLogicalValueBytes(*app);
+        const auto rejected = app->Run(0, -1, kDiagnosticStart);
+        Check(!rejected && rejected.error() ==
+                  "diagnostic play launch failed: developer-diagnostics-required" &&
+                  Access::FrontEnd(*app) == front_end_before &&
+                  Access::DiagnosticMissionLifecycleState(*app) == mission_before &&
+                  !Access::ActiveProfile(*app) && !Access::ActiveCharacter(*app) &&
+                  !Access::PersistedConfirmedProfile(*app) &&
+                  !Access::PersistedConfirmedCharacter(*app) &&
+                  Access::PersistenceGeneration(*app) == generation_before &&
+                  Access::PersistenceRecordCount(*app) == records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) == bytes_before &&
+                  !Access::ProjectDiagnosticLaunchConsumed(*app) &&
+                  !Access::ProjectDiagnosticPlayActive(*app),
+            "retail-required mode stays inert and rejects project diagnostic start without mutation");
+    }
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(
+            tree.root() / "typed-diagnostic-start-mission-failure");
+        auto config = omega::runtime::ParseConfigText("");
+        auto content = BuildLevelContentStartupState(tree);
+        Check(persistence && config && content,
+            "the typed diagnostic-start mission-failure fixture is ready");
+        if (!persistence || !config || !content)
+            return;
+        InstallSyntheticSpatialTriangle(*content);
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            std::move(*content), std::move(*persistence), false);
+        const bool removed_actor = app && Access::DestroyDiagnosticActor(*app);
+        Check(removed_actor,
+            "the typed diagnostic-start mission-failure app removes its project actor");
+        if (!removed_actor)
+            return;
+
+        const auto front_end_before = Access::FrontEnd(*app);
+        const auto mission_before = Access::DiagnosticMissionLifecycleState(*app);
+        const auto generation_before = Access::PersistenceGeneration(*app);
+        const auto records_before = Access::PersistenceRecordCount(*app);
+        const auto bytes_before = Access::PersistenceLogicalValueBytes(*app);
+        const auto rejected = app->Run(0, -1, kDiagnosticStart);
+        Check(!rejected && rejected.error() ==
+                  "diagnostic play launch failed: mission-preparation-failed" &&
+                  Access::FrontEnd(*app) == front_end_before &&
+                  Access::DiagnosticMissionLifecycleState(*app) == mission_before &&
+                  !Access::ActiveProfile(*app) && !Access::ActiveCharacter(*app) &&
+                  !Access::PersistedConfirmedProfile(*app) &&
+                  !Access::PersistedConfirmedCharacter(*app) &&
+                  Access::PersistenceGeneration(*app) == generation_before &&
+                  Access::PersistenceRecordCount(*app) == records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) == bytes_before &&
+                  !Access::ProjectDiagnosticLaunchConsumed(*app) &&
+                  !Access::ProjectDiagnosticPlayActive(*app),
+            "failed typed mission preparation publishes no front-end, mission, identity, persistence, or launch-state mutation");
+    }
+
+    {
+        auto persistence = omega::app::NativePersistence::Bootstrap(
+            tree.root() / "typed-diagnostic-start-success");
+        auto config = omega::runtime::ParseConfigText("");
+        auto content = BuildLevelContentStartupState(tree);
+        Check(persistence && config && content,
+            "the successful typed diagnostic-start fixture is ready");
+        if (!persistence || !config || !content)
+            return;
+        InstallSyntheticSpatialTriangle(*content);
+        auto app = Access::CreateWithPersistence(std::move(*config), settings,
+            std::move(*content), std::move(*persistence), false);
+        Check(app.has_value(),
+            "the typed diagnostic-start app owns a generated project scene");
+        if (!app)
+            return;
+
+        const auto generation_before = Access::PersistenceGeneration(*app);
+        const auto records_before = Access::PersistenceRecordCount(*app);
+        const auto bytes_before = Access::PersistenceLogicalValueBytes(*app);
+        const auto started = app->Run(0, -1, kDiagnosticStart);
+        const auto active_capabilities = Access::Capabilities(*app);
+        Check(started && started->rendered_frames == 0 &&
+                  Access::FrontEnd(*app).mode ==
+                      omega::app::FrontEndMode::DiagnosticPlay &&
+                  Access::DiagnosticMissionLifecycleState(*app).status ==
+                      omega::gameplay::DiagnosticMissionStatus::Active &&
+                  Access::ProjectDiagnosticLaunchConsumed(*app) &&
+                  Access::ProjectDiagnosticPlayActive(*app) &&
+                  active_capabilities.can_start_diagnostic_campaign &&
+                  !active_capabilities.requires_active_profile_for_diagnostic_play &&
+                  !active_capabilities.requires_active_character_for_diagnostic_play &&
+                  !active_capabilities.supports_character_selection &&
+                  !Access::ActiveProfile(*app) && !Access::ActiveCharacter(*app) &&
+                  !Access::PersistedConfirmedProfile(*app) &&
+                  !Access::PersistedConfirmedCharacter(*app) &&
+                  Access::PersistenceGeneration(*app) == generation_before &&
+                  Access::PersistenceRecordCount(*app) == records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) == bytes_before,
+            "the explicit project start deploys DiagnosticPlay without selecting identities or writing persistence");
+
+        const auto active_front_end = Access::FrontEnd(*app);
+        const auto active_mission = Access::DiagnosticMissionLifecycleState(*app);
+        const auto repeated = app->Run(0, -1, kDiagnosticStart);
+        Check(!repeated && repeated.error() ==
+                  "diagnostic play launch failed: already-consumed" &&
+                  Access::FrontEnd(*app) == active_front_end &&
+                  Access::DiagnosticMissionLifecycleState(*app) == active_mission &&
+                  !Access::ActiveProfile(*app) && !Access::ActiveCharacter(*app) &&
+                  Access::PersistenceGeneration(*app) == generation_before &&
+                  Access::PersistenceRecordCount(*app) == records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) == bytes_before &&
+                  Access::ProjectDiagnosticLaunchConsumed(*app) &&
+                  Access::ProjectDiagnosticPlayActive(*app),
+            "a repeated typed start fails without redeploying or mutating the active launch session");
+
+        SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+        const bool exited = PushKey(SDL_SCANCODE_BACKSPACE, true) &&
+            app->Run(1).has_value();
+        const auto menu_capabilities = Access::Capabilities(*app);
+        Check(exited && Access::FrontEnd(*app) ==
+                  omega::app::InitialFrontEndState() &&
+                  Access::DiagnosticMissionLifecycleState(*app).status ==
+                      omega::gameplay::DiagnosticMissionStatus::Failed &&
+                  Access::ProjectDiagnosticLaunchConsumed(*app) &&
+                  !Access::ProjectDiagnosticPlayActive(*app) &&
+                  !menu_capabilities.can_start_diagnostic_campaign &&
+                  menu_capabilities.requires_active_profile_for_diagnostic_play &&
+                  menu_capabilities.requires_active_character_for_diagnostic_play &&
+                  menu_capabilities.supports_character_selection &&
+                  !Access::ActiveProfile(*app) && !Access::ActiveCharacter(*app) &&
+                  Access::PersistenceGeneration(*app) == generation_before &&
+                  Access::PersistenceRecordCount(*app) == records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) == bytes_before,
+            "leaving DiagnosticPlay consumes launch authorization before ordinary menu capability reads");
+        Check(PushKey(SDL_SCANCODE_BACKSPACE, false) && app->Run(1).has_value(),
+            "the typed diagnostic-start exit releases its cancel edge");
+
+        const auto post_exit_front_end = Access::FrontEnd(*app);
+        const auto post_exit_mission = Access::DiagnosticMissionLifecycleState(*app);
+        const auto post_exit_repeat = app->Run(0, -1, kDiagnosticStart);
+        Check(!post_exit_repeat && post_exit_repeat.error() ==
+                  "diagnostic play launch failed: already-consumed" &&
+                  Access::FrontEnd(*app) == post_exit_front_end &&
+                  Access::DiagnosticMissionLifecycleState(*app) == post_exit_mission &&
+                  !Access::ProjectDiagnosticPlayActive(*app) &&
+                  Access::PersistenceGeneration(*app) == generation_before &&
+                  Access::PersistenceRecordCount(*app) == records_before &&
+                  Access::PersistenceLogicalValueBytes(*app) == bytes_before,
+            "a consumed launch cannot reopen diagnostic play after returning to the menu");
+    }
 }
 
 [[nodiscard]] omega::asset::RenderMeshIR MakePresentationTriangle(
@@ -4905,6 +5168,7 @@ int main()
         CheckActiveProfileConfirmation(generated_content.root(), settings);
         CheckDiagnosticCampaignStart(generated_content.root(), settings);
         CheckDiagnosticSceneMissionActivation(generated_content, settings);
+        CheckTypedDiagnosticPlayLaunch(generated_content, settings);
         CheckComposedGeneratedMenuAcceptance(generated_content.root(), settings);
 
         const std::filesystem::path profile_database_root =

@@ -62,6 +62,28 @@ constexpr runtime::RenderMeshColorRgba8 kDiagnosticActorMeshColor{
     .alpha = 255U,
 };
 
+// [game/main thread; no I/O] Plans the same command-before-state publication
+// contract used by interactive front-end reductions. No profile or character
+// identity participates in this explicit project diagnostic request.
+[[nodiscard]] constexpr FrontEndReduction PlanProjectDiagnosticLaunch(
+    const FrontEndState current, const FrontEndCapabilities capabilities) noexcept
+{
+    if (current != InitialFrontEndState() ||
+        !FrontEndAllowsDiagnosticPlay(capabilities, false, false))
+    {
+        return FrontEndReduction{.state = current};
+    }
+
+    FrontEndState projected = current;
+    projected.mode = FrontEndMode::DiagnosticPlay;
+    return FrontEndReduction{
+        .state = projected,
+        .command = FrontEndCommand{
+            .type = FrontEndCommandType::StartDiagnosticCampaign,
+        },
+    };
+}
+
 class DiagnosticSceneRollbackGuard final
 {
 public:
@@ -1792,12 +1814,14 @@ bool OmegaApp::FinishOpeningMovieFrontEndTransition(
 OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
 
 std::expected<RunResult, std::string> OmegaApp::Run(
-    const int frame_limit, const int screenshot_frame)
+    const int frame_limit, const int screenshot_frame,
+    const OmegaAppStartMode start_mode)
 {
     auto first_elapsed_override =
         std::exchange(next_run_elapsed_override_for_testing_, std::nullopt);
     RunLoopResult loop = RunLoop(
-        frame_limit, nullptr, std::move(first_elapsed_override), screenshot_frame);
+        frame_limit, nullptr, std::move(first_elapsed_override), screenshot_frame,
+        start_mode);
     if (loop.operational_error)
         return std::unexpected(std::move(*loop.operational_error));
     return loop.result;
@@ -1845,7 +1869,8 @@ std::expected<RunCaptureOutcome, std::string> OmegaApp::RunWithCapture(
     }
 
     RunLoopResult loop = RunLoop(
-        frame_limit, &capture_session, std::move(first_elapsed_override));
+        frame_limit, &capture_session, std::move(first_elapsed_override), -1,
+        OmegaAppStartMode::CurrentFrontEnd);
     const runtime::FrameSchedulerState scheduler_state_after =
         frame_scheduler_->Snapshot();
 
@@ -1890,14 +1915,97 @@ std::expected<RunCaptureOutcome, std::string> OmegaApp::RunWithCapture(
             std::in_place, std::move(*finished)});
 }
 
+std::expected<void, std::string> OmegaApp::PrepareRunStart(
+    const OmegaAppStartMode start_mode)
+{
+    if (start_mode == OmegaAppStartMode::CurrentFrontEnd)
+        return {};
+    if (start_mode != OmegaAppStartMode::ProjectDiagnosticPlay)
+    {
+        return std::unexpected(
+            std::string{"diagnostic play launch failed: invalid-start-mode"});
+    }
+    if (presentation_mode_ !=
+        runtime::FrontEndPresentationMode::DeveloperDiagnostics)
+    {
+        return std::unexpected(std::string{
+            "diagnostic play launch failed: developer-diagnostics-required"});
+    }
+    if (diagnostic_scene_presentation_ == nullptr ||
+        diagnostic_scene_presentation_->draw_list.empty() ||
+        !diagnostic_scene_presentation_->actor_mesh_handle.valid())
+    {
+        return std::unexpected(std::string{
+            "diagnostic play launch failed: project-scene-unavailable"});
+    }
+    if (project_diagnostic_launch_consumed_)
+    {
+        return std::unexpected(std::string{
+            "diagnostic play launch failed: already-consumed"});
+    }
+    if (front_end_state_ != InitialFrontEndState())
+    {
+        return std::unexpected(std::string{
+            "diagnostic play launch failed: initial-state-required"});
+    }
+
+    FrontEndCapabilities launch_capabilities = CurrentFrontEndCapabilities();
+    launch_capabilities.can_start_diagnostic_campaign = true;
+    launch_capabilities.requires_active_profile_for_diagnostic_play = false;
+    launch_capabilities.supports_character_selection = false;
+    launch_capabilities.requires_active_character_for_diagnostic_play = false;
+    const FrontEndReduction planned = PlanProjectDiagnosticLaunch(
+        front_end_state_, launch_capabilities);
+    if (planned.command.type != FrontEndCommandType::StartDiagnosticCampaign ||
+        planned.state.mode != FrontEndMode::DiagnosticPlay)
+    {
+        return std::unexpected(std::string{
+            "diagnostic play launch failed: preparation-rejected"});
+    }
+
+    auto applied = ApplyFrontEndCommand(planned.command,
+        FrontEndCommandPreparation::ProjectDiagnosticLaunch);
+    if (!applied)
+    {
+        return std::unexpected(std::string{
+            "diagnostic play launch failed: mission-preparation-failed"});
+    }
+
+    // These scalar publications cannot fail. The projected state becomes
+    // observable only after its typed mission preparation has succeeded.
+    project_diagnostic_launch_consumed_ = true;
+    project_diagnostic_play_active_ = true;
+    front_end_state_ = planned.state;
+    return {};
+}
+
+void OmegaApp::ConsumeProjectDiagnosticLaunchIfInactive() noexcept
+{
+    if (project_diagnostic_play_active_ &&
+        front_end_state_.mode != FrontEndMode::DiagnosticPlay)
+    {
+        project_diagnostic_play_active_ = false;
+    }
+}
+
 OmegaApp::RunLoopResult OmegaApp::RunLoop(
     const int frame_limit, runtime::RunCaptureSession* const capture_session,
     std::optional<std::chrono::nanoseconds> first_elapsed_override,
-    const int screenshot_frame)
+    const int screenshot_frame, const OmegaAppStartMode start_mode)
 {
     using Clock = std::chrono::steady_clock;
 
     log_->Info("runtime", "entering native host loop");
+    auto prepared_start = PrepareRunStart(start_mode);
+    if (!prepared_start)
+    {
+        log_->Error("runtime", prepared_start.error());
+        return RunLoopResult{
+            .result = {},
+            .operational_error = std::move(prepared_start.error()),
+            .capture_error = std::nullopt,
+        };
+    }
     LoadRetailFrontEndBundleIfEnabled();
     RunResult result;
     bool running = true;
@@ -2372,6 +2480,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 };
             }
             front_end_state_ = front_end.state;
+            ConsumeProjectDiagnosticLaunchIfInactive();
         }
         const bool diagnostic_mission_aborted_now =
             diagnostic_play_input_context &&
@@ -2581,6 +2690,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             {
                 front_end_state_ = InitialFrontEndState();
             }
+            ConsumeProjectDiagnosticLaunchIfInactive();
         }
 
         const simulation::SimulationState simulation_snapshot = simulation_->Snapshot();
@@ -2985,6 +3095,18 @@ std::expected<void, std::string> OmegaApp::CreateFirstCharacter()
 
 FrontEndCapabilities OmegaApp::CurrentFrontEndCapabilities() const noexcept
 {
+    if (project_diagnostic_play_active_ &&
+        front_end_state_.mode == FrontEndMode::DiagnosticPlay)
+    {
+        return FrontEndCapabilities{
+            .can_create_first_profile = can_create_first_profile_,
+            .can_start_diagnostic_campaign = true,
+            .requires_active_profile_for_diagnostic_play = false,
+            .supports_character_selection = false,
+            .can_create_first_character = false,
+            .requires_active_character_for_diagnostic_play = false,
+        };
+    }
     const bool active_profile_is_confirmed = ActiveProfileIsConfirmed();
     const bool active_character_is_confirmed = ActiveCharacterIsConfirmed();
     return FrontEndCapabilities{
@@ -3524,8 +3646,15 @@ std::expected<void, std::string> OmegaApp::DeployDiagnosticMission()
 }
 
 std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
-    const FrontEndCommand command)
+    const FrontEndCommand command,
+    const FrontEndCommandPreparation preparation)
 {
+    if (preparation == FrontEndCommandPreparation::ProjectDiagnosticLaunch &&
+        command.type != FrontEndCommandType::StartDiagnosticCampaign)
+    {
+        return std::unexpected(
+            std::string{"project diagnostic launch command is invalid"});
+    }
     if (command.type == FrontEndCommandType::CreateFirstProfile)
     {
         if (command.profile_slot != FrontEndProfileSlot::First)
@@ -3587,6 +3716,11 @@ std::expected<void, std::string> OmegaApp::ApplyFrontEndCommand(
         {
             return std::unexpected(std::string{
                 "diagnostic campaign start selected an invalid slot"});
+        }
+        if (preparation ==
+            FrontEndCommandPreparation::ProjectDiagnosticLaunch)
+        {
+            return DeployDiagnosticMission();
         }
         // Only private renderer/capture tests can construct OmegaApp without
         // NativePersistence. Production Create always owns the persistence
