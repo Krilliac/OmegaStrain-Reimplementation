@@ -259,6 +259,7 @@ _FRONTEND_EDGES = frozenset({"omega_frontend", "omega_assets"})
 _MEDIA_EDGES = frozenset({"omega_media", "omega_assets"})
 _SIMULATION_EDGES = frozenset({"omega_simulation", "omega_assets", "omega_core"})
 _GAMEPLAY_EDGES = frozenset({"omega_gameplay", "omega_simulation"})
+_MULTIPLAYER_EDGES = frozenset({"omega_multiplayer"})
 _PERSISTENCE_EDGES = frozenset({"omega_persistence"})
 _PROFILES_EDGES = frozenset({"omega_profiles", "omega_persistence"})
 _PS2_COMPAT_EDGES = frozenset({"omega_ps2_compat"})
@@ -353,6 +354,12 @@ MODULE_RULES = (
         "native/src/gameplay/",
         "omega_gameplay",
         _GAMEPLAY_EDGES,
+        platform_neutral=True,
+    ),
+    ModuleRule(
+        "native/include/omega/multiplayer/",
+        "omega_multiplayer",
+        _MULTIPLAYER_EDGES,
         platform_neutral=True,
     ),
     ModuleRule(
@@ -557,6 +564,7 @@ PROJECT_HEADER_MODULES = (
     ("omega/frontend_presentation/", "omega_frontend_presentation"),
     ("omega/frontend/", "omega_frontend"),
     ("omega/gameplay/", "omega_gameplay"),
+    ("omega/multiplayer/", "omega_multiplayer"),
     ("omega/profiles/", "omega_profiles"),
     ("omega/persistence/", "omega_persistence"),
     ("omega/compat/", "omega_ps2_compat"),

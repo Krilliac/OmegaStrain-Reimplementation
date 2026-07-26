@@ -406,6 +406,63 @@ class NativeDependencyGateTests(unittest.TestCase):
             "unclassified project include",
         )
 
+    def test_multiplayer_header_and_test_include_form_standalone_layer(
+        self,
+    ) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/include/omega/multiplayer/mp_menu.h": (
+                    "#pragma once\n"
+                    "#include <array>\n"
+                    "#include <string_view>\n"
+                ),
+                "native/tests/mp_menu_tests.cpp": (
+                    '#include "omega/multiplayer/mp_menu.h"\n'
+                ),
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(errors, [])
+
+        rule = gate.module_rule(
+            Path("native/include/omega/multiplayer/mp_menu.h")
+        )
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule.name, "omega_multiplayer")
+        self.assertEqual(
+            rule.allowed_omega_modules,
+            frozenset({"omega_multiplayer"}),
+        )
+        self.assertTrue(rule.platform_neutral)
+
+    def test_multiplayer_header_rejects_cross_layer_and_external_dependencies(
+        self,
+    ) -> None:
+        cases = (
+            (
+                '#include "omega/gameplay/debug_locomotion.h"\n',
+                "omega_multiplayer includes forbidden dependency",
+            ),
+            (
+                '#include "omega/runtime/frame_scheduler.h"\n',
+                "omega_multiplayer includes forbidden dependency",
+            ),
+            ("#include <SDL3/SDL.h>\n", "includes unapproved external header"),
+        )
+        for source, message in cases:
+            with self.subTest(source=source):
+                self.assert_rejected(
+                    "native/include/omega/multiplayer/example.h",
+                    source,
+                    message,
+                )
+
+        self.assert_rejected(
+            "native/include/omega/multiplayer_extra/example.h",
+            "#pragma once\n",
+            "unclassified shipping native source path",
+        )
+
     def test_persistence_header_and_source_form_standalone_layer(self) -> None:
         checked, errors = self.check_sources(
             {
