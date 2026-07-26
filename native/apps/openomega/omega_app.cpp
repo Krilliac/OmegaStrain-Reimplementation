@@ -4344,8 +4344,24 @@ const content::FrontEndScreenBundle* OmegaApp::RetailBundleForScreen(
         return nullptr;
     if (slot->has_value())
         return &**slot;
+    // A screen already attempted and failed stays unavailable without repeating
+    // the decode or the log. Without this the caller's per-frame resolve turns a
+    // single missing screen into an archive decode attempt and a warning line on
+    // every rendered frame.
+    const std::size_t memo_index = static_cast<std::size_t>(screen);
+    if (memo_index < retail_screen_load_failed_.size() &&
+        retail_screen_load_failed_[memo_index])
+    {
+        return nullptr;
+    }
+    // Not an attempt: leave the memo clear so this screen can still resolve if a
+    // content service becomes available.
     if (!content_ || !content_->game_data.has_value())
         return nullptr;
+    const auto memoize_failure = [this, memo_index]() noexcept {
+        if (memo_index < retail_screen_load_failed_.size())
+            retail_screen_load_failed_[memo_index] = true;
+    };
     // LoadFrontEndScreen is not noexcept; contain any allocation/decoder throw so
     // this loader keeps its own noexcept contract and simply reports "no bundle".
     try
@@ -4355,10 +4371,12 @@ const content::FrontEndScreenBundle* OmegaApp::RetailBundleForScreen(
         {
             // Identity-free: the GameData error code names a category, not owner
             // data. Helps distinguish a decode gap from a missing member/scope.
+            // Logged once per screen because the memo below suppresses retries.
             log_->Warning("presentation",
                 std::string("retail front-end screen load failed [") +
                     std::string(content::GameDataErrorCodeName(bundle.error().code)) +
                     "]");
+            memoize_failure();
             return nullptr;
         }
         *slot = std::move(*bundle);
@@ -4366,6 +4384,7 @@ const content::FrontEndScreenBundle* OmegaApp::RetailBundleForScreen(
     }
     catch (...)
     {
+        memoize_failure();
         return nullptr;
     }
 }
@@ -4411,14 +4430,25 @@ void OmegaApp::UpdateRetailFrontEndPresentation(
         // Derive the current screen's selectable buttons to bound navigation and
         // resolve the selected button's accept target, then step the pure nav.
         std::uint32_t button_count = 0U;
-        std::optional<content::FrontEndScreenKey> accept_target;
+        std::optional<content::FrontEndScreenKey> button_target;
         if (const auto* const pre = RetailBundleForScreen(retail_nav_.screen))
         {
             const auto buttons = RetailScreenSelectableButtons(*pre);
             button_count = static_cast<std::uint32_t>(buttons.size());
             if (retail_nav_.selected < buttons.size())
-                accept_target = buttons[retail_nav_.selected].target;
+                button_target = buttons[retail_nav_.selected].target;
         }
+        // Admit the transition only if the destination can actually be composed,
+        // so a screen this build cannot decode leaves the player on a screen that
+        // still draws and still responds instead of stranding navigation on the
+        // previous screen's last composed frame. Probe only on the Accept edge:
+        // resolving a target every frame would eagerly load every routed screen.
+        // Resolving here also warms the cache, so the compose below reuses it.
+        const bool target_is_presentable = input.accept && button_target &&
+            RetailBundleForScreen(*button_target) != nullptr;
+        const std::optional<content::FrontEndScreenKey> accept_target =
+            frontend::presentation::ResolveRetailFrontEndAcceptTarget(
+                button_target, input.accept, target_is_presentable);
         retail_nav_ = frontend::presentation::StepRetailFrontEndNav(
             retail_nav_, input, button_count, accept_target);
 
@@ -4435,8 +4465,11 @@ void OmegaApp::UpdateRetailFrontEndPresentation(
         const auto* const bundle = RetailBundleForScreen(retail_nav_.screen);
         if (bundle == nullptr)
         {
-            log_->Warning("presentation",
-                "retail front-end screen bundle unavailable; using project fallback");
+            // RetailBundleForScreen already logged the one identity-free reason
+            // for this screen and memoized it, so logging again here would emit a
+            // line per rendered frame for a condition that cannot change. Leave
+            // retail_composed_nav_ untouched so a screen that becomes resolvable
+            // still composes.
             return;
         }
         const auto buttons = RetailScreenSelectableButtons(*bundle);

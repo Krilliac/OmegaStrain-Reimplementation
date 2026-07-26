@@ -29,6 +29,7 @@ namespace nav_test
 using omega::content::FrontEndScreenKey;
 using omega::frontend::presentation::RetailFrontEndNavInput;
 using omega::frontend::presentation::RetailFrontEndNavState;
+using omega::frontend::presentation::ResolveRetailFrontEndAcceptTarget;
 using omega::frontend::presentation::StepRetailFrontEndNav;
 
 // next advances the selection; previous retreats it; both clamp to [0, count).
@@ -68,6 +69,77 @@ static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Cr
 static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
                   RetailFrontEndNavInput{.back = true}, 3U, std::nullopt)
                   .screen == FrontEndScreenKey::Title);
+
+// A stale selection at or past the current screen's button count clamps into
+// range before anything else acts on it, and a screen with no selectable button
+// pins the selection at zero rather than leaving it dangling.
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 7U},
+                  RetailFrontEndNavInput{}, 3U, std::nullopt)
+                  .selected == 2U);
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 7U},
+                  RetailFrontEndNavInput{.next = true}, 3U, std::nullopt)
+                  .selected == 2U);
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 7U},
+                  RetailFrontEndNavInput{.previous = true}, 3U, std::nullopt)
+                  .selected == 1U);
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 4U},
+                  RetailFrontEndNavInput{.next = true}, 0U, std::nullopt)
+                  .selected == 0U);
+// Back still recovers the Title from a sub-screen that has no selectable button,
+// which is the only escape once navigation has entered one.
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::CreateAgent, 3U},
+                  RetailFrontEndNavInput{.back = true}, 0U, std::nullopt)
+                  .screen == FrontEndScreenKey::Title);
+static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::CreateAgent, 3U},
+                  RetailFrontEndNavInput{.back = true}, 0U, std::nullopt)
+                  .selected == 0U);
+
+// Accept-target admission. A target survives only with an Accept edge AND a
+// presentable destination; every other combination yields no target.
+static_assert(ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, true) ==
+              FrontEndScreenKey::CreateAgent);
+static_assert(!ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, false)
+                   .has_value());
+static_assert(!ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, false, true)
+                   .has_value());
+static_assert(!ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, false, false)
+                   .has_value());
+// A button that declares no target never gains one, presentable or not.
+static_assert(!ResolveRetailFrontEndAcceptTarget(std::nullopt, true, true).has_value());
+static_assert(!ResolveRetailFrontEndAcceptTarget(std::nullopt, true, false).has_value());
+// Admission is target-preserving: it never substitutes a different screen.
+static_assert(ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::LoadAgent, true, true) ==
+              FrontEndScreenKey::LoadAgent);
+
+// Composed with the step: a refused destination leaves the player on the Title
+// with the selection intact, instead of switching to a screen that cannot draw.
+static_assert(
+    StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
+        RetailFrontEndNavInput{.accept = true}, 3U,
+        ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, false))
+        .screen == FrontEndScreenKey::Title);
+static_assert(
+    StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
+        RetailFrontEndNavInput{.accept = true}, 3U,
+        ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, false))
+        .selected == 1U);
+// An admitted destination still switches and resets the selection.
+static_assert(
+    StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
+        RetailFrontEndNavInput{.accept = true}, 3U,
+        ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, true))
+        .screen == FrontEndScreenKey::CreateAgent);
+static_assert(
+    StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
+        RetailFrontEndNavInput{.accept = true}, 3U,
+        ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, true))
+        .selected == 0U);
+// Back keeps priority over an admitted target on the same frame.
+static_assert(
+    StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::LoadAgent, 0U},
+        RetailFrontEndNavInput{.accept = true, .back = true}, 1U,
+        ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, true))
+        .screen == FrontEndScreenKey::Title);
 } // namespace nav_test
 
 // Minimal test-only construction access, mirroring the pattern in
