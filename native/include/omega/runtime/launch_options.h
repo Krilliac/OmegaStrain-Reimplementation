@@ -33,6 +33,7 @@ struct LaunchOptions
     bool capture_run = false;
     bool replay_capture = false;
     bool probe_only = false;
+    bool start_diagnostic_play = false;
     FrontEndPresentationMode front_end_presentation_mode =
         FrontEndPresentationMode::RetailRequired;
     bool show_help = false;

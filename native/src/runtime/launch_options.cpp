@@ -92,6 +92,7 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     bool saw_capture_run = false;
     bool saw_replay_capture = false;
     bool saw_probe_only = false;
+    bool saw_start_diagnostic_play = false;
     bool saw_developer_diagnostics = false;
     bool saw_help = false;
 
@@ -238,6 +239,17 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
                 FrontEndPresentationMode::DeveloperDiagnostics;
             continue;
         }
+        if (argument == "--start-diagnostic-play")
+        {
+            if (saw_start_diagnostic_play)
+            {
+                return std::unexpected(
+                    "--start-diagnostic-play may be specified only once");
+            }
+            saw_start_diagnostic_play = true;
+            result.start_diagnostic_play = true;
+            continue;
+        }
         if (argument == "--capture-run")
         {
             if (saw_capture_run)
@@ -277,6 +289,9 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     if (result.probe_only && result.opening_movie_member)
         return std::unexpected(
             "--probe-only cannot be combined with --opening-movie-member");
+    if (result.probe_only && result.start_diagnostic_play)
+        return std::unexpected(
+            "--probe-only cannot be combined with --start-diagnostic-play");
     if (result.probe_only && saw_developer_diagnostics)
         return std::unexpected(
             "--probe-only cannot be combined with --developer-diagnostics");
@@ -285,11 +300,20 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     if (result.opening_movie_path && result.opening_movie_member)
         return std::unexpected(
             "--opening-movie and --opening-movie-member are mutually exclusive");
+    if (result.start_diagnostic_play && result.opening_movie_path)
+        return std::unexpected(
+            "--start-diagnostic-play cannot be combined with --opening-movie");
+    if (result.start_diagnostic_play && result.opening_movie_member)
+        return std::unexpected(
+            "--start-diagnostic-play cannot be combined with --opening-movie-member");
     if (result.opening_movie_path && result.capture_run)
         return std::unexpected("--opening-movie cannot be combined with --capture-run");
     if (result.opening_movie_member && result.capture_run)
         return std::unexpected(
             "--opening-movie-member cannot be combined with --capture-run");
+    if (result.start_diagnostic_play && result.capture_run)
+        return std::unexpected(
+            "--start-diagnostic-play cannot be combined with --capture-run");
     if (saw_screenshot_frame && result.capture_run)
         return std::unexpected(
             "--screenshot-frame cannot be combined with --capture-run");
@@ -305,6 +329,9 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     if (result.capture_run && !saw_developer_diagnostics)
         return std::unexpected(
             "--capture-run requires --developer-diagnostics");
+    if (result.start_diagnostic_play && !saw_developer_diagnostics)
+        return std::unexpected(
+            "--start-diagnostic-play requires --developer-diagnostics");
     return result;
 }
 
@@ -316,6 +343,6 @@ std::string_view LaunchUsage() noexcept
            "[--screenshot-frame=N] "
            "[--data-root=PATH [--level=CODE]] [--probe-only] "
            "[--opening-movie=PATH | --opening-movie-member=NAME] "
-           "[--developer-diagnostics]\n";
+           "[--developer-diagnostics [--start-diagnostic-play]]\n";
 }
 } // namespace omega::runtime

@@ -829,7 +829,12 @@ int main(const int argc, char** argv)
         return EXIT_SUCCESS;
     }
 
-    auto run = app->Run(options->frame_limit, options->screenshot_frame);
+    const omega::app::OmegaAppStartMode start_mode =
+        options->start_diagnostic_play
+            ? omega::app::OmegaAppStartMode::ProjectDiagnosticPlay
+            : omega::app::OmegaAppStartMode::CurrentFrontEnd;
+    auto run = app->Run(
+        options->frame_limit, options->screenshot_frame, start_mode);
     if (!run)
     {
         std::cerr << "runtime loop: " << run.error() << '\n';

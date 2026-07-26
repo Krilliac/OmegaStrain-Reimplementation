@@ -52,6 +52,12 @@ namespace detail
 struct OmegaAppTestAccess;
 }
 
+enum class OmegaAppStartMode : std::uint8_t
+{
+    CurrentFrontEnd = 0U,
+    ProjectDiagnosticPlay = 1U,
+};
+
 // Non-hot-reloadable native composition root. It is the sole owner of service lifetimes; SDL and
 // service dependencies receive only non-owning references whose lifetime is guaranteed here.
 class OmegaApp final
@@ -79,9 +85,12 @@ public:
     // [game/main/render thread] screenshot_frame, when positive, writes one
     // headless BMP of the frame at that 1-based rendered index to the platform
     // screenshots directory, using the same capture path as the interactive
-    // screenshot key. A non-positive value disables headless capture.
+    // screenshot key. A non-positive value disables headless capture. start_mode
+    // is an explicit, launch-local request; the default preserves the current
+    // front-end and performs no startup transition.
     [[nodiscard]] std::expected<RunResult, std::string> Run(
-        int frame_limit, int screenshot_frame = -1);
+        int frame_limit, int screenshot_frame = -1,
+        OmegaAppStartMode start_mode = OmegaAppStartMode::CurrentFrontEnd);
 
     // [game/main/render thread] Runs one finite diagnostic capture. Pre-loop validation and
     // backing-allocation failures return unexpected without mutating app services; operational
@@ -145,10 +154,24 @@ private:
         std::optional<runtime::RunCaptureSessionError> capture_error;
     };
 
+    enum class FrontEndCommandPreparation : std::uint8_t
+    {
+        PersistenceBacked = 0U,
+        ProjectDiagnosticLaunch = 1U,
+    };
+
     [[nodiscard]] RunLoopResult RunLoop(
         int frame_limit, runtime::RunCaptureSession* capture_session,
         std::optional<std::chrono::nanoseconds> first_elapsed_override,
-        int screenshot_frame = -1);
+        int screenshot_frame, OmegaAppStartMode start_mode);
+    // [game/main thread, before frame input] Transactionally prepares the one
+    // explicit project diagnostic launch. It publishes neither mode nor launch
+    // authorization until typed command preparation succeeds.
+    [[nodiscard]] std::expected<void, std::string> PrepareRunStart(
+        OmegaAppStartMode start_mode);
+    // [game/main thread; no concurrent use] Consumes the launch-only gameplay
+    // authorization as soon as a transition leaves DiagnosticPlay.
+    void ConsumeProjectDiagnosticLaunchIfInactive() noexcept;
     [[nodiscard]] bool ContainOpeningMovieAudio() noexcept;
     [[nodiscard]] static OpeningMovieAudioFaultCounters OpeningMovieAudioFaultCountersOf(
         const AudioServiceSnapshot& snapshot) noexcept;
@@ -162,11 +185,14 @@ private:
     void ReleaseOpeningMovieForFrontEnd();
     // [game/main thread; no concurrent use] Applies a bounded menu command before
     // its projected reducer state is published. Profile creation, explicit
-    // active-profile confirmation, and project diagnostic-start preparation may
-    // touch persistence; none mutates GPU state. A failed command leaves the
-    // prior front-end state and session activation unpublished.
+    // active-profile confirmation, and persistence-backed diagnostic-start
+    // preparation may touch persistence; the explicit project diagnostic launch
+    // context does not. None mutates GPU state. A failed command leaves the prior
+    // front-end state and session activation unpublished.
     [[nodiscard]] std::expected<void, std::string> ApplyFrontEndCommand(
-        FrontEndCommand command);
+        FrontEndCommand command,
+        FrontEndCommandPreparation preparation =
+            FrontEndCommandPreparation::PersistenceBacked);
     [[nodiscard]] std::expected<void, std::string> DeployDiagnosticMission();
     [[nodiscard]] std::expected<void, std::string> CreateFirstProfile();
     [[nodiscard]] std::expected<void, std::string> CreateFirstCharacter();
@@ -484,6 +510,11 @@ private:
     // persistence-free diagnostic-start path instead.
     bool requires_active_profile_for_diagnostic_play_ = false;
     bool requires_active_character_for_diagnostic_play_ = false;
+    // A successful explicit launch consumes its one-shot preparation forever.
+    // The active authorization is observable only while DiagnosticPlay remains
+    // published and is cleared on the same frame that returns to any menu.
+    bool project_diagnostic_launch_consumed_ = false;
+    bool project_diagnostic_play_active_ = false;
     // Explicit per-launch activation only. The corresponding confirmation is
     // persisted before this value is published, but startup never copies a durable
     // confirmation into session state or selects a profile implicitly. This value
