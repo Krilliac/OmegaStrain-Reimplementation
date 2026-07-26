@@ -219,6 +219,11 @@ private:
         runtime::Rgba8TextureUploadView upload) noexcept;
     // [game/main thread] Returns the cached retail bundle for a screen, lazily
     // loading+caching it via GameDataService on first use. nullptr if unavailable.
+    // A screen whose load is actually attempted and fails is memoized in
+    // retail_screen_load_failed_ and reported unavailable from then on, so a
+    // persistent gap costs one decode attempt and one log line rather than one
+    // of each per rendered frame. A screen that is never attempted (no content
+    // service) is not memoized, so it can still be resolved later.
     [[nodiscard]] const content::FrontEndScreenBundle* RetailBundleForScreen(
         content::FrontEndScreenKey screen) noexcept;
     // One selectable retail menu button: its widget identifier and the screen its
@@ -584,6 +589,14 @@ private:
     std::optional<content::FrontEndScreenBundle> retail_load_agent_bundle_;
     std::optional<content::FrontEndScreenBundle> retail_command_center_bundle_;
     std::optional<content::FrontEndScreenBundle> retail_equipment_bundle_;
+    // One flag per FrontEndScreenKey, indexed by its ordinal: set once a load was
+    // attempted for that screen and failed. Bounds the cost of a screen this
+    // build cannot decode to a single attempt and a single log line, and lets
+    // ResolveRetailFrontEndAcceptTarget refuse an Accept into it. Sized from the
+    // last enumerator so adding a screen key is a compile-time update here.
+    std::array<bool,
+        static_cast<std::size_t>(content::FrontEndScreenKey::Equipment) + 1U>
+        retail_screen_load_failed_{};
     FrontEndStartupModel front_end_startup_model_{};
     FrontEndCharacterStartupModel front_end_character_startup_model_{};
     std::optional<CharacterPresentation> character_presentation_;

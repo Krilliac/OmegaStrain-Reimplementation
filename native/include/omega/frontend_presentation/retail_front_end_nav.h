@@ -40,6 +40,40 @@ struct RetailFrontEndNavInput final
         const RetailFrontEndNavInput&) noexcept = default;
 };
 
+// [any thread; reentrant] Pure accept-target admission policy.
+//
+// `button_target` is the screen the currently-selected button declares, or
+// nullopt when it declares none. `target_screen_is_presentable` reports whether
+// the caller can actually compose that screen right now (for OmegaApp: whether
+// its bundle resolves). The target survives only when an Accept edge is present
+// AND the screen is presentable; otherwise Accept becomes inert.
+//
+// This exists because StepRetailFrontEndNav commits a screen switch
+// unconditionally once it is handed a target. Without this admission step a
+// caller that discovers, only after the switch, that it cannot compose the new
+// screen leaves navigation and pixels disagreeing: the player sees the previous
+// screen's last composed frame while the selection lives on a screen that never
+// draws, and Accept is inert off the Title, so only a Back edge recovers.
+// Refusing the transition keeps the player on a screen that still composes and
+// still responds.
+//
+// Fail-closed refusal is project-owned policy for an unpresentable screen. It
+// asserts no retail transition rule, no retail screen availability, and no
+// retail behaviour for a screen this build cannot yet compose.
+//
+// `accept_requested` is taken so a caller can pass its live Accept edge and let
+// this function decide; callers that probe availability lazily should probe only
+// when that edge is set. No allocation or I/O occurs.
+[[nodiscard]] constexpr std::optional<content::FrontEndScreenKey>
+ResolveRetailFrontEndAcceptTarget(
+    const std::optional<content::FrontEndScreenKey> button_target,
+    const bool accept_requested, const bool target_screen_is_presentable) noexcept
+{
+    if (!accept_requested || !button_target || !target_screen_is_presentable)
+        return std::nullopt;
+    return button_target;
+}
+
 // [any thread; reentrant] Pure retail front-end navigation step.
 //
 // Priority: back, then accept, then navigation (matching the reducer's
