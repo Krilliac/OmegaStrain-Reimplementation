@@ -209,7 +209,7 @@ string(CONCAT openomega_usage
     "[--screenshot-frame=N] "
     "[--data-root=PATH [--level=CODE]] [--probe-only] "
     "[--opening-movie=PATH | --opening-movie-member=NAME] "
-    "[--developer-diagnostics]\n"
+    "[--developer-diagnostics [--start-diagnostic-play]]\n"
 )
 # E-0089's empty-profile startup exercises the bounded front-end model without entering the frame
 # loop; stdout remains the established process contract and no profile is implicitly created.

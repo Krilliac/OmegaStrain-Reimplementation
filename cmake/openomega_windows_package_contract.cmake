@@ -1218,7 +1218,7 @@ string(CONCAT launch_usage
     "[--screenshot-frame=N] "
     "[--data-root=PATH [--level=CODE]] [--probe-only] "
     "[--opening-movie=PATH | --opening-movie-member=NAME] "
-    "[--developer-diagnostics]\n"
+    "[--developer-diagnostics [--start-diagnostic-play]]\n"
 )
 string(CONCAT sentinel_stderr
     "unknown option: --openomega-package-contract-sentinel\n"
