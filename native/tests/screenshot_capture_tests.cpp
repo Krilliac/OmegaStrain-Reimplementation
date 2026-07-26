@@ -56,6 +56,11 @@ public:
         std::filesystem::remove_all(path_, ignored);
     }
 
+    ScopedTestDirectory(const ScopedTestDirectory&) = delete;
+    ScopedTestDirectory& operator=(const ScopedTestDirectory&) = delete;
+    ScopedTestDirectory(ScopedTestDirectory&&) = delete;
+    ScopedTestDirectory& operator=(ScopedTestDirectory&&) = delete;
+
     ~ScopedTestDirectory()
     {
         std::error_code ignored;
@@ -203,12 +208,31 @@ int main()
             "existing links are rejected before payload creation");
     }
 
-    const auto privacy_code = ScreenshotErrorCodeName(
-        ScreenshotErrorCode::UnsafePath);
-    Check(privacy_code == "unsafe-path" &&
-              privacy_code.find(test_root.path().filename().string()) ==
-                  std::string_view::npos,
-        "public screenshot errors remain categorical and path-free");
+    using InvalidFrameResult = std::remove_cvref_t<decltype(invalid)>;
+    using UnsafePathResult = std::remove_cvref_t<decltype(unsafe)>;
+    static_assert(std::is_same_v<
+        typename InvalidFrameResult::error_type, ScreenshotErrorCode>);
+    static_assert(std::is_same_v<
+        typename UnsafePathResult::error_type, ScreenshotErrorCode>);
+
+    const std::string_view privacy_code =
+        unsafe ? std::string_view{} : ScreenshotErrorCodeName(unsafe.error());
+    Check(privacy_code == "unsafe-path",
+        "the surfaced unsafe-path rejection stays categorical");
+
+    constexpr unsigned kLastScreenshotErrorCode =
+        static_cast<unsigned>(ScreenshotErrorCode::InternalFailure);
+    for (unsigned raw = 0U; raw <= kLastScreenshotErrorCode; ++raw)
+    {
+        const std::string_view name =
+            ScreenshotErrorCodeName(static_cast<ScreenshotErrorCode>(raw));
+        Check(!name.empty() &&
+                  name.find_first_of("/\\:") == std::string_view::npos &&
+                  name.find("..") == std::string_view::npos &&
+                  name.find_first_not_of("abcdefghijklmnopqrstuvwxyz-") ==
+                      std::string_view::npos,
+            "every defined screenshot error name stays a path-free category");
+    }
 
     return failures == 0 ? 0 : 1;
 }
