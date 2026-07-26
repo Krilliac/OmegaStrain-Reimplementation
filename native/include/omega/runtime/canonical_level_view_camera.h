@@ -65,7 +65,9 @@ struct CanonicalLevelViewCamera
 // placeholder; a non-identity transform is rejected instead of being assigned
 // an unproven placement meaning. Non-finite coordinates, non-finite
 // intermediates, and scales that are not representable as `float` are rejected
-// with fixed path-free diagnostics before any camera value is published.
+// with fixed path-free diagnostics before any camera value is published. The
+// final float matrices are also composed through the runtime transform path and
+// rejected when their projected bounds lose the fixed clip-space fit precision.
 //
 // This is a project diagnostic framing. It establishes no retail camera, view,
 // projection, axis meaning, handedness, up direction, field of view, depth

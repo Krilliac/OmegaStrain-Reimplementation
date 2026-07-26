@@ -2175,14 +2175,18 @@ compose or publish a retail presentation.
   range, falling back to the fixed diagnostic-depth constant when that axis has zero extent. An
   unframed scene (no cell with both positions and complete triangles) publishes the identity camera
   with zero counts rather than inventing an extent. Every intermediate translation and scale is
-  checked for finiteness and float representability before publication.
+  checked for finiteness and float representability before publication. The final float matrices
+  are composed through the same runtime transform path used downstream, and both fused and
+  separately rounded endpoint projections must preserve the intended bounds within a fixed
+  clip-space error budget; a precision-losing fit is rejected instead of clipping geometry.
 - Generated fixtures cover an empty scene, a triangle-free-only scene, one hand-verified triangle
   (asserting the exact composed `world_to_view`/`view_to_clip` values and the resulting clip-space
   projection of all three vertices), the X-then-Y-then-Z tie-break, a nonzero depth extent, a
   rejected noncanonical source ordinal, non-identity cell transform, non-finite coordinate even in a
   triangle-free cell, incomplete triangle, out-of-range triangle reference, exact and one-below
-  triangle-index budgets, tighten-only limit enforcement, and both a non-representable planar scale
-  and a non-representable depth scale from a subnormal extent.
+  triangle-index budgets, tighten-only limit enforcement, an adjacent-float nonzero-origin fit that
+  loses its midpoint after matrix composition, and both a non-representable planar scale and a
+  non-representable depth scale from a subnormal extent.
 - This slice adds no `OmegaApp`, host, or GPU consumer; no page-selection or paging policy; and no
   retail camera, projection, axis meaning, handedness, up direction, field of view, depth range,
   placement, visibility, or world-space claim. It was built entirely from tracked clean-room source
