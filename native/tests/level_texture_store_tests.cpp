@@ -741,6 +741,46 @@ void CheckOpenAndLoadBudgets()
     }
 
     auto handle = baseline_store->HandleAt(0);
+    auto baseline_raw =
+        handle ? baseline_store->LoadRawBytes(service, *handle)
+               : std::expected<std::vector<std::byte>, LevelTextureStoreError>(
+                     std::unexpected(LevelTextureStoreError{}));
+    Check(baseline_raw && *baseline_raw == fixture.tdx,
+          "operation-budget baseline raw texture bytes load");
+    if (baseline_raw)
+    {
+        DecodeLimits exact_raw_output_limits;
+        exact_raw_output_limits.maximum_output_bytes = baseline_raw->size();
+        auto exact_raw_store =
+            OpenStore(service, fixture.manifest, exact_raw_output_limits);
+        Check(exact_raw_store.has_value(),
+              "LoadRawBytes exact output limit still permits Open");
+        if (exact_raw_store)
+        {
+            auto exact_raw_handle = exact_raw_store->HandleAt(0);
+            Check(exact_raw_handle &&
+                      exact_raw_store->LoadRawBytes(service, *exact_raw_handle)
+                          .has_value(),
+                  "LoadRawBytes succeeds at its exact output limit");
+        }
+
+        DecodeLimits below_raw_output_limits;
+        below_raw_output_limits.maximum_output_bytes = baseline_raw->size() - 1U;
+        auto below_raw_store =
+            OpenStore(service, fixture.manifest, below_raw_output_limits);
+        Check(below_raw_store.has_value(),
+              "LoadRawBytes one-below output limit still permits Open");
+        if (below_raw_store)
+        {
+            auto below_raw_handle = below_raw_store->HandleAt(0);
+            if (below_raw_handle)
+                CheckError(
+                    below_raw_store->LoadRawBytes(service, *below_raw_handle),
+                    LevelTextureStoreErrorCode::LimitExceeded,
+                    "LoadRawBytes rejects one byte below its exact output limit");
+        }
+    }
+
     auto baseline_load =
         handle ? baseline_store->Load(service, *handle)
                : std::expected<omega::content::LoadedLevelTexture, LevelTextureStoreError>(

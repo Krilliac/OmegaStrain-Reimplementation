@@ -778,6 +778,9 @@ LevelTextureStore::LoadRawBytes(
     auto terminal_input = budget.ConsumeInput(resolved->terminal_bytes.size());
     if (!terminal_input)
         return std::unexpected(terminal_input.error());
+    auto terminal_output = budget.ConsumeOutput(resolved->terminal_bytes.size());
+    if (!terminal_output)
+        return std::unexpected(terminal_output.error());
 
     return std::move(resolved->terminal_bytes);
 }
