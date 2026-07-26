@@ -1215,6 +1215,7 @@ string(CONCAT launch_usage
     "usage: openomega [-h|--help]\n"
     "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
     "[--frames=N [--capture-run [--replay-capture]]] "
+    "[--screenshot-frame=N] "
     "[--data-root=PATH [--level=CODE]] [--probe-only] "
     "[--opening-movie=PATH | --opening-movie-member=NAME] "
     "[--developer-diagnostics]\n"
