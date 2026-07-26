@@ -294,7 +294,7 @@ _LAUNCHER_HOST_EDGES = frozenset(
     {"omega_launcher_host", "omega_launcher_core", "omega_content"}
 )
 _LAUNCHER_EXE_EDGES = frozenset({"openomega_launcher", "omega_launcher_host"})
-_APP_EDGES = frozenset(
+_APP_CORE_EDGES = frozenset(
     {
         "openomega",
         "omega_persistence",
@@ -305,6 +305,11 @@ _APP_EDGES = frozenset(
         "omega_simulation",
         "omega_gameplay",
         "omega_multiplayer",
+    }
+)
+_APP_HOST_EDGES = frozenset(
+    {
+        *_APP_CORE_EDGES,
         "omega_content",
         "omega_frontend_presentation",
         "omega_retail_formats",
@@ -317,7 +322,7 @@ _APP_EDGES = frozenset(
 # not receive shipping-library module-edge restrictions.
 MODULE_RULES = (
     ModuleRule("native/apps/openomega/sdl_", "omega_sdl_backend", _SDL_EDGES),
-    ModuleRule("native/apps/openomega/", "openomega", _APP_EDGES),
+    ModuleRule("native/apps/openomega/", "openomega", _APP_CORE_EDGES),
     ModuleRule(
         "native/include/omega/multiplayer/",
         "omega_multiplayer",
@@ -497,6 +502,16 @@ MODULE_RULES = (
 )
 
 EXACT_MODULE_RULES = {
+    "native/apps/openomega/omega_app.cpp": ModuleRule(
+        "native/apps/openomega/omega_app.cpp",
+        "openomega",
+        _APP_HOST_EDGES,
+    ),
+    "native/apps/openomega/omega_app.h": ModuleRule(
+        "native/apps/openomega/omega_app.h",
+        "openomega",
+        _APP_HOST_EDGES,
+    ),
     "native/include/omega/frontend_presentation/screen_space_triangle_kernel.h": ModuleRule(
         "native/include/omega/frontend_presentation/screen_space_triangle_kernel.h",
         "omega_frontend_triangle_kernel",

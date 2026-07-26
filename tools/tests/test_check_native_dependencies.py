@@ -420,6 +420,21 @@ class NativeDependencyGateTests(unittest.TestCase):
         self.assertEqual(checked, 1)
         self.assertEqual(errors, [])
 
+    def test_openomega_core_cannot_borrow_host_only_composition_edges(
+        self,
+    ) -> None:
+        for include in (
+            "omega/content/front_end_screen_bundle.h",
+            "omega/frontend_presentation/retail_front_end_frame.h",
+            "omega/retail/frontend_tdx_decoder.h",
+        ):
+            with self.subTest(include=include):
+                self.assert_rejected(
+                    "native/apps/openomega/front_end.cpp",
+                    f'#include "{include}"\n',
+                    "openomega includes forbidden dependency",
+                )
+
     def test_sdl_shader_headers_remain_owned_by_the_sdl_backend(self) -> None:
         checked, errors = self.check_sources(
             {
