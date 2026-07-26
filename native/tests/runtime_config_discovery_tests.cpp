@@ -251,7 +251,7 @@ int RuntimeConfigDiscoveryFailureCount()
     const auto valid_default = test_root / "valid-default.cfg";
     Check(WriteTextFile(valid_default, "jobs.worker_count = 2\n"
                                        "content.data_root = default/content\n"
-                                       "content.level_code = default1\n"),
+                                       "content.level_code = lorelei\n"),
         "the valid default profile fixture is written");
     const auto ambient_free = omega::runtime::LoadRuntimeConfig({});
     Check(ambient_free && ambient_free->entry_count() == 0U,

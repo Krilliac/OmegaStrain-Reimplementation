@@ -166,6 +166,7 @@ add_library(omega_content STATIC
     native/src/content/game_data_service.cpp
     native/src/content/level_texture_store.cpp
     native/src/content/model_member_source.cpp
+    native/src/content/retail_level_table.cpp
 )
 target_include_directories(omega_content PUBLIC native/include)
 target_link_libraries(omega_content PUBLIC omega_assets PRIVATE omega_core omega_retail_formats)
@@ -2141,6 +2142,31 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME omega_gameplay_tests COMMAND omega_gameplay_tests)
     set_tests_properties(omega_gameplay_tests PROPERTIES TIMEOUT 5)
+
+    add_executable(omega_retail_level_table_tests
+        native/tests/retail_level_table_tests.cpp
+    )
+    target_link_libraries(omega_retail_level_table_tests PRIVATE omega_content)
+    if(MSVC)
+        target_compile_options(omega_retail_level_table_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_retail_level_table_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_retail_level_table_tests COMMAND omega_retail_level_table_tests)
+    set_tests_properties(omega_retail_level_table_tests PROPERTIES TIMEOUT 5)
 
     add_executable(omega_diagnostic_proximity_trigger_tests
         native/tests/diagnostic_proximity_trigger_tests.cpp

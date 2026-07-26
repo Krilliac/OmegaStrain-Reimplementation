@@ -187,7 +187,7 @@ int RuntimeSettingsFailureCount()
 
     auto configured_content = omega::runtime::ParseConfigText(
         "content.data_root = configured/content\n"
-        "content.level_code = minsk2\n"
+        "content.level_code = minsk\n"
         "content.opening_movie_member = MOVIES/OPENING.BIN\n");
     Check(configured_content && omega::runtime::ResolveRuntimeSettings(*configured_content),
         "content launch keys are known strict runtime settings");
@@ -198,19 +198,19 @@ int RuntimeSettingsFailureCount()
         Check(resolved_content && resolved_content->has_value() &&
                   (*resolved_content)->data_root ==
                       std::filesystem::path("configured/content") &&
-                  (*resolved_content)->level_code == std::optional<std::string>{"MINSK2"} &&
+                  (*resolved_content)->level_code == std::optional<std::string>{"MINSK"} &&
                   (*resolved_content)->opening_movie_member ==
                       std::optional<std::string>{"MOVIES/OPENING.BIN"},
             "configured content resolves a native path, uppercase level code, and exact owner movie selection");
 
         omega::runtime::LaunchOptions direct_content;
         direct_content.data_root = std::filesystem::path("direct/content");
-        direct_content.level_code = "level7";
+        direct_content.level_code = "tokyo";
         auto direct_resolved = omega::runtime::ResolveContentLaunchProfile(
             direct_content, *configured_content);
         Check(direct_resolved && direct_resolved->has_value() &&
                   (*direct_resolved)->data_root == std::filesystem::path("direct/content") &&
-                  (*direct_resolved)->level_code == std::optional<std::string>{"LEVEL7"} &&
+                  (*direct_resolved)->level_code == std::optional<std::string>{"TOKYO"} &&
                   !(*direct_resolved)->opening_movie_member,
             "a valid direct root and level atomically override configured content");
 
@@ -323,11 +323,11 @@ int RuntimeSettingsFailureCount()
     {
         omega::runtime::LaunchOptions valid_direct;
         valid_direct.data_root = std::filesystem::path("secret-direct-root");
-        valid_direct.level_code = "VALID1";
+        valid_direct.level_code = "MINSK";
         auto result = omega::runtime::ResolveContentLaunchProfile(
             valid_direct, *invalid_content_level);
         CheckProfileError(result, ContentLaunchProfileErrorCode::InvalidLevelCode,
-            "content.level_code must contain 1 to 32 ASCII alphanumeric characters",
+            "content.level_code must name one of the known level codes",
             "invalid configured level bytes remain fatal when valid direct CLI would win");
         Check(!result && result.error().message.find("secret") == std::string::npos,
             "content profile diagnostics never echo configured or direct values");
@@ -342,10 +342,14 @@ int RuntimeSettingsFailureCount()
         auto result = omega::runtime::ResolveContentLaunchProfile(
             no_content_options, *long_content_level);
         CheckProfileError(result, ContentLaunchProfileErrorCode::InvalidLevelCode,
-            "content.level_code must contain 1 to 32 ASCII alphanumeric characters",
-            "a configured level longer than 32 bytes is rejected");
+            "content.level_code must name one of the known level codes",
+            "a configured level longer than any known code is rejected");
     }
 
+    // Level validation is membership in the decoded reference table, not a byte
+    // range. These two fixtures were previously accepted purely because they
+    // were 1 and 32 ASCII alphanumeric bytes; neither names a level, so both
+    // must now be rejected before any content I/O is attempted.
     auto boundary_content_levels = omega::runtime::ParseConfigText(
         "content.data_root = configured/content\n"
         "content.level_code = a\n");
@@ -354,9 +358,9 @@ int RuntimeSettingsFailureCount()
     {
         auto result = omega::runtime::ResolveContentLaunchProfile(
             no_content_options, *boundary_content_levels);
-        Check(result && result->has_value() &&
-                  (*result)->level_code == std::optional<std::string>{"A"},
-            "a one-byte configured level is accepted and normalized");
+        CheckProfileError(result, ContentLaunchProfileErrorCode::InvalidLevelCode,
+            "content.level_code must name one of the known level codes",
+            "a well-formed one-byte level that names no level is rejected");
     }
 
     boundary_content_levels = omega::runtime::ParseConfigText(
@@ -367,10 +371,36 @@ int RuntimeSettingsFailureCount()
     {
         auto result = omega::runtime::ResolveContentLaunchProfile(
             no_content_options, *boundary_content_levels);
+        CheckProfileError(result, ContentLaunchProfileErrorCode::InvalidLevelCode,
+            "content.level_code must name one of the known level codes",
+            "a well-formed 32-byte level that names no level is rejected");
+    }
+
+    // A shortest and a longest real code both round-trip with case folding.
+    auto shortest_real_level = omega::runtime::ParseConfigText(
+        "content.data_root = configured/content\n"
+        "content.level_code = tokyo\n");
+    Check(shortest_real_level.has_value(), "the shortest-real-level fixture parses");
+    if (shortest_real_level)
+    {
+        auto result = omega::runtime::ResolveContentLaunchProfile(
+            no_content_options, *shortest_real_level);
         Check(result && result->has_value() &&
-                  (*result)->level_code ==
-                      std::optional<std::string>{"ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"},
-            "a 32-byte configured level is accepted and normalized");
+                  (*result)->level_code == std::optional<std::string>{"TOKYO"},
+            "a shortest known level is accepted and normalized");
+    }
+
+    auto longest_real_level = omega::runtime::ParseConfigText(
+        "content.data_root = configured/content\n"
+        "content.level_code = KyRgStAn\n");
+    Check(longest_real_level.has_value(), "the longest-real-level fixture parses");
+    if (longest_real_level)
+    {
+        auto result = omega::runtime::ResolveContentLaunchProfile(
+            no_content_options, *longest_real_level);
+        Check(result && result->has_value() &&
+                  (*result)->level_code == std::optional<std::string>{"KYRGSTAN"},
+            "a longest known level is accepted regardless of input case");
     }
 
     auto empty_content_level = omega::runtime::ParseConfigText(
@@ -382,7 +412,7 @@ int RuntimeSettingsFailureCount()
         auto result = omega::runtime::ResolveContentLaunchProfile(
             no_content_options, *empty_content_level);
         CheckProfileError(result, ContentLaunchProfileErrorCode::InvalidLevelCode,
-            "content.level_code must contain 1 to 32 ASCII alphanumeric characters",
+            "content.level_code must name one of the known level codes",
             "an empty configured level is rejected rather than treated as absent");
     }
 
@@ -469,7 +499,7 @@ int RuntimeSettingsFailureCount()
               "jobs.worker_count = 2\n"
               "log.minimum_severity = warning\n"
               "content.data_root = file/content\n"
-              "content.level_code = file1\n"),
+              "content.level_code = training\n"),
         "runtime-settings fixture is written");
 
     omega::runtime::LaunchOptions file_options;
@@ -479,7 +509,7 @@ int RuntimeSettingsFailureCount()
     file_options.config_overrides.push_back(
         {.key = "content.data_root", .value = "override/content"});
     file_options.config_overrides.push_back(
-        {.key = "content.level_code", .value = "override2"});
+        {.key = "content.level_code", .value = "zurich"});
     auto file_config = omega::runtime::LoadRuntimeConfig(file_options);
     Check(file_config && file_config->RequireInt64("jobs.worker_count") == 3 &&
               file_config->RequireString("log.minimum_severity") == "warning",
@@ -490,15 +520,15 @@ int RuntimeSettingsFailureCount()
             file_options, *file_config);
         Check(file_profile && file_profile->has_value() &&
                   (*file_profile)->data_root == std::filesystem::path("override/content") &&
-                  (*file_profile)->level_code == std::optional<std::string>{"OVERRIDE2"},
+                  (*file_profile)->level_code == std::optional<std::string>{"ZURICH"},
             "effective --set content values override the selected explicit file");
 
         file_options.data_root = std::filesystem::path("direct/content");
-        file_options.level_code = "direct3";
+        file_options.level_code = "italy";
         file_profile = omega::runtime::ResolveContentLaunchProfile(file_options, *file_config);
         Check(file_profile && file_profile->has_value() &&
                   (*file_profile)->data_root == std::filesystem::path("direct/content") &&
-                  (*file_profile)->level_code == std::optional<std::string>{"DIRECT3"},
+                  (*file_profile)->level_code == std::optional<std::string>{"ITALY"},
             "direct content atomically wins over effective --set and explicit file values");
 
         file_options.level_code.reset();
@@ -549,7 +579,7 @@ int RuntimeSettingsFailureCount()
     omega::runtime::LaunchOptions invalid_override_options;
     invalid_override_options.config_path = config_path;
     invalid_override_options.data_root = std::filesystem::path("direct/content");
-    invalid_override_options.level_code = "DIRECT1";
+    invalid_override_options.level_code = "MINSK";
     invalid_override_options.config_overrides.push_back(
         {.key = "content.level_code", .value = "invalid-level"});
     auto invalid_override_config = omega::runtime::LoadRuntimeConfig(invalid_override_options);
@@ -559,7 +589,7 @@ int RuntimeSettingsFailureCount()
         auto result = omega::runtime::ResolveContentLaunchProfile(
             invalid_override_options, *invalid_override_config);
         CheckProfileError(result, ContentLaunchProfileErrorCode::InvalidLevelCode,
-            "content.level_code must contain 1 to 32 ASCII alphanumeric characters",
+            "content.level_code must name one of the known level codes",
             "invalid effective --set content remains fatal before valid direct CLI precedence");
     }
 

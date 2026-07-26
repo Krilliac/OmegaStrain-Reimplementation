@@ -1091,8 +1091,11 @@ Studio's historical engine source or internal toolchain.
   configured level. A configured level without a root, an empty/unrepresentable native root, an
   invalid level, and a defensive malformed direct pair return the stable categories
   `missing-data-root`, `invalid-data-root`, `invalid-level-code`, and `invalid-options` with fixed
-  diagnostics that echo no path or invalid level bytes. Valid level codes are 1 to 32 ASCII
-  alphanumeric bytes and normalize to uppercase before the unchanged `StartContent` boundary.
+  diagnostics that echo no path or invalid level bytes. Valid level codes are the eighteen names
+  decoded from the reference level-name table (`analysis/elf/level-name-table.md`, E-0129); they are
+  matched without ASCII case sensitivity and normalize to the table's uppercase spelling before the
+  unchanged `StartContent` boundary. An unknown level fails at the argument or configuration
+  boundary rather than late inside content I/O.
   With neither content key and no direct root, startup remains zero-file. `/openomega.cfg` is ignored
   because it can contain a private local path. This slice adds no ambient/default discovery,
   persistence, picker, filesystem probing in the resolver, asset semantics, retail UI, or

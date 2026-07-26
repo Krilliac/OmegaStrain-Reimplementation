@@ -339,6 +339,12 @@ int LaunchOptionsFailureCount()
     Check(!Parse({"--level=MINSK"}), "level selection requires an explicit data root");
     Check(!Parse({"--data-root=A", "--level=../MINSK"}),
         "unsafe level components are rejected by the launch boundary");
+    // A well-formed alphanumeric code that names no table entry must also fail
+    // here: the boundary validates membership, not byte shape, so a typo cannot
+    // reach content I/O and resurface later as a missing directory.
+    CheckError(Parse({"--data-root=A", "--level=MINSK2"}),
+        "--level requires a known level code",
+        "an alphanumeric level that names no table entry is rejected at the boundary");
     auto deferred_probe_root = Parse({"--probe-only"});
     Check(deferred_probe_root && deferred_probe_root->probe_only &&
               !deferred_probe_root->data_root && !deferred_probe_root->level_code,
