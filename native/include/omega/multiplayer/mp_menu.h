@@ -1,7 +1,13 @@
 #pragma once
 
 // Project-owned multiplayer menu logic. This header contains only bounded text
-// editing, menu state, and a deterministic reducer. Emitted actions are UI
+// editing, menu state, and a deterministic reducer. Every operation is
+// allocation-free and reentrant and uses no global, platform, or transport
+// state. Callers must provide exclusive access to each mutable state or field.
+// State, input, steps, and actions own only values and are safe to copy across a
+// hot-reload boundary when both sides share this type definition and ABI; a
+// string_view returned by MpTextField::view() is borrowed from that field and
+// must not cross the boundary. Emitted actions are UI
 // intents; their consumer decides how (or whether) to implement them.
 
 #include <array>
@@ -20,6 +26,11 @@ enum class HostMode : std::uint8_t
 [[nodiscard]] constexpr std::string_view HostModeName(const HostMode mode) noexcept
 {
     return mode == HostMode::Dedicated ? "DEDICATED" : "LISTEN";
+}
+
+[[nodiscard]] constexpr bool IsKnownHostMode(const HostMode mode) noexcept
+{
+    return mode == HostMode::Listen || mode == HostMode::Dedicated;
 }
 
 enum class MpMenuActionType : std::uint8_t
@@ -138,6 +149,12 @@ enum class MpScreen : std::uint8_t
     ServerList = 3U,
 };
 
+[[nodiscard]] constexpr bool IsKnownMpScreen(const MpScreen screen) noexcept
+{
+    return screen == MpScreen::Root || screen == MpScreen::HostGame ||
+           screen == MpScreen::DirectConnect || screen == MpScreen::ServerList;
+}
+
 [[nodiscard]] constexpr std::uint8_t MpScreenRowCount(
     const MpScreen screen) noexcept
 {
@@ -188,6 +205,9 @@ struct MpMenuAction
     friend constexpr bool operator==(const MpMenuAction&, const MpMenuAction&) noexcept = default;
 };
 
+// Boolean members are one-step edges, not held levels. A caller that polls held
+// controls must perform edge detection before constructing each input value.
+// text_char likewise carries at most one input byte for this reducer step.
 struct MpMenuInput
 {
     bool up = false;
@@ -224,8 +244,10 @@ struct MpMenuStep
                : MpTextFieldKind::Name;
 }
 
-// One deterministic menu step. Exited states are terminal. For active states,
-// stale selections are clamped and stale edit focus is cleared. Input priority:
+// One allocation-free, reentrant deterministic menu step over copied values.
+// Exited states are terminal. For active states, unknown host mode canonicalizes
+// to Listen; unknown screen canonicalizes to Root and consumes the input step.
+// Stale selections are clamped and stale edit focus is cleared. Input priority:
 // edit exit, edit mutation, cancel, primary action, then exclusive navigation.
 [[nodiscard]] constexpr MpMenuStep StepMpMenu(
     MpMenuState state,
@@ -235,6 +257,17 @@ struct MpMenuStep
 
     if (state.exit_requested)
         return MpMenuStep{.state = state, .action = action};
+
+    if (!IsKnownHostMode(state.host_mode))
+        state.host_mode = HostMode::Listen;
+
+    if (!IsKnownMpScreen(state.screen))
+    {
+        state.screen = MpScreen::Root;
+        state.selection = 0U;
+        state.editing = false;
+        return MpMenuStep{.state = state, .action = action};
+    }
 
     const std::uint8_t rows = MpScreenRowCount(state.screen);
     if (state.selection >= rows)
