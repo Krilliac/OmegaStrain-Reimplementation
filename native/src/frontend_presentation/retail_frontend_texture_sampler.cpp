@@ -46,20 +46,13 @@ struct AxisTaps final
     };
 }
 
-[[nodiscard]] std::uint32_t WrapIndex(
-    const std::int64_t index, const std::uint32_t extent) noexcept
-{
-    const std::int64_t signed_extent = static_cast<std::int64_t>(extent);
-    std::int64_t wrapped = index % signed_extent;
-    if (wrapped < 0)
-        wrapped += signed_extent;
-    return static_cast<std::uint32_t>(wrapped);
-}
-
 [[nodiscard]] AxisTaps ResolveAxis(
     const float normalized_coordinate, const std::uint32_t extent) noexcept
 {
-    double repeated = std::fmod(static_cast<double>(normalized_coordinate), 1.0);
+    const double coordinate = static_cast<double>(normalized_coordinate);
+    double repeated = coordinate;
+    if (!(normalized_coordinate >= 0.0F && normalized_coordinate < 1.0F))
+        repeated = std::fmod(coordinate, 1.0);
     if (repeated < 0.0)
         repeated += 1.0;
 
@@ -67,9 +60,19 @@ struct AxisTaps final
         repeated * static_cast<double>(extent) - 0.5;
     const double lower_double = std::floor(texel_coordinate);
     const auto lower = static_cast<std::int64_t>(lower_double);
+    const auto signed_extent = static_cast<std::int64_t>(extent);
+    // Validation proves extent is positive. Repeating yields [0, 1] (the
+    // inclusive upper endpoint is possible when adding a tiny negative
+    // remainder rounds to 1.0), so lower is bounded to [-1, extent - 1].
+    const std::uint32_t lower_index =
+        lower < 0 ? extent - 1U : static_cast<std::uint32_t>(lower);
+    const std::uint32_t upper_index =
+        lower >= signed_extent - 1
+            ? 0U
+            : static_cast<std::uint32_t>(lower + 1);
     return AxisTaps{
-        .lower = WrapIndex(lower, extent),
-        .upper = WrapIndex(lower + 1, extent),
+        .lower = lower_index,
+        .upper = upper_index,
         .fraction = texel_coordinate - lower_double,
     };
 }
