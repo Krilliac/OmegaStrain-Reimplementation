@@ -2,6 +2,7 @@
 
 #include "omega/content/front_end_screen_bundle.h"
 
+#include <bit>
 #include <cmath>
 #include <concepts>
 #include <cstdint>
@@ -68,6 +69,26 @@ void Check(const bool condition, const std::string_view message)
     return std::fabs(left - right) <= epsilon;
 }
 
+[[nodiscard]] bool ExactlyEqual(
+    const RetailFrontEndTextureSamplingResult& left,
+    const RetailFrontEndTextureSamplingResult& right) noexcept
+{
+    if (left.has_value() != right.has_value())
+        return false;
+    if (!left)
+        return left.error() == right.error();
+
+    const auto same_float = [](const float first, const float second) {
+        return std::bit_cast<std::uint32_t>(first) ==
+               std::bit_cast<std::uint32_t>(second);
+    };
+    return same_float(left->modulation.red, right->modulation.red) &&
+           same_float(left->modulation.green, right->modulation.green) &&
+           same_float(left->modulation.blue, right->modulation.blue) &&
+           same_float(left->modulation.alpha, right->modulation.alpha) &&
+           left->alpha_contribution == right->alpha_contribution;
+}
+
 void CheckError(const RetailFrontEndTextureSamplingResult& result,
     const RetailFrontEndTextureSamplingError expected,
     const std::string_view message)
@@ -99,6 +120,113 @@ void CheckError(const RetailFrontEndTextureSamplingResult& result,
             .palette = std::move(palette),
         },
         encoding, alpha_mode);
+}
+
+struct FrozenReferenceAxisTaps final
+{
+    std::uint32_t lower = 0U;
+    std::uint32_t upper = 0U;
+    double fraction = 0.0;
+};
+
+[[nodiscard]] std::uint32_t FrozenReferenceWrapIndex(
+    const std::int64_t index, const std::uint32_t extent) noexcept
+{
+    const std::int64_t signed_extent = static_cast<std::int64_t>(extent);
+    std::int64_t wrapped = index % signed_extent;
+    if (wrapped < 0)
+        wrapped += signed_extent;
+    return static_cast<std::uint32_t>(wrapped);
+}
+
+[[nodiscard]] FrozenReferenceAxisTaps FrozenReferenceResolveAxis(
+    const float normalized_coordinate, const std::uint32_t extent) noexcept
+{
+    double repeated =
+        std::fmod(static_cast<double>(normalized_coordinate), 1.0);
+    if (repeated < 0.0)
+        repeated += 1.0;
+
+    const double texel_coordinate =
+        repeated * static_cast<double>(extent) - 0.5;
+    const double lower_double = std::floor(texel_coordinate);
+    const auto lower = static_cast<std::int64_t>(lower_double);
+    return FrozenReferenceAxisTaps{
+        .lower = FrozenReferenceWrapIndex(lower, extent),
+        .upper = FrozenReferenceWrapIndex(lower + 1, extent),
+        .fraction = texel_coordinate - lower_double,
+    };
+}
+
+[[nodiscard]] float FrozenReferenceLerp(
+    const float left, const float right, const double fraction) noexcept
+{
+    return static_cast<float>(
+        static_cast<double>(left) +
+        (static_cast<double>(right) - static_cast<double>(left)) * fraction);
+}
+
+[[nodiscard]] omega::frontend::RgbaF FrozenReferenceLerp(
+    const omega::frontend::RgbaF& left,
+    const omega::frontend::RgbaF& right,
+    const double fraction) noexcept
+{
+    return omega::frontend::RgbaF{
+        FrozenReferenceLerp(left.red, right.red, fraction),
+        FrozenReferenceLerp(left.green, right.green, fraction),
+        FrozenReferenceLerp(left.blue, right.blue, fraction),
+        FrozenReferenceLerp(left.alpha, right.alpha, fraction),
+    };
+}
+
+// This is the pre-fast-path addressing and interpolation algorithm, kept
+// test-local so every optimized result can be compared bit for bit with the
+// frozen behavior rather than with a second copy of the new branches.
+[[nodiscard]] RetailFrontEndTextureSamplingResult FrozenReferenceSample(
+    const FrontEndTextureBinding& binding,
+    const omega::asset::FrontendUvIR& normalized_st) noexcept
+{
+    if (!std::isfinite(normalized_st.u) || !std::isfinite(normalized_st.v))
+        return std::unexpected(
+            RetailFrontEndTextureSamplingError::NonFiniteCoordinate);
+
+    const auto validated = ValidateRetailFrontEndTexture(binding);
+    if (!validated)
+        return std::unexpected(validated.error());
+
+    const auto& image = binding.image();
+    const FrozenReferenceAxisTaps horizontal =
+        FrozenReferenceResolveAxis(normalized_st.u, image.width);
+    const FrozenReferenceAxisTaps vertical =
+        FrozenReferenceResolveAxis(normalized_st.v, image.height);
+    const auto upper_left = LookupRetailFrontEndTexel(
+        binding, horizontal.lower, vertical.lower);
+    const auto upper_right = LookupRetailFrontEndTexel(
+        binding, horizontal.upper, vertical.lower);
+    const auto lower_left = LookupRetailFrontEndTexel(
+        binding, horizontal.lower, vertical.upper);
+    const auto lower_right = LookupRetailFrontEndTexel(
+        binding, horizontal.upper, vertical.upper);
+    if (!upper_left)
+        return std::unexpected(upper_left.error());
+    if (!upper_right)
+        return std::unexpected(upper_right.error());
+    if (!lower_left)
+        return std::unexpected(lower_left.error());
+    if (!lower_right)
+        return std::unexpected(lower_right.error());
+
+    const omega::frontend::RgbaF upper =
+        FrozenReferenceLerp(upper_left->modulation, upper_right->modulation,
+            horizontal.fraction);
+    const omega::frontend::RgbaF lower =
+        FrozenReferenceLerp(lower_left->modulation, lower_right->modulation,
+            horizontal.fraction);
+    return omega::frontend::presentation::RetailFrontEndTextureSample{
+        .modulation =
+            FrozenReferenceLerp(upper, lower, vertical.fraction),
+        .alpha_contribution = upper_left->alpha_contribution,
+    };
 }
 
 void TestPublicContract()
@@ -411,6 +539,163 @@ void TestDeterminism()
             "repeated sampling is byte-for-byte deterministic");
     }
 }
+
+[[nodiscard]] std::vector<float> DifferentialCoordinates(
+    const std::uint32_t extent)
+{
+    const float positive_infinity = std::numeric_limits<float>::infinity();
+    const float negative_infinity = -positive_infinity;
+    const float denormal = std::numeric_limits<float>::denorm_min();
+    const float minimum_normal = std::numeric_limits<float>::min();
+    std::vector<float> coordinates{
+        0.0F,
+        -0.0F,
+        std::nextafter(0.0F, positive_infinity),
+        std::nextafter(0.0F, negative_infinity),
+        std::nextafter(1.0F, 0.0F),
+        1.0F,
+        std::nextafter(1.0F, positive_infinity),
+        std::nextafter(-1.0F, 0.0F),
+        -1.0F,
+        std::nextafter(-1.0F, negative_infinity),
+        denormal,
+        -denormal,
+        minimum_normal,
+        -minimum_normal,
+        -1'024.75F,
+        -64.0F,
+        -7.375F,
+        -2.0F,
+        -1.75F,
+        -0.75F,
+        -0.5F,
+        -0.25F,
+        0.125F,
+        0.25F,
+        0.5F,
+        0.75F,
+        1.25F,
+        2.0F,
+        7.375F,
+        64.0F,
+        1'024.75F,
+        std::numeric_limits<float>::lowest(),
+        std::nextafter(std::numeric_limits<float>::lowest(), 0.0F),
+        std::nextafter(std::numeric_limits<float>::max(), 0.0F),
+        std::numeric_limits<float>::max(),
+    };
+    constexpr std::array<float, 4U> phases{
+        0.125F, 0.25F, 0.5F, 0.75F};
+    constexpr std::array<float, 9U> periods{
+        -4'096.0F,
+        -257.0F,
+        -2.0F,
+        -1.0F,
+        0.0F,
+        1.0F,
+        2.0F,
+        257.0F,
+        4'096.0F,
+    };
+    for (const float period : periods)
+    {
+        for (const float phase : phases)
+            coordinates.push_back(period + phase);
+    }
+
+    const auto append_neighborhood =
+        [&coordinates, positive_infinity, negative_infinity](const float value) {
+            coordinates.push_back(std::nextafter(value, negative_infinity));
+            coordinates.push_back(value);
+            coordinates.push_back(std::nextafter(value, positive_infinity));
+        };
+    const std::array<std::uint32_t, 4U> texels{
+        0U, extent > 1U ? 1U : 0U, extent / 2U, extent - 1U};
+    for (const std::uint32_t texel : texels)
+    {
+        const float boundary = static_cast<float>(
+            static_cast<double>(texel) / static_cast<double>(extent));
+        const float center = static_cast<float>(
+            (static_cast<double>(texel) + 0.5) /
+            static_cast<double>(extent));
+        append_neighborhood(boundary);
+        append_neighborhood(center);
+        append_neighborhood(boundary - 1.0F);
+        append_neighborhood(center + 1.0F);
+    }
+    return coordinates;
+}
+
+void TestAxisFastPathMatchesFrozenReference()
+{
+    constexpr std::array<std::uint32_t, 7U> extents{
+        1U, 2U, 3U, 255U, 256U, 511U, 512U};
+
+    std::vector<RawGsRgba8> palette(256U);
+    for (std::size_t entry = 0U; entry < palette.size(); ++entry)
+    {
+        palette[entry] = {
+            static_cast<std::uint8_t>((entry * 29U + 3U) & 0xFFU),
+            static_cast<std::uint8_t>((entry * 71U + 5U) & 0xFFU),
+            static_cast<std::uint8_t>((entry * 113U + 7U) & 0xFFU),
+            static_cast<std::uint8_t>((entry * 43U + 1U) & 0x7FU),
+        };
+    }
+
+    bool identical = true;
+    for (const std::uint32_t extent : extents)
+    {
+        std::vector<std::uint8_t> indices(
+            static_cast<std::size_t>(extent) * extent);
+        for (std::uint32_t y = 0U; y < extent; ++y)
+        {
+            for (std::uint32_t x = 0U; x < extent; ++x)
+            {
+                indices[static_cast<std::size_t>(y) * extent + x] =
+                    static_cast<std::uint8_t>(
+                        (x * 17U + y * 29U + 11U) & 0xFFU);
+            }
+        }
+        const auto texture = MakeTexture(IndexedImageEncoding::Indexed8,
+            FrontEndTextureAlphaMode::UsesPaletteAlpha, extent, extent,
+            std::move(indices), palette);
+        const float first_texel_center =
+            static_cast<float>(0.5 / static_cast<double>(extent));
+        const std::vector<float> coordinates =
+            DifferentialCoordinates(extent);
+        for (const float coordinate : coordinates)
+        {
+            const omega::asset::FrontendUvIR horizontal{
+                .u = coordinate, .v = first_texel_center};
+            const omega::asset::FrontendUvIR vertical{
+                .u = first_texel_center, .v = coordinate};
+            identical =
+                identical &&
+                ExactlyEqual(SampleRetailFrontEndTextureBilinearRepeat(
+                                 texture, horizontal),
+                    FrozenReferenceSample(texture, horizontal)) &&
+                ExactlyEqual(SampleRetailFrontEndTextureBilinearRepeat(
+                                 texture, vertical),
+                    FrozenReferenceSample(texture, vertical));
+        }
+    }
+    Check(identical,
+        "the axis fast path is bit-for-bit identical to the frozen algorithm");
+}
+
+void TestNonFinitePrecedesInvalidBinding()
+{
+    const auto invalid = MakeTexture(IndexedImageEncoding::Indexed4,
+        FrontEndTextureAlphaMode::UsesPaletteAlpha, 2U, 1U, {0U});
+    CheckError(SampleRetailFrontEndTextureBilinearRepeat(invalid,
+                   {.u = std::numeric_limits<float>::quiet_NaN(), .v = 0.0F}),
+        RetailFrontEndTextureSamplingError::NonFiniteCoordinate,
+        "NaN is rejected before an invalid binding");
+    CheckError(SampleRetailFrontEndTextureBilinearRepeat(invalid,
+                   {.u = 0.0F, .v = std::numeric_limits<float>::infinity()}),
+        RetailFrontEndTextureSamplingError::NonFiniteCoordinate,
+        "infinity is rejected before an invalid binding");
+}
 } // namespace
 
 int main()
@@ -422,6 +707,8 @@ int main()
     TestFailuresAreTypedAndFailClosed();
     TestValidatedLayoutMatchesTheBindingOverload();
     TestDeterminism();
+    TestAxisFastPathMatchesFrozenReference();
+    TestNonFinitePrecedesInvalidBinding();
 
     if (failures != 0)
     {
