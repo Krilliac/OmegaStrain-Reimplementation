@@ -116,6 +116,55 @@ struct QueuedNv12Frame {
 };
 } // namespace
 
+namespace detail {
+std::expected<OpeningMovieFrameBatchAdmission, OpeningMoviePlayerErrorCode>
+ValidateOpeningMovieFrameBatch(
+    const OpeningMovieFrameQueueState &state,
+    const std::span<const OpeningMovieDecodedFrameFacts> batch) {
+  OpeningMovieFrameBatchAdmission admission;
+  admission.state = state;
+  admission.frames.reserve(batch.size());
+
+  for (const OpeningMovieDecodedFrameFacts &frame : batch) {
+    if (frame.width != state.width || frame.height != state.height)
+      return std::unexpected(OpeningMoviePlayerErrorCode::FrameExtentChanged);
+    if (frame.timestamp_100ns < 0 || frame.duration_100ns <= 0)
+      return std::unexpected(OpeningMoviePlayerErrorCode::InvalidTimestamp);
+
+    const std::uint64_t timestamp =
+        static_cast<std::uint64_t>(frame.timestamp_100ns);
+    if (!admission.state.first_decoder_timestamp_100ns)
+      admission.state.first_decoder_timestamp_100ns = timestamp;
+    if (timestamp < *admission.state.first_decoder_timestamp_100ns)
+      return std::unexpected(OpeningMoviePlayerErrorCode::InvalidTimestamp);
+
+    const std::uint64_t normalized =
+        timestamp - *admission.state.first_decoder_timestamp_100ns;
+    if (admission.state.last_decoded_timestamp_100ns &&
+        normalized <= *admission.state.last_decoded_timestamp_100ns) {
+      return std::unexpected(OpeningMoviePlayerErrorCode::InvalidTimestamp);
+    }
+
+    const std::uint64_t duration =
+        static_cast<std::uint64_t>(frame.duration_100ns);
+    if (duration > std::numeric_limits<std::uint64_t>::max() - normalized)
+      return std::unexpected(OpeningMoviePlayerErrorCode::InvalidTimestamp);
+    if (admission.state.queued_frame_count >=
+        admission.state.maximum_queued_frames) {
+      return std::unexpected(OpeningMoviePlayerErrorCode::FrameQueueExceeded);
+    }
+
+    admission.frames.push_back(OpeningMovieFrameAdmission{
+        .timestamp_100ns = normalized,
+        .duration_100ns = duration,
+    });
+    admission.state.last_decoded_timestamp_100ns = normalized;
+    ++admission.state.queued_frame_count;
+  }
+  return admission;
+}
+} // namespace detail
+
 struct OpeningMoviePlayer::Impl {
   Impl(std::vector<std::byte> source_bytes,
        media::MpegVideoElementaryStreamPlan stream_plan,
@@ -161,39 +210,45 @@ struct OpeningMoviePlayer::Impl {
     return std::nullopt;
   }
 
+  // Typed decoder rejection is transactional: validate the complete batch
+  // against a copied queue state before moving any frame. Allocation during the
+  // staging or commit passes is instead caught by Advance and made terminal.
   [[nodiscard]] std::optional<Error>
   QueueDecodedFrames(std::vector<media::OwnedNv12VideoFrame> &&decoded) {
-    for (media::OwnedNv12VideoFrame &frame : decoded) {
-      if (frame.width != width || frame.height != height)
-        return MakeError(ErrorCode::FrameExtentChanged);
-      if (frame.timestamp_100ns < 0 || frame.duration_100ns <= 0)
-        return MakeError(ErrorCode::InvalidTimestamp);
-      const std::uint64_t timestamp =
-          static_cast<std::uint64_t>(frame.timestamp_100ns);
-      if (!first_decoder_timestamp_100ns)
-        first_decoder_timestamp_100ns = timestamp;
-      if (timestamp < *first_decoder_timestamp_100ns)
-        return MakeError(ErrorCode::InvalidTimestamp);
-      const std::uint64_t normalized =
-          timestamp - *first_decoder_timestamp_100ns;
-      if (last_decoded_timestamp_100ns &&
-          normalized <= *last_decoded_timestamp_100ns) {
-        return MakeError(ErrorCode::InvalidTimestamp);
-      }
-      const std::uint64_t duration =
-          static_cast<std::uint64_t>(frame.duration_100ns);
-      if (duration > std::numeric_limits<std::uint64_t>::max() - normalized)
-        return MakeError(ErrorCode::InvalidTimestamp);
-      if (queued_frames.size() >= kMaximumQueuedFrames)
-        return MakeError(ErrorCode::FrameQueueExceeded);
-
-      queued_frames.push_back(QueuedNv12Frame{
-          .timestamp_100ns = normalized,
-          .duration_100ns = duration,
-          .frame = std::move(frame),
+    std::vector<detail::OpeningMovieDecodedFrameFacts> facts;
+    facts.reserve(decoded.size());
+    for (const media::OwnedNv12VideoFrame &frame : decoded) {
+      facts.push_back(detail::OpeningMovieDecodedFrameFacts{
+          .width = frame.width,
+          .height = frame.height,
+          .timestamp_100ns = frame.timestamp_100ns,
+          .duration_100ns = frame.duration_100ns,
       });
-      last_decoded_timestamp_100ns = normalized;
     }
+
+    const auto admission = detail::ValidateOpeningMovieFrameBatch(
+        detail::OpeningMovieFrameQueueState{
+            .width = width,
+            .height = height,
+            .queued_frame_count = queued_frames.size(),
+            .maximum_queued_frames = kMaximumQueuedFrames,
+            .first_decoder_timestamp_100ns = first_decoder_timestamp_100ns,
+            .last_decoded_timestamp_100ns = last_decoded_timestamp_100ns,
+        },
+        facts);
+    if (!admission)
+      return MakeError(admission.error());
+
+    for (std::size_t index = 0U; index < decoded.size(); ++index) {
+      queued_frames.push_back(QueuedNv12Frame{
+          .timestamp_100ns = admission->frames[index].timestamp_100ns,
+          .duration_100ns = admission->frames[index].duration_100ns,
+          .frame = std::move(decoded[index]),
+      });
+    }
+    first_decoder_timestamp_100ns =
+        admission->state.first_decoder_timestamp_100ns;
+    last_decoded_timestamp_100ns = admission->state.last_decoded_timestamp_100ns;
     return std::nullopt;
   }
 
@@ -303,7 +358,7 @@ OpeningMoviePlayer::OpeningMoviePlayer(std::unique_ptr<Impl> impl) noexcept
 
 OpeningMoviePlayer::OpeningMoviePlayer(OpeningMoviePlayer &&) noexcept =
     default;
-OpeningMoviePlayer::~OpeningMoviePlayer() = default;
+OpeningMoviePlayer::~OpeningMoviePlayer() noexcept = default;
 
 std::expected<OpeningMoviePlayer, OpeningMoviePlayerError>
 OpeningMoviePlayer::Create(const std::filesystem::path &path) {
@@ -390,11 +445,10 @@ OpeningMoviePlayer::Advance(const std::chrono::nanoseconds elapsed) {
     if (auto error = impl_->AdvanceClock(elapsed))
       return impl_->Fail(*error);
 
-    bool frame_updated = false;
     auto published = impl_->PublishDueFrame();
     if (!published)
       return impl_->Fail(published.error());
-    frame_updated = *published;
+    bool frame_updated = *published;
 
     std::size_t feed_count = 0U;
     while (impl_->queued_frames.empty() && !impl_->decoder_drained &&
