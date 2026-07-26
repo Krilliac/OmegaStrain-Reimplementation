@@ -30,7 +30,9 @@ syntax**:
 - `-l` consumes the text attached to the same argument, so `-lMINSK` is the
   correct form and `-l MINSK` is not equivalent;
 - the selected level name is copied into a 128-byte global buffer;
-- `MINSK` is level-name table entry 9 (zero-based) in a 17-entry table; and
+- `MINSK` is level-name table entry 9 (zero-based); a later boundary scan
+  established eighteen stored entries and identified seventeen as one
+  consumer's narrower admitted range (see `level-name-table.md`); and
 - the loader subsequently constructs the logical path
   `GAMEDATA/<selected-level>/LOADING.HOG`, with a common-data fallback.
 
@@ -163,7 +165,8 @@ a platform mode would be speculation.
 
 The token occurs at file offset `0x003ACBC8`, mapped to VA `0x004ACAC8`. The only
 direct stored pointer to those characters is at `0x0048C184`. That pointer is
-entry 9 of the 17-entry level-name pointer table beginning at `0x0048C160`:
+entry 9 of the level-name pointer table beginning at `0x0048C160`; the later
+boundary scan in `level-name-table.md` establishes eighteen stored entries:
 
 `(0x0048C184 - 0x0048C160) / 4 = 9`
 
@@ -179,9 +182,10 @@ consumers:
 | `0x0033E6A0` / `0x0033E6A8` | `0x0034F438` / `0x0034F43C` | `0x0034F964` / `0x0034F96C` |
 | `0x00354BBC` / `0x00354BC0` | `0x00354FFC` / `0x00355000` | |
 
-The consumer at `0x00294D04` is a useful sanity check: it bounds the index below
-17, scales it by four, adds the `0x0048C160` base, and loads the selected pointer.
-That establishes the table interpretation independently of string adjacency.
+The consumer at `0x00294D04` is a useful sanity check because its observed
+admitted index set is `[0, 17)`. That narrower consumer bound establishes an
+independent relationship to the table without describing the table's storage
+extent; `level-name-table.md` records the corrected eighteen-entry extent.
 
 Nearby constructions of related data tables occur at `0x002C9B44`
 (`0x0048C148`), `0x002C90A4` (`0x0048C200`), `0x002C9124`

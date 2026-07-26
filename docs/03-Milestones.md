@@ -1044,10 +1044,13 @@ one of the eighteen decoded table entries, matched without ASCII case sensitivit
 the table's uppercase spelling. Main resolves this tuple after service settings and before unchanged
 content startup and E-0072 diagnostics. The root-level local `openomega.cfg` is ignored for privacy,
 but E-0074 does not discover it or any other ambient/default file. It adds no persistence, picker,
-path existence validation, content decoding, retail UI, or emulator-equivalence behavior. Local
-focused/full MSVC, direct core/process, 30/34/30 default/GPU/restored CTest, runtime-off with 27
-registrations, the 157-file dependency gate, 209 tooling tests, and Python compile-all passed.
-Publication remains unclaimed.
+path existence validation, content decoding, retail UI, or emulator-equivalence behavior. For the
+original E-0074 slice, local focused/full MSVC, direct core/process, 30/34/30 default/GPU/restored
+CTest, runtime-off with 27 registrations, the 157-file dependency gate, 209 tooling tests, and
+Python compile-all passed. E-0129 initially deferred project MSVC/CMake/CTest in favor of
+supplemental cross-compiler checks; this integration has since passed serialized MSVC builds and
+focused CTest for the table, core, and process contracts. Full local and hosted validation remains
+pending. Publication remains unclaimed.
 
 E-0075 adds optional per-user default-profile discovery while preserving the explicit and content
 precedence contracts. A no-I/O compile-time host classifier and pure lexical resolver accept only

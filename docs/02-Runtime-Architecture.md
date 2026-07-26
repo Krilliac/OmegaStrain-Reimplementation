@@ -883,11 +883,13 @@ Main resolves this profile after service settings and projects it back into the 
 the following failure boundary. The resolver performs no filesystem existence check or other I/O.
 There is no ambient/default profile discovery, persistence, picker, hot reload, new schema, asset
 semantic, retail behavior, or emulator-equivalence claim. `/openomega.cfg` is ignored solely as a
-privacy boundary for a possible local path. Focused and full MSVC builds were clean;
-`omega_core_tests`, the process contract, and default/GPU/restored CTest passed 30/34/30.
-Runtime-off direct and focused checks retained 27 registrations. The dependency gate checked 157
-native files, all 209 tooling tests passed, and Python compile-all passed. Publication remains
-unclaimed.
+privacy boundary for a possible local path. For the original E-0074 slice, focused and full MSVC
+builds were clean; `omega_core_tests`, the process contract, and default/GPU/restored CTest passed
+30/34/30. Runtime-off direct and focused checks retained 27 registrations. The dependency gate
+checked 157 native files, all 209 tooling tests passed, and Python compile-all passed. E-0129
+initially deferred project MSVC/CMake/CTest in favor of supplemental cross-compiler checks; this
+integration has since passed serialized MSVC builds and focused CTest for the table, core, and
+process contracts. Full local and hosted validation remains pending. Publication remains unclaimed.
 
 E-0075 adds default-profile selection as a separate composition-root stage. The compile-time
 `HostRuntimeConfigPlatform` classifier is `noexcept` and performs no I/O. The pure lexical

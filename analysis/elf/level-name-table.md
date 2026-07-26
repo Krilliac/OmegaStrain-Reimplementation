@@ -41,10 +41,9 @@ The scan was deliberately extended to indices `-8` through `25` so that the
 table's boundaries were observed on both sides instead of being taken from the
 earlier note.
 
-Consumer bounds were then read directly. For each base-construction site
-recorded in `argument-loader.md`, the surrounding instructions were decoded to
-field level and the compare that guards the index register was identified. Only
-decoded instruction fields were used; no instruction bytes were extracted.
+The originating extraction also recorded six table-consumer observations.
+This public note retains only their aggregate admitted index sets; the
+instruction-level research record remains private.
 
 Reproduce with the existing scanner for the base constructions:
 
@@ -102,23 +101,22 @@ terminated by zero words on both sides.
 
 ## Validation against the owned disc
 
-The owned disc's `GAMEDATA` directory contains twenty-one subdirectories. Three
-are not level directories by name and content role: `COMMON`, `FRONTEND`, and
-`NETWORK`. `COMMON` is already established in `argument-loader.md` as the
-loader's fallback location rather than a level.
-
-That leaves eighteen level directories. The correspondence with the decoded
-table is exact and total:
+The tracked manifest contains twenty-one distinct first-level directory names
+under `GAMEDATA`. The structural name-set comparison is exact:
 
 - every one of the eighteen decoded names has a `GAMEDATA/<NAME>` directory;
-- every one of the eighteen level directories appears in the table;
-- the set difference in both directions is empty.
+- the table-name set minus the manifest-directory set is empty;
+- the manifest-directory set minus the table-name set is exactly `COMMON`,
+  `FRONTEND`, and `NETWORK`.
+
+This comparison assigns no content role to the three unmatched directory
+names. `COMMON` has separate fallback evidence in `argument-loader.md`;
+the name-set comparison itself does not classify any unmatched directory.
 
 This correspondence is independently reproducible from the public tree alone,
 without the disc: reducing the `path` fields of
-`analysis/manifests/disc-files.jsonl` to their first two components yields
-exactly twenty-one `GAMEDATA` subdirectories, and removing the three non-level
-roles leaves a set equal to the eighteen names above.
+`analysis/manifests/disc-files.jsonl` to their first two components yields the
+twenty-one directory names and the exact set differences stated above.
 
 All eighteen names therefore already appear in this repository's tracked
 manifest, so recording them here introduces no reference content that the public
@@ -130,42 +128,25 @@ This is the point the prior note got wrong, and it is worth stating precisely
 because the resolution is the opposite of what a naive reconciliation would
 produce.
 
-`argument-loader.md` describes a "17-entry level-name pointer table". A
-seventeen-entry table set against eighteen level directories would imply that
-one on-disc directory is absent from the table. **That is not what is happening.
-No directory is absent.** The table holds eighteen entries, and the eighteenth
-is `TRAINING`.
+`argument-loader.md` describes a "17-entry level-name pointer table". The
+observed contiguous table storage instead holds eighteen entries, and the
+eighteenth is `TRAINING`.
 
-The number seventeen is real, but it is a *consumer bound*, not the table's
-size. The consumers disagree with each other. Decoding the compare that guards
-the index register at each base-construction site recorded in
-`argument-loader.md` gives:
+The number seventeen is real, but it is an observed *consumer bound*, not the
+table's storage extent. The retained aggregate observations are:
 
-| Consumer base construction | Guarding compare | Admitted indices |
-| --- | --- | --- |
-| `0x00294D04` | `0x00294CEC` compare against 17 | `[0, 17)` |
-| `0x0034F964` | `0x0034F958` compare against 17 | `[0, 17)` |
-| `0x00354BBC` | `0x00354BB0` compare against 17 | `[0, 17)` |
-| `0x00354FFC` | `0x00354FEC` compare against 17 | `[0, 17)` |
-| `0x002CC84C` | `0x002CC840` compare against 18 | `[0, 18)` |
-| `0x002CC904` | `0x002CC93C` compare against 18 | `[0, 18)` |
+| Observed consumers | Admitted indices |
+| --- | --- |
+| 4 | `[0, 17)` |
+| 2 | `[0, 18)` |
 
-In every row the compared register is the same register that is then shifted
-left by two, added to the base, and used as the load address, so the bound and
-the index are provably the same value. In every row the base is constructed as
-the same `LUI 0x0049` / `ADDIU -16032` pair, and `0x00490000 - 16032` is
-`0x0048C160`, the table base. The site at `0x002CC904` is a loop that increments
-its index and continues while it remains below 18, stepping a companion pointer
-by four per iteration; it therefore walks all eighteen entries.
-
-The prior note's seventeen came from `0x00294D04`, which it explicitly cites as
-the sanity check that "bounds the index below 17". That reading of that one
-consumer was correct. Generalizing it to the table's size was not.
+The prior note generalized one `[0, 17)` consumer observation to the table's
+size. The independently observed contiguous storage extent is eighteen.
 
 So the discrepancy is fully resolved, and resolved without discarding anything:
 
-- eighteen level directories on disc,
-- eighteen entries in the table,
+- eighteen table names that each have a matching `GAMEDATA/<NAME>` directory,
+- eighteen contiguous entries in the table,
 - `TRAINING` is the entry that four of the six inspected consumers cannot
   reach, and the two that can do reach it.
 
@@ -219,9 +200,9 @@ consumer, not from this table.
 The decoded table is carried into the native tree as a constant in
 `native/include/omega/content/retail_level_table.h` and
 `native/src/content/retail_level_table.cpp`. It exposes all eighteen names in
-table order, index/name lookups in both directions, the count, and the narrower
-consumer bound as a separately named constant so the two numbers cannot be
-confused again.
+table order, index/name lookups in both directions, and the table count. The
+aggregate `[0, 17)` versus `[0, 18)` observations remain passive analysis
+evidence and do not enter the shipping API.
 
 `omega::runtime::IsValidContentLevelCode` now validates `content.level_code`
 and `--level` against that table rather than accepting any 1-to-32-byte ASCII
@@ -231,13 +212,12 @@ failing late inside content I/O as a missing directory.
 
 ## Provenance of this note
 
-The pointer chase, the boundary scan, the consumer-bound decoding, and the
+The pointer chase, boundary scan, aggregate consumer-bound observations, and
 `GAMEDATA` directory listing were performed against the private reference image
-and the owned disc in the originating analysis session. This note and the native
+and owned disc in the originating analysis session. This note and the native
 table are a hand-port of that recorded result; the port did not reopen either
-private input. The disc-correspondence claim above was independently re-checked
-in the port from the tracked public manifest alone, as described in that
-section. The remaining reference-image facts — entry addresses, zero-word
-boundaries, and the six consumer bounds — carry the provenance of the original
-extraction and are reproducible with the method above by anyone holding the
-image.
+private input. The structural name-set comparison above was independently
+re-checked in the port from the tracked public manifest alone. The remaining
+reference-image facts — entry addresses, zero-word boundaries, and aggregate
+admitted index sets — carry the provenance of the original extraction and are
+reproducible by anyone holding the image.
