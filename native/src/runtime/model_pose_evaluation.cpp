@@ -250,10 +250,33 @@ asset::Float3IR SkinVertexPosition(const asset::Float3IR& bind_position,
 {
     if (!IsFiniteFloat3(bind_position))
         return bind_position;
+    if (skinning_matrices.size() > asset::kMaximumSkeletonJoints ||
+        static_cast<std::size_t>(influences.used_influences) >
+            asset::kMaximumSkinInfluencesPerVertex)
+    {
+        return bind_position;
+    }
 
-    const std::size_t influence_count = std::min<std::size_t>(
-        static_cast<std::size_t>(influences.used_influences),
-        asset::kMaximumSkinInfluencesPerVertex);
+    const std::size_t influence_count = static_cast<std::size_t>(influences.used_influences);
+    for (std::size_t slot = 0U; slot < asset::kMaximumSkinInfluencesPerVertex; ++slot)
+    {
+        const float weight = influences.weights[slot];
+        if (slot < influence_count)
+        {
+            if (!std::isfinite(weight) || weight < 0.0F ||
+                static_cast<std::size_t>(influences.joint_indices[slot]) >=
+                    skinning_matrices.size())
+            {
+                return bind_position;
+            }
+            continue;
+        }
+        if (influences.joint_indices[slot] != 0U || !std::isfinite(weight) ||
+            weight != 0.0F || std::signbit(weight))
+        {
+            return bind_position;
+        }
+    }
 
     double accumulated_x = 0.0;
     double accumulated_y = 0.0;
@@ -262,14 +285,8 @@ asset::Float3IR SkinVertexPosition(const asset::Float3IR& bind_position,
     for (std::size_t slot = 0; slot < influence_count; ++slot)
     {
         const float weight = influences.weights[slot];
-        if (!std::isfinite(weight))
-            return bind_position;
-
         const std::size_t joint_index =
             static_cast<std::size_t>(influences.joint_indices[slot]);
-        if (joint_index >= skinning_matrices.size())
-            continue;
-
         const asset::Matrix4x4IR& matrix = skinning_matrices[joint_index];
         if (!IsFiniteMatrix(matrix))
             return bind_position;

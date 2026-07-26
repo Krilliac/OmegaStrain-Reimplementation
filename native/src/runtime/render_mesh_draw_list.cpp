@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 namespace omega::runtime
 {
@@ -54,40 +55,78 @@ constexpr std::uint32_t kOutsideFar = 1U << 5U;
 constexpr std::uint32_t kOutsideEveryPlane = kOutsideLeft | kOutsideRight | kOutsideBottom |
                                              kOutsideTop | kOutsideNear | kOutsideFar;
 
-[[nodiscard]] double ClipComponent(const asset::Matrix4x4IR& object_to_clip,
-    const std::size_t row, const double x, const double y, const double z) noexcept
+struct OutwardInterval final
 {
-    return static_cast<double>(object_to_clip.row_major[row * 4U]) * x +
-           static_cast<double>(object_to_clip.row_major[row * 4U + 1U]) * y +
-           static_cast<double>(object_to_clip.row_major[row * 4U + 2U]) * z +
-           static_cast<double>(object_to_clip.row_major[row * 4U + 3U]);
+    double lower = 0.0;
+    double upper = 0.0;
+};
+
+[[nodiscard]] OutwardInterval ClipComponentBounds(const asset::Matrix4x4IR& object_to_clip,
+    const std::size_t row, const float x, const float y, const float z) noexcept
+{
+    const std::array<float, 4U> coordinates{x, y, z, 1.0F};
+    OutwardInterval bounds;
+    constexpr double negative_infinity = -std::numeric_limits<double>::infinity();
+    constexpr double positive_infinity = std::numeric_limits<double>::infinity();
+    for (std::size_t column = 0U; column < coordinates.size(); ++column)
+    {
+        // A binary32-by-binary32 product is exactly representable in binary64. Only the running
+        // additions round, so advancing each endpoint by one binary64 value encloses the exact dot
+        // product even under catastrophic cancellation.
+        const double term = static_cast<double>(object_to_clip.row_major[row * 4U + column]) *
+                            static_cast<double>(coordinates[column]);
+        bounds.lower = std::nextafter(bounds.lower + term, negative_infinity);
+        bounds.upper = std::nextafter(bounds.upper + term, positive_infinity);
+    }
+    return bounds;
+}
+
+[[nodiscard]] double SumUpperBound(
+    const OutwardInterval& left, const OutwardInterval& right) noexcept
+{
+    return std::nextafter(
+        left.upper + right.upper, std::numeric_limits<double>::infinity());
+}
+
+[[nodiscard]] double DifferenceUpperBound(
+    const OutwardInterval& left, const OutwardInterval& right) noexcept
+{
+    return std::nextafter(
+        left.upper - right.lower, std::numeric_limits<double>::infinity());
+}
+
+[[nodiscard]] bool IsFinite(const OutwardInterval& value) noexcept
+{
+    return std::isfinite(value.lower) && std::isfinite(value.upper);
 }
 
 [[nodiscard]] std::uint32_t CornerOutsideMask(const asset::Matrix4x4IR& object_to_clip,
-    const double x, const double y, const double z) noexcept
+    const float x, const float y, const float z) noexcept
 {
-    const double clip_x = ClipComponent(object_to_clip, 0U, x, y, z);
-    const double clip_y = ClipComponent(object_to_clip, 1U, x, y, z);
-    const double clip_z = ClipComponent(object_to_clip, 2U, x, y, z);
-    const double clip_w = ClipComponent(object_to_clip, 3U, x, y, z);
-    if (!std::isfinite(clip_x) || !std::isfinite(clip_y) || !std::isfinite(clip_z) ||
-        !std::isfinite(clip_w))
+    const OutwardInterval clip_x = ClipComponentBounds(object_to_clip, 0U, x, y, z);
+    const OutwardInterval clip_y = ClipComponentBounds(object_to_clip, 1U, x, y, z);
+    const OutwardInterval clip_z = ClipComponentBounds(object_to_clip, 2U, x, y, z);
+    const OutwardInterval clip_w = ClipComponentBounds(object_to_clip, 3U, x, y, z);
+    if (!IsFinite(clip_x) || !IsFinite(clip_y) || !IsFinite(clip_z) || !IsFinite(clip_w))
     {
         return 0U;
     }
 
+    // Each canonical Direct3D plane is expressed as an inside-is-nonnegative affine form. A
+    // corner is outside only when the outward-rounded upper bound proves the complete interval is
+    // strictly negative. Numerically uncertain boundary cases therefore fail soft to visible.
     std::uint32_t mask = 0U;
-    if (clip_x < -clip_w)
+    if (SumUpperBound(clip_x, clip_w) < 0.0)
         mask |= kOutsideLeft;
-    if (clip_x > clip_w)
+    if (DifferenceUpperBound(clip_w, clip_x) < 0.0)
         mask |= kOutsideRight;
-    if (clip_y < -clip_w)
+    if (SumUpperBound(clip_y, clip_w) < 0.0)
         mask |= kOutsideBottom;
-    if (clip_y > clip_w)
+    if (DifferenceUpperBound(clip_w, clip_y) < 0.0)
         mask |= kOutsideTop;
-    if (clip_z < 0.0)
+    if (clip_z.upper < 0.0)
         mask |= kOutsideNear;
-    if (clip_z > clip_w)
+    if (DifferenceUpperBound(clip_w, clip_z) < 0.0)
         mask |= kOutsideFar;
     return mask;
 }
@@ -132,19 +171,16 @@ bool IsBoxPossiblyVisible(const asset::Matrix4x4IR& object_to_clip,
         return true;
     }
 
-    const std::array<double, 2U> xs{
-        static_cast<double>(minimum.x), static_cast<double>(maximum.x)};
-    const std::array<double, 2U> ys{
-        static_cast<double>(minimum.y), static_cast<double>(maximum.y)};
-    const std::array<double, 2U> zs{
-        static_cast<double>(minimum.z), static_cast<double>(maximum.z)};
+    const std::array<float, 2U> xs{minimum.x, maximum.x};
+    const std::array<float, 2U> ys{minimum.y, maximum.y};
+    const std::array<float, 2U> zs{minimum.z, maximum.z};
 
     std::uint32_t shared_outside = kOutsideEveryPlane;
-    for (const double z : zs)
+    for (const float z : zs)
     {
-        for (const double y : ys)
+        for (const float y : ys)
         {
-            for (const double x : xs)
+            for (const float x : xs)
             {
                 shared_outside &= CornerOutsideMask(object_to_clip, x, y, z);
                 if (shared_outside == 0U)
