@@ -15,15 +15,15 @@ function(normalize_process_output output_variable input_value)
     set(${output_variable} "${normalized}" PARENT_SCOPE)
 endfunction()
 
-function(make_depth_33_fixture fixture_name output_variable)
-    set(root "${CMAKE_CURRENT_BINARY_DIR}/omega-tool-corpus-bounds-${fixture_name}")
+function(make_depth_fixture fixture_name deepest_depth output_variable)
+    set(root
+        "${CMAKE_CURRENT_BINARY_DIR}/omega-tool-corpus-bounds-${fixture_name}-depth-${deepest_depth}")
     file(REMOVE_RECURSE "${root}")
     file(MAKE_DIRECTORY "${root}")
 
-    # recursive_directory_iterator reports the first child as depth zero, so
-    # 34 generated children make the deepest visited entry exactly depth 33.
+    # recursive_directory_iterator reports the first child as depth zero.
     set(current "${root}")
-    foreach(depth RANGE 0 33)
+    foreach(depth RANGE 0 ${deepest_depth})
         string(APPEND current "/d")
         file(MAKE_DIRECTORY "${current}")
     endforeach()
@@ -31,7 +31,7 @@ function(make_depth_33_fixture fixture_name output_variable)
     set(${output_variable} "${root}" PARENT_SCOPE)
 endfunction()
 
-function(run_depth_limit_case
+function(run_depth_case
     case_name command expected_stdout expected_stderr fixture_root)
     execute_process(
         COMMAND "${OMEGA_TOOL_EXECUTABLE}" "${command}" "${fixture_root}"
@@ -60,26 +60,59 @@ function(run_depth_limit_case
     endif()
 endfunction()
 
-make_depth_33_fixture("hog" hog_root)
-run_depth_limit_case(
+set(hog_accepted_stdout [[{"archives":0,"valid":0,"errors":0,"entries":0,"bytes":0}]])
+string(APPEND hog_accepted_stdout "\n")
+set(nested_hog_accepted_stdout
+    [[{"top_level_archives":0,"top_level_valid":0,"top_level_errors":0,"top_level_entries":0,"nested_candidates":0,"nested_valid":0,"nested_errors":0,"nested_entries":0,"nested_bytes":0,"exact_spans":0,"zero_padded_spans":0}]])
+string(APPEND nested_hog_accepted_stdout "\n")
+set(pop_accepted_stdout
+    [[{"files":0,"valid":0,"errors":0,"terrain_records":0,"nonzero_alignment_records":0}]])
+string(APPEND pop_accepted_stdout "\n")
+
+make_depth_fixture("hog-accepted" 32 hog_accepted_root)
+run_depth_case(
+    "hog-verify-tree depth 32"
+    "hog-verify-tree"
+    "${hog_accepted_stdout}"
+    "no top-level HOG files were found\n"
+    "${hog_accepted_root}")
+
+make_depth_fixture("nested-hog-accepted" 32 nested_hog_accepted_root)
+run_depth_case(
+    "hog-verify-nested-tree depth 32"
+    "hog-verify-nested-tree"
+    "${nested_hog_accepted_stdout}"
+    "no top-level HOG files were found\nno nested HOG spans were found\n"
+    "${nested_hog_accepted_root}")
+
+make_depth_fixture("pop-accepted" 32 pop_accepted_root)
+run_depth_case(
+    "pop-verify-tree depth 32"
+    "pop-verify-tree"
+    "${pop_accepted_stdout}"
+    "no POP files were found\n"
+    "${pop_accepted_root}")
+
+make_depth_fixture("hog-rejected" 33 hog_rejected_root)
+run_depth_case(
     "hog-verify-tree depth 33"
     "hog-verify-tree"
     "{\"archives\":0,\"valid\":0,\"errors\":1,\"entries\":0,\"bytes\":0}\n"
     "HOG corpus depth exceeds safety limit\nno top-level HOG files were found\n"
-    "${hog_root}")
+    "${hog_rejected_root}")
 
-make_depth_33_fixture("nested-hog" nested_hog_root)
-run_depth_limit_case(
+make_depth_fixture("nested-hog-rejected" 33 nested_hog_rejected_root)
+run_depth_case(
     "hog-verify-nested-tree depth 33"
     "hog-verify-nested-tree"
     "{\"top_level_archives\":0,\"top_level_valid\":0,\"top_level_errors\":1,\"top_level_entries\":0,\"nested_candidates\":0,\"nested_valid\":0,\"nested_errors\":0,\"nested_entries\":0,\"nested_bytes\":0,\"exact_spans\":0,\"zero_padded_spans\":0}\n"
     "HOG corpus depth exceeds safety limit\nno top-level HOG files were found\nno nested HOG spans were found\n"
-    "${nested_hog_root}")
+    "${nested_hog_rejected_root}")
 
-make_depth_33_fixture("pop" pop_root)
-run_depth_limit_case(
+make_depth_fixture("pop-rejected" 33 pop_rejected_root)
+run_depth_case(
     "pop-verify-tree depth 33"
     "pop-verify-tree"
     "{\"files\":0,\"valid\":0,\"errors\":1,\"terrain_records\":0,\"nonzero_alignment_records\":0}\n"
     "POP corpus depth exceeds safety limit\nno POP files were found\n"
-    "${pop_root}")
+    "${pop_rejected_root}")
