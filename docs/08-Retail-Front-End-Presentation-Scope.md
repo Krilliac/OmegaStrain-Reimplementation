@@ -195,3 +195,86 @@ gate itself.
   Gap B is bounded by resolving those, not by writing new decoders.
 - **No TIM/TIM2 decoder exists** — but the front-end uses TDX, not TIM, so this
   is not on the critical path.
+
+## 9. Current owner observation command: `front-end-screen-survey`
+
+Unlike the historical gap analysis in §§1–8, this section describes the current
+command contract. It provides a bounded owner-side conformance observation; it
+does not authorize any preview behavior as retail-equivalent.
+
+### Command and exit status
+
+```text
+omega_tool front-end-screen-survey <retail-data-root>
+```
+
+`<retail-data-root>` is either a read-only `.iso` or an extracted disc root that
+contains `SYSTEM.CNF` and `GAMEDATA`. Passing the `GAMEDATA` child alone is not a
+valid service root. The path remains outside project storage and is never echoed.
+
+Exit 0 means the root opened and all currently declared screen roles were
+attempted. An individual screen load failure is a recorded observation and does
+not change that status. Exit 1 means the root itself could not be opened.
+
+### Fixed scope and output
+
+The command attempts exactly the three roles in the current owned API, in this
+order: `Title`, `CreateAgent`, and `LoadAgent`. It does not search for or infer
+other retail screen names. For Title only, it also surveys the app's visible
+button preorder, including inherited visibility, and reports whether the two
+repository-published routes (`newagent` and `loadagent`) are present.
+
+It emits one JSON line on stdout with schema
+`omega-front-end-screen-survey-v1`:
+
+```json
+{"schema":"omega-front-end-screen-survey-v1",
+ "screens":[{"key":"title","loaded":true,"error":null},
+            {"key":"create_agent","loaded":false,"error":"decode-failed"},
+            {"key":"load_agent","loaded":true,"error":null}],
+ "title_buttons":{"observed":true,"visible_button_count":3,
+                  "unknown_identifier_count":1,"empty_identifier_count":0,
+                  "duplicate_known_identifier_count":0,"nodes_visited":4,
+                  "truncated":false,
+                  "known":[{"identifier":"newagent","present":true,"ordinal":0},
+                           {"identifier":"loadagent","present":true,"ordinal":1}]}}
+```
+
+The `screens` array always contains all three rows. A successful row has
+`error: null`; a failed row carries only a stable `GameDataErrorCodeName`.
+`ordinal` is the position among visible buttons in the same preorder used by
+the current app selection walk. If Title cannot be loaded, `observed` is false,
+all aggregate fields are zero/false, and the fixed `known` entries remain in the
+schema with `present: false` and `ordinal: null`. If either traversal ceiling is
+hit, `truncated` is true and every count and ordinal is only a lower bound.
+
+### Clean-room and privacy boundary
+
+- The owner path is never serialized or included in the categorical root-open
+  diagnostic. The command performs no repository write and retains no input.
+- `LoadFrontEndScreen` necessarily reads and decodes local GUI, IE, TDX, FNT,
+  and string resources before returning an owned bundle. Those resources remain
+  local. The survey walk examines only the decoded widget-tree shape; it emits
+  no payload bytes, pixels, strings, source spans, or member names.
+- Unknown widget identifiers are reduced to `unknown_identifier_count` or
+  `empty_identifier_count`. No unknown characters, prefix, length, digest, or
+  other character-derived value is retained. Values in `known` always borrow
+  the repository's fixed literals rather than document strings.
+- Only the typed error category is serialized. `GameDataError::message`, which
+  may contain a validated project-relative identifier, is never emitted.
+- The command computes no payload or identifier-derived hash and probes only
+  `kAllFrontEndScreenKeys`. Traversal is capped at depth 64 and 65,536 nodes.
+
+The loaded/error vector, counts, and ordinals are deliberate aggregate
+structural observations and **can distinguish data sets**. They cannot recover
+the underlying content, but they are not claimed to make two owner inputs
+indistinguishable. The owner should review the complete one-line output before
+sharing it.
+
+### What the observation does not establish
+
+`loaded: true` means only that the current decoders accepted the role's local
+resources. It does not establish correct composition, layout, draw ordering,
+animation, interaction, retail equivalence, or the existence/meaning of any
+undeclared screen role. The button aggregate measures current project routing
+coverage only.

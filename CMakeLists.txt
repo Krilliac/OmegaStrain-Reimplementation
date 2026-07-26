@@ -422,6 +422,8 @@ endif()
 
 add_executable(omega_tool
     native/apps/omega_tool/asset_commands.cpp
+    native/apps/omega_tool/front_end_screen_survey_commands.cpp
+    native/apps/omega_tool/front_end_screen_survey_report.cpp
     native/apps/omega_tool/frontend_envelope_commands.cpp
     native/apps/omega_tool/level_texture_commands.cpp
     native/apps/omega_tool/main.cpp
@@ -3154,6 +3156,39 @@ if(BUILD_TESTING)
     add_test(NAME omega_front_end_screen_bundle_tests
         COMMAND omega_front_end_screen_bundle_tests)
     set_tests_properties(omega_front_end_screen_bundle_tests PROPERTIES TIMEOUT 20)
+
+    add_executable(omega_front_end_screen_survey_tests
+        native/apps/omega_tool/front_end_screen_survey_report.cpp
+        native/tests/front_end_screen_survey_tests.cpp
+    )
+    target_include_directories(omega_front_end_screen_survey_tests PRIVATE
+        native/apps/omega_tool
+    )
+    target_link_libraries(omega_front_end_screen_survey_tests PRIVATE
+        omega_content
+    )
+    target_compile_features(omega_front_end_screen_survey_tests PRIVATE cxx_std_23)
+    if(MSVC)
+        target_compile_options(omega_front_end_screen_survey_tests PRIVATE
+            /W4
+            /WX
+            /permissive-
+            /Zc:__cplusplus
+            /Zc:preprocessor
+            /utf-8
+        )
+    else()
+        target_compile_options(omega_front_end_screen_survey_tests PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-missing-field-initializers
+        )
+    endif()
+    add_test(NAME omega_front_end_screen_survey_tests
+        COMMAND omega_front_end_screen_survey_tests)
+    set_tests_properties(omega_front_end_screen_survey_tests PROPERTIES TIMEOUT 20)
 
     add_executable(omega_frontend_presentation_tests
         native/tests/frontend_presentation_tests.cpp
