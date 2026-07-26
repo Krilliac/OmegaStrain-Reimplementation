@@ -2161,11 +2161,12 @@ compose or publish a retail presentation.
   so it remained unusable for any future per-cell render submission.
 - `BuildCanonicalLevelDiagnosticViewCamera` closes that specific gap. It is a stateless, reentrant
   adapter over an unmodified `CanonicalLevelScene`: it validates every cell in source order (a
-  non-identity canonical placeholder transform or a non-finite coordinate is rejected before any
-  output is produced), measures the position union of only the cells that have both positions and
-  complete triangles, and publishes a `SceneCameraIR` pair plus the framed cell/position counts and
-  the selected decoded axis order. It reads canonical geometry only to frame it; it copies, discards,
-  or reorders no position, triangle index, or ordinal.
+  noncanonical source ordinal, non-identity canonical placeholder transform, non-finite coordinate,
+  incomplete triangle, or out-of-range triangle reference is rejected before any output is
+  produced), bounds all inspected positions and triangle indices, measures the position union of
+  only the cells that have both positions and complete triangles, and publishes a `SceneCameraIR`
+  pair plus the framed cell/position counts and the selected decoded axis order. It reads canonical
+  geometry only to frame it; it copies, discards, or reorders no position, triangle index, or ordinal.
 - Axis selection reuses the accepted ADR 0005 rule verbatim: the two largest union extents lead, with
   equal extents broken in X, then Y, then Z order, and the remaining axis becomes depth.
   `world_to_view` centres the two leading axes on the union and rebases the remaining axis on its
@@ -2178,14 +2179,15 @@ compose or publish a retail presentation.
 - Generated fixtures cover an empty scene, a triangle-free-only scene, one hand-verified triangle
   (asserting the exact composed `world_to_view`/`view_to_clip` values and the resulting clip-space
   projection of all three vertices), the X-then-Y-then-Z tie-break, a nonzero depth extent, a
-  rejected non-identity cell transform, a rejected non-finite coordinate even in a triangle-free
-  cell, tighten-only limit enforcement, and both a non-representable planar scale and a
-  non-representable depth scale from a subnormal extent.
+  rejected noncanonical source ordinal, non-identity cell transform, non-finite coordinate even in a
+  triangle-free cell, incomplete triangle, out-of-range triangle reference, exact and one-below
+  triangle-index budgets, tighten-only limit enforcement, and both a non-representable planar scale
+  and a non-representable depth scale from a subnormal extent.
 - This slice adds no `OmegaApp`, host, or GPU consumer; no page-selection or paging policy; and no
   retail camera, projection, axis meaning, handedness, up direction, field of view, depth range,
   placement, visibility, or world-space claim. It was built entirely from tracked clean-room source
   and project-generated fixtures; no owner or private input was accessed. The 408-file native-
-  dependency gate and the 617-blob public-tree gate passed. Local C++ compilation and CTest execution
+  dependency gate and the 621-blob public-tree gate passed. Local C++ compilation and CTest execution
   remain pending: the machine was under a preflight RAM `CAUTION`/`STOP` for the whole session, so no
   MSVC/CMake/CTest build was attempted, matching the E-0128 precedent for source-reviewed-only work.
 

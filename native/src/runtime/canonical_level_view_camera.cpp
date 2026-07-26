@@ -34,7 +34,8 @@ constexpr std::size_t kAxisCount = 3U;
 {
     const CanonicalLevelViewCameraLimits maxima;
     return limits.maximum_cells <= maxima.maximum_cells &&
-           limits.maximum_positions <= maxima.maximum_positions;
+           limits.maximum_positions <= maxima.maximum_positions &&
+           limits.maximum_triangle_indices <= maxima.maximum_triangle_indices;
 }
 
 [[nodiscard]] double Coordinate(const asset::Float3IR& position, const std::size_t axis) noexcept
@@ -111,8 +112,13 @@ std::expected<CanonicalLevelViewCamera, std::string> BuildCanonicalLevelDiagnost
     CanonicalLevelViewCamera view;
     CoordinateBounds bounds;
     std::uint64_t inspected_positions = 0U;
-    for (const CanonicalLevelSceneCell& cell : canonical.cells)
+    std::uint64_t inspected_triangle_indices = 0U;
+    for (std::size_t cell_index = 0U; cell_index < canonical.cells.size(); ++cell_index)
     {
+        const CanonicalLevelSceneCell& cell = canonical.cells[cell_index];
+        if (cell.source_cell_ordinal !=
+            SourceCellOrdinal{.value = static_cast<std::uint32_t>(cell_index)})
+            return std::unexpected("canonical level view camera source ordinal is invalid");
         if (cell.local_to_world != asset::kIdentityMatrix4x4IR)
         {
             return std::unexpected(
@@ -122,6 +128,12 @@ std::expected<CanonicalLevelViewCamera, std::string> BuildCanonicalLevelDiagnost
                  inspected_positions) ||
             inspected_positions > limits.maximum_positions)
             return std::unexpected("canonical level view camera exceeds the position limit");
+        if (!Add(inspected_triangle_indices,
+                 static_cast<std::uint64_t>(cell.render_mesh.triangle_indices.size()),
+                 inspected_triangle_indices) ||
+            inspected_triangle_indices > limits.maximum_triangle_indices)
+            return std::unexpected(
+                "canonical level view camera exceeds the triangle-index limit");
 
         for (const asset::Float3IR& position : cell.render_mesh.positions)
         {
@@ -129,6 +141,15 @@ std::expected<CanonicalLevelViewCamera, std::string> BuildCanonicalLevelDiagnost
                 !std::isfinite(position.z))
                 return std::unexpected(
                     "canonical level view camera requires finite cell coordinates");
+        }
+        if (cell.render_mesh.triangle_indices.size() % 3U != 0U)
+            return std::unexpected(
+                "canonical level view camera mesh has an incomplete triangle");
+        for (const std::uint32_t index : cell.render_mesh.triangle_indices)
+        {
+            if (index >= cell.render_mesh.positions.size())
+                return std::unexpected(
+                    "canonical level view camera triangle index is invalid");
         }
 
         if (cell.render_mesh.positions.empty() || cell.render_mesh.triangle_indices.empty())
