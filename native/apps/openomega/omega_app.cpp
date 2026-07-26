@@ -3079,6 +3079,61 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             break;
         }
 
+        // The project reducer can turn a menu Primary edge into a logical quit
+        // request. Resolve it while capture still owns an unpaired input frame:
+        // AppendElapsed closes that phase, after which MarkTerminal must reject
+        // the request. Cache every non-terminal reduction for the normal
+        // persistence/state-publication path later in this frame.
+        std::optional<FrontEndReduction> project_front_end;
+        if (!movie_was_active && !mp_menu_active_ &&
+            !(presentation_mode_ ==
+                    runtime::FrontEndPresentationMode::RetailRequired &&
+                retail_front_end_bundle_.has_value()))
+        {
+            project_front_end = ReduceFrontEnd(front_end_state_,
+                ResolveFrontEndInputEdges(front_end_state_.mode,
+                    FrontEndInputEdges{
+                        .primary_pressed =
+                            input_snapshot.WasPressed(kFrontEndPrimaryAction),
+                        .previous_pressed =
+                            input_snapshot.WasPressed(kFrontEndPreviousAction),
+                        .next_pressed =
+                            input_snapshot.WasPressed(kFrontEndNextAction),
+                        .cancel_pressed =
+                            input_snapshot.WasPressed(kFrontEndCancelAction),
+                    },
+                    input_snapshot.WasPressed(kDebugMoveLeftAction),
+                    input_snapshot.WasPressed(kDebugMoveRightAction),
+                    input_snapshot.WasPressed(kDebugFireAction),
+                    input_snapshot.WasPressed(kDebugTargetAction)),
+                front_end_startup_model_.visible_profiles,
+                CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
+                front_end_character_startup_model_.visible_characters,
+                ActiveCharacterIsConfirmed());
+            if (project_front_end->command.type ==
+                FrontEndCommandType::RequestQuit)
+            {
+                if (capture_session != nullptr)
+                {
+                    const auto marked =
+                        capture_session->MarkTerminal(false, true);
+                    if (!marked)
+                    {
+                        (void)ContainOpeningMovieAudio();
+                        jobs_->WaitForIdle();
+                        return RunLoopResult{
+                            .result = result,
+                            .operational_error = std::nullopt,
+                            .capture_error = marked.error(),
+                        };
+                    }
+                }
+                running = false;
+                result.quit_requested = true;
+                break;
+            }
+        }
+
         const auto current_frame = Clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
             current_frame - previous_frame);
@@ -3411,27 +3466,19 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         }
         else
         {
-            const FrontEndReduction front_end =
-                ReduceFrontEnd(front_end_state_,
-                    ResolveFrontEndInputEdges(front_end_state_.mode,
-                        FrontEndInputEdges{
-                            .primary_pressed =
-                                input_snapshot.WasPressed(kFrontEndPrimaryAction),
-                            .previous_pressed =
-                                input_snapshot.WasPressed(kFrontEndPreviousAction),
-                            .next_pressed =
-                                input_snapshot.WasPressed(kFrontEndNextAction),
-                            .cancel_pressed =
-                                input_snapshot.WasPressed(kFrontEndCancelAction),
-                        },
-                        input_snapshot.WasPressed(kDebugMoveLeftAction),
-                        input_snapshot.WasPressed(kDebugMoveRightAction),
-                        input_snapshot.WasPressed(kDebugFireAction),
-                        input_snapshot.WasPressed(kDebugTargetAction)),
-                    front_end_startup_model_.visible_profiles,
-                    CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
-                    front_end_character_startup_model_.visible_characters,
-                    ActiveCharacterIsConfirmed());
+            if (!project_front_end)
+            {
+                jobs_->WaitForIdle();
+                constexpr std::string_view error =
+                    "project front-end reduction was not resolved";
+                log_->Error("frontend", error);
+                return RunLoopResult{
+                    .result = result,
+                    .operational_error = std::string(error),
+                    .capture_error = std::nullopt,
+                };
+            }
+            const FrontEndReduction& front_end = *project_front_end;
             // The command is applied, and therefore persisted, before its state
             // is published. A failed command leaves the prior front-end state and
             // the prior activation in place.

@@ -6786,6 +6786,84 @@ int main()
               OmegaAppTestAccess::FrontEnd(*app) == kTitleQuit,
         "only the final physical next-alias release emits action 3 release");
 
+    const std::uint64_t menu_quit_terminal_index =
+        OmegaAppTestAccess::NextInputFrameIndex(*app);
+    const omega::app::GpuHostSnapshot menu_quit_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    Check(PushKey(SDL_SCANCODE_F1, true) &&
+              OmegaAppTestAccess::ArmNextRunElapsed(
+                  *app, modal_proof_elapsed),
+        "the Title/Quit primary edge enters with an elapsed sample");
+    auto menu_quit_capture = app->RunWithCapture(1);
+    const auto* menu_quit_pair =
+        menu_quit_capture ? menu_quit_capture->trace_pair() : nullptr;
+    const auto menu_quit_terminal =
+        menu_quit_capture ? menu_quit_capture->terminal_input() : std::nullopt;
+    const auto menu_quit_primary = menu_quit_pair
+        ? menu_quit_pair->input_trace().ActionAt(
+              0U, omega::app::kFrontEndPrimaryAction)
+        : std::nullopt;
+    Check(menu_quit_capture &&
+              menu_quit_capture->completion() ==
+                  RunCaptureCompletion::QuitRequested &&
+              !menu_quit_capture->failure() && menu_quit_pair &&
+              menu_quit_terminal && menu_quit_primary &&
+              menu_quit_capture->result().input_frames == 1U &&
+              menu_quit_capture->result().rendered_frames == 0 &&
+              menu_quit_capture->result().quit_requested &&
+              menu_quit_capture->result().planned_simulation_steps == 0U &&
+              menu_quit_capture->result().executed_simulation_steps == 0U &&
+              menu_quit_capture->scheduler_state_before() ==
+                  modal_scheduler_before &&
+              menu_quit_capture->scheduler_state_after() ==
+                  modal_scheduler_before &&
+              OmegaAppTestAccess::FrontEnd(*app) == kTitleQuit &&
+              SameSimulationState(
+                  OmegaAppTestAccess::SimulationSnapshot(*app),
+                  modal_simulation_before) &&
+              OmegaAppTestAccess::DebugLocomotionPosition(*app) ==
+                  modal_position_before &&
+              OmegaAppTestAccess::GpuSnapshot(*app) ==
+                  menu_quit_gpu_before,
+        "Title/Quit terminates capture before elapsed, simulation, rendering, or state publication");
+    if (menu_quit_pair && menu_quit_terminal && menu_quit_primary)
+    {
+        Check(menu_quit_pair->input_trace().first_frame_index() ==
+                  menu_quit_terminal_index &&
+                  menu_quit_pair->input_trace().frame_count() == 1U &&
+                  menu_quit_pair->scheduler_elapsed_trace().frame_count() ==
+                      0U &&
+                  menu_quit_terminal->frame_index ==
+                      menu_quit_terminal_index &&
+                  !menu_quit_terminal->host_quit_requested &&
+                  menu_quit_terminal->logical_quit_pressed &&
+                  menu_quit_primary->held && menu_quit_primary->pressed &&
+                  !menu_quit_primary->released,
+            "Title/Quit owns the exact pending input as a logical terminal reason");
+    }
+
+    Check(PushKey(SDL_SCANCODE_F1, false) && RunPlainFrame() &&
+              OmegaAppTestAccess::FrontEnd(*app) == kTitleQuit,
+        "the terminal Title/Quit primary edge releases without changing selection");
+    const omega::app::GpuHostSnapshot plain_menu_quit_gpu_before =
+        OmegaAppTestAccess::GpuSnapshot(*app);
+    Check(PushKey(SDL_SCANCODE_F1, true),
+        "a fresh Title/Quit primary edge enters the plain run path");
+    const auto plain_menu_quit = app->Run(1);
+    Check(plain_menu_quit &&
+              plain_menu_quit->input_frames == 1U &&
+              plain_menu_quit->rendered_frames == 0 &&
+              plain_menu_quit->quit_requested &&
+              plain_menu_quit->planned_simulation_steps == 0U &&
+              plain_menu_quit->executed_simulation_steps == 0U &&
+              OmegaAppTestAccess::FrontEnd(*app) == kTitleQuit &&
+              OmegaAppTestAccess::GpuSnapshot(*app) ==
+                  plain_menu_quit_gpu_before,
+        "Title/Quit terminates a plain run before rendering or publishing another state");
+    Check(PushKey(SDL_SCANCODE_F1, false) && RunPlainFrame() &&
+              OmegaAppTestAccess::FrontEnd(*app) == kTitleQuit,
+        "the plain-run Title/Quit primary edge releases at the same selection");
+
     Check(PushKey(SDL_SCANCODE_DOWN, true) && RunPlainFrame() &&
               OmegaAppTestAccess::FrontEnd(*app) == kTitleQuit &&
               PushKey(SDL_SCANCODE_DOWN, false) && RunPlainFrame(),
