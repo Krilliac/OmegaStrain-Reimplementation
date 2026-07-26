@@ -2466,3 +2466,44 @@ level visibly and correctly textured on screen under `OPENOMEGA_VISUAL_GEOMETRY=
 claim, and it additionally depends on the unproven UV scale, on per-material binding that does not
 exist yet, and on the strip-break topology work. No retail texture mapping, material assignment,
 sampler state, tiling rule, or visual parity is claimed.
+
+### Retail menu no longer strands on an unloadable screen (commit `b955e4e`, 2026-07-25)
+
+This entry is written from its own commit. The commits between `a4a6856` and this one are not yet
+written up in this section; their absence here is outstanding documentation work, not a claim that
+they landed no change.
+
+- `StepRetailFrontEndNav` switches screen unconditionally once it is handed an accept target, and
+  `UpdateRetailFrontEndPresentation` handed one over before anything checked that the destination
+  could be composed. When `LoadFrontEndScreen` failed for that screen the compose bailed without
+  updating `retail_composed_nav_`, so navigation sat on a screen that never drew while the player
+  still saw the Title's last composed frame. Accept is inert off the Title, so only a Back edge
+  recovered.
+- The failure also repeated indefinitely: `RetailBundleForScreen` cached successes only, so a missing
+  screen re-ran its archive decode and re-emitted its warning every frame -- twice per frame, because
+  the function is called once to bound navigation and once to compose.
+- `ResolveRetailFrontEndAcceptTarget` (pure, in `retail_front_end_nav.h`) now admits a target only
+  when an Accept edge is present and the destination is presentable. `StepRetailFrontEndNav` is
+  unchanged; the caller decides whether a target is offered. `RetailBundleForScreen` memoizes a
+  screen whose load was actually attempted and failed, bounding the cost to one attempt and one log
+  line; a screen never attempted (no content service) is not memoized and can still resolve later.
+  The redundant per-frame warning in the compose path is removed.
+- `OmegaApp` probes the destination only on the Accept edge, so no routed screen is eagerly loaded,
+  and that probe warms the cache the compose reuses.
+- Coverage is compile-time, beside the existing pure-nav `static_assert`s: every admission
+  combination; admission composed with the step (refused target holds screen and selection, admitted
+  target switches and resets, Back still wins on the same frame); and the previously uncovered clamp
+  cases -- a stale selection past the button count, a screen with no selectable button, and Back
+  recovering the Title from one.
+
+Validation is partial and bounded by a deliberate no-build constraint in the worktree that produced
+it: the C++ was NOT compiled and CTest was NOT run. The `static_assert`s are written so an incorrect
+policy fails the build rather than passing silently. What did run, and passed, is the repository's
+cheap tooling: the native dependency gate (430 files), the public-tree gate (648 indexed text blobs),
+the evidence-ledger and ledger-format gates (129 records), and the Python tooling suite
+(461 tests, 1,879 subtests). A compiled `/W4 /WX` build plus default CTest remains outstanding for
+this commit.
+
+Refusing an unpresentable transition is fail-closed project policy. It asserts no retail transition
+rule, no retail screen availability, no retail Accept/Back semantics, and no retail behaviour for a
+screen this build cannot yet compose.
