@@ -445,6 +445,29 @@ private:
 class FrontEndLoadBudget final
 {
 public:
+    class RetainedScratchCheckpoint final
+    {
+    public:
+        explicit RetainedScratchCheckpoint(FrontEndLoadBudget& budget) noexcept
+            : budget_(budget), retained_scratch_bytes_(budget.retained_scratch_bytes_)
+        {
+        }
+
+        ~RetainedScratchCheckpoint()
+        {
+            budget_.RestoreRetainedScratch(retained_scratch_bytes_);
+        }
+
+        RetainedScratchCheckpoint(const RetainedScratchCheckpoint&) = delete;
+        RetainedScratchCheckpoint& operator=(const RetainedScratchCheckpoint&) = delete;
+        RetainedScratchCheckpoint(RetainedScratchCheckpoint&&) = delete;
+        RetainedScratchCheckpoint& operator=(RetainedScratchCheckpoint&&) = delete;
+
+    private:
+        FrontEndLoadBudget& budget_;
+        std::uint64_t retained_scratch_bytes_ = 0U;
+    };
+
     [[nodiscard]] static asset::DecodeResult<FrontEndLoadBudget> Create(
         const asset::DecodeLimits caller_limits)
     {
@@ -470,6 +493,11 @@ public:
         return budget;
     }
 
+    [[nodiscard]] RetainedScratchCheckpoint MakeRetainedScratchCheckpoint() noexcept
+    {
+        return RetainedScratchCheckpoint(*this);
+    }
+
     [[nodiscard]] asset::DecodeResult<asset::DecodeLimits> ChildLimits(
         const std::uint32_t container_depth) const
     {
@@ -481,9 +509,10 @@ public:
         return asset::DecodeLimits{
             .maximum_input_bytes = remaining_input_bytes_,
             .maximum_output_bytes = remaining_output_bytes_,
-            // Scratch is a PEAK (transient, per-decode) bound, not a cumulative
-            // pool -- see Commit. Each child gets the full peak headroom.
-            .maximum_scratch_bytes = limits_.maximum_scratch_bytes,
+            // Retained archive/index/reference workspace shares the operation
+            // allowance. A child may reuse only the transient headroom left
+            // after those live allocations have been debited.
+            .maximum_scratch_bytes = remaining_scratch_bytes_,
             .maximum_items = remaining_items_,
             .maximum_string_bytes = limits_.maximum_string_bytes,
             .maximum_nesting_depth = limits_.maximum_nesting_depth - container_depth,
@@ -494,33 +523,71 @@ public:
         const std::uint64_t item_count, const std::uint64_t output_bytes,
         const std::uint64_t scratch_bytes, const std::string_view description)
     {
-        // Input, items, and owned output are retained across the screen's
-        // members, so they debit the shared remaining budget. GS local-memory
-        // scratch is PEAK, not cumulative: every texture decode reuses the same
-        // transient GS workspace (a fixed 4 MiB) and frees it before the next,
-        // so it is bounded by the per-decode maximum and never summed -- matching
-        // SourceResolveBudget's high-water treatment above. Summing it (as this
-        // did) falsely exhausted the budget after ~31 textures, which is why the
-        // Command Center hub (>31 members) returned decode-failed.
+        // Decoder scratch is transient. Every sequential texture decode may
+        // reuse the same GS workspace, but that peak must still fit beside all
+        // retained workspace that is live at the time of the decode.
         if (input_bytes > remaining_input_bytes_ || item_count > remaining_items_ ||
             output_bytes > remaining_output_bytes_ ||
-            scratch_bytes > limits_.maximum_scratch_bytes)
+            scratch_bytes > remaining_scratch_bytes_)
         {
             return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
                 std::string(description) + " exceeded the shared front-end operation budget"));
         }
+        std::uint64_t observed_scratch_bytes = 0U;
+        if (!Add(retained_scratch_bytes_, scratch_bytes, observed_scratch_bytes))
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "front-end scratch size overflows"));
+        }
         remaining_input_bytes_ -= input_bytes;
         remaining_items_ -= item_count;
         remaining_output_bytes_ -= output_bytes;
-        peak_scratch_bytes_ = std::max(peak_scratch_bytes_, scratch_bytes);
+        peak_scratch_bytes_ = std::max(peak_scratch_bytes_, observed_scratch_bytes);
+        return {};
+    }
+
+    [[nodiscard]] asset::DecodeResult<void> CommitRetained(
+        const std::uint64_t input_bytes, const std::uint64_t item_count,
+        const std::uint64_t output_bytes, const std::uint64_t scratch_bytes,
+        const std::string_view description)
+    {
+        if (input_bytes > remaining_input_bytes_ || item_count > remaining_items_ ||
+            output_bytes > remaining_output_bytes_ ||
+            scratch_bytes > remaining_scratch_bytes_)
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
+                std::string(description) + " exceeded the shared front-end operation budget"));
+        }
+        std::uint64_t retained_scratch_bytes = 0U;
+        if (!Add(retained_scratch_bytes_, scratch_bytes, retained_scratch_bytes))
+        {
+            return std::unexpected(AssetError(asset::DecodeErrorCode::Overflow,
+                "front-end retained scratch size overflows"));
+        }
+        remaining_input_bytes_ -= input_bytes;
+        remaining_items_ -= item_count;
+        remaining_output_bytes_ -= output_bytes;
+        remaining_scratch_bytes_ -= scratch_bytes;
+        retained_scratch_bytes_ = retained_scratch_bytes;
+        peak_scratch_bytes_ = std::max(peak_scratch_bytes_, retained_scratch_bytes_);
         return {};
     }
 
 private:
+    void RestoreRetainedScratch(const std::uint64_t retained_scratch_bytes) noexcept
+    {
+        // The checkpoint can only restore an earlier value from this budget.
+        // Peak usage deliberately remains historical and is never rewound.
+        retained_scratch_bytes_ = retained_scratch_bytes;
+        remaining_scratch_bytes_ =
+            limits_.maximum_scratch_bytes - retained_scratch_bytes_;
+    }
+
     explicit FrontEndLoadBudget(const asset::DecodeLimits limits) noexcept
         : limits_(limits),
           remaining_input_bytes_(limits.maximum_input_bytes),
           remaining_output_bytes_(limits.maximum_output_bytes),
+          remaining_scratch_bytes_(limits.maximum_scratch_bytes),
           remaining_items_(limits.maximum_items)
     {
     }
@@ -528,8 +595,10 @@ private:
     asset::DecodeLimits limits_;
     std::uint64_t remaining_input_bytes_ = 0;
     std::uint64_t remaining_output_bytes_ = 0;
+    std::uint64_t remaining_scratch_bytes_ = 0;
     std::uint64_t remaining_items_ = 0;
-    // High-water mark of transient per-decode scratch (peak, not summed).
+    std::uint64_t retained_scratch_bytes_ = 0;
+    // High-water mark of retained workspace plus one transient decoder peak.
     std::uint64_t peak_scratch_bytes_ = 0;
 };
 
@@ -663,7 +732,7 @@ using ArchiveDirectory = std::unordered_map<std::string, const archive::HogEntry
     auto workspace = DirectoryWorkspaceUpperBound(archive, limits);
     if (!workspace)
         return std::unexpected(workspace.error());
-    auto committed = budget.Commit(0U, 0U, 0U, *workspace, description);
+    auto committed = budget.CommitRetained(0U, 0U, 0U, *workspace, description);
     if (!committed)
         return std::unexpected(committed.error());
     return BuildArchiveDirectory(archive, limits);
@@ -880,7 +949,8 @@ using FrontEndScopedResourceSet =
                 "front-end dependency workspace size overflows"));
         }
     }
-    return budget.Commit(0U, references.size(), 0U, scratch_bytes, description);
+    return budget.CommitRetained(
+        0U, references.size(), 0U, scratch_bytes, description);
 }
 
 [[nodiscard]] asset::DecodeResult<void> CommitFrontEndScopedResourceSet(
@@ -911,7 +981,7 @@ using FrontEndScopedResourceSet =
             }
         }
     }
-    return budget.Commit(
+    return budget.CommitRetained(
         0U, items, 0U, scratch_bytes, "front-end visual-scope references");
 }
 
@@ -1492,7 +1562,7 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
         return std::unexpected(DecodeFailure(
             "unable to load front-end screen archive", screen_limits.error()));
     }
-    auto screen_copy = budget.Commit(
+    auto screen_copy = budget.CommitRetained(
         0U, 0U, 0U, screen_bytes.size(), "front-end screen archive copy");
     if (!screen_copy)
     {
@@ -1520,6 +1590,12 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
         return std::unexpected(DecodeFailure(
             "unable to index front-end screen archive", screen_directory.error()));
     }
+    screen_limits = budget.ChildLimits(1U);
+    if (!screen_limits)
+    {
+        return std::unexpected(DecodeFailure(
+            "unable to decode canonical front-end GUI", screen_limits.error()));
+    }
 
     auto gui_entry = FindArchiveEntry(*screen_directory, route->gui_member, *screen_limits);
     auto visual_entry = FindArchiveEntry(
@@ -1539,7 +1615,7 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
             "unable to decode canonical front-end GUI", gui.error()));
     }
     auto gui_commit = budget.Commit(gui_bytes.size(), gui->decoded_items,
-        gui->logical_output_bytes, 0U, "front-end GUI");
+        gui->logical_output_bytes, gui->peak_scratch_bytes, "front-end GUI");
     if (!gui_commit)
     {
         return std::unexpected(DecodeFailure(
@@ -1560,7 +1636,8 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
             "unable to decode canonical front-end visual document", visual.error()));
     }
     auto visual_commit = budget.Commit(visual_bytes.size(), visual->decoded_items,
-        visual->logical_output_bytes, 0U, "front-end visual document");
+        visual->logical_output_bytes, visual->peak_scratch_bytes,
+        "front-end visual document");
     if (!visual_commit)
     {
         return std::unexpected(DecodeFailure(
@@ -1706,6 +1783,8 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
         if (scope == *primary_scope)
             continue;
 
+        [[maybe_unused]] auto scope_scratch_checkpoint =
+            budget.MakeRetainedScratchCheckpoint();
         auto scope_limits = budget.ChildLimits(1U);
         if (!scope_limits)
         {
@@ -1741,7 +1820,7 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                 "unable to load front-end visual scope archive",
                 scope_archive_size.error()));
         }
-        auto scope_copy = budget.Commit(
+        auto scope_copy = budget.CommitRetained(
             0U, 0U, 0U, scope_archive_bytes.size(), "front-end visual scope archive copy");
         if (!scope_copy)
         {
@@ -1796,8 +1875,8 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
                 scope_visual.error()));
         }
         auto scope_visual_commit = budget.Commit(scope_visual_bytes.size(),
-            scope_visual->decoded_items, scope_visual->logical_output_bytes, 0U,
-            "front-end scoped visual document");
+            scope_visual->decoded_items, scope_visual->logical_output_bytes,
+            scope_visual->peak_scratch_bytes, "front-end scoped visual document");
         if (!scope_visual_commit)
         {
             return std::unexpected(DecodeFailure(
@@ -1904,9 +1983,11 @@ GameDataService::LoadFrontEndScreen(const FrontEndScreenKey key) const
 
     FrontEndScreenBundle::FontMap fonts;
     FrontEndScreenBundle::TextureMap font_atlases;
-    FrontEndDependencySet atlas_references;
     if (!font_references.empty())
     {
+        [[maybe_unused]] auto font_scratch_checkpoint =
+            budget.MakeRetainedScratchCheckpoint();
+        FrontEndDependencySet atlas_references;
         auto font_archive_bytes = read_direct(
             kFontArchiveGamePath, kFrontEndMaximumAggregateInputBytes);
         if (!font_archive_bytes)
