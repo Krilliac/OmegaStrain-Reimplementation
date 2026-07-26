@@ -497,6 +497,34 @@ Useful anchors extracted from the same 168-draw frame, framebuffer pixels:
 The two mission-name lines share one 256 × 256 glyph atlas and are emitted as `PRIM=sprite` runs
 (34 and 28 vertices), which is the title's text path; the ring markers never use sprites.
 
+### Texture identity follow-up: bounded draw-level resolution
+
+A later owner-side byte replay closed the texture-identity question that the geometry-only pass
+below deliberately left open. The replay walked GIF uploads and draws in order, tracked each
+`BITBLTBUF` destination, and compared the uploaded image/palette byte strings with the stored upload
+rectangles decoded from the owner's `CMDCENTR.HOG`. A draw was attributed only when the bytes most
+recently written to its `TEX0.TBP0`/CBP slots were identical to one decoded member; dimensions or
+member-name guesses were not used.
+
+For the observed common opaque passes, that procedure resolves markers 3–18 to `BUTTON.TDX`,
+marker 1 to `BUTTON_HIGHLIGHT.TDX`, and markers 19–20 to `UNLOCKED_DARK.TDX` and
+`ONLINEDARK_GREY.TDX`. On the observed mission-select form specifically, marker 2's two opaque
+quads resolve to `IPCA_LOGO.TDX` then `MULTI_ICON.TDX`, while marker 21's opaque draw 154 resolves
+to `PERSONNELDARK.TDX`. These names are not generic "selected marker" roles.
+
+The corresponding member identity for Personnel marker 21's opaque draw 153 remains unresolved.
+That draw has proven geometry and alpha behaviour, but this replay did not establish which archive
+member supplied it. `retail_mission_ring.h` therefore represents mission select and Personnel as
+separate observed forms, exposes draw 153's measured 53.500 × 46.188 geometry without assigning it
+a member name, and omits that pass unless a binding is supplied explicitly. It never reuses marker
+2's mission-select textures for marker 21.
+
+Reproduction requires the owner's matching capture and retail archive; both remain outside version
+control. No upload bytes, palette bytes, texels, filesystem paths, or private capture identity are
+stored here. This proves texture identity only for the listed observed draws. It does not establish
+the unresolved Personnel draw, mission semantics, selection order, unobserved screen states, or
+general texture-binding behavior.
+
 ## UNPROVEN
 
 * **Whether 22 equals the mission count.** The captures prove 22 markers are drawn. They do not
@@ -525,11 +553,6 @@ The two mission-name lines share one 256 × 256 glyph atlas and are emitted as `
   table is the same for a save with different mission progress is still untested.
 * **What marker 0 represents.** Its motion, its lack of an opaque pass, and its position near
   marker 19 are all measured; its meaning is not.
-* **Texture identity.** Markers reference different `TEX0.TBP0` addresses (for example the plain
-  dot is `TBP0=11766`/`11460` for markers 3–18 but `15614` for markers 1–2 in `…003922`, and the
-  addresses differ between captures). Equal addresses within one capture mean the same texture
-  cache slot; different addresses do **not** prove different images. Texel payloads were
-  deliberately not decoded.
 * **The 3D interpretation.** All coordinates here are post-transform screen positions. Nothing in a
   GS dump exposes the model or view transform that produced them.
 
@@ -549,3 +572,7 @@ slot07, and establishes the slot-to-screen map. Its numbers come from
 `tools/tests/test_measure_mission_ring_state.py`; screen identifications were checked against each
 capture's own companion PNG. The captures, their PNGs and the tool's JSON output are owner-private
 and stay under the git-ignored `analysis/DrawDump/` tree.
+
+Extended again on 2026-07-25 with the owner-local byte replay described above. The matching capture
+and `CMDCENTR.HOG` remain private; this document retains only the bounded categorical member mapping
+needed by the clean-room implementation.

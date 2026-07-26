@@ -1022,14 +1022,16 @@ void TestMeasuredMissionRingGeometry()
             {
                 table_matches = false;
             }
-            // MISSION-RING.md: only marker 0 "carries no opaque pass at all".
-            if (marker.emits_opaque_pass != (index != 0U))
+            // Marker 0 is transparent in every observed frame. Marker 2 has no
+            // baseline pass: mission select uses its separate two-quad form,
+            // and Personnel leaves all five of its draws transparent.
+            if (marker.emits_opaque_pass != (index != 0U && index != 2U))
                 opaque_flags_match = false;
         }
         Check(table_matches,
             "every marker centre and extent matches the measured table");
         Check(opaque_flags_match,
-            "only the animated marker 0 lacks an opaque pass");
+            "only markers 0 and 2 lack a baseline opaque pass");
     }
 
     // Every marker's opaque pass names the CMDCENTR.HOG member it samples.
@@ -1038,7 +1040,7 @@ void TestMeasuredMissionRingGeometry()
     {
         using Role = presentation::RetailMissionRingTextureRole;
         constexpr std::array<Role, 22U> kDocumentedRoles{
-            Role::None, Role::HighlightedDot, Role::PlainDot, Role::PlainDot,
+            Role::None, Role::HighlightedDot, Role::None, Role::PlainDot,
             Role::PlainDot, Role::PlainDot, Role::PlainDot, Role::PlainDot,
             Role::PlainDot, Role::PlainDot, Role::PlainDot, Role::PlainDot,
             Role::PlainDot, Role::PlainDot, Role::PlainDot, Role::PlainDot,
@@ -1085,6 +1087,10 @@ void TestMeasuredMissionRingGeometry()
         omega::asset::RawGsRgba8{
             .red = 130U, .green = 140U, .blue = 150U, .alpha = 128U},
         omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha);
+    const auto personnel_selected_observed_texture = MakeLayerTexture(
+        omega::asset::RawGsRgba8{
+            .red = 220U, .green = 230U, .blue = 240U, .alpha = 128U},
+        omega::content::FrontEndTextureAlphaMode::UsesPaletteAlpha);
     const presentation::RetailMissionRingTextures resolved{
         .band = nullptr,
         .plain_dot = &plain_dot_texture,
@@ -1094,14 +1100,15 @@ void TestMeasuredMissionRingGeometry()
         .unlocked_icon = &unlocked_icon_texture,
         .online_icon = &online_icon_texture,
         .personnel_icon = &personnel_icon_texture,
+        .personnel_selected_observed_draw =
+            &personnel_selected_observed_texture,
     };
 
-    // 2. The markers, composed with the one selection the captures show. With
-    // no band texture the band quad is not emitted, so everything here is a
-    // marker.
+    // 2. The observed mission-select form. With no band texture the band quad
+    // is not emitted, so everything here is a marker.
     std::vector<RetailFrontEndRasterTriangle> ring;
     AppendRetailMissionRingTriangles(resolved, ring,
-        presentation::kRetailMissionRingCapturedSelectedIndex);
+        presentation::RetailMissionRingObservedForm::MissionSelect);
     Check(!ring.empty(), "the mission ring emits triangles");
     Check((ring.size() % 2U) == 0U, "the ring is emitted as whole quads");
 
@@ -1157,7 +1164,8 @@ void TestMeasuredMissionRingGeometry()
         for (std::uint32_t index = 1U;
              index < presentation::kRetailMissionRingMarkerCount; ++index)
         {
-            if (index == presentation::kRetailMissionRingCapturedSelectedIndex)
+            if (index ==
+                presentation::kRetailMissionRingMissionSelectMarkerIndex)
                 continue;
             const auto& measured = kDocumentedMarkers[index];
             bool found = false;
@@ -1201,7 +1209,7 @@ void TestMeasuredMissionRingGeometry()
         with_band.band = &band_texture;
         std::vector<RetailFrontEndRasterTriangle> textured;
         AppendRetailMissionRingTriangles(with_band, textured,
-            presentation::kRetailMissionRingCapturedSelectedIndex);
+            presentation::RetailMissionRingObservedForm::MissionSelect);
         Check(textured.size() == ring.size() + 2U,
             "a band texture adds exactly the two band triangles");
         std::size_t band_triangles = 0U;
@@ -1226,20 +1234,15 @@ void TestMeasuredMissionRingGeometry()
         }
     }
 
-    // 4. Exactly one marker renders the highlight form; the rest render dots.
-    for (std::uint32_t selected = 1U;
-         selected < presentation::kRetailMissionRingMarkerCount; ++selected)
+    // 4. The two-quad highlight form belongs only to mission-select marker 2.
     {
-        std::vector<RetailFrontEndRasterTriangle> selection;
-        AppendRetailMissionRingTriangles(resolved, selection, selected);
         std::size_t highlight_quads = 0U;
         std::size_t halo_on_centre = 0U;
         std::size_t icon_at_offset = 0U;
         std::size_t dot_quads = 0U;
-        const auto selection_quads = CollectQuads(selection);
-        for (std::size_t quad = 0U; quad < selection_quads.size(); ++quad)
+        for (std::size_t quad = 0U; quad < quads.size(); ++quad)
         {
-            const auto& bounds = selection_quads[quad];
+            const auto& bounds = quads[quad];
             // MISSION-RING.md, "The highlighted marker": the pair of
             // 52.31 x 47.31 quads spanning (336.688, 338.625)-(389.000,
             // 385.938) -- 52.312 x 47.312. Markers 20 and 21 (54.06 x 45.56
@@ -1252,20 +1255,20 @@ void TestMeasuredMissionRingGeometry()
             {
                 ++highlight_quads;
                 if (Near(bounds.center_x(),
-                        kDocumentedMarkers[selected].center_x) &&
+                        kDocumentedMarkers[2U].center_x) &&
                     Near(bounds.center_y(),
-                        kDocumentedMarkers[selected].center_y) &&
-                    selection[quad * 2U].texture == &selected_halo_texture)
+                        kDocumentedMarkers[2U].center_y) &&
+                    ring[quad * 2U].texture == &selected_halo_texture)
                 {
                     ++halo_on_centre;
                 }
                 // The capture's second highlight quad is displaced by exactly
                 // (3.125, 0.875) from the first (draws 24 and 25).
                 if (Near(bounds.center_x(),
-                        kDocumentedMarkers[selected].center_x + 3.125F) &&
+                        kDocumentedMarkers[2U].center_x + 3.125F) &&
                     Near(bounds.center_y(),
-                        kDocumentedMarkers[selected].center_y + 0.875F) &&
-                    selection[quad * 2U].texture == &selected_icon_texture)
+                        kDocumentedMarkers[2U].center_y + 0.875F) &&
+                    ring[quad * 2U].texture == &selected_icon_texture)
                 {
                     ++icon_at_offset;
                 }
@@ -1280,8 +1283,8 @@ void TestMeasuredMissionRingGeometry()
             "the halo quad sits on the selected marker's measured centre");
         Check(icon_at_offset == 1U,
             "the icon quad sits at the measured (3.125, 0.875) displacement");
-        // 22 markers, less marker 0 (no opaque pass), less the highlighted one.
-        Check(dot_quads == 20U, "every other opaque marker renders its dot");
+        Check(dot_quads == 20U,
+            "mission select emits every other observed opaque marker pass");
     }
 
     // The highlighted marker's own dot is suppressed (retail leaves both of its
@@ -1301,40 +1304,95 @@ void TestMeasuredMissionRingGeometry()
             "the highlighted marker's small dot is not emitted");
     }
 
-    // 5. Selection is fail-soft, and it never rotates the ring: the marker
-    // positions are identical for every selection.
+    // 5. Personnel is a separate observed form. Marker 2 is fully suppressed;
+    // marker 21 swaps from its dark 52.750 x 45.562 draw to the unresolved
+    // 53.500 x 46.188 draw. A synthetic binding tests only the proven geometry,
+    // not a retail member identity.
     {
-        std::vector<RetailFrontEndRasterTriangle> out_of_range;
-        AppendRetailMissionRingTriangles(resolved, out_of_range,
-            presentation::kRetailMissionRingMarkerCount);
-        // Nothing highlighted, nothing out of bounds: 21 opaque dots.
-        Check(CollectQuads(out_of_range).size() == 21U,
-            "an out-of-range selection highlights nothing and stays in bounds");
+        std::vector<RetailFrontEndRasterTriangle> personnel;
+        AppendRetailMissionRingTriangles(resolved, personnel,
+            presentation::RetailMissionRingObservedForm::Personnel);
+        const auto personnel_quads = CollectQuads(personnel);
+        Check(personnel_quads.size() == 20U,
+            "Personnel emits 19 common passes plus marker 21's observed draw");
 
-        std::vector<RetailFrontEndRasterTriangle> huge;
-        AppendRetailMissionRingTriangles(
-            resolved, huge, std::numeric_limits<std::uint32_t>::max());
-        Check(CollectQuads(huge).size() == 21U,
-            "a wildly out-of-range selection also fails soft");
-
-        // The ring does not rotate: marker 5's dot is at its measured position
-        // whichever marker is selected. (MISSION-RING.md: the rotation step is
-        // unobservable, and the highlighted marker is not at the ring's lowest
-        // point, so no selection is brought to a focal position.)
-        std::vector<RetailFrontEndRasterTriangle> other_selection;
-        AppendRetailMissionRingTriangles(resolved, other_selection, 12U);
+        bool marker_two_absent = true;
+        bool personnel_draw_present = false;
+        bool mission_select_texture_absent = true;
+        bool personnel_dark_texture_absent = true;
         bool marker_five_fixed = false;
-        for (const auto& quad : CollectQuads(other_selection))
+        for (std::size_t quad = 0U; quad < personnel_quads.size(); ++quad)
         {
-            if (Near(quad.center_x(), kDocumentedMarkers[5U].center_x) &&
-                Near(quad.center_y(), kDocumentedMarkers[5U].center_y) &&
-                Near(quad.width(), kDocumentedMarkers[5U].width, 0.01F))
+            const auto& bounds = personnel_quads[quad];
+            const auto* texture = personnel[quad * 2U].texture;
+            if (Near(bounds.center_x(), kDocumentedMarkers[2U].center_x) &&
+                Near(bounds.center_y(), kDocumentedMarkers[2U].center_y))
+            {
+                marker_two_absent = false;
+            }
+            if (Near(bounds.center_x(), kDocumentedMarkers[21U].center_x) &&
+                Near(bounds.center_y(), kDocumentedMarkers[21U].center_y) &&
+                Near(bounds.width(),
+                    presentation::kRetailMissionRingPersonnelSelectedWidth,
+                    0.01F) &&
+                Near(bounds.height(),
+                    presentation::kRetailMissionRingPersonnelSelectedHeight,
+                    0.01F) &&
+                texture == &personnel_selected_observed_texture)
+            {
+                personnel_draw_present = true;
+            }
+            if (texture == &selected_halo_texture ||
+                texture == &selected_icon_texture)
+            {
+                mission_select_texture_absent = false;
+            }
+            if (texture == &personnel_icon_texture)
+                personnel_dark_texture_absent = false;
+            if (Near(bounds.center_x(), kDocumentedMarkers[5U].center_x) &&
+                Near(bounds.center_y(), kDocumentedMarkers[5U].center_y) &&
+                Near(bounds.width(), kDocumentedMarkers[5U].width, 0.01F))
             {
                 marker_five_fixed = true;
             }
         }
+        Check(marker_two_absent,
+            "Personnel emits none of marker 2's transparent draws");
+        Check(personnel_draw_present,
+            "Personnel preserves marker 21 draw 153's measured geometry");
+        Check(mission_select_texture_absent,
+            "Personnel never reuses marker 2's mission-select bindings");
+        Check(personnel_dark_texture_absent,
+            "Personnel suppresses marker 21's dark mission-select draw");
         Check(marker_five_fixed,
-            "changing the selection does not move any marker");
+            "the two observed forms keep common marker positions fixed");
+
+        auto unresolved_personnel = resolved;
+        unresolved_personnel.personnel_selected_observed_draw = nullptr;
+        std::vector<RetailFrontEndRasterTriangle> fail_closed;
+        AppendRetailMissionRingTriangles(unresolved_personnel, fail_closed,
+            presentation::RetailMissionRingObservedForm::Personnel);
+        Check(CollectQuads(fail_closed).size() == 19U,
+            "an unresolved Personnel texture omits draw 153 fail-closed");
+
+        std::vector<RetailFrontEndRasterTriangle> invalid;
+        AppendRetailMissionRingTriangles(resolved, invalid,
+            static_cast<presentation::RetailMissionRingObservedForm>(0xFFU));
+        Check(CollectQuads(invalid).size() == 19U,
+            "an invalid observed form emits only common proven passes");
+        bool invalid_uses_state_texture = false;
+        for (const auto& triangle : invalid)
+        {
+            if (triangle.texture == &selected_halo_texture ||
+                triangle.texture == &selected_icon_texture ||
+                triangle.texture == &personnel_icon_texture ||
+                triangle.texture == &personnel_selected_observed_texture)
+            {
+                invalid_uses_state_texture = true;
+            }
+        }
+        Check(!invalid_uses_state_texture,
+            "an invalid observed form never guesses a state-specific texture");
     }
 
     // 6. Appending is additive and touches nothing already in the buffer.
@@ -1342,7 +1400,7 @@ void TestMeasuredMissionRingGeometry()
         std::vector<RetailFrontEndRasterTriangle> seeded;
         seeded.push_back(RetailFrontEndRasterTriangle{});
         AppendRetailMissionRingTriangles(resolved, seeded,
-            presentation::kRetailMissionRingCapturedSelectedIndex);
+            presentation::RetailMissionRingObservedForm::MissionSelect);
         Check(seeded.size() == ring.size() + 1U &&
                   seeded.front() == RetailFrontEndRasterTriangle{},
             "the producer appends and preserves prior triangles");
@@ -1356,7 +1414,7 @@ void TestMeasuredMissionRingGeometry()
         std::vector<RetailFrontEndRasterTriangle> stand_in;
         AppendRetailMissionRingTriangles(
             presentation::RetailMissionRingTextures{}, stand_in,
-            presentation::kRetailMissionRingCapturedSelectedIndex);
+            presentation::RetailMissionRingObservedForm::MissionSelect);
         Check(!stand_in.empty(), "a fully unresolved ring still draws");
 
         bool untextured = true;

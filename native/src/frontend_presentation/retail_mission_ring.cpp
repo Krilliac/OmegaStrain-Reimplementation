@@ -58,9 +58,12 @@ constexpr std::array<RetailMissionRingMarker, kRetailMissionRingMarkerCount>
         {.center_x = 437.844F, .center_y = 361.000F, .width = 29.81F,
             .height = 27.00F, .emits_opaque_pass = true,
             .opaque_role = Role::HighlightedDot},
+        // Marker 2 has no baseline opaque pass in either observed form. Mission
+        // select emits its separate two-quad form below; Personnel leaves all
+        // five of its draws transparent.
         {.center_x = 362.844F, .center_y = 362.281F, .width = 29.81F,
-            .height = 26.94F, .emits_opaque_pass = true,
-            .opaque_role = Role::PlainDot},
+            .height = 26.94F, .emits_opaque_pass = false,
+            .opaque_role = Role::None},
         {.center_x = 297.688F, .center_y = 374.406F, .width = 29.62F,
             .height = 26.81F, .emits_opaque_pass = true,
             .opaque_role = Role::PlainDot},
@@ -110,8 +113,9 @@ constexpr std::array<RetailMissionRingMarker, kRetailMissionRingMarkerCount>
             .height = 27.00F, .emits_opaque_pass = true,
             .opaque_role = Role::PlainDot},
         // Markers 19, 20 and 21 are the three distinctly shaped icons on the
-        // right of the ring. Their opaque passes sample menu-entry art, not the
-        // dot art; 19's opaque extent is its own, not its cluster minimum.
+        // right of the ring. Their mission-select opaque passes sample
+        // menu-entry art, not dot art; 19's opaque extent is its own, not its
+        // cluster minimum. Personnel replaces marker 21's baseline pass below.
         {.center_x = 515.031F, .center_y = 164.375F, .width = 43.69F,
             .height = 40.75F, .emits_opaque_pass = true,
             .opaque_role = Role::UnlockedIcon},
@@ -295,7 +299,7 @@ std::span<const RetailMissionRingMarker> RetailMissionRingMarkers() noexcept
 void AppendRetailMissionRingTriangles(
     const RetailMissionRingTextures& textures,
     std::vector<RetailFrontEndRasterTriangle>& out,
-    const std::uint32_t selected_marker_index)
+    const RetailMissionRingObservedForm observed_form)
 {
     out.reserve(out.size() + (kMaximumQuads * kTrianglesPerQuad));
 
@@ -329,32 +333,57 @@ void AppendRetailMissionRingTriangles(
             out);
     }
 
-    // The markers, in measured draw order. Fail-soft selection: an index
-    // outside the table simply matches no marker, so nothing is highlighted and
-    // nothing is read out of bounds.
+    const bool is_mission_select =
+        observed_form == RetailMissionRingObservedForm::MissionSelect;
+    const bool is_personnel =
+        observed_form == RetailMissionRingObservedForm::Personnel;
+
+    // The markers, in measured draw order. Only the two captured forms receive
+    // their state-specific passes. An invalid enum value therefore emits only
+    // the passes common to both forms.
     for (std::uint32_t index = 0U; index < kRetailMissionRingMarkerCount;
          ++index)
     {
         const RetailMissionRingMarker& marker = kMarkers[index];
-        if (index == selected_marker_index)
+        if (index == kRetailMissionRingMissionSelectMarkerIndex)
         {
-            // MISSION-RING.md, "The highlighted marker": the selected marker is
-            // the only one whose opaque pass is not its small dot -- it emits
-            // TWO 52.31 x 47.31 quads at the opaque alpha and leaves both of
-            // its dot draws at alpha 0. An alpha-0 draw contributes no sample,
-            // so the dot is simply not emitted. The pair is a halo quad on the
-            // marker centre and an icon quad displaced from it; both extents
-            // and the displacement are measured.
-            AppendMarkerPass(marker.center_x, marker.center_y,
-                kRetailMissionRingHighlightWidth,
-                kRetailMissionRingHighlightHeight,
-                textures.For(RetailMissionRingTextureRole::SelectedHalo), out);
-            AppendMarkerPass(
-                marker.center_x + kRetailMissionRingSelectedIconOffsetX,
-                marker.center_y + kRetailMissionRingSelectedIconOffsetY,
-                kRetailMissionRingHighlightWidth,
-                kRetailMissionRingHighlightHeight,
-                textures.For(RetailMissionRingTextureRole::SelectedIcon), out);
+            if (is_mission_select)
+            {
+                // Mission-select marker 2 emits two opaque 52.312x47.312
+                // quads, while its small-dot draws remain transparent.
+                AppendMarkerPass(marker.center_x, marker.center_y,
+                    kRetailMissionRingHighlightWidth,
+                    kRetailMissionRingHighlightHeight,
+                    textures.For(RetailMissionRingTextureRole::SelectedHalo),
+                    out);
+                AppendMarkerPass(
+                    marker.center_x + kRetailMissionRingSelectedIconOffsetX,
+                    marker.center_y + kRetailMissionRingSelectedIconOffsetY,
+                    kRetailMissionRingHighlightWidth,
+                    kRetailMissionRingHighlightHeight,
+                    textures.For(RetailMissionRingTextureRole::SelectedIcon),
+                    out);
+            }
+            continue;
+        }
+        if (index == kRetailMissionRingPersonnelMarkerIndex)
+        {
+            if (is_mission_select)
+            {
+                AppendMarkerPass(marker.center_x, marker.center_y, marker.width,
+                    marker.height, textures.For(marker.opaque_role), out);
+            }
+            else if (is_personnel &&
+                textures.personnel_selected_observed_draw != nullptr)
+            {
+                // Personnel makes draw 153 opaque and draw 154 transparent.
+                // The former's geometry is measured, but its archive identity
+                // is not, so no stand-in or mission-select texture is used.
+                AppendMarkerPass(marker.center_x, marker.center_y,
+                    kRetailMissionRingPersonnelSelectedWidth,
+                    kRetailMissionRingPersonnelSelectedHeight,
+                    textures.personnel_selected_observed_draw, out);
+            }
             continue;
         }
         if (!marker.emits_opaque_pass)

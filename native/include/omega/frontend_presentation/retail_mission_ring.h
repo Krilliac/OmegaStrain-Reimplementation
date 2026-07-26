@@ -14,13 +14,13 @@ class FrontEndTextureBinding;
 
 namespace omega::frontend::presentation
 {
-// MEASURED reconstruction of the retail Command Center mission-select ring.
+// MEASURED reconstruction of the retail Command Center ring.
 // Every position, extent and count below is transcribed from
-// analysis/formats/MISSION-RING.md, which derives them from three owner-private
-// PCSX2 GS captures of the `command-center-mission-select` cohort via
-// tools/gs_dump_inspect.py. The captures are in a 640x448 framebuffer, which is
-// exactly this project's canonical front-end raster, so the coordinates are
-// used verbatim with no rescaling.
+// analysis/formats/MISSION-RING.md, which derives them from five owner-private
+// PCSX2 GS captures spanning the Command Center mission-select and Personnel
+// screens via tools/gs_dump_inspect.py. The captures are in a 640x448
+// framebuffer, which is exactly this project's canonical front-end raster, so
+// the coordinates are used verbatim with no rescaling.
 //
 // What the captures proved, and what this module therefore models:
 //   1. The ring BAND is not geometry. It is a six-vertex, screen-aligned,
@@ -43,10 +43,8 @@ namespace omega::frontend::presentation
 //      and no colour tint exist to reconstruct; a marker's drawn form is its
 //      texture's own alpha over its measured quad.
 //
-// TEXTURE IDENTITY IS NOW PROVEN, and this is the one point on which this
-// header contradicts MISSION-RING.md, which lists it under UNPROVEN because
-// that pass deliberately did not decode texel payloads. It was decoded
-// afterwards, and by byte identity rather than by inference:
+// Texture identity for the listed draws was decoded afterwards, by byte
+// identity rather than by inference:
 //   * The shipped CMDCENTR.HOG members store their GS upload rectangles
 //     verbatim (frontend_tdx_decoder.cpp: one block, palette payload at block
 //     +0x120, texel payload at +0x520). Those exact byte strings appear in the
@@ -57,13 +55,19 @@ namespace omega::frontend::presentation
 //     and CBP to the member whose own bytes most recently occupied that slot --
 //     which is what the GS itself samples, and it is decided by byte equality,
 //     not by matching dimensions or guessing from names.
-//   * Under that resolution the ring's opaque passes are, without exception:
-//     markers 3-18 sample BUTTON.TDX (32x32 PSMT4); marker 1 samples
-//     BUTTON_HIGHLIGHT.TDX (32x32 PSMT8); the selected marker's two quads
-//     sample IPCA_LOGO.TDX then MULTI_ICON.TDX (64x64 PSMT8); markers 19, 20
-//     and 21 sample UNLOCKED_DARK.TDX, ONLINEDARK_GREY.TDX and
-//     PERSONNELDARK.TDX. Reproduce with the capture and CMDCENTR.HOG; the
-//     member names below are the archive members those bytes came from.
+//   * Under that resolution the common opaque passes are: markers 3-18 sample
+//     BUTTON.TDX (32x32 PSMT4), marker 1 samples BUTTON_HIGHLIGHT.TDX
+//     (32x32 PSMT8), and markers 19 and 20 sample UNLOCKED_DARK.TDX and
+//     ONLINEDARK_GREY.TDX.
+//   * On the observed mission-select form, marker 2's two opaque quads sample
+//     IPCA_LOGO.TDX then MULTI_ICON.TDX (64x64 PSMT8), while marker 21's
+//     opaque draw samples PERSONNELDARK.TDX.
+//   * On the observed Personnel form, marker 2 has no opaque pass and marker 21
+//     swaps to a different 53.500x46.188 opaque draw. That draw's archive
+//     member identity is still unresolved, so this API assigns it no member
+//     constant and never substitutes either mission-select binding for it.
+// Reproduce the resolved subset with the capture and CMDCENTR.HOG; the member
+// names below are the archive members those bytes came from.
 // This module never picks a texture itself: it names the member each marker
 // samples and the caller resolves those names in the screen's own visual scope.
 //
@@ -77,17 +81,14 @@ namespace omega::frontend::presentation
 //   * whether 22 equals the mission count (the honest range of selectable
 //     entries is 18-22), so this module exposes marker indices, never missions;
 //   * what drives the ordering (stored table, depth sort, or re-sorted view);
-//   * the ROTATION STEP -- no capture spans an L1/R1 press, so rotation is
-//     unobservable. No rotation is implemented. The selected index picks among
-//     FIXED positions and never rotates the ring to bring a selection to a
-//     focal point: the captures show the highlighted marker is not at the
-//     ring's lowest point (marker 3 is lower than the highlighted marker 2);
+//   * the selection increment -- no capture spans an L1/R1 press. No rotation
+//     is implemented because the two observed forms keep all static markers at
+//     identical fixed positions;
 //   * whether the layout is geographic -- the positions are an opaque fixed
 //     table;
 //   * what the animated marker 0 represents;
-//   * WHICH texture a marker samples when a DIFFERENT marker is selected. Only
-//     one selection state was ever captured, so the roles below are the roles
-//     observed in that state, applied to whichever index the caller selects.
+//   * any selected-marker form other than mission-select marker 2 and Personnel
+//     marker 21. The API exposes only those two observed forms.
 // Menu label placement is still none of this module's business: it comes from
 // the decoded GUI widget rectangle (asset::FrontendWidgetIR::rectangle) laid
 // out by LayoutRetailText in the frame compositor's text pass.
@@ -102,10 +103,30 @@ inline constexpr float kRetailMissionRingBandMaximumY = 387.500F;
 // MISSION-RING.md, "22 markers, at fixed screen positions".
 inline constexpr std::uint32_t kRetailMissionRingMarkerCount = 22U;
 
-// MISSION-RING.md, "The highlighted marker": marker 2, centred at
-// (362.844, 362.281), is the selected one in every capture. It is the default
-// selection here because it is the only selection state ever observed.
-inline constexpr std::uint32_t kRetailMissionRingCapturedSelectedIndex = 2U;
+// The only two observed forms. They differ only in four draw alpha values:
+// mission select makes marker 2's two large quads opaque and marker 21's dark
+// quad opaque; Personnel suppresses marker 2 and swaps marker 21 to its other
+// large quad. Arbitrary marker selection remains unproven and is not accepted
+// by AppendRetailMissionRingTriangles.
+enum class RetailMissionRingObservedForm : std::uint8_t
+{
+    MissionSelect,
+    Personnel,
+};
+
+inline constexpr std::uint32_t kRetailMissionRingMissionSelectMarkerIndex = 2U;
+inline constexpr std::uint32_t kRetailMissionRingPersonnelMarkerIndex = 21U;
+
+// Compatibility name used by the current frame compositor. Its type is an
+// observed form, not an integer marker index, so it cannot re-enable the former
+// arbitrary-selection API.
+inline constexpr RetailMissionRingObservedForm
+    kRetailMissionRingDefaultObservedForm =
+        RetailMissionRingObservedForm::MissionSelect;
+
+inline constexpr RetailMissionRingObservedForm
+    kRetailMissionRingCapturedSelectedIndex =
+        kRetailMissionRingDefaultObservedForm;
 
 // MISSION-RING.md, "The highlighted marker": the selected marker's drawn extent
 // is "the pair of 52.31 x 47.31 quads spanning (336.688, 338.625) -
@@ -117,11 +138,16 @@ inline constexpr std::uint32_t kRetailMissionRingHighlightQuadCount = 2U;
 // The two highlight quads are NOT concentric. In capture ...003922 frame 0 the
 // halo quad (draw 24) spans (336.688, 338.625)-(389.000, 385.938), centred on
 // the marker, and the icon quad (draw 25) spans (339.812, 339.500)-(392.125,
-// 386.812) -- the same size, displaced by exactly this much. Only marker 2 was
-// ever observed selected, so this displacement is measured once and applied to
-// whichever marker the caller selects.
+// 386.812) -- the same size, displaced by exactly this much. These constants
+// belong only to mission-select marker 2.
 inline constexpr float kRetailMissionRingSelectedIconOffsetX = 3.125F;
 inline constexpr float kRetailMissionRingSelectedIconOffsetY = 0.875F;
+
+// Personnel marker 21's observed opaque draw 153. Its centre is the marker
+// table's centre. The associated archive member is unresolved, so these
+// geometry constants carry no texture claim.
+inline constexpr float kRetailMissionRingPersonnelSelectedWidth = 53.500F;
+inline constexpr float kRetailMissionRingPersonnelSelectedHeight = 46.188F;
 
 // The CMDCENTR.HOG members the ring's opaque passes sample, proven by byte
 // identity between each member's stored upload rectangle and the capture's GIF
@@ -142,10 +168,8 @@ inline constexpr std::string_view kRetailMissionRingOnlineIconMember =
 inline constexpr std::string_view kRetailMissionRingPersonnelIconMember =
     "PERSONNELDARK.TDX";
 
-// Which of those members a marker's single opaque pass samples. One role per
-// member; the selected marker's two quads use SelectedHalo then SelectedIcon
-// regardless of the role its table entry carries, because a selected marker
-// does not draw its unselected form at all.
+// Which of those members a measured opaque pass samples. SelectedHalo and
+// SelectedIcon are exclusive to mission-select marker 2.
 enum class RetailMissionRingTextureRole : std::uint8_t
 {
     None,
@@ -172,6 +196,11 @@ struct RetailMissionRingTextures final
     const content::FrontEndTextureBinding* unlocked_icon = nullptr;
     const content::FrontEndTextureBinding* online_icon = nullptr;
     const content::FrontEndTextureBinding* personnel_icon = nullptr;
+    // Optional binding for Personnel marker 21's observed draw 153. No archive
+    // member identity is claimed. When absent, that pass is omitted rather
+    // than guessed or replaced with mission-select art.
+    const content::FrontEndTextureBinding* personnel_selected_observed_draw =
+        nullptr;
 
     // The binding for a role, or null when that role has none.
     [[nodiscard]] const content::FrontEndTextureBinding* For(
@@ -185,15 +214,17 @@ struct RetailMissionRingMarker final
 {
     float center_x = 0.0F;
     float center_y = 0.0F;
-    // The extent of the marker's ONE opaque pass -- what it actually draws.
-    // This equals the MISSION-RING.md marker table's "marker W x H" column for
-    // every marker except 19, where they differ; see the table in the .cpp.
+    // The marker table's measured baseline extent. For an emitted baseline
+    // pass this is its quad extent; for markers 0 and 2 it retains the measured
+    // cluster's small extent even though that pass is transparent. This equals
+    // MISSION-RING.md's "marker W x H" column except at marker 19; see the .cpp.
+    // State-specific marker 2 and Personnel marker 21 geometry uses the
+    // constants above instead.
     float width = 0.0F;
     float height = 0.0F;
-    // MISSION-RING.md: "Every marker emits exactly one opaque pass (vertex
-    // alpha 127 on all six vertices)" -- except marker 0, which "carries no
-    // opaque pass at all (alpha 0 on every vertex)" and is the only element
-    // whose position changes between frames. False only for marker 0.
+    // Whether the marker has the baseline opaque pass described above.
+    // Markers 0 and 2 do not: marker 0 is always transparent in the observed
+    // frames, while marker 2 uses only its mission-select two-quad form.
     bool emits_opaque_pass = true;
     // The member that opaque pass samples. None exactly when it emits none.
     RetailMissionRingTextureRole opaque_role =
@@ -211,13 +242,15 @@ RetailMissionRingMarkers() noexcept;
 // quad first (lowest submission ordinal), then the markers in measured draw
 // order.
 //
-// `selected_marker_index` selects among the fixed measured positions. The
-// selected marker renders the measured highlight form -- two 52.312 x 47.312
-// quads at the opaque vertex alpha sampling the halo then the icon member, with
-// its small dot suppressed (the captures show that dot at alpha 0) -- and every
-// other opaque marker renders its measured quad sampling its own member. Fails
-// soft: an index outside [0, kRetailMissionRingMarkerCount) highlights nothing
-// and reads nothing out of bounds; it never throws and never asserts.
+// `observed_form` selects one of exactly two captured forms:
+//   * MissionSelect emits marker 2's measured two-quad IPCA_LOGO/MULTI_ICON
+//     form, suppresses its small dot, and emits marker 21's PERSONNELDARK draw.
+//   * Personnel suppresses marker 2 and the dark marker-21 draw. It emits
+//     marker 21's measured 53.500x46.188 draw only when
+//     `personnel_selected_observed_draw` is supplied; otherwise that unresolved
+//     pass is omitted fail-closed.
+// No arbitrary marker-index highlight is supported. An invalid enum value emits
+// only passes common to both observed forms. It never throws or asserts.
 //
 // `textures.band` is the texture the band quad samples. It may be null, and
 // then NO band quad is emitted: the captures show the ellipse, the tick marks
@@ -241,6 +274,6 @@ RetailMissionRingMarkers() noexcept;
 // skipped, not emitted, so this can never fail the screen raster.
 void AppendRetailMissionRingTriangles(const RetailMissionRingTextures& textures,
     std::vector<RetailFrontEndRasterTriangle>& out,
-    std::uint32_t selected_marker_index =
-        kRetailMissionRingCapturedSelectedIndex);
+    RetailMissionRingObservedForm observed_form =
+        kRetailMissionRingDefaultObservedForm);
 } // namespace omega::frontend::presentation
