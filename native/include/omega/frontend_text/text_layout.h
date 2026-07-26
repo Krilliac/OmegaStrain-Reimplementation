@@ -57,6 +57,16 @@ enum class TextEllipsisMode : std::uint8_t {
   LiteralThreeDots,
 };
 
+// Where a laid-out glyph quad's top edge sits relative to its line origin.
+// `LineOrigin` uses the caller-authored line origin directly.
+// `ObservedByte17Offset` retains the earlier project hypothesis that the
+// unnamed FNT header byte 17 supplies a vertical-placement offset. The caller
+// must choose explicitly; this API assigns no retail meaning to that byte.
+enum class GlyphVerticalOrigin : std::uint8_t {
+  LineOrigin,
+  ObservedByte17Offset,
+};
+
 // Optional pair adjustments are supplied independently of FntV3IR because the
 // complete retail pair-table serialization is not yet proven. The value is an
 // advance delta in canonical GUI units and may be positive or negative.
@@ -92,6 +102,11 @@ struct TextLayoutOptions {
   TextEllipsisMode ellipsis_mode;
   std::span<const SignedPairAdjustment> pair_adjustments;
   TextLayoutLimits limits;
+
+  // Constant inter-glyph tracking in canonical GUI units, added to the advance
+  // of rendered glyphs but not spaces. Zero preserves the prior layout policy.
+  float glyph_tracking = 0.0F;
+  GlyphVerticalOrigin vertical_origin = GlyphVerticalOrigin::LineOrigin;
 };
 
 struct TextGlyphQuad {

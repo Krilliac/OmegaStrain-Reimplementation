@@ -150,6 +150,28 @@ int main() {
               !decoded->AdvanceForCodepoint(
                   0x21U, std::numeric_limits<float>::infinity()),
           "FNT v3 rejects invalid atlas widths in its width adapter");
+
+    // The generated fixture deliberately gives record zero a taller span than
+    // its neighbours, so the shared-row query must decline rather than pick a
+    // representative row.
+    Check(!decoded->LineCellHeight(256.0F),
+          "FNT v3 declines a row height when its glyph records disagree");
+    omega::retail::FntV3IR uniform = *decoded;
+    for (auto &glyph : uniform.glyphs) {
+      glyph.v_top = 0.25F;
+      glyph.v_bottom = 0.5F;
+    }
+    const auto uniform_height = uniform.LineCellHeight(256.0F);
+    Check(uniform_height && *uniform_height == 64.0F,
+          "FNT v3 reports the shared glyph row height in atlas texels");
+    Check(!uniform.LineCellHeight(-1.0F) &&
+              !uniform.LineCellHeight(
+                  std::numeric_limits<float>::quiet_NaN()),
+          "FNT v3 rejects invalid atlas heights in its row-height adapter");
+    omega::retail::FntV3IR empty = *decoded;
+    empty.glyphs.clear();
+    Check(!empty.LineCellHeight(256.0F),
+          "FNT v3 reports no row height for a font without glyph records");
   }
 
   const auto repeated = omega::retail::DecodeFntV3(bytes);

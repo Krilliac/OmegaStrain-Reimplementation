@@ -53,7 +53,8 @@ void CheckSanitizedError(
 int LaunchOptionsFailureCount()
 {
     auto defaults = Parse({});
-    Check(defaults && defaults->frame_limit == -1 && !defaults->data_root &&
+    Check(defaults && defaults->frame_limit == -1 &&
+              defaults->screenshot_frame == -1 && !defaults->data_root &&
               !defaults->level_code && !defaults->opening_movie_path &&
               !defaults->opening_movie_member &&
               !defaults->config_path &&
@@ -119,6 +120,34 @@ int LaunchOptionsFailureCount()
         "overflowing frame limits are rejected");
     Check(!Parse({"--frames=1", "--frames=2"}),
         "duplicate frame limits are rejected");
+
+    auto screenshot = Parse({"--frames=5", "--screenshot-frame=3"});
+    Check(screenshot && screenshot->screenshot_frame == 3 &&
+              screenshot->frame_limit == 5,
+        "a headless screenshot frame composes with a finite frame limit");
+    auto screenshot_only = Parse({"--screenshot-frame=1"});
+    Check(screenshot_only && screenshot_only->screenshot_frame == 1,
+        "a headless screenshot frame does not itself require a frame limit");
+    CheckError(Parse({"--screenshot-frame=0"}),
+        "--screenshot-frame requires a positive integer",
+        "a zero screenshot frame is rejected");
+    CheckError(Parse({"--screenshot-frame=-1"}),
+        "--screenshot-frame requires a positive integer",
+        "a negative screenshot frame is rejected");
+    CheckError(Parse({"--screenshot-frame="}),
+        "--screenshot-frame requires a positive integer",
+        "an empty screenshot frame value is rejected");
+    CheckError(Parse({"--screenshot-frame=x"}),
+        "--screenshot-frame requires a positive integer",
+        "a non-integer screenshot frame is rejected");
+    Check(!Parse({"--screenshot-frame=99999999999999999999"}),
+        "an overflowing screenshot frame is rejected");
+    CheckError(Parse({"--screenshot-frame=1", "--screenshot-frame=2"}),
+        "--screenshot-frame may be specified only once",
+        "duplicate screenshot frames are rejected");
+    CheckError(Parse({"--data-root=A", "--probe-only", "--screenshot-frame=1"}),
+        "--probe-only cannot be combined with --screenshot-frame",
+        "headless probing exits before the GPU and cannot capture a frame");
 
     const std::string maximum_frames = "--frames=" +
         std::to_string(omega::runtime::kMaximumRunCaptureSessionFrames);
@@ -373,6 +402,7 @@ int LaunchOptionsFailureCount()
     Check(usage == "usage: openomega [-h|--help]\n"
                    "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
                    "[--frames=N [--capture-run [--replay-capture]]] "
+                   "[--screenshot-frame=N] "
                    "[--data-root=PATH [--level=CODE]] [--probe-only] "
                    "[--opening-movie=PATH | --opening-movie-member=NAME] "
                    "[--developer-diagnostics]\n",

@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <limits>
 #include <new>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -33,7 +34,9 @@ struct RasterScratch final
 struct TriangleVisitorContext final
 {
     RasterScratch* scratch = nullptr;
-    const content::FrontEndTextureBinding* texture = nullptr;
+    // Validated once per triangle rather than re-proven on every covered
+    // pixel. Null still selects the untextured identity path.
+    const RetailFrontEndValidatedTexture* texture = nullptr;
     std::uint64_t covered_before_triangle = 0U;
     std::uint64_t maximum_covered_samples = 0U;
     std::uint64_t visited_samples = 0U;
@@ -174,7 +177,7 @@ struct TriangleVisitorContext final
 
 [[nodiscard]] std::expected<RgbaF, RetailFrontEndRasterError> ResolveSource(
     const ScreenSpaceTriangleSample& sample,
-    const content::FrontEndTextureBinding* const texture) noexcept
+    const RetailFrontEndValidatedTexture* const texture) noexcept
 {
     const auto channels = sample.AffineChannels();
     if (channels.size() != kRasterAffineChannelCount)
@@ -268,23 +271,35 @@ struct TriangleVisitorContext final
 
 [[nodiscard]] std::uint8_t ToHostByte(const float value) noexcept
 {
-    const double scaled = static_cast<double>(ClampUnit(value)) * 255.0;
-    return static_cast<std::uint8_t>(std::floor(scaled + 0.5));
+    // Round-half-up over a clamped channel. ClampUnit leaves the argument in
+    // [0,1], so the scaled value is in [0.5,255.5] and never negative, and on
+    // non-negative values the C++ float-to-integer conversion (truncation
+    // toward zero) IS std::floor. Dropping the library call therefore produces
+    // the identical byte for every representable input, including the
+    // half-tie cases the public contract pins upward.
+    const double scaled = static_cast<double>(ClampUnit(value)) * 255.0 + 0.5;
+    return static_cast<std::uint8_t>(scaled);
 }
 
-[[nodiscard]] std::expected<RasterScratch, RetailFrontEndRasterError>
-AllocateScratch(const RgbaF clear_color) noexcept
+// The canonical scratch is 5.6 MB that every render overwrites end to end
+// (colors are re-cleared, depths are re-cleared), so allocating and releasing
+// it per frame only bought a page-fault storm. The buffers are reused across
+// calls on the same thread; they are pure scratch, hold no owner data between
+// calls, and are fully rewritten before the first sample is shaded, so a
+// render cannot observe anything a fresh allocation would not have given it.
+[[nodiscard]] std::expected<RasterScratch*, RetailFrontEndRasterError>
+AcquireClearedScratch(const RgbaF clear_color) noexcept
 {
     constexpr std::size_t pixel_count =
         static_cast<std::size_t>(kCanonicalRasterWidth) *
         static_cast<std::size_t>(kCanonicalRasterHeight);
+    static thread_local RasterScratch scratch;
     try
     {
-        RasterScratch scratch;
         scratch.colors.assign(pixel_count, clear_color);
         scratch.depths.assign(pixel_count,
             -std::numeric_limits<float>::infinity());
-        return scratch;
+        return &scratch;
     }
     catch (const std::bad_alloc&)
     {
@@ -306,15 +321,19 @@ BuildOwnedFrame(const RasterScratch& scratch) noexcept
         return std::unexpected(RetailFrontEndRasterError::AllocationFailure);
     }
 
-    for (std::size_t pixel_index = 0U;
-         pixel_index < scratch.colors.size(); ++pixel_index)
+    // ToHostByte clamps each channel itself, so the former per-pixel ClampUnit
+    // was a second, redundant clamp of the same value.
+    std::uint8_t* const bytes = frame.pixels.data();
+    const RgbaF* const colors = scratch.colors.data();
+    const std::size_t pixel_count = scratch.colors.size();
+    for (std::size_t pixel_index = 0U; pixel_index < pixel_count; ++pixel_index)
     {
         const std::size_t byte_offset = pixel_index * 4U;
-        const RgbaF color = ClampUnit(scratch.colors[pixel_index]);
-        frame.pixels[byte_offset] = ToHostByte(color.red);
-        frame.pixels[byte_offset + 1U] = ToHostByte(color.green);
-        frame.pixels[byte_offset + 2U] = ToHostByte(color.blue);
-        frame.pixels[byte_offset + 3U] = ToHostByte(color.alpha);
+        const RgbaF& color = colors[pixel_index];
+        bytes[byte_offset] = ToHostByte(color.red);
+        bytes[byte_offset + 1U] = ToHostByte(color.green);
+        bytes[byte_offset + 2U] = ToHostByte(color.blue);
+        bytes[byte_offset + 3U] = ToHostByte(color.alpha);
     }
     return frame;
 }
@@ -329,7 +348,7 @@ RetailFrontEndRasterResult RasterizeRetailFrontEndTriangles(
     if (!valid)
         return std::unexpected(valid.error());
 
-    auto scratch = AllocateScratch(clear_color);
+    const auto scratch = AcquireClearedScratch(clear_color);
     if (!scratch)
         return std::unexpected(scratch.error());
 
@@ -340,6 +359,11 @@ RetailFrontEndRasterResult RasterizeRetailFrontEndTriangles(
         .bottom = static_cast<std::int32_t>(kCanonicalRasterHeight),
     };
     std::uint64_t covered_samples = 0U;
+    // A frontend screen draws long runs of triangles from one binding, and a
+    // binding is immutable for the whole call, so the validated layout is
+    // resolved once per distinct binding rather than once per triangle.
+    std::optional<RetailFrontEndValidatedTexture> validated_texture;
+    const content::FrontEndTextureBinding* validated_binding = nullptr;
     for (const auto& triangle : triangles)
     {
         std::array<std::array<float, kRasterAffineChannelCount>, 3U> channels{};
@@ -365,14 +389,32 @@ RetailFrontEndRasterResult RasterizeRetailFrontEndTriangles(
             };
         }
 
+        // One validation per distinct binding instead of one per covered
+        // pixel. ValidateInputs above has already rejected every malformed
+        // binding with this same category.
+        const RetailFrontEndValidatedTexture* validated = nullptr;
+        if (triangle.texture != nullptr)
+        {
+            if (triangle.texture != validated_binding)
+            {
+                const auto layout =
+                    ValidateRetailFrontEndTexture(*triangle.texture);
+                if (!layout)
+                    return std::unexpected(MapTextureError(layout.error()));
+                validated_texture.emplace(std::move(*layout));
+                validated_binding = triangle.texture;
+            }
+            validated = &*validated_texture;
+        }
+
         const std::uint64_t remaining =
             limits.maximum_covered_samples - covered_samples;
         const std::uint64_t kernel_budget = std::min(
             std::max(remaining, std::uint64_t{1U}),
             kScreenSpaceTriangleMaximumCoveredPixels);
         TriangleVisitorContext context{
-            .scratch = &*scratch,
-            .texture = triangle.texture,
+            .scratch = *scratch,
+            .texture = validated,
             .covered_before_triangle = covered_samples,
             .maximum_covered_samples = limits.maximum_covered_samples,
         };
@@ -400,6 +442,6 @@ RetailFrontEndRasterResult RasterizeRetailFrontEndTriangles(
         covered_samples += rendered->covered_pixel_count;
     }
 
-    return BuildOwnedFrame(*scratch);
+    return BuildOwnedFrame(**scratch);
 }
 } // namespace omega::frontend::presentation

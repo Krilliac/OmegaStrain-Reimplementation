@@ -13,6 +13,7 @@ namespace omega::runtime
 namespace
 {
 constexpr std::string_view kFramesPrefix = "--frames=";
+constexpr std::string_view kScreenshotFramePrefix = "--screenshot-frame=";
 constexpr std::string_view kDataRootPrefix = "--data-root=";
 constexpr std::string_view kLevelPrefix = "--level=";
 constexpr std::string_view kOpeningMoviePrefix = "--opening-movie=";
@@ -98,6 +99,7 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
 {
     LaunchOptions result;
     bool saw_frames = false;
+    bool saw_screenshot_frame = false;
     bool saw_data_root = false;
     bool saw_level = false;
     bool saw_opening_movie = false;
@@ -124,6 +126,24 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
                 conversion.ptr != value.data() + value.size() || parsed < 0)
                 return std::unexpected("--frames requires a non-negative integer");
             result.frame_limit = parsed;
+            continue;
+        }
+        if (argument.starts_with(kScreenshotFramePrefix))
+        {
+            if (saw_screenshot_frame)
+                return std::unexpected(
+                    "--screenshot-frame may be specified only once");
+            saw_screenshot_frame = true;
+            const std::string_view value =
+                argument.substr(kScreenshotFramePrefix.size());
+            int parsed = 0;
+            const auto conversion = std::from_chars(
+                value.data(), value.data() + value.size(), parsed);
+            if (value.empty() || conversion.ec != std::errc{} ||
+                conversion.ptr != value.data() + value.size() || parsed < 1)
+                return std::unexpected(
+                    "--screenshot-frame requires a positive integer");
+            result.screenshot_frame = parsed;
             continue;
         }
         if (argument.starts_with(kDataRootPrefix))
@@ -269,6 +289,9 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
         return std::unexpected("--level requires --data-root");
     if (result.probe_only && saw_frames)
         return std::unexpected("--probe-only cannot be combined with --frames");
+    if (result.probe_only && saw_screenshot_frame)
+        return std::unexpected(
+            "--probe-only cannot be combined with --screenshot-frame");
     if (result.probe_only && result.opening_movie_path)
         return std::unexpected("--probe-only cannot be combined with --opening-movie");
     if (result.probe_only && result.opening_movie_member)
@@ -307,6 +330,7 @@ std::string_view LaunchUsage() noexcept
     return "usage: openomega [-h|--help]\n"
            "       openomega [--config=PATH] [--set=KEY=VALUE ...] "
            "[--frames=N [--capture-run [--replay-capture]]] "
+           "[--screenshot-frame=N] "
            "[--data-root=PATH [--level=CODE]] [--probe-only] "
            "[--opening-movie=PATH | --opening-movie-member=NAME] "
            "[--developer-diagnostics]\n";

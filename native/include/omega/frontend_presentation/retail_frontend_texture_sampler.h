@@ -2,8 +2,10 @@
 
 #include "omega/frontend/compositor_math.h"
 
+#include <array>
 #include <cstdint>
 #include <expected>
+#include <utility>
 
 namespace omega::content
 {
@@ -12,6 +14,11 @@ class FrontEndTextureBinding;
 
 namespace omega::frontend::presentation
 {
+namespace detail
+{
+struct RetailFrontEndValidatedTextureAccess;
+}
+
 // The retained frontend TDX family is already bounded to this extent by its
 // decoder. Rechecking the hard ceiling here keeps generated or future callers
 // from turning a sampling operation into unbounded indexing work.
@@ -59,6 +66,63 @@ using RetailFrontEndTextureSamplingResult =
     std::expected<RetailFrontEndTextureSample,
         RetailFrontEndTextureSamplingError>;
 
+// One binding's already-checked sampling layout. Every rule the per-texel path
+// depends on - extent ceiling, encoding agreement, exact index storage, exact
+// palette cardinality, and a recognized TCC alpha mode - has been proven before
+// this value exists, so a sampler that takes it performs the identical work
+// without rechecking a binding that cannot have changed. It borrows the
+// binding's storage and is therefore valid only while that immutable binding
+// stays live and unmoved; it is a per-call/per-frame value, never a cache.
+//
+// The normalized palette is the same per-binding hoist one step further: a
+// palette entry's normalized value is a pure function of the raw entry and the
+// binding's TCC alpha mode, so it is resolved once here instead of once per
+// tap. Only the first `palette_size` entries are meaningful; a texel index at
+// or beyond that count is still rejected per texel.
+class RetailFrontEndValidatedTexture final
+{
+  public:
+    RetailFrontEndValidatedTexture(
+        const RetailFrontEndValidatedTexture&) = default;
+    RetailFrontEndValidatedTexture(
+        RetailFrontEndValidatedTexture&&) noexcept = default;
+    RetailFrontEndValidatedTexture& operator=(
+        const RetailFrontEndValidatedTexture&) = default;
+    RetailFrontEndValidatedTexture& operator=(
+        RetailFrontEndValidatedTexture&&) noexcept = default;
+    ~RetailFrontEndValidatedTexture() = default;
+
+  private:
+    friend struct detail::RetailFrontEndValidatedTextureAccess;
+
+    RetailFrontEndValidatedTexture(const std::uint8_t* indices,
+        const std::uint32_t palette_size,
+        const std::uint32_t width,
+        const std::uint32_t height,
+        const RetailFrontEndTextureAlphaContribution alpha_contribution,
+        std::array<RgbaF, 256U> normalized_palette) noexcept
+        : indices_(indices),
+          palette_size_(palette_size),
+          width_(width),
+          height_(height),
+          alpha_contribution_(alpha_contribution),
+          normalized_palette_(std::move(normalized_palette))
+    {
+    }
+
+    const std::uint8_t* indices_ = nullptr;
+    std::uint32_t palette_size_ = 0U;
+    std::uint32_t width_ = 0U;
+    std::uint32_t height_ = 0U;
+    RetailFrontEndTextureAlphaContribution alpha_contribution_ =
+        RetailFrontEndTextureAlphaContribution::Identity;
+    std::array<RgbaF, 256U> normalized_palette_{};
+};
+
+using RetailFrontEndTextureValidationResult =
+    std::expected<RetailFrontEndValidatedTexture,
+        RetailFrontEndTextureSamplingError>;
+
 // [any thread; stateless/reentrant] Looks up one already-expanded indexed-4 or
 // indexed-8 texel. The immutable binding is borrowed only for this call. The
 // caller must not move or destroy its owning bundle concurrently.
@@ -76,6 +140,97 @@ using RetailFrontEndTextureSamplingResult =
 SampleRetailFrontEndTextureBilinearRepeat(
     const content::FrontEndTextureBinding& binding,
     const asset::FrontendUvIR& normalized_st) noexcept;
+
+// [any thread; stateless/reentrant] Runs exactly the validation the sampling
+// entry points run, once, so a caller that samples one binding many times can
+// hoist it out of its inner loop. The returned layout borrows the binding; it
+// must not outlive it.
+[[nodiscard]] RetailFrontEndTextureValidationResult
+ValidateRetailFrontEndTexture(
+    const content::FrontEndTextureBinding& binding) noexcept;
+
+// [any thread; stateless/reentrant] The same evidence-closed sampling rule
+// against an already-validated layout. Identical filtering, addressing,
+// rounding, and per-texel palette-range failure to the binding overload - only
+// the invariant revalidation is gone.
+[[nodiscard]] RetailFrontEndTextureSamplingResult
+SampleRetailFrontEndTextureBilinearRepeat(
+    const RetailFrontEndValidatedTexture& texture,
+    const asset::FrontendUvIR& normalized_st) noexcept;
+
+namespace detail
+{
+// Header-defined so no caller can supply its own definition for the sole
+// friend of RetailFrontEndValidatedTexture. Every operation remains private;
+// only the validating factory and the two sampling entry points can use it.
+struct RetailFrontEndValidatedTextureAccess final
+{
+  private:
+    [[nodiscard]] static RetailFrontEndValidatedTexture Create(
+        const std::uint8_t* const indices,
+        const std::uint32_t palette_size,
+        const std::uint32_t width,
+        const std::uint32_t height,
+        const RetailFrontEndTextureAlphaContribution alpha_contribution,
+        std::array<RgbaF, 256U> normalized_palette) noexcept
+    {
+        return RetailFrontEndValidatedTexture(indices, palette_size, width,
+            height, alpha_contribution, std::move(normalized_palette));
+    }
+
+    [[nodiscard]] static const std::uint8_t* Indices(
+        const RetailFrontEndValidatedTexture& texture) noexcept
+    {
+        return texture.indices_;
+    }
+
+    [[nodiscard]] static std::uint32_t PaletteSize(
+        const RetailFrontEndValidatedTexture& texture) noexcept
+    {
+        return texture.palette_size_;
+    }
+
+    [[nodiscard]] static std::uint32_t Width(
+        const RetailFrontEndValidatedTexture& texture) noexcept
+    {
+        return texture.width_;
+    }
+
+    [[nodiscard]] static std::uint32_t Height(
+        const RetailFrontEndValidatedTexture& texture) noexcept
+    {
+        return texture.height_;
+    }
+
+    [[nodiscard]] static RetailFrontEndTextureAlphaContribution
+    AlphaContribution(
+        const RetailFrontEndValidatedTexture& texture) noexcept
+    {
+        return texture.alpha_contribution_;
+    }
+
+    [[nodiscard]] static const std::array<RgbaF, 256U>& NormalizedPalette(
+        const RetailFrontEndValidatedTexture& texture) noexcept
+    {
+        return texture.normalized_palette_;
+    }
+
+    friend auto
+    ::omega::frontend::presentation::ValidateRetailFrontEndTexture(
+        const content::FrontEndTextureBinding&) noexcept
+        -> RetailFrontEndTextureValidationResult;
+    friend auto
+    ::omega::frontend::presentation::LookupRetailFrontEndTexel(
+        const content::FrontEndTextureBinding&,
+        std::uint32_t,
+        std::uint32_t) noexcept -> RetailFrontEndTextureSamplingResult;
+    friend auto
+    ::omega::frontend::presentation::SampleRetailFrontEndTextureBilinearRepeat(
+        const RetailFrontEndValidatedTexture&,
+        const asset::FrontendUvIR&) noexcept
+        -> RetailFrontEndTextureSamplingResult;
+};
+} // namespace detail
 } // namespace omega::frontend::presentation
 
 static_assert(omega::frontend::presentation::kRetailFrontEndTextureMaximumPixels ==
