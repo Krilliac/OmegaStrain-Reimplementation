@@ -20,10 +20,11 @@ Run (Git Bash), driving a bounded 3-frame retail launch against the real disc:
 
 ```
 CFG=/tmp/omega.cfg
-printf 'content.data_root = D:/OmegaStrain-Reimplementation/private/extracted-disc\n' > "$CFG"
+: "${OMEGA_DATA_ROOT:?set OMEGA_DATA_ROOT to your private extracted-disc root}"
+printf 'content.data_root = %s\n' "$(cygpath -m "$OMEGA_DATA_ROOT")" > "$CFG"
 OPENOMEGA_DISABLE_STARTUP_DIALOG=1 OPENOMEGA_ENABLE_RETAIL_FRONT_END=1 \
   cdbX64.exe -c "\$\$><$(cygpath -w tools/omega_debug/frontend_trace.cdb)" \
-  "D:\OmegaStrain-Reimplementation\build\msvc\products\game\Debug\openomega.exe" \
+  "$(cygpath -w "$PWD/build/msvc/products/game/Debug/openomega.exe")" \
   "--config=$(cygpath -w "$CFG")" --frames=3
 ```
 
