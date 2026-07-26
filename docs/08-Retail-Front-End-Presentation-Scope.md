@@ -34,8 +34,11 @@ return AuthorizeFrontEndPresentation(presentation_mode_, std::nullopt);
 The nullopt overload (`native/src/runtime/front_end_presentation_gate.cpp:80-84`)
 always returns `PresentationUnavailable`. The retail overload
 (`front_end_presentation_gate.cpp:46-58`) authorizes exactly when
-`mode == RetailRequired && capability.valid()`. So the gate is ready; nothing
-supplies it a valid capability yet.
+`mode == RetailRequired && capability.valid()`. The gate is ready; nothing
+supplies it a valid capability, and — see §10 — nothing may, until the
+presentation rules themselves are evidence-backed. The retail overload
+consequently has no production caller today; it is kept and tested for the
+milestone that earns it.
 
 > The in-code comment claiming the "FNT/GUI/IE and display-conversion decoders
 > are intentionally not guessed here" is **stale**. See §3 — those decoders and
@@ -81,18 +84,24 @@ Nothing in `apps/` ever calls `LoadFrontEndScreen`. To close the gate the app mu
 1. For each needed `FrontEndScreenKey` (`Title`, `CreateAgent`, `LoadAgent`),
    call `content_owner->game_data->LoadFrontEndScreen(key)` during app
    construction (retail mode only) and retain the returned `FrontEndScreenBundle`(s).
-2. Change `AuthorizeCurrentFrontEndPresentation()` (`omega_app.cpp:2931`) so the
-   retail branch passes `bundle.presentation_capability()` to the retail overload
-   instead of `std::nullopt`.
+2. ~~Change `AuthorizeCurrentFrontEndPresentation()` so the retail branch passes
+   `bundle.presentation_capability()` to the retail overload instead of
+   `std::nullopt`.~~ **Withdrawn — this step was wrong; see §10.** The minted
+   capability describes the DATA's provenance, while the gate is about the
+   provenance of what is DRAWN, and the compositor draws by project policy. The
+   retail branch stays `std::nullopt`. Reaching the decoded screens is done
+   under `--developer-diagnostics` instead.
 3. Decide failure policy: a missing/failed bundle load must produce a clear
    startup error (routed through the existing `StartupFailure*` path so the
    launcher — see §7 — can surface it), not the current unconditional gate fail.
 
-On its own, Gap A makes the gate **pass** and the app reach steady-state — but
-with no retail pixels drawn yet unless Gap B supplies them. Sequencing note:
-do not authorize the gate on a bundle the compositor cannot yet render, or the
-app will present an empty/incorrect screen. Gate A should land together with at
-least the Phase-1 compositor slice (§6), or behind a temporary internal flag.
+~~On its own, Gap A makes the gate **pass** and the app reach steady-state.~~
+**Also withdrawn.** Gap A supplies the decoded bundle; it does not and must not
+make the `RetailRequired` gate pass. The sequencing worry recorded here — "do not
+authorize the gate on a bundle the compositor cannot yet render" — turned out to
+understate the problem: the issue is not only that an early compositor renders
+*badly*, but that no compositor governed by project-chosen presentation rules may
+be labelled retail at all, however well it renders. §10 records the resolution.
 
 ### Gap B — Full per-screen retail compositor (the real work)
 
@@ -331,3 +340,62 @@ screen composes correctly, that its layout is right, or that anything about it
 matches retail presentation. The button survey measures this project's own
 routing reachability. It assigns no retail menu structure, control layout,
 ordering rule, activation behaviour, or screen semantic.
+
+## 10. Why the decoded preview never satisfies `RetailRequired`
+
+The compositor now decodes real assets and puts a recognisable Title and menu on
+screen. That made it tempting — and §4's Gap A step 2 originally said so — to
+authorize `RetailRequired` on the `RetailFrontEndPresentationCapability` that
+`GameDataService` mints for the bundle. That is withdrawn, because it confuses
+two different provenances.
+
+**The minted capability describes where the DATA came from. The gate is about
+the provenance of what is DRAWN.** Between the two sits a stack of presentation
+rules that are project choices, not observations:
+
+- depth-first PREORDER traversal of the IE visual tree;
+- the IE geometry / GUI text interleave, with text appended last;
+- painter's depth by submission ordinal rather than projected Z;
+- one animation tick per rendered frame (the authored rate is unknown);
+- a fixed highlight colour for the selected MissionSelect widget.
+
+`retail_front_end_frame.h` labels each of these unproven in its own contract.
+A screen assembled from real assets under invented rules is a project diagnostic
+built from real data — it is not evidence of what retail displayed, and
+authorizing it as `RetailRequired` would state exactly the equivalence this gate
+exists to prevent.
+
+Publication does not change that. Composing and publishing prove pixels reached
+the display; they say nothing about whether those pixels match retail. So a
+bundle that loads, composes and publishes still leaves `RetailRequired`
+`PresentationUnavailable`.
+
+### What this means in practice
+
+- **Default `RetailRequired` launches are unconditionally fail-closed**, exactly
+  as §1 describes, and cannot fall through to project pixels: the host loop
+  treats the gate failure as an operational error and exits.
+- **The preview lives under `DeveloperDiagnostics`**, and additionally requires
+  the explicit `OPENOMEGA_ENABLE_RETAIL_FRONT_END` opt-in, so it is never what a
+  developer gets from `--developer-diagnostics` alone. The launcher's
+  **DEV DIAGNOSTICS** button (§7) is the supported route.
+- **Both presentations in that mode share one provenance.** The project-authored
+  cards and the decoded preview are both arranged by project policy, so both
+  authorize on the same existing `DeveloperDiagnosticFrontEndPresentationCapability`.
+  No new capability type was invented; a third one would have expanded the gate's
+  surface without changing any authorization outcome.
+- **A failed preview is therefore harmless.** Falling back to the project cards
+  stays inside the provenance the mode already declares, so the fallback cannot
+  be relabelled by the failure.
+- `CurrentFrontEndDrawList` re-checks the mode before returning the preview draw
+  list, so a `RetailRequired` process cannot submit those pixels even if the
+  ready flag were somehow set. The gate is the first barrier; that check is the
+  second.
+
+### What would change this
+
+Not a better decoder — evidence for the presentation rules above. When draw
+order, the interleave, depth policy, the animation rate, and the selection visual
+are each independently observed and corroborated, the `RetailRequired` branch of
+`AuthorizeCurrentFrontEndPresentation` is the single place that changes, and the
+already-tested retail overload gains its first production caller.

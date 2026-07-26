@@ -24,10 +24,14 @@ printf 'content.data_root = D:/OmegaStrain-Reimplementation/private/extracted-di
 OPENOMEGA_DISABLE_STARTUP_DIALOG=1 OPENOMEGA_ENABLE_RETAIL_FRONT_END=1 \
   cdbX64.exe -c "\$\$><$(cygpath -w tools/omega_debug/frontend_trace.cdb)" \
   "D:\OmegaStrain-Reimplementation\build\msvc\products\game\Debug\openomega.exe" \
-  "--config=$(cygpath -w "$CFG")" --frames=3
+  "--config=$(cygpath -w "$CFG")" --frames=3 --developer-diagnostics
 ```
 
 Notes:
+- `--developer-diagnostics` is **required**. The decoded-data preview is arranged
+  by project presentation policy, so it runs only under developer provenance;
+  `OPENOMEGA_ENABLE_RETAIL_FRONT_END` alone does nothing on a default
+  RetailRequired launch, which stays fail-closed. See docs/08 section 10.
 - The exe **must** be an absolute Windows path (cdb `Win32 error 0n2` otherwise).
 - The script file must have CRLF line endings for `$$><` to split commands.
 - Symbols resolve from the PDBs next to the exe + `build/msvc/Debug`; no manual

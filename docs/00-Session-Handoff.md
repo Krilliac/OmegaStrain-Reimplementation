@@ -2648,3 +2648,56 @@ Validation is unchanged in kind: the C++ was NOT compiled and CTest was NOT run 
 worktree's no-build constraint, and this test needs the opt-in GPU configuration. The native
 dependency gate (433 files), public-tree gate, evidence-ledger and ledger-format gates, and the
 Python tooling suite all pass. No privacy, bounds, or clean-room claim changes.
+
+### The decoded preview is developer-provenance, not retail (2026-07-25)
+
+A correctness blocker found before this lane could land. The compositor decodes real assets and puts
+a recognisable Title and menu on screen, and the app had begun authorizing `RetailRequired` on the
+`RetailFrontEndPresentationCapability` that `GameDataService` mints for the bundle — which
+`docs/08` Gap A step 2 had explicitly asked for. That step was wrong and is now withdrawn.
+
+The minted capability describes where the DATA came from. The gate is about the provenance of what is
+DRAWN. Between them sits a stack of project choices that no evidence supports: depth-first preorder
+traversal, the IE/GUI interleave with text last, painter's depth by submission ordinal rather than
+projected Z, one animation tick per rendered frame, and a fixed MissionSelect highlight colour.
+`retail_front_end_frame.h` already labels each unproven. A screen assembled from real assets under
+invented rules is a project diagnostic built from real data; calling it retail asserts exactly the
+equivalence the gate exists to prevent. Publication does not help: composing and publishing prove
+pixels reached the display, not that they match retail.
+
+- `AuthorizeCurrentFrontEndPresentation` no longer consults the bundle capability.
+  `RetailRequired` is unconditionally `PresentationUnavailable`, and the host loop still treats that
+  as an operational error, so it cannot fall through to project pixels.
+- The preview moved to `DeveloperDiagnostics`, still behind the explicit
+  `OPENOMEGA_ENABLE_RETAIL_FRONT_END` opt-in, so it is never what `--developer-diagnostics` alone
+  produces. The launcher's DEV DIAGNOSTICS button is the supported route, and developers can still
+  reach and exercise the decoded Title/menu honestly.
+- No new capability type was invented. The project-authored cards and the decoded preview are both
+  arranged by project policy, so both authorize on the existing
+  `DeveloperDiagnosticFrontEndPresentationCapability`. A third type would have widened the gate's
+  surface without changing any authorization outcome.
+- A failed or unpublishable preview is therefore harmless: falling back to the project cards stays
+  inside the provenance that mode already declares, so nothing is relabelled.
+- `CurrentFrontEndDrawList` re-checks the mode before returning the preview draw list, so a
+  `RetailRequired` process cannot submit those pixels even if the ready flag were set. The gate is
+  the first barrier; that check is an independent second one.
+- The retail overload of `AuthorizeFrontEndPresentation` is kept and still tested. It now has no
+  production caller, and gains one only when the presentation rules are themselves evidence-backed.
+
+`omega_app_retail_presentation_smoke` adds `CheckPreviewNeverSatisfiesRetailRequired`: a
+`RetailRequired` app with a bundle installed AND a published preview frame still reports
+`PresentationUnavailable` and never submits the decoded list; a `DeveloperDiagnostics` app with the
+explicit preview authorizes and does submit it; and a `DeveloperDiagnostics` app whose preview cannot
+compose still authorizes as developer diagnostics while falling back to project pixels. Because the
+preview is now developer-mode-only, the three existing preview tests moved from `CreateRetailApp` to
+a new `CreateDiagnosticApp`; the two boundary tests that assert `RetailRequired` fails closed stay on
+`CreateRetailApp` and are unchanged.
+
+6105954's startup transaction is preserved: `TryAdoptRetailScreen` and
+`BeginRetailFrontEndPresentation` are untouched except for the mode predicate they sit behind.
+
+Validation is unchanged in kind: the C++ was NOT compiled and CTest was NOT run under this
+worktree's no-build constraint, and the new coverage needs the opt-in GPU configuration. The native
+dependency gate (433 files), public-tree gate, evidence-ledger and ledger-format gates, and the
+Python tooling suite all pass. No privacy or clean-room claim is weakened; this strictly narrows what
+may be called retail.

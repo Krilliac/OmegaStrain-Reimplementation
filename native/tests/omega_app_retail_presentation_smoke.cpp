@@ -177,6 +177,20 @@ struct OmegaAppTestAccess final
         return app.retail_front_end_ready_;
     }
 
+    [[nodiscard]] static std::expected<void, runtime::FrontEndPresentationGateError>
+    AuthorizeFrontEnd(const OmegaApp& app) noexcept
+    {
+        return app.AuthorizeCurrentFrontEndPresentation();
+    }
+
+    // The draw list the host would actually submit, so a test can prove which
+    // presentation source is live rather than inferring it from a flag.
+    [[nodiscard]] static std::span<const runtime::RenderTextureBlitCommand>
+    CurrentFrontEndDrawCommands(const OmegaApp& app) noexcept
+    {
+        return app.CurrentFrontEndDrawList().commands();
+    }
+
     [[nodiscard]] static bool RetailScreenHasAnimation(
         const OmegaApp& app) noexcept
     {
@@ -473,6 +487,20 @@ private:
         omega::runtime::FrontEndPresentationMode::RetailRequired);
 }
 
+// The decoded-data preview is DeveloperDiagnostics-only, so every test that
+// drives it must run in that mode. A RetailRequired process cannot reach the
+// preview at all -- which is itself asserted below.
+[[nodiscard]] std::expected<OmegaApp, std::string> CreateDiagnosticApp(
+    std::unique_ptr<OpeningMoviePlayback> playback)
+{
+    auto config = omega::runtime::ParseConfigText("");
+    if (!config)
+        return std::unexpected("test config: " + config.error());
+    return OmegaAppTestAccess::Create(std::move(*config), TestSettings(),
+        std::move(playback),
+        omega::runtime::FrontEndPresentationMode::DeveloperDiagnostics);
+}
+
 [[nodiscard]] bool SameSimulationState(
     const omega::simulation::SimulationState& left,
     const omega::simulation::SimulationState& right) noexcept
@@ -488,9 +516,9 @@ void CheckAnimatedRetailFrameTextureReuse()
         static_cast<std::uint64_t>(omega::frontend::kCanonicalRasterWidth) *
         omega::frontend::kCanonicalRasterHeight * 4U;
 
-    auto app = CreateRetailApp(nullptr);
+    auto app = CreateDiagnosticApp(nullptr);
     Check(app.has_value(),
-        "retail-required host starts for animated texture-reuse coverage");
+        "diagnostic host starts for animated texture-reuse coverage");
     if (!app)
         return;
 
@@ -650,8 +678,8 @@ void CheckRetailNavCommitsOnlyOnPublish()
     using omega::content::FrontEndScreenKey;
     using omega::frontend::presentation::RetailFrontEndNavInput;
 
-    auto app = CreateRetailApp(nullptr);
-    Check(app.has_value(), "retail-required host starts for nav-commit coverage");
+    auto app = CreateDiagnosticApp(nullptr);
+    Check(app.has_value(), "diagnostic host starts for nav-commit coverage");
     if (!app)
         return;
 
@@ -735,8 +763,8 @@ void CheckStartScreenOverrideFallsBackToTitle()
 {
     using omega::content::FrontEndScreenKey;
 
-    auto app = CreateRetailApp(nullptr);
-    Check(app.has_value(), "retail-required host starts for start-override coverage");
+    auto app = CreateDiagnosticApp(nullptr);
+    Check(app.has_value(), "diagnostic host starts for start-override coverage");
     if (!app)
         return;
 
@@ -762,8 +790,8 @@ void CheckStartScreenOverrideFallsBackToTitle()
 
     // A composable override IS adopted, so the fallback is not simply refusing
     // every override.
-    auto adopting = CreateRetailApp(nullptr);
-    Check(adopting.has_value(), "retail-required host starts for override adoption");
+    auto adopting = CreateDiagnosticApp(nullptr);
+    Check(adopting.has_value(), "diagnostic host starts for override adoption");
     if (!adopting)
         return;
     OmegaAppTestAccess::InstallRetailBundle(
@@ -782,8 +810,8 @@ void CheckStartScreenOverrideFallsBackToTitle()
         "an adopted override publishes its own frame");
 
     // No override at all still composes and adopts the Title.
-    auto plain = CreateRetailApp(nullptr);
-    Check(plain.has_value(), "retail-required host starts without an override");
+    auto plain = CreateDiagnosticApp(nullptr);
+    Check(plain.has_value(), "diagnostic host starts without an override");
     if (!plain)
         return;
     OmegaAppTestAccess::InstallRetailBundle(
@@ -793,6 +821,83 @@ void CheckStartScreenOverrideFallsBackToTitle()
               OmegaAppTestAccess::RetailFrontEndReady(*plain),
         "startup without an override composes and adopts the Title");
 }
+
+// The decoded-data preview arranges real assets by unevidenced project policy,
+// so it must never mint or satisfy the canonical retail capability -- not even
+// once it has composed and published. These three cases pin that boundary.
+void CheckPreviewNeverSatisfiesRetailRequired()
+{
+    using omega::content::FrontEndScreenKey;
+    using omega::runtime::FrontEndPresentationGateErrorCode;
+
+    // (1) RetailRequired stays fail-closed even with a loaded AND published
+    // preview. The compose seam bypasses the mode guard on purpose, so this
+    // asserts the gate itself refuses rather than merely that the preview was
+    // unreachable.
+    {
+        auto app = CreateRetailApp(nullptr);
+        Check(app.has_value(), "retail-required host starts for gate coverage");
+        if (!app)
+            return;
+        const FrontEndScreenBundle bundle = MakeRoutingBundle(true);
+        OmegaAppTestAccess::InstallRetailBundle(
+            *app, FrontEndScreenKey::Title, MakeRoutingBundle(true));
+        Check(OmegaAppTestAccess::ComposeRetailScreenPresentation(*app, bundle, 1U),
+            "a decoded preview frame can publish under any mode");
+        Check(OmegaAppTestAccess::RetailFrontEndReady(*app),
+            "the published preview marks itself ready");
+
+        const auto gate = OmegaAppTestAccess::AuthorizeFrontEnd(*app);
+        Check(!gate.has_value() &&
+                  gate.error().code ==
+                      FrontEndPresentationGateErrorCode::PresentationUnavailable,
+            "a loaded and published preview still leaves RetailRequired unavailable");
+        Check(OmegaAppTestAccess::CurrentFrontEndDrawCommands(*app).data() !=
+                  OmegaAppTestAccess::RetailFrontEndDrawCommands(*app).data(),
+            "RetailRequired never submits decoded preview pixels");
+    }
+
+    // (2) DeveloperDiagnostics with a working preview authorizes on developer
+    // provenance and actually submits the decoded draw list.
+    {
+        auto app = CreateDiagnosticApp(nullptr);
+        Check(app.has_value(), "diagnostic host starts for preview coverage");
+        if (!app)
+            return;
+        OmegaAppTestAccess::InstallRetailBundle(
+            *app, FrontEndScreenKey::Title, MakeRoutingBundle(true));
+        OmegaAppTestAccess::BeginRetailFrontEndPresentation(*app, std::nullopt, false);
+
+        Check(OmegaAppTestAccess::RetailFrontEndReady(*app),
+            "the preview publishes under developer diagnostics");
+        Check(OmegaAppTestAccess::AuthorizeFrontEnd(*app).has_value(),
+            "developer diagnostics authorizes on its own provenance");
+        Check(OmegaAppTestAccess::CurrentFrontEndDrawCommands(*app).data() ==
+                  OmegaAppTestAccess::RetailFrontEndDrawCommands(*app).data(),
+            "the explicit preview submits the decoded draw list");
+    }
+
+    // (3) A preview that cannot compose falls back to project pixels while
+    // staying inside developer provenance -- the fallback is not relabelled, and
+    // the failure does not promote anything.
+    {
+        auto app = CreateDiagnosticApp(nullptr);
+        Check(app.has_value(), "diagnostic host starts for failed-preview coverage");
+        if (!app)
+            return;
+        OmegaAppTestAccess::InstallRetailBundle(
+            *app, FrontEndScreenKey::Title, MakeRoutingBundle(false));
+        OmegaAppTestAccess::BeginRetailFrontEndPresentation(*app, std::nullopt, false);
+
+        Check(!OmegaAppTestAccess::RetailFrontEndReady(*app),
+            "an uncomposable preview never becomes ready");
+        Check(OmegaAppTestAccess::AuthorizeFrontEnd(*app).has_value(),
+            "a failed preview still authorizes only as developer diagnostics");
+        Check(OmegaAppTestAccess::CurrentFrontEndDrawCommands(*app).data() !=
+                  OmegaAppTestAccess::RetailFrontEndDrawCommands(*app).data(),
+            "a failed preview falls back to project pixels");
+    }
+}
 } // namespace
 
 int main()
@@ -800,6 +905,7 @@ int main()
     CheckAnimatedRetailFrameTextureReuse();
     CheckRetailNavCommitsOnlyOnPublish();
     CheckStartScreenOverrideFallsBackToTitle();
+    CheckPreviewNeverSatisfiesRetailRequired();
     CheckBoundaryWithoutMovie();
     CheckBoundaryAfterMovie();
 

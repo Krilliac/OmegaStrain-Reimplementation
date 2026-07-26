@@ -187,21 +187,48 @@ private:
     // allocation, I/O, or persistence work occurs.
     [[nodiscard]] bool ActiveProfileIsConfirmed() const noexcept;
     [[nodiscard]] bool ActiveCharacterIsConfirmed() const noexcept;
-    // [game/main thread; no concurrent use] The current project-authored
-    // presentation owns only the explicit developer capability. Normal mode
-    // remains unavailable until a retail-data decoder supplies the distinct,
-    // GameDataService-minted capability with its owned presentation.
+    // [game/main thread; no concurrent use] DeveloperDiagnostics authorizes on
+    // the explicit developer capability, which covers both the project-authored
+    // cards and the decoded-data preview -- both are arranged by project policy.
+    //
+    // RetailRequired is unconditionally unavailable. It stays that way until the
+    // presentation rules themselves are evidence-backed, not merely until a
+    // decoder exists: a GameDataService-minted capability describes the DATA's
+    // provenance, and this gate is about the provenance of what is drawn.
     [[nodiscard]] std::expected<void,
         runtime::FrontEndPresentationGateError>
     AuthorizeCurrentFrontEndPresentation() const noexcept;
     // [game/main thread; no concurrent use] Gap A of the retail front-end
-    // wiring (docs/08). One-time, on first host-loop entry: in RetailRequired
-    // mode, when the OPENOMEGA_ENABLE_RETAIL_FRONT_END guard is set, loads the
-    // GameDataService-minted Title screen bundle so the gate can authorize on
-    // its retail capability. Guarded off by default because the retail
-    // compositor (Gap B) does not yet render the bundle; until then default
-    // launches stay fail-closed. Never throws: a failure just leaves the bundle
-    // empty and the gate unavailable.
+    // wiring (docs/08). One-time, on first host-loop entry: under
+    // DeveloperDiagnostics, and only when the OPENOMEGA_ENABLE_RETAIL_FRONT_END
+    // guard is also set, loads the Title screen bundle so the decoded-data
+    // preview has something to draw. It does NOT affect authorization: the
+    // bundle's GameDataService-minted retail capability is never consulted by
+    // the gate, because the presentation rules applied to that data are project
+    // policy. Never throws: a failure just leaves the bundle empty.
+    // [any thread; reentrant] True when this process may run the experimental
+    // decoded-data preview at all.
+    //
+    // The preview draws DECODED retail assets, but it arranges them by
+    // unevidenced PROJECT policy -- DFS preorder, the IE/GUI interleave,
+    // submission-order painter depth, text drawn last, one animation tick per
+    // rendered frame, and a fixed MissionSelect highlight. None of that is
+    // observed retail behaviour, so what it puts on screen is a project
+    // diagnostic built from real data, not a reproduction of the retail screen.
+    // It therefore lives behind DeveloperDiagnostics and can never satisfy
+    // RetailRequired: decoded input does not make project-chosen presentation
+    // retail-equivalent.
+    [[nodiscard]] bool IsRetailPreviewMode() const noexcept
+    {
+        return presentation_mode_ ==
+            runtime::FrontEndPresentationMode::DeveloperDiagnostics;
+    }
+    // [any thread; reentrant] True when the preview is both permitted and has an
+    // owned Title bundle to drive.
+    [[nodiscard]] bool RetailPreviewActive() const noexcept
+    {
+        return IsRetailPreviewMode() && retail_front_end_bundle_.has_value();
+    }
     void LoadRetailFrontEndBundleIfEnabled() noexcept;
     // [game/main thread; no concurrent use] Startup-only staged adoption of one
     // screen, under the same commit rule as the player-driven path: load,
@@ -588,10 +615,11 @@ private:
     // project-authored presentation owned below.
     runtime::FrontEndPresentationMode presentation_mode_ =
         runtime::FrontEndPresentationMode::RetailRequired;
-    // Experimental retail front-end presentation source (Gap A, docs/08).
-    // Populated at most once by LoadRetailFrontEndBundleIfEnabled(); empty on
-    // default launches so the retail gate stays fail-closed until the compositor
-    // (Gap B) can render it. std::optional default-constructs to empty, so no
+    // Decoded source for the experimental preview (Gap A, docs/08). Populated at
+    // most once by LoadRetailFrontEndBundleIfEnabled(), and only under
+    // DeveloperDiagnostics plus the explicit env opt-in; empty on every default
+    // launch. Holding it authorizes nothing -- RetailRequired is fail-closed
+    // regardless. std::optional default-constructs to empty, so no
     // constructor/move changes are required (the move constructor is defaulted).
     std::optional<content::FrontEndScreenBundle> retail_front_end_bundle_;
     bool retail_front_end_bundle_attempted_ = false;

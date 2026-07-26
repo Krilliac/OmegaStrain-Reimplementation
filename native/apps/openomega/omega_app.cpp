@@ -3099,10 +3099,7 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
         // the request. Cache every non-terminal reduction for the normal
         // persistence/state-publication path later in this frame.
         std::optional<FrontEndReduction> project_front_end;
-        if (!movie_was_active && !mp_menu_active_ &&
-            !(presentation_mode_ ==
-                    runtime::FrontEndPresentationMode::RetailRequired &&
-                retail_front_end_bundle_.has_value()))
+        if (!movie_was_active && !mp_menu_active_ && !RetailPreviewActive())
         {
             project_front_end = ReduceFrontEnd(front_end_state_,
                 ResolveFrontEndInputEdges(front_end_state_.mode,
@@ -3447,14 +3444,13 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             if (mp_menu_state_ != before_state)
                 UpdateMultiplayerMenuPresentation();
         }
-        else if (presentation_mode_ ==
-                     runtime::FrontEndPresentationMode::RetailRequired &&
-                 retail_front_end_bundle_.has_value())
+        else if (RetailPreviewActive())
         {
-            // Retail front end active: drive the retail navigation (select move /
-            // accept-switch-screen / back) instead of the project reducer, so the
-            // retail path never fires the project's persistence commands. Reuse the
-            // same input-edge resolution the project menu uses (arrows + gamepad).
+            // Decoded-data preview active (DeveloperDiagnostics only): drive its
+            // navigation (select move / accept-switch-screen / back) instead of
+            // the project reducer, so the preview never fires the project's
+            // persistence commands. Reuse the same input-edge resolution the
+            // project menu uses (arrows + gamepad).
             const auto retail_edges = ResolveFrontEndInputEdges(
                 FrontEndMode::Title,
                 FrontEndInputEdges{
@@ -4226,6 +4222,14 @@ bool OmegaApp::ActiveCharacterIsConfirmed() const noexcept
 std::expected<void, runtime::FrontEndPresentationGateError>
 OmegaApp::AuthorizeCurrentFrontEndPresentation() const noexcept
 {
+    // DeveloperDiagnostics covers BOTH the project-authored cards and the
+    // experimental decoded-data preview, and both are authorized by the same
+    // developer provenance -- correctly, because both are arranged by project
+    // policy. Decoded input does not change who chose the arrangement.
+    //
+    // This is also why a failed preview is harmless here: falling back to the
+    // project cards stays inside the provenance this mode already declares, so
+    // nothing is relabelled by the fallback.
     if (presentation_mode_ ==
         runtime::FrontEndPresentationMode::DeveloperDiagnostics)
     {
@@ -4233,17 +4237,21 @@ OmegaApp::AuthorizeCurrentFrontEndPresentation() const noexcept
             presentation_mode_, front_end_presentation_.provenance);
     }
 
-    // Retail presentation is authorized only through a GameDataService-minted
-    // capability carried by the owned Title screen bundle. That bundle is loaded
-    // once, on first host-loop entry, and only under the experimental guard (see
-    // LoadRetailFrontEndBundleIfEnabled and docs/08). Until the retail compositor
-    // (Gap B) can render it, default launches leave the bundle empty and this
-    // gate stays fail-closed rather than authorizing an unrenderable screen.
-    if (retail_front_end_bundle_)
-    {
-        return runtime::AuthorizeFrontEndPresentation(
-            presentation_mode_, retail_front_end_bundle_->presentation_capability());
-    }
+    // RetailRequired is unconditionally fail-closed.
+    //
+    // It deliberately does NOT consult retail_front_end_bundle_->presentation_capability().
+    // GameDataService mints that capability for decoded DATA, but the compositor
+    // that would draw it applies unevidenced project policy (DFS preorder, the
+    // IE/GUI interleave, submission-order painter depth, text last, one tick per
+    // rendered frame, a fixed MissionSelect highlight). Authorizing on the data's
+    // provenance would let project-chosen presentation be labelled retail, which
+    // is exactly the claim this gate exists to prevent. A bundle that composes
+    // and publishes changes nothing: publication proves pixels reached the
+    // display, not that they are what retail showed.
+    //
+    // The retail-capability overload of AuthorizeFrontEndPresentation is kept and
+    // still tested; it has no production caller until the presentation rules
+    // themselves are evidence-backed, at which point this branch is what changes.
     return runtime::AuthorizeFrontEndPresentation(
         presentation_mode_, std::nullopt);
 }
@@ -4254,13 +4262,16 @@ void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
         return;
     retail_front_end_bundle_attempted_ = true;
 
-    if (presentation_mode_ != runtime::FrontEndPresentationMode::RetailRequired)
+    // DeveloperDiagnostics only. The preview draws decoded data through
+    // project-chosen presentation rules, so it belongs to developer provenance
+    // and must never be reachable from a RetailRequired launch -- see
+    // IsRetailPreviewMode and AuthorizeCurrentFrontEndPresentation.
+    if (!IsRetailPreviewMode())
         return;
 
-    // Experimental opt-in. The retail compositor (Gap B) does not yet turn a
-    // bundle into per-mode textures and draw lists, so authorizing the gate by
-    // default would present an empty screen. Keep this behind an env guard until
-    // that lands; see docs/08-Retail-Front-End-Presentation-Scope.md.
+    // Explicit per-run opt-in on top of the mode, so the decoded preview is
+    // never what a developer gets by merely passing --developer-diagnostics;
+    // see docs/08-Retail-Front-End-Presentation-Scope.md.
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 4996)
@@ -4486,8 +4497,7 @@ std::vector<OmegaApp::RetailFrontEndButton> OmegaApp::RetailScreenSelectableButt
 void OmegaApp::UpdateRetailFrontEndPresentation(
     const frontend::presentation::RetailFrontEndNavInput& input) noexcept
 {
-    if (presentation_mode_ != runtime::FrontEndPresentationMode::RetailRequired ||
-        !retail_front_end_bundle_ || !host_)
+    if (!RetailPreviewActive() || !host_)
         return;
 
     // Declared outside the try so the containment handler below can still tell an
@@ -5742,13 +5752,17 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
     if (mp_menu_active_ && mp_menu_ready_)
         return mp_menu_draw_list_;
 
-    // Retail presentation (Gap B Phase 1): once the decoded retail screen has been
-    // composited, it IS the whole front end -- a single full-frame blit of the
-    // static Title -- and supersedes every project-authored per-mode draw list.
-    // Built once by BuildRetailFrontEndPresentationIfPossible under the retail
-    // presentation mode + experimental opt-in; until then this falls through to
-    // the project presentation (developer-diagnostics mode never sets it).
-    if (retail_front_end_ready_)
+    // Experimental decoded-data preview: once composed and published it IS the
+    // whole front end -- a single full-frame blit -- superseding every
+    // project-authored per-mode draw list. It is DeveloperDiagnostics-only,
+    // because the presentation rules that arrange the decoded assets are
+    // project policy rather than observed retail behaviour.
+    //
+    // The mode is re-checked here rather than trusted from the publish path, so
+    // a RetailRequired process cannot present these pixels even if the ready
+    // flag were somehow set. That mode's gate is already fail-closed; this is
+    // the second, independent barrier.
+    if (retail_front_end_ready_ && IsRetailPreviewMode())
         return retail_front_end_draw_list_;
 
     const FrontEndView view = BuildFrontEndView(
