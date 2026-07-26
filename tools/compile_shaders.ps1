@@ -12,7 +12,9 @@
 # Usage:  powershell -NoProfile -File tools/compile_shaders.ps1
 
 $ErrorActionPreference = 'Stop'
-$shaderDir = Join-Path $PSScriptRoot '..\native\apps\openomega\shaders'
+$shaderSourceDir = Join-Path $PSScriptRoot '..\shaders\openomega'
+$shaderHeaderDir = Join-Path $PSScriptRoot '..\native\apps\openomega\sdl_shaders'
+New-Item -ItemType Directory -Force -Path $shaderHeaderDir | Out-Null
 
 # Locate dxc: prefer the Windows Kits bin, else PATH.
 $dxc = $null
@@ -47,11 +49,11 @@ $stages = @(
     @{ src = 'mesh_textured.frag.hlsl'; profile = 'ps_6_0'; name = 'mesh_textured_frag_dxil'; header = 'mesh_textured.frag.dxil.h' }
 )
 foreach ($s in $stages) {
-    $src = Join-Path $shaderDir $s.src
+    $src = Join-Path $shaderSourceDir $s.src
     $tmp = [System.IO.Path]::GetTempFileName() + '.dxil'
     & $dxc -T $s.profile -E main $src -Fo $tmp
     if ($LASTEXITCODE -ne 0) { throw "dxc failed for $($s.src)" }
-    Convert-BinToHeader $tmp (Join-Path $shaderDir $s.header) $s.name
+    Convert-BinToHeader $tmp (Join-Path $shaderHeaderDir $s.header) $s.name
     Remove-Item $tmp -ErrorAction SilentlyContinue
 }
 Write-Host 'Done. Commit the regenerated *.dxil.h headers.'

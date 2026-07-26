@@ -118,8 +118,12 @@ add_library(omega_gameplay STATIC
     native/src/gameplay/combat.cpp
 )
 target_include_directories(omega_gameplay PUBLIC native/include)
-target_link_libraries(omega_gameplay PUBLIC omega_simulation)
+target_link_libraries(omega_gameplay PUBLIC omega_simulation omega_assets)
 target_compile_features(omega_gameplay PUBLIC cxx_std_23)
+
+add_library(omega_multiplayer INTERFACE)
+target_include_directories(omega_multiplayer INTERFACE native/include)
+target_compile_features(omega_multiplayer INTERFACE cxx_std_23)
 
 add_library(omega_retail_formats STATIC
     native/src/retail/col_spatial_mesh_decoder.cpp
@@ -399,7 +403,13 @@ add_library(omega_app_core STATIC
 )
 target_include_directories(omega_app_core PUBLIC native/apps/openomega)
 target_link_libraries(omega_app_core
-    PUBLIC omega_profiles omega_runtime omega_simulation omega_gameplay)
+    PUBLIC
+        omega_profiles
+        omega_runtime
+        omega_simulation
+        omega_gameplay
+        omega_multiplayer
+)
 target_compile_features(omega_app_core PUBLIC cxx_std_23)
 if(MSVC)
     target_compile_options(omega_app_core PRIVATE
@@ -548,7 +558,10 @@ if(OMEGA_BUILD_RUNTIME)
             omega_runtime
             omega_simulation
             omega_sdl_backend
+            omega_content
             omega_frontend_presentation
+        PRIVATE
+            omega_retail_formats
     )
     target_compile_features(omega_app_host PUBLIC cxx_std_23)
     if(MSVC)
@@ -841,13 +854,11 @@ if(BUILD_TESTING)
     set_tests_properties(omega_scene_fragment_wire_contract_tests PROPERTIES TIMEOUT 10)
 
     # Header-only project multiplayer menu logic (pure reducer + text field +
-    # session-request seam). Links no shipping target.
+    # session-request seam).
     add_executable(omega_mp_menu_tests
         native/tests/mp_menu_tests.cpp
     )
-    target_include_directories(omega_mp_menu_tests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/native/include"
-    )
+    target_link_libraries(omega_mp_menu_tests PRIVATE omega_multiplayer)
     if(MSVC)
         target_compile_options(omega_mp_menu_tests PRIVATE
             /W4

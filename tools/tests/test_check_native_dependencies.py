@@ -55,6 +55,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             ),
             ("native/src/profiles/example.cpp", "omega/persistence/save_database.h"),
             ("native/src/simulation/example.cpp", "omega/asset/decode.h"),
+            ("native/src/gameplay/example.cpp", "omega/asset/geometry_ir.h"),
             ("native/src/media/example.cpp", "omega/asset/decode.h"),
             ("native/src/retail/example.cpp", "omega/archive/archive_reader.h"),
             ("native/src/retail/example.cpp", "omega/asset/audio_ir.h"),
@@ -186,7 +187,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             ("native/src/runtime/example.cpp", "omega/retail/vag_adpcm_decoder.h"),
             ("native/src/runtime/example.cpp", "omega/retail/vpk_wrapper_envelope_decoder.h"),
             ("native/apps/openomega/sdl_example.cpp", "omega/simulation/simulation_world.h"),
-            ("native/apps/openomega/example.cpp", "omega/retail/pop_level_manifest_decoder.h"),
+            ("native/apps/openomega/example.cpp", "omega/compat/ps2_memory_card_image.h"),
         )
         for relative_path, include in cases:
             with self.subTest(relative_path=relative_path, include=include):
@@ -275,7 +276,7 @@ class NativeDependencyGateTests(unittest.TestCase):
             "unclassified project include",
         )
 
-    def test_gameplay_header_and_source_allow_only_self_simulation_and_stdlib(
+    def test_gameplay_header_and_source_allow_self_simulation_assets_and_stdlib(
         self,
     ) -> None:
         checked, errors = self.check_sources(
@@ -283,6 +284,8 @@ class NativeDependencyGateTests(unittest.TestCase):
                 "native/include/omega/gameplay/debug_locomotion.h": (
                     "#pragma once\n"
                     "#include <cstdint>\n"
+                    '#include "omega/asset/geometry_ir.h"\n'
+                    '#include "omega/asset/level_spatial_ir.h"\n'
                     '#include "omega/simulation/simulation_world.h"\n'
                 ),
                 "native/src/gameplay/debug_locomotion.cpp": (
@@ -301,6 +304,57 @@ class NativeDependencyGateTests(unittest.TestCase):
                 rule = gate.module_rule(Path(relative_path))
                 self.assertIsNotNone(rule)
                 self.assertEqual(rule.name, "omega_gameplay")
+                self.assertEqual(
+                    rule.allowed_omega_modules,
+                    frozenset(
+                        {"omega_gameplay", "omega_simulation", "omega_assets"}
+                    ),
+                )
+                self.assertTrue(rule.platform_neutral)
+
+    def test_multiplayer_is_a_dependency_free_interface_for_the_app(self) -> None:
+        multiplayer_header = "native/include/omega/multiplayer/mp_menu.h"
+        checked, errors = self.check_sources(
+            {
+                multiplayer_header: (
+                    "#pragma once\n"
+                    "#include <array>\n"
+                    '#include "omega/multiplayer/menu_types.h"\n'
+                ),
+                "native/include/omega/multiplayer/menu_types.h": (
+                    "#pragma once\n"
+                    "#include <cstdint>\n"
+                ),
+                "native/apps/openomega/front_end.cpp": (
+                    '#include "omega/multiplayer/mp_menu.h"\n'
+                ),
+            }
+        )
+        self.assertEqual(checked, 3)
+        self.assertEqual(errors, [])
+
+        rule = gate.module_rule(Path(multiplayer_header))
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule.name, "omega_multiplayer")
+        self.assertEqual(
+            rule.allowed_omega_modules, frozenset({"omega_multiplayer"})
+        )
+        self.assertTrue(rule.platform_neutral)
+        self.assertEqual(
+            gate._project_header_module("omega/multiplayer/mp_menu.h"),
+            "omega_multiplayer",
+        )
+
+        self.assert_rejected(
+            multiplayer_header,
+            '#include "omega/runtime/frame_scheduler.h"\n',
+            "omega_multiplayer includes forbidden dependency",
+        )
+        self.assert_rejected(
+            "native/src/simulation/example.cpp",
+            '#include "omega/multiplayer/mp_menu.h"\n',
+            "omega_simulation includes forbidden dependency",
+        )
 
     def test_gameplay_rejects_runtime_sdl_and_app_dependencies(self) -> None:
         cases = (
@@ -351,6 +405,61 @@ class NativeDependencyGateTests(unittest.TestCase):
                 )
                 self.assertEqual(checked, 1)
                 self.assertEqual(errors, [])
+
+    def test_openomega_host_may_compose_frontend_content_and_retail_formats(
+        self,
+    ) -> None:
+        source = (
+            '#include "omega/content/front_end_screen_bundle.h"\n'
+            '#include "omega/frontend_presentation/retail_front_end_frame.h"\n'
+            '#include "omega/retail/frontend_tdx_decoder.h"\n'
+        )
+        checked, errors = self.check_source(
+            "native/apps/openomega/omega_app.cpp", source
+        )
+        self.assertEqual(checked, 1)
+        self.assertEqual(errors, [])
+
+    def test_sdl_shader_headers_remain_owned_by_the_sdl_backend(self) -> None:
+        checked, errors = self.check_sources(
+            {
+                "native/apps/openomega/sdl_gpu_host.cpp": (
+                    '#include "sdl_shaders/mesh_textured.vert.dxil.h"\n'
+                ),
+                "native/apps/openomega/sdl_shaders/mesh_textured.vert.dxil.h": (
+                    "static constexpr unsigned char shader[] = {0U};\n"
+                ),
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(errors, [])
+
+        rule = gate.module_rule(
+            Path(
+                "native/apps/openomega/"
+                "sdl_shaders/mesh_textured.vert.dxil.h"
+            )
+        )
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule.name, "omega_sdl_backend")
+        self.assertEqual(
+            rule.allowed_omega_modules,
+            frozenset({"omega_sdl_backend", "omega_runtime"}),
+        )
+
+        checked, errors = self.check_sources(
+            {
+                "native/apps/openomega/sdl_gpu_host.cpp": (
+                    '#include "shaders/mesh_textured.vert.dxil.h"\n'
+                ),
+                "native/apps/openomega/shaders/mesh_textured.vert.dxil.h": (
+                    "static constexpr unsigned char shader[] = {0U};\n"
+                ),
+            }
+        )
+        self.assertEqual(checked, 2)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("omega_sdl_backend includes forbidden dependency", errors[0])
 
     def test_openomega_movie_presentation_may_depend_on_media(self) -> None:
         for relative_path in (
@@ -1014,12 +1123,15 @@ constexpr int separated = 1'048'576;
                 )
 
     def test_unknown_file_types_in_shipping_modules_fail_closed(self) -> None:
-        checked, errors = self.check_source(
-            "native/src/runtime/example.generated", "opaque\n"
-        )
-        self.assertEqual(checked, 0)
-        self.assertEqual(len(errors), 1, errors)
-        self.assertIn("unsupported file type", errors[0])
+        for relative_path in (
+            "native/src/runtime/example.generated",
+            "native/apps/openomega/sdl_shaders/example.hlsl",
+        ):
+            with self.subTest(relative_path=relative_path):
+                checked, errors = self.check_source(relative_path, "opaque\n")
+                self.assertEqual(checked, 0)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn("unsupported file type", errors[0])
 
     def test_unknown_file_types_in_unclassified_shipping_paths_fail_closed(self) -> None:
         checked, errors = self.check_sources(

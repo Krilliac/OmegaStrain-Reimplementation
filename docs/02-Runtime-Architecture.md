@@ -292,18 +292,22 @@ The detailed maturity gates and staged exits live in
 omega_profiles -> omega_persistence
 omega_media -> omega_assets                         (+ Windows OS libraries privately)
 omega_frontend -> omega_assets
-omega_gameplay -> omega_simulation
+omega_gameplay -> omega_simulation + omega_assets
+omega_multiplayer                              (dependency-free interface target)
 omega_retail_formats -> omega_assets + omega_core
 omega_content -> omega_assets                       (public)
               -> omega_core + omega_retail_formats  (private)
 omega_runtime -> omega_assets + omega_content       (public)
               -> Threads                            (private)
 omega_app_core -> omega_profiles + omega_runtime + omega_simulation + omega_gameplay
+               + omega_multiplayer
 omega_sdl_backend -> SDL3                           (public)
                   -> omega_runtime                  (private)
 omega_native_persistence -> omega_profiles
 omega_app_host -> omega_app_core + omega_media + omega_native_persistence
                + omega_runtime + omega_simulation + omega_sdl_backend
+               + omega_content + omega_frontend_presentation
+               + omega_retail_formats (private)
 omega_launcher_core -> omega_runtime
 omega_launcher_host -> omega_launcher_core + omega_content + Windows UI libraries
 openomega_launcher -> omega_launcher_host
@@ -347,15 +351,17 @@ The current native build targets express the same direction:
   Media-Foundation-named public header and `platform_code` error field are transitional internal
   contracts, not promoted SDK APIs, even though Windows SDK types remain hidden;
 - `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
-- `omega_gameplay`: project-owned gameplay systems over `omega_simulation`;
+- `omega_gameplay`: project-owned gameplay systems over `omega_simulation` and canonical owned
+  `omega_assets` geometry values;
+- `omega_multiplayer`: dependency-free project multiplayer menu values and reducers;
 - `omega_retail_formats`: stateless retail adapters and passive descriptors over `omega_assets` and
   `omega_core`;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
   orchestration, currently with a private transitional retail-adapter dependency;
 - `omega_runtime`: launch/configuration services and renderer-neutral diagnostic scene values
   consumed by the composition root and SDL host;
-- `omega_app_core`: portable OpenOmega title composition over profiles, runtime, simulation, and
-  gameplay;
+- `omega_app_core`: portable OpenOmega title composition over profiles, runtime, simulation,
+  gameplay, and multiplayer;
 - `omega_tool`: offline inspection and verification that may link retail adapters;
 - `omega_native_persistence`: app composition over project-owned profiles and saves;
 - `omega_sdl_backend`: the non-hot-reloadable SDL platform, audio, input translation, and GPU leaf;

@@ -23,12 +23,12 @@
 
 // In-house textured mesh shaders (Gap-A / gameplay Slice 1). DXIL only: this is
 // the format the SDL GPU D3D12 backend consumes on Windows. Authored HLSL under
-// native/apps/openomega/shaders/, compiled to DXIL by tools/compile_shaders.ps1,
-// committed as these headers so the build needs no shader compiler. On backends
+// shaders/openomega/, compiled to DXIL by tools/compile_shaders.ps1 and committed
+// as SDL-backend-owned headers so the build needs no shader compiler. On backends
 // without DXIL (MSL/SPIRV) the textured pipeline is simply not created and mesh
 // draws fall back to the flat solid-color pipeline (fail-soft).
-#include "shaders/mesh_textured.frag.dxil.h"
-#include "shaders/mesh_textured.vert.dxil.h"
+#include "sdl_shaders/mesh_textured.frag.dxil.h"
+#include "sdl_shaders/mesh_textured.vert.dxil.h"
 
 #include <algorithm>
 #include <array>
