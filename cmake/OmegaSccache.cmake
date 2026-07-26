@@ -35,6 +35,20 @@ function(_omega_compute_sccache_partition_token
     set("${output_token}" "omega-${partition_hash}" PARENT_SCOPE)
 endfunction()
 
+function(omega_sccache_partition_compile_definition
+        partition_token output_definition)
+    string(REGEX REPLACE "^omega-" "" partition_hash "${partition_token}")
+    string(LENGTH "${partition_hash}" partition_hash_length)
+    if(NOT partition_hash MATCHES "^[0-9a-f]+$"
+            OR NOT partition_hash_length EQUAL 64)
+        message(FATAL_ERROR "invalid OpenOmega sccache partition token")
+    endif()
+
+    set("${output_definition}"
+        "OPENOMEGA_SCCACHE_PARTITION_${partition_hash}=1"
+        PARENT_SCOPE)
+endfunction()
+
 function(omega_partition_sccache_launcher
         launcher_variable source_root binary_root caller_buster
         output_launcher output_partitioned output_token)
@@ -83,11 +97,13 @@ function(omega_partition_sccache_launcher
     set("${output_token}" "${partition_token}" PARENT_SCOPE)
 endfunction()
 
-function(omega_enable_sccache_worktree_partition)
+function(omega_enable_sccache_worktree_partition output_compile_definition)
+    set("${output_compile_definition}" "" PARENT_SCOPE)
     if(NOT WIN32 OR NOT CMAKE_GENERATOR MATCHES "^Ninja")
         return()
     endif()
 
+    set(partition_compile_definition "")
     foreach(language IN ITEMS C CXX)
         set(launcher_variable "CMAKE_${language}_COMPILER_LAUNCHER")
         if(NOT DEFINED "${launcher_variable}")
@@ -105,6 +121,12 @@ function(omega_enable_sccache_worktree_partition)
         )
         if(launcher_was_partitioned)
             set("${launcher_variable}" "${partitioned_launcher}" PARENT_SCOPE)
+            if(NOT partition_compile_definition)
+                omega_sccache_partition_compile_definition(
+                    "${partition_token}" partition_compile_definition)
+            endif()
         endif()
     endforeach()
+    set("${output_compile_definition}" "${partition_compile_definition}"
+        PARENT_SCOPE)
 endfunction()
