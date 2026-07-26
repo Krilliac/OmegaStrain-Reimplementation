@@ -24,6 +24,9 @@ struct RenderMeshDrawListTestAccess final
 
 namespace
 {
+using omega::asset::Float3IR;
+using omega::asset::Matrix4x4IR;
+using omega::runtime::IsBoxPossiblyVisible;
 using omega::runtime::RenderMeshColorRgba8;
 using omega::runtime::RenderMeshDrawCommand;
 using omega::runtime::RenderMeshDrawList;
@@ -215,6 +218,126 @@ void CheckValidation()
     Check(RenderMeshDrawList::Create(boundaries).has_value(),
         "both raster modes and all RGBA byte boundaries are accepted as project values");
 }
+
+[[nodiscard]] constexpr Float3IR Point(const float x, const float y, const float z) noexcept
+{
+    return Float3IR{.x = x, .y = y, .z = z};
+}
+
+// Project-owned 90-degree, square, left-handed projection with near = 1 and far = 101.
+// A point maps to (x, y, 1.01z - 1.01, z), making the visible region
+// |x| <= z, |y| <= z, and 1 <= z <= 101.
+constexpr Matrix4x4IR kTestProjection{
+    .row_major = {
+        1.0F, 0.0F, 0.0F, 0.0F,
+        0.0F, 1.0F, 0.0F, 0.0F,
+        0.0F, 0.0F, 1.01F, -1.01F,
+        0.0F, 0.0F, 1.0F, 0.0F,
+    },
+};
+
+[[nodiscard]] bool Visible(const Float3IR& minimum, const Float3IR& maximum) noexcept
+{
+    return IsBoxPossiblyVisible(kTestProjection, minimum, maximum);
+}
+
+[[nodiscard]] bool AnyCornerInside(const Float3IR& minimum, const Float3IR& maximum) noexcept
+{
+    const std::array<float, 2U> xs{minimum.x, maximum.x};
+    const std::array<float, 2U> ys{minimum.y, maximum.y};
+    const std::array<float, 2U> zs{minimum.z, maximum.z};
+    for (const float z : zs)
+    {
+        for (const float y : ys)
+        {
+            for (const float x : xs)
+            {
+                const double clip_z = static_cast<double>(1.01F) * static_cast<double>(z) +
+                                      static_cast<double>(-1.01F);
+                const double clip_w = static_cast<double>(z);
+                if (static_cast<double>(x) >= -clip_w &&
+                    static_cast<double>(x) <= clip_w &&
+                    static_cast<double>(y) >= -clip_w &&
+                    static_cast<double>(y) <= clip_w && clip_z >= 0.0 && clip_z <= clip_w)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+void CheckFrustumPredicate()
+{
+    static_assert(noexcept(IsBoxPossiblyVisible(std::declval<const Matrix4x4IR&>(),
+        std::declval<const Float3IR&>(), std::declval<const Float3IR&>())));
+
+    Check(Visible(Point(-1.0F, -1.0F, 9.0F), Point(1.0F, 1.0F, 11.0F)),
+        "a centered box is possibly visible");
+
+    Check(!Visible(Point(-100.0F, -1.0F, 9.0F), Point(-90.0F, 1.0F, 11.0F)),
+        "a box beyond the left plane is culled");
+    Check(!Visible(Point(90.0F, -1.0F, 9.0F), Point(100.0F, 1.0F, 11.0F)),
+        "a box beyond the right plane is culled");
+    Check(!Visible(Point(-1.0F, -100.0F, 9.0F), Point(1.0F, -90.0F, 11.0F)),
+        "a box beyond the bottom plane is culled");
+    Check(!Visible(Point(-1.0F, 90.0F, 9.0F), Point(1.0F, 100.0F, 11.0F)),
+        "a box beyond the top plane is culled");
+    Check(!Visible(Point(-1.0F, -1.0F, -11.0F), Point(1.0F, 1.0F, -9.0F)),
+        "a box behind the near plane is culled");
+    Check(!Visible(Point(-1.0F, -1.0F, 200.0F), Point(1.0F, 1.0F, 300.0F)),
+        "a box beyond the far plane is culled");
+
+    Check(Visible(Point(-20.0F, -1.0F, 9.0F), Point(0.0F, 1.0F, 11.0F)),
+        "a box straddling a side plane stays visible");
+    Check(Visible(Point(-1.0F, -1.0F, -5.0F), Point(1.0F, 1.0F, 20.0F)),
+        "a box straddling the camera plane stays visible");
+    Check(Visible(Point(-1000.0F, -1000.0F, -1000.0F),
+              Point(1000.0F, 1000.0F, 1000.0F)),
+        "a box enclosing the camera stays visible");
+    Check(!AnyCornerInside(Point(-1000.0F, -1000.0F, -1000.0F),
+              Point(1000.0F, 1000.0F, 1000.0F)),
+        "the camera-enclosing fixture has no corner inside the frustum");
+
+    Check(IsBoxPossiblyVisible(omega::asset::kIdentityMatrix4x4IR,
+              Point(-0.5F, -0.5F, 0.25F), Point(0.5F, 0.5F, 0.75F)),
+        "identity-space bounds inside the homogeneous clip volume stay visible");
+    Check(!IsBoxPossiblyVisible(omega::asset::kIdentityMatrix4x4IR,
+              Point(2.0F, -0.5F, 0.25F), Point(3.0F, 0.5F, 0.75F)),
+        "identity-space bounds beyond x equals w are culled");
+
+    Matrix4x4IR nonfinite = kTestProjection;
+    nonfinite.row_major[0] = std::numeric_limits<float>::quiet_NaN();
+    Check(IsBoxPossiblyVisible(nonfinite, Point(-100.0F, -1.0F, 9.0F),
+              Point(-90.0F, 1.0F, 11.0F)),
+        "a non-finite transform fails soft to visible");
+    Check(Visible(Point(-90.0F, 1.0F, 11.0F), Point(-100.0F, -1.0F, 9.0F)),
+        "inverted bounds fail soft to visible");
+    Check(Visible(Point(0.0F, 0.0F, 9.0F), Point(0.0F, 0.0F, 9.0F)),
+        "a visible zero-extent box remains visible");
+
+    for (int center_x = -6; center_x <= 6; ++center_x)
+    {
+        for (int center_y = -6; center_y <= 6; ++center_y)
+        {
+            for (int center_z = -6; center_z <= 6; ++center_z)
+            {
+                const Float3IR minimum = Point(static_cast<float>(center_x) * 20.0F - 5.0F,
+                    static_cast<float>(center_y) * 20.0F - 5.0F,
+                    static_cast<float>(center_z) * 20.0F - 5.0F);
+                const Float3IR maximum = Point(static_cast<float>(center_x) * 20.0F + 5.0F,
+                    static_cast<float>(center_y) * 20.0F + 5.0F,
+                    static_cast<float>(center_z) * 20.0F + 5.0F);
+                if (AnyCornerInside(minimum, maximum))
+                {
+                    Check(Visible(minimum, maximum),
+                        "a box with an inside corner is never culled");
+                }
+            }
+        }
+    }
+}
 } // namespace
 
 int main()
@@ -222,6 +345,7 @@ int main()
     CheckContractAndErrors();
     CheckCapacityOwnershipAndZeroTail();
     CheckValidation();
+    CheckFrustumPredicate();
     if (failures == 0)
         std::cout << "omega_render_mesh_draw_list_tests: all checks passed\n";
     return failures == 0 ? 0 : 1;
