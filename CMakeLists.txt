@@ -3496,6 +3496,10 @@ if(BUILD_TESTING)
         COMMAND omega_tool hog-verify-nested-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
     add_test(NAME omega_tool_rejects_empty_pop_tree
         COMMAND omega_tool pop-verify-tree "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
+    add_test(NAME omega_tool_corpus_bounds_process_contract
+        COMMAND "${CMAKE_COMMAND}"
+            "-DOMEGA_TOOL_EXECUTABLE=$<TARGET_FILE:omega_tool>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/omega_tool_corpus_bounds_process_contract.cmake")
     add_test(NAME omega_tool_rejects_empty_pop_post_terrain_hypotheses_tree
         COMMAND omega_tool pop-post-terrain-hypotheses-verify-tree
             "${CMAKE_CURRENT_BINARY_DIR}/empty-corpus")
@@ -3536,6 +3540,7 @@ if(BUILD_TESTING)
             WILL_FAIL TRUE
             TIMEOUT 10
     )
+    set_tests_properties(omega_tool_corpus_bounds_process_contract PROPERTIES TIMEOUT 30)
     set_tests_properties(
         omega_tool_empty_level_material_catalogs_signature
         PROPERTIES
