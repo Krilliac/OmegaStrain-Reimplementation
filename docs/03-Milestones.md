@@ -1038,8 +1038,10 @@ E-0074 adds a typed, explicit-only configuration path for content selection. The
 validated before direct CLI precedence. A valid direct root plus optional level wins as one tuple;
 it never inherits a configured level. No content keys preserve zero-file startup. A configured level
 without a root, an empty or unrepresentable native root, an invalid level, and an inconsistent direct
-pair map to four fixed sanitized error categories. Valid levels contain 1 to 32 ASCII alphanumeric
-bytes and normalize uppercase. Main resolves this tuple after service settings and before unchanged
+pair map to four fixed sanitized error categories. At E-0074, valid levels contained 1 to 32 ASCII
+alphanumeric bytes and normalized uppercase. E-0129 supersedes that validator: levels must now name
+one of the eighteen decoded table entries, matched without ASCII case sensitivity and normalized to
+the table's uppercase spelling. Main resolves this tuple after service settings and before unchanged
 content startup and E-0072 diagnostics. The root-level local `openomega.cfg` is ignored for privacy,
 but E-0074 does not discover it or any other ambient/default file. It adds no persistence, picker,
 path existence validation, content decoding, retail UI, or emulator-equivalence behavior. Local
