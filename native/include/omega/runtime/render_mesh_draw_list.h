@@ -125,6 +125,18 @@ private:
     std::uint32_t count_ = 0U;
 };
 
+// [any thread; reentrant] Conservatively tests an object-space axis-aligned box against this
+// project's Direct3D homogeneous clip volume. The matrix follows the existing row-major,
+// column-vector convention: -w <= x <= w, -w <= y <= w, and 0 <= z <= w.
+//
+// The predicate rejects only when every transformed corner lies strictly outside the same plane.
+// It therefore may retain an invisible box, but never rejects one whose bounds intersect the clip
+// volume. No perspective divide, allocation, renderer state, or GPU resource is involved.
+//
+// Non-finite inputs and inverted bounds fail soft to visible. Zero-extent bounds are valid.
+[[nodiscard]] bool IsBoxPossiblyVisible(const asset::Matrix4x4IR& object_to_clip,
+    const asset::Float3IR& minimum, const asset::Float3IR& maximum) noexcept;
+
 static_assert(sizeof(RenderMeshColorRgba8) == 4U);
 static_assert(std::is_trivially_copyable_v<RenderMeshColorRgba8>);
 static_assert(std::is_standard_layout_v<RenderMeshColorRgba8>);
