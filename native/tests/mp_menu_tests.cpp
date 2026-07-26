@@ -281,6 +281,40 @@ void TestConnectAndServerList()
         "server-list Back returns to Root");
 }
 
+void TestInvalidEnumCanonicalization()
+{
+    MpMenuState unknown_mode = MenuAt(MpScreen::HostGame, 2U);
+    unknown_mode.host_mode = static_cast<HostMode>(0xffU);
+    const MpMenuStep hosted = StepMpMenu(unknown_mode, Primary());
+    Check(
+        hosted.state.host_mode == HostMode::Listen &&
+            hosted.action.type == MpMenuActionType::StartHost &&
+            hosted.action.host_mode == HostMode::Listen,
+        "active 0xff host mode canonicalizes to Listen before input dispatch");
+
+    MpMenuState unknown_screen =
+        MenuAt(static_cast<MpScreen>(0xffU), 0xffU);
+    unknown_screen.host_mode = HostMode::Dedicated;
+    unknown_screen.editing = true;
+    unknown_screen.server_name =
+        TypeInto(MpTextField{}, "PRESERVED", MpTextFieldKind::Name);
+    MpMenuInput conflicting{};
+    conflicting.down = true;
+    conflicting.primary = true;
+    conflicting.cancel = true;
+    conflicting.backspace = true;
+    conflicting.text_char = 'X';
+    const MpMenuStep recovered = StepMpMenu(unknown_screen, conflicting);
+    Check(
+        recovered.state.screen == MpScreen::Root &&
+            recovered.state.selection == 0U && !recovered.state.editing &&
+            !recovered.state.exit_requested &&
+            recovered.state.host_mode == HostMode::Dedicated &&
+            recovered.state.server_name.view() == "PRESERVED" &&
+            recovered.action.type == MpMenuActionType::None,
+        "active 0xff screen resets control state and consumes the input step");
+}
+
 void TestInertStates()
 {
     const MpMenuState before = MenuAt(MpScreen::HostGame, 1U);
@@ -296,6 +330,17 @@ void TestInertStates()
         terminal.state == exited &&
             terminal.action.type == MpMenuActionType::None,
         "an exited menu state is terminal");
+
+    MpMenuState invalid_terminal = exited;
+    invalid_terminal.screen = static_cast<MpScreen>(0xffU);
+    invalid_terminal.host_mode = static_cast<HostMode>(0xffU);
+    invalid_terminal.selection = 0xffU;
+    invalid_terminal.editing = true;
+    const MpMenuStep untouched = StepMpMenu(invalid_terminal, Cancel());
+    Check(
+        untouched.state == invalid_terminal &&
+            untouched.action.type == MpMenuActionType::None,
+        "terminal state precedes 0xff enum canonicalization");
 }
 } // namespace
 
@@ -309,6 +354,7 @@ int main()
     TestNavigationAndTransitions();
     TestHostGame();
     TestConnectAndServerList();
+    TestInvalidEnumCanonicalization();
     TestInertStates();
 
     if (g_failures != 0)

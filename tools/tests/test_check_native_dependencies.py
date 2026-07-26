@@ -463,6 +463,20 @@ class NativeDependencyGateTests(unittest.TestCase):
             "unclassified shipping native source path",
         )
 
+    def test_openomega_cannot_consume_multiplayer_without_explicit_wiring(
+        self,
+    ) -> None:
+        for relative_path in (
+            "native/apps/openomega/front_end.cpp",
+            "native/apps/openomega/omega_app.cpp",
+        ):
+            with self.subTest(relative_path=relative_path):
+                self.assert_rejected(
+                    relative_path,
+                    '#include "omega/multiplayer/mp_menu.h"\n',
+                    "openomega includes forbidden dependency",
+                )
+
     def test_persistence_header_and_source_form_standalone_layer(self) -> None:
         checked, errors = self.check_sources(
             {

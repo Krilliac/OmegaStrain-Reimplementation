@@ -316,13 +316,20 @@ SDK edge. A dependency-free target such as `omega_ps2_compat` intentionally has 
 backends and retail decoders remain architectural leaves. Core and simulation never include PCSX2,
 Windows, GPU API, or proprietary-format implementation headers.
 
+`omega_multiplayer` is currently a header-only logical layer rather than a shipping CMake library or
+application dependency. It contains only project-owned bounded menu values and a deterministic
+reducer, and the dependency gate deliberately prevents `openomega` from consuming it until an
+explicit composition contract is reviewed. This layer makes no claim about a retail multiplayer
+menu, server discovery behavior, network transport, session protocol, or implemented netcode.
+
 `omega_persistence` and `omega_profiles` are separate bottom-level native service layers. Persistence
 may use host filesystem APIs in its private implementation, but both public interfaces are
 platform-neutral and neither can include runtime, content, retail-format, simulation, gameplay, app,
 SDL, or PCSX2 headers. Profiles may depend only on persistence; the app may own both through its
 composition service, and no lower layer depends upward on it.
 
-The current native build targets express the same direction:
+The current native build targets and the classified header-only logical layer express the same
+direction:
 
 - `omega_core`: HOG and ISO9660 indexing, VFS, and generic bounded infrastructure;
 - `omega_persistence`: the project-owned transactional save database, with no emulator or retail
@@ -348,6 +355,8 @@ The current native build targets express the same direction:
   contracts, not promoted SDK APIs, even though Windows SDK types remain hidden;
 - `omega_simulation`: platform-neutral deterministic world state and fixed-step execution;
 - `omega_gameplay`: project-owned gameplay systems over `omega_simulation`;
+- `omega_multiplayer`: allocation-free project-owned menu state and consumer-neutral UI actions,
+  header-only, self-contained, and not app-wired;
 - `omega_retail_formats`: stateless retail adapters and passive descriptors over `omega_assets` and
   `omega_core`;
 - `omega_content`: the non-hot-reloadable data-root service and retail-to-canonical startup
