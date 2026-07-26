@@ -156,6 +156,16 @@ The FNT/GUI/IE/TDX decoders predate this window.
 Each phase closes a defined subset of `RetailPresentationRequirement` blockers;
 track them explicitly.
 
+Phase 4 note (commit `b955e4e`): until every routed screen composes, navigation
+must not enter one that does not. `ResolveRetailFrontEndAcceptTarget`
+(`retail_front_end_nav.h`) admits an Accept target only when the destination is
+presentable, and `RetailBundleForScreen` memoizes an attempted-and-failed load
+so a missing screen costs one decode attempt and one log line instead of one of
+each per rendered frame. Before that, accepting into an unloadable screen left
+navigation on a screen that never drew while the Title's last composed frame
+stayed on display, recoverable only by a Back edge. As each screen lands, its
+key simply becomes presentable; no navigation change is needed.
+
 ## 7. Related launcher change (this session)
 
 The launcher (`native/apps/openomega_launcher/launcher_window.cpp`) previously
