@@ -332,6 +332,9 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     if (result.start_diagnostic_play && !saw_developer_diagnostics)
         return std::unexpected(
             "--start-diagnostic-play requires --developer-diagnostics");
+    if (result.start_diagnostic_play && saw_frames && result.frame_limit == 0)
+        return std::unexpected(
+            "--start-diagnostic-play cannot be combined with --frames=0");
     return result;
 }
 

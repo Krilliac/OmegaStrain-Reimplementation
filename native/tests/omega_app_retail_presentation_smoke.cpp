@@ -159,6 +159,23 @@ struct OmegaAppTestAccess final
         return app.RetailPreviewActive();
     }
 
+    static void SetFrontEndMode(
+        OmegaApp& app, const FrontEndMode mode) noexcept
+    {
+        app.front_end_state_.mode = mode;
+    }
+
+    static void LoadRetailFrontEndBundleIfEnabled(OmegaApp& app) noexcept
+    {
+        app.LoadRetailFrontEndBundleIfEnabled();
+    }
+
+    [[nodiscard]] static bool RetailFrontEndBundleAttempted(
+        const OmegaApp& app) noexcept
+    {
+        return app.retail_front_end_bundle_attempted_;
+    }
+
     static void BreakRetailTextureInvariant(OmegaApp& app) noexcept
     {
         app.retail_front_end_texture_ = runtime::RenderTextureHandle{};
@@ -887,6 +904,22 @@ void CheckPreviewProvenanceAndActivationBoundary()
                       preview_commands.data() &&
                   OmegaAppTestAccess::CurrentFrontEndMeshDrawList(*developer).empty(),
             "developer preview is authorized on project provenance and owns both draw lanes");
+
+        OmegaAppTestAccess::SetFrontEndMode(
+            *developer, omega::app::FrontEndMode::DiagnosticPlay);
+        OmegaAppTestAccess::LoadRetailFrontEndBundleIfEnabled(*developer);
+        Check(!OmegaAppTestAccess::RetailPreviewActive(*developer) &&
+                  !OmegaAppTestAccess::RetailFrontEndBundleAttempted(*developer) &&
+                  OmegaAppTestAccess::CurrentFrontEndDrawCommands(*developer).data() !=
+                      preview_commands.data(),
+            "DiagnosticPlay owns presentation and defers optional discovery even "
+            "when a coherent retail preview is resident");
+        OmegaAppTestAccess::SetFrontEndMode(
+            *developer, omega::app::FrontEndMode::Title);
+        Check(OmegaAppTestAccess::RetailPreviewActive(*developer) &&
+                  OmegaAppTestAccess::CurrentFrontEndDrawCommands(*developer).data() ==
+                      preview_commands.data(),
+            "leaving DiagnosticPlay allows the unchanged resident preview to reactivate at Title");
 
         const auto published_texture =
             OmegaAppTestAccess::RetailFrontEndTexture(*developer);

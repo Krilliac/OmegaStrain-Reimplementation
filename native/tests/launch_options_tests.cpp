@@ -86,6 +86,16 @@ int LaunchOptionsFailureCount()
     CheckError(Parse({"--start-diagnostic-play"}),
         "--start-diagnostic-play requires --developer-diagnostics",
         "normal retail-required launch cannot activate the project diagnostic scene");
+    constexpr std::string_view diagnostic_zero_frame_error =
+        "--start-diagnostic-play cannot be combined with --frames=0";
+    CheckError(Parse({"--developer-diagnostics", "--start-diagnostic-play",
+                         "--frames=0"}),
+        diagnostic_zero_frame_error,
+        "a typed diagnostic start cannot be consumed by the zero-frame shortcut");
+    CheckError(Parse({"--frames=0", "--start-diagnostic-play",
+                         "--developer-diagnostics"}),
+        diagnostic_zero_frame_error,
+        "zero-frame diagnostic start remains rejected in reverse option order");
     auto diagnostic_screenshot = Parse({"--start-diagnostic-play",
         "--screenshot-frame=1", "--frames=1", "--developer-diagnostics"});
     Check(diagnostic_screenshot && diagnostic_screenshot->start_diagnostic_play &&

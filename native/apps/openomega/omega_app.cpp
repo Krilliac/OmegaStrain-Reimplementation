@@ -3157,6 +3157,11 @@ OmegaApp::AuthorizeCurrentFrontEndPresentation() const noexcept
 
 void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
 {
+    // An explicit project diagnostic start owns presentation and input for the
+    // complete DiagnosticPlay lifetime. Defer optional preview discovery until
+    // a later menu run instead of loading a presentation that cannot be active.
+    if (front_end_state_.mode == FrontEndMode::DiagnosticPlay)
+        return;
     if (retail_front_end_bundle_attempted_)
         return;
     retail_front_end_bundle_attempted_ = true;
