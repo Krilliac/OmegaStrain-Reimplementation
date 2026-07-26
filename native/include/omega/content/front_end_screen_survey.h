@@ -19,9 +19,16 @@ namespace omega::content
 // This measures project routing reachability only. It does not assign retail
 // menu structure, control layout, ordering rules, activation behavior, or
 // screen semantics.
+// Give each allowlisted spelling named inline storage. Direct string-literal
+// initializers may use distinct literal objects across inline definitions, so
+// their data() pointer identity is not a portable borrowing proof.
+inline constexpr char kKnownFrontEndNewAgentIdentifier[] = "newagent";
+inline constexpr char kKnownFrontEndLoadAgentIdentifier[] = "loadagent";
 inline constexpr std::array<std::string_view, 2U> kKnownFrontEndButtonIdentifiers{
-    "newagent",
-    "loadagent",
+    std::string_view{
+        kKnownFrontEndNewAgentIdentifier, sizeof(kKnownFrontEndNewAgentIdentifier) - 1U},
+    std::string_view{
+        kKnownFrontEndLoadAgentIdentifier, sizeof(kKnownFrontEndLoadAgentIdentifier) - 1U},
 };
 
 inline constexpr std::uint32_t kFrontEndSurveyMaximumDepth = 64U;
