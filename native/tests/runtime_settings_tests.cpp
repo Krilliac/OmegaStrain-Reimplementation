@@ -238,6 +238,17 @@ int RuntimeSettingsFailureCount()
         CheckProfileError(probe_result, ContentLaunchProfileErrorCode::InvalidOptions,
             "direct content launch options are inconsistent",
             "probe mode rejects an effective configured opening movie member");
+
+        omega::runtime::LaunchOptions diagnostic_start_with_configured_movie;
+        diagnostic_start_with_configured_movie.start_diagnostic_play = true;
+        diagnostic_start_with_configured_movie.front_end_presentation_mode =
+            omega::runtime::FrontEndPresentationMode::DeveloperDiagnostics;
+        auto diagnostic_start_result = omega::runtime::ResolveContentLaunchProfile(
+            diagnostic_start_with_configured_movie, *configured_content);
+        CheckProfileError(diagnostic_start_result,
+            ContentLaunchProfileErrorCode::InvalidOptions,
+            "direct content launch options are inconsistent",
+            "diagnostic start rejects an effective configured opening movie member before app creation");
     }
 
     const std::string unicode_root_bytes = "configured/\xCE\xA9-data";

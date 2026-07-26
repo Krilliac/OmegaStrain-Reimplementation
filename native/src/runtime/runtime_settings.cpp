@@ -377,7 +377,8 @@ ResolveContentLaunchProfile(const LaunchOptions& options, const ConfigStore& con
                 (*configured)->opening_movie_member.reset();
             }
             else if ((*configured)->opening_movie_member &&
-                     (options.probe_only || options.capture_run))
+                     (options.probe_only || options.capture_run ||
+                         options.start_diagnostic_play))
             {
                 return std::unexpected(MakeContentLaunchProfileError(
                     ContentLaunchProfileErrorCode::InvalidOptions));

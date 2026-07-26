@@ -223,13 +223,15 @@ private:
         return presentation_mode_ ==
             runtime::FrontEndPresentationMode::DeveloperDiagnostics;
     }
-    // [any thread; reentrant] True only when the preview is coherent and ready
-    // to replace the project UI. Bundle presence alone is intentionally
-    // insufficient: navigation, pixels, texture, and draw list must describe the
-    // same successfully published frame.
+    // [any thread; reentrant] True only when the preview is coherent and ready,
+    // and the current state permits it to replace the project UI. Bundle
+    // presence alone is intentionally insufficient: navigation, pixels,
+    // texture, and draw list must describe the same successfully published frame.
     [[nodiscard]] bool RetailPreviewActive() const noexcept
     {
-        return IsRetailPreviewMode() && retail_front_end_ready_ &&
+        return IsRetailPreviewMode() &&
+               front_end_state_.mode != FrontEndMode::DiagnosticPlay &&
+               retail_front_end_ready_ &&
                retail_front_end_texture_valid_ &&
                retail_front_end_texture_.valid() &&
                !retail_front_end_draw_list_.empty() &&
