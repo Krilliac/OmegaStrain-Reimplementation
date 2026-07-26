@@ -6,6 +6,9 @@ endif()
 
 project(OmegaStrainReimplementation VERSION 0.1.0 LANGUAGES CXX)
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/OmegaSccache.cmake")
+omega_enable_sccache_worktree_partition()
+
 set(CMAKE_MSVC_RUNTIME_LIBRARY
     "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<NOT:$<CONFIG:Release>>:DLL>"
 )
@@ -681,6 +684,14 @@ if(OMEGA_RUN_GPU_SMOKE_TEST AND NOT TARGET omega_sdl_backend)
 endif()
 
 if(BUILD_TESTING)
+    add_test(NAME omega_sccache_worktree_partition_contract
+        COMMAND "${CMAKE_COMMAND}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/omega_sccache_worktree_partition_contract.cmake"
+    )
+    set_tests_properties(omega_sccache_worktree_partition_contract PROPERTIES
+        TIMEOUT 10
+    )
+
     function(set_openomega_synthetic_profile_environment test_name)
         set(profile_root
             "${CMAKE_CURRENT_BINARY_DIR}/synthetic-runtime-profiles/${test_name}")
