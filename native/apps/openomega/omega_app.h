@@ -203,6 +203,24 @@ private:
     // launches stay fail-closed. Never throws: a failure just leaves the bundle
     // empty and the gate unavailable.
     void LoadRetailFrontEndBundleIfEnabled() noexcept;
+    // [game/main thread; no concurrent use] Startup-only staged adoption of one
+    // screen, under the same commit rule as the player-driven path: load,
+    // compose and publish first, and adopt navigation ONLY if that whole
+    // transaction succeeded. Returns false without touching retail_nav_,
+    // retail_composed_nav_, the animation tick, or the animation flag when any
+    // step fails, so a caller can fall back. Never throws.
+    [[nodiscard]] bool TryAdoptRetailScreen(
+        content::FrontEndScreenKey screen) noexcept;
+    // [game/main thread; no concurrent use] Chooses the first retail screen.
+    // `requested` is the resolved debug start-screen override, if any, and
+    // `override_requested` says whether one was asked for at all (so an
+    // unrecognized spelling still reports). The override is staged through
+    // TryAdoptRetailScreen; if it is absent, unrecognized, unloadable,
+    // uncomposable, or unpublishable, navigation is left on the Title and the
+    // Title is composed. Never throws.
+    void BeginRetailFrontEndPresentation(
+        std::optional<content::FrontEndScreenKey> requested,
+        bool override_requested) noexcept;
     // [game/main thread; no concurrent use] Gap B retail front-end (docs/08).
     // Composites one decoded retail screen bundle into a canonical frame with the
     // named widget highlighted, at `animation_tick`, and publishes it.

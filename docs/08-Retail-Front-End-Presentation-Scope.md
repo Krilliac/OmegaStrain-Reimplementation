@@ -189,9 +189,20 @@ to an Accept edge rather than by the failure memo `b955e4e` used, which made a
 transient failure permanent. One fixed, identity-free warning is emitted per
 failed explicit attempt, including one raised by an exception.
 
-An unrecognized or unloadable `OPENOMEGA_FRONTEND_START_SCREEN` override falls
-back to composing the Title, so a bad override cannot leave navigation on a
-screen that never publishes.
+The `OPENOMEGA_FRONTEND_START_SCREEN` override is **staged**, never assigned up
+front. `TryAdoptRetailScreen` runs the same load → compose → publish transaction
+as the player-driven path and moves navigation only if the whole thing
+succeeded; `BeginRetailFrontEndPresentation` otherwise leaves navigation on the
+Title and composes the Title.
+
+That staging is the point. Assigning the override to `retail_nav_` as soon as
+its bundle loaded — which is what the first correction still did — made the
+requested screen simultaneously the current screen and the candidate, so a
+screen that loaded but failed to compose or upload had nothing to fall back to:
+navigation sat on a screen that never rendered, and every later frame retried
+the same screen instead of ever reaching the Title. An unrecognized spelling and
+an unloadable screen were always harmless, because neither ever moved
+navigation; the loadable-but-uncomposable case was the real one.
 
 As each screen lands, its key simply begins to publish; no navigation change is
 needed.

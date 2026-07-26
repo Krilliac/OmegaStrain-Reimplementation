@@ -46,6 +46,13 @@ namespace
 // upload -- all of which leave the player exactly where they were.
 constexpr std::string_view kRetailScreenChangeFailedWarning =
     "retail front-end screen change failed; keeping the current screen";
+// The one warning a refused debug start-screen override may emit. Fixed and
+// identity-free for the same reason: it echoes neither the requested spelling
+// nor any screen, member, or path, and reads the same whether the spelling was
+// unrecognized, the bundle would not load, or the screen would not compose or
+// publish -- all of which land the player on the Title.
+constexpr std::string_view kRetailStartScreenOverrideUnavailableWarning =
+    "retail front-end start-screen override unavailable; composing the Title";
 // Refill when the 4,096-frame ring has at least this much space. The queued lead therefore stays
 // between roughly 53 and 85 ms at 48 kHz during steady playback.
 constexpr std::uint64_t kOpeningMovieAudioRefillFrames = 1'536U;
@@ -4307,29 +4314,81 @@ void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
-    if (start_screen != nullptr)
-    {
-        // An override is honoured only when its spelling is recognized AND its
-        // bundle actually loads. Anything else falls back to the Title, which is
-        // already resident, so a bad override cannot leave navigation pointing at
-        // a screen that never composes and never publishes.
-        const auto requested = frontend::presentation::ResolveRetailStartScreenOverride(
-            std::string_view(start_screen));
-        if (requested && LoadRetailBundleForScreen(*requested) != nullptr)
-        {
-            retail_nav_.screen = *requested;
-        }
-        else
-        {
-            // Identity-free and fixed: it echoes neither the requested spelling
-            // nor any screen or member name.
-            log_->Warning("presentation",
-                "retail front-end start-screen override unavailable; composing the Title");
-        }
-    }
+    // The override is STAGED, never assigned up front. Assigning it before it had
+    // published made the requested screen simultaneously the current screen and
+    // the candidate, so a failed composition or upload had nothing to fall back
+    // to: navigation sat on a screen that never rendered, and every later frame
+    // retried the same screen instead of ever reaching the Title.
+    const std::optional<content::FrontEndScreenKey> requested =
+        start_screen != nullptr
+        ? frontend::presentation::ResolveRetailStartScreenOverride(
+              std::string_view(start_screen))
+        : std::nullopt;
+    BeginRetailFrontEndPresentation(requested, start_screen != nullptr);
+}
 
-    // Compose the initial screen (default selection) through the same recompose
-    // path the host loop uses each frame.
+bool OmegaApp::TryAdoptRetailScreen(
+    const content::FrontEndScreenKey screen) noexcept
+{
+    // Same discipline as the player-driven path: nothing is written until the
+    // whole load -> compose -> publish transaction has succeeded.
+    try
+    {
+        const auto* const bundle = LoadRetailBundleForScreen(screen);
+        if (bundle == nullptr)
+            return false;
+
+        const frontend::presentation::RetailFrontEndNavState candidate{
+            .screen = screen,
+            .selected = 0U,
+        };
+        const auto buttons = RetailScreenSelectableButtons(*bundle);
+        std::string_view selected_identifier;
+        if (candidate.selected < buttons.size())
+            selected_identifier = buttons[candidate.selected].identifier;
+
+        const std::uint32_t candidate_tick = retail_animation_tick_ + 1U;
+        bool candidate_has_animation = false;
+        if (!ComposeRetailScreenPresentation(*bundle, selected_identifier,
+                candidate_tick, candidate_has_animation))
+        {
+            return false;
+        }
+
+        retail_animation_tick_ = candidate_tick;
+        retail_screen_has_animation_ = candidate_has_animation;
+        retail_nav_ = candidate;
+        retail_composed_nav_ = candidate;
+        return true;
+    }
+    catch (...)
+    {
+        // Nothing above commits before the publish, so the caller's state is
+        // already intact and the Title fallback below still applies.
+        return false;
+    }
+}
+
+void OmegaApp::BeginRetailFrontEndPresentation(
+    const std::optional<content::FrontEndScreenKey> requested,
+    const bool override_requested) noexcept
+{
+    if (requested && TryAdoptRetailScreen(*requested))
+        return;
+
+    if (override_requested)
+        log_->Warning("presentation", kRetailStartScreenOverrideUnavailableWarning);
+
+    // Explicit rather than implied: whatever the override attempted, navigation
+    // returns to the Title before the Title is composed, so a refused override
+    // can never leave a screen selected that the player is not looking at.
+    //
+    // Guarded on nothing having published yet, which is the only state this
+    // startup path runs in. That keeps the pairing invariant unconditional: once
+    // retail_composed_nav_ holds a value, retail_nav_ equals it and is moved only
+    // by a publish, so this reset can never contradict what is on screen.
+    if (!retail_composed_nav_.has_value())
+        retail_nav_ = frontend::presentation::RetailFrontEndNavState{};
     UpdateRetailFrontEndPresentation(frontend::presentation::RetailFrontEndNavInput{});
 }
 

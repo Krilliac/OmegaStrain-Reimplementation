@@ -2589,7 +2589,8 @@ The correction, now the standing rule:
   the candidate fall back to the current screen, which publishes normally, so that case is warned on
   explicitly rather than passing silently.
 - An unrecognized or unloadable `OPENOMEGA_FRONTEND_START_SCREEN` override falls back to composing
-  the Title.
+  the Title. (This bullet was incomplete as written; the staged-override entry below covers the
+  loadable-but-uncomposable case it missed.)
 
 Coverage is no longer static assertions alone. `retail_front_end_frame_tests` adds a frame-sequence
 harness over the same pure functions that asserts the load-attempt budget, the warning count, and
@@ -2610,3 +2611,40 @@ runs; it covers Python this work never touched.
 No privacy, bounds, or clean-room claim changes. The warning text names no screen, member, path,
 widget, or error value, and refusing an unpresentable transition remains project-owned policy that
 asserts no retail transition rule, screen availability, or menu semantic.
+
+### The startup override is staged, not assigned (2026-07-25)
+
+An independent review found the remaining edge in the retail startup path after `d4ccf40`. The
+player-driven transaction was correct; the startup one was not.
+
+`LoadRetailFrontEndBundleIfEnabled` assigned `retail_nav_.screen` to a recognized override as soon
+as its bundle LOADED. `UpdateRetailFrontEndPresentation` then saw that screen as both current and
+candidate, so if it failed CPU composition or GPU publication there was nothing to fall back to:
+navigation stayed on a screen that had never been presented, `retail_composed_nav_` stayed empty,
+and every later frame retried the same screen instead of ever reaching the Title. An unrecognized
+spelling and an unloadable screen were always harmless, because neither moved navigation at all.
+The loadable-but-uncomposable override was the real defect, and it was the case the earlier
+correction did not cover.
+
+- `TryAdoptRetailScreen` runs the full load, compose and publish transaction for one screen and
+  writes `retail_nav_`, `retail_composed_nav_`, the animation tick and the animation flag only if
+  all of it succeeded. It is the startup counterpart of the per-frame commit rule, not a relaxation
+  of it: the player-driven path is unchanged.
+- `BeginRetailFrontEndPresentation` stages the override through that helper. Absent, unrecognized,
+  unloadable, uncomposable or unpublishable all take the same path: leave navigation on the Title
+  and compose the Title. Its fallback reset is guarded on nothing having published yet, so it can
+  never contradict a frame already on screen.
+- The refused-override warning stays one fixed identity-free line. It echoes neither the requested
+  spelling nor any screen, member or path, and reads the same for every refusal reason.
+
+`omega_app_retail_presentation_smoke` adds `CheckStartScreenOverrideFallsBackToTitle`, which is
+deliberately built on an override that LOADS but cannot compose — the case unknown/unloadable
+coverage would have missed. It asserts navigation stays on the Title, the Title still composes, and
+the fallback publishes a texture and one draw command; then that a composable override IS adopted,
+so the fallback is not merely refusing everything; then that startup with no override composes and
+adopts the Title.
+
+Validation is unchanged in kind: the C++ was NOT compiled and CTest was NOT run under this
+worktree's no-build constraint, and this test needs the opt-in GPU configuration. The native
+dependency gate (433 files), public-tree gate, evidence-ledger and ledger-format gates, and the
+Python tooling suite all pass. No privacy, bounds, or clean-room claim changes.

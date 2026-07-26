@@ -143,6 +143,16 @@ struct OmegaAppTestAccess final
             slot->reset();
     }
 
+    // Drives the startup screen choice exactly as LoadRetailFrontEndBundleIfEnabled
+    // does once it has parsed the environment override, so the staged-adoption
+    // behaviour is exercised without setting a process environment variable.
+    static void BeginRetailFrontEndPresentation(OmegaApp& app,
+        const std::optional<content::FrontEndScreenKey> requested,
+        const bool override_requested) noexcept
+    {
+        app.BeginRetailFrontEndPresentation(requested, override_requested);
+    }
+
     [[nodiscard]] static runtime::RenderTextureHandle RetailFrontEndTexture(
         const OmegaApp& app) noexcept
     {
@@ -715,12 +725,81 @@ void CheckRetailNavCommitsOnlyOnPublish()
     Check(OmegaAppTestAccess::RetailNav(*app).screen == FrontEndScreenKey::Title,
         "Accept accompanied by Back does not probe or switch");
 }
+
+// The startup override is staged, not assigned. The interesting case is an
+// override that LOADS but cannot be composed: an unknown or unloadable spelling
+// never moves navigation anyway, whereas this one used to be committed to
+// retail_nav_ before anything rendered, leaving navigation on a screen that
+// never published and no path back to the Title.
+void CheckStartScreenOverrideFallsBackToTitle()
+{
+    using omega::content::FrontEndScreenKey;
+
+    auto app = CreateRetailApp(nullptr);
+    Check(app.has_value(), "retail-required host starts for start-override coverage");
+    if (!app)
+        return;
+
+    OmegaAppTestAccess::InstallRetailBundle(
+        *app, FrontEndScreenKey::Title, MakeRoutingBundle(true));
+    // Loadable, and deliberately uncomposable.
+    OmegaAppTestAccess::InstallRetailBundle(
+        *app, FrontEndScreenKey::CreateAgent, MakeRoutingBundle(false));
+
+    OmegaAppTestAccess::BeginRetailFrontEndPresentation(
+        *app, FrontEndScreenKey::CreateAgent, true);
+
+    Check(OmegaAppTestAccess::RetailNav(*app).screen == FrontEndScreenKey::Title,
+        "a loadable but uncomposable override leaves navigation on the Title");
+    Check(OmegaAppTestAccess::RetailComposedNav(*app).has_value() &&
+              OmegaAppTestAccess::RetailComposedNav(*app)->screen ==
+                  FrontEndScreenKey::Title,
+        "a refused override still composes the Title");
+    Check(OmegaAppTestAccess::RetailFrontEndReady(*app) &&
+              OmegaAppTestAccess::RetailFrontEndTexture(*app).valid() &&
+              OmegaAppTestAccess::RetailFrontEndDrawCommands(*app).size() == 1U,
+        "the Title fallback publishes a texture and one draw command");
+
+    // A composable override IS adopted, so the fallback is not simply refusing
+    // every override.
+    auto adopting = CreateRetailApp(nullptr);
+    Check(adopting.has_value(), "retail-required host starts for override adoption");
+    if (!adopting)
+        return;
+    OmegaAppTestAccess::InstallRetailBundle(
+        *adopting, FrontEndScreenKey::Title, MakeRoutingBundle(true));
+    OmegaAppTestAccess::InstallRetailBundle(
+        *adopting, FrontEndScreenKey::CreateAgent, MakeRoutingBundle(true));
+    OmegaAppTestAccess::BeginRetailFrontEndPresentation(
+        *adopting, FrontEndScreenKey::CreateAgent, true);
+    Check(OmegaAppTestAccess::RetailNav(*adopting).screen ==
+                  FrontEndScreenKey::CreateAgent &&
+              OmegaAppTestAccess::RetailComposedNav(*adopting).has_value() &&
+              OmegaAppTestAccess::RetailComposedNav(*adopting)->screen ==
+                  FrontEndScreenKey::CreateAgent,
+        "an override that publishes is adopted");
+    Check(OmegaAppTestAccess::RetailFrontEndReady(*adopting),
+        "an adopted override publishes its own frame");
+
+    // No override at all still composes and adopts the Title.
+    auto plain = CreateRetailApp(nullptr);
+    Check(plain.has_value(), "retail-required host starts without an override");
+    if (!plain)
+        return;
+    OmegaAppTestAccess::InstallRetailBundle(
+        *plain, FrontEndScreenKey::Title, MakeRoutingBundle(true));
+    OmegaAppTestAccess::BeginRetailFrontEndPresentation(*plain, std::nullopt, false);
+    Check(OmegaAppTestAccess::RetailNav(*plain).screen == FrontEndScreenKey::Title &&
+              OmegaAppTestAccess::RetailFrontEndReady(*plain),
+        "startup without an override composes and adopts the Title");
+}
 } // namespace
 
 int main()
 {
     CheckAnimatedRetailFrameTextureReuse();
     CheckRetailNavCommitsOnlyOnPublish();
+    CheckStartScreenOverrideFallsBackToTitle();
     CheckBoundaryWithoutMovie();
     CheckBoundaryAfterMovie();
 
