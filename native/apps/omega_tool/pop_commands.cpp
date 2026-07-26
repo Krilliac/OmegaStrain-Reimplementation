@@ -169,11 +169,26 @@ int PopVerifyTree(const std::filesystem::path& root)
     std::uint64_t error_count = 0;
     std::uint64_t terrain_record_count = 0;
     std::uint64_t nonzero_alignment_record_count = 0;
+    std::uint64_t visited_entry_count = 0;
     std::error_code error;
 
     std::filesystem::recursive_directory_iterator iterator(root, error), end;
     while (iterator != end && !error)
     {
+        if (visited_entry_count >= kMaximumCorpusEntries)
+        {
+            ++error_count;
+            std::cerr << "POP corpus entry count exceeds safety limit\n";
+            break;
+        }
+        ++visited_entry_count;
+        if (iterator.depth() > kMaximumCorpusDepth)
+        {
+            ++error_count;
+            std::cerr << "POP corpus depth exceeds safety limit\n";
+            break;
+        }
+
         const auto status = iterator->symlink_status(error);
         if (error)
             break;

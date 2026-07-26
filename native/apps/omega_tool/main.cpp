@@ -25,6 +25,8 @@ constexpr std::uint64_t kMaximumTopLevelArchiveCount = 1U << 12U;
 constexpr std::uint64_t kMaximumNestedArchiveCount = 1U << 15U;
 constexpr std::uint64_t kMaximumIndexedEntryCount = 1U << 20U;
 constexpr std::size_t kMaximumNestedArchiveDepth = 32;
+constexpr std::uint64_t kMaximumHogCorpusEntries = 1ULL << 20U;
+constexpr int kMaximumHogCorpusDepth = 32;
 
 [[nodiscard]] bool IsHog(const std::filesystem::path& path)
 {
@@ -86,10 +88,25 @@ int HogVerifyTree(const std::filesystem::path& root)
     std::uint64_t error_count = 0;
     std::uint64_t entry_count = 0;
     std::uint64_t total_bytes = 0;
+    std::uint64_t visited_entry_count = 0;
 
     std::filesystem::recursive_directory_iterator iterator(root, error), end;
     while (iterator != end && !error)
     {
+        if (visited_entry_count >= kMaximumHogCorpusEntries)
+        {
+            ++error_count;
+            std::cerr << "HOG corpus entry count exceeds safety limit\n";
+            break;
+        }
+        ++visited_entry_count;
+        if (iterator.depth() > kMaximumHogCorpusDepth)
+        {
+            ++error_count;
+            std::cerr << "HOG corpus depth exceeds safety limit\n";
+            break;
+        }
+
         const auto status = iterator->symlink_status(error);
         if (error)
             break;
@@ -278,9 +295,26 @@ int HogVerifyNestedTree(const std::filesystem::path& root)
 {
     NestedVerificationStats stats;
     std::error_code error;
+    std::uint64_t visited_entry_count = 0;
     std::filesystem::recursive_directory_iterator iterator(root, error), end;
     while (iterator != end && !error && !stats.stopped_at_safety_limit)
     {
+        if (visited_entry_count >= kMaximumHogCorpusEntries)
+        {
+            ++stats.top_level_errors;
+            stats.stopped_at_safety_limit = true;
+            std::cerr << "HOG corpus entry count exceeds safety limit\n";
+            break;
+        }
+        ++visited_entry_count;
+        if (iterator.depth() > kMaximumHogCorpusDepth)
+        {
+            ++stats.top_level_errors;
+            stats.stopped_at_safety_limit = true;
+            std::cerr << "HOG corpus depth exceeds safety limit\n";
+            break;
+        }
+
         const auto status = iterator->symlink_status(error);
         if (error)
             break;
