@@ -1,5 +1,7 @@
 #include "omega/runtime/model_pose_evaluation.h"
 
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <limits>
@@ -10,14 +12,20 @@ namespace
 {
 using omega::asset::DecodeErrorCode;
 using omega::asset::DecodeLimits;
+using omega::asset::Float3IR;
 using omega::asset::JointIR;
 using omega::asset::kIdentityMatrix4x4IR;
 using omega::asset::kMaximumSkeletonJoints;
+using omega::asset::kMaximumSkinInfluencesPerVertex;
 using omega::asset::Matrix4x4IR;
 using omega::asset::PoseIR;
 using omega::asset::SkeletonIR;
+using omega::asset::SkinInfluenceIR;
+using omega::runtime::ComposeSkinningMatrices;
 using omega::runtime::EvaluateBindPose;
 using omega::runtime::EvaluatePose;
+using omega::runtime::SkinningError;
+using omega::runtime::SkinVertexPosition;
 
 int failures = 0;
 
@@ -81,6 +89,37 @@ void CheckError(
 
     return skeleton;
 }
+
+[[nodiscard]] SkinInfluenceIR Influence(const std::uint32_t joint, const float weight)
+{
+    SkinInfluenceIR influence;
+    influence.joint_indices[0] = joint;
+    influence.weights[0] = weight;
+    influence.used_influences = 1U;
+    return influence;
+}
+
+[[nodiscard]] SkinInfluenceIR InfluencePair(const std::uint32_t first_joint,
+    const float first_weight, const std::uint32_t second_joint, const float second_weight)
+{
+    SkinInfluenceIR influence;
+    influence.joint_indices[0] = first_joint;
+    influence.weights[0] = first_weight;
+    influence.joint_indices[1] = second_joint;
+    influence.weights[1] = second_weight;
+    influence.used_influences = 2U;
+    return influence;
+}
+
+[[nodiscard]] std::vector<Matrix4x4IR> SkinningPalette()
+{
+    return {Translation(10.0F, 0.0F, 0.0F), Translation(0.0F, 20.0F, 0.0F)};
+}
+
+constexpr Float3IR kBindPosition{.x = 1.0F, .y = 2.0F, .z = 3.0F};
+constexpr Float3IR kJoint0Position{.x = 11.0F, .y = 2.0F, .z = 3.0F};
+constexpr Float3IR kJoint1Position{.x = 1.0F, .y = 22.0F, .z = 3.0F};
+constexpr Float3IR kHalfBlend{.x = 6.0F, .y = 12.0F, .z = 3.0F};
 } // namespace
 
 int ModelPoseEvaluationFailureCount()
@@ -222,6 +261,182 @@ int ModelPoseEvaluationFailureCount()
         --limits.maximum_output_bytes;
         CheckError(EvaluateBindPose(chain, limits), DecodeErrorCode::LimitExceeded,
             "bind pose rejects one byte below the output-byte budget");
+    }
+
+    // A posed global transform composed with its matching inverse bind yields identity.
+    {
+        const std::vector<Matrix4x4IR> global{Translation(4.0F, 0.0F, 0.0F)};
+        const std::vector<Matrix4x4IR> inverse_bind{Translation(-4.0F, 0.0F, 0.0F)};
+        std::vector<Matrix4x4IR> skinning(1U);
+        const auto result = ComposeSkinningMatrices(global, inverse_bind, skinning);
+        Check(result.has_value() && skinning[0] == kIdentityMatrix4x4IR,
+            "matching global and inverse-bind transforms compose to identity");
+    }
+
+    // Non-commutative coverage freezes global * inverse-bind order.
+    {
+        const std::vector<Matrix4x4IR> global{Translation(1.0F, 0.0F, 0.0F)};
+        const std::vector<Matrix4x4IR> inverse_bind{Scale(2.0F, 2.0F, 2.0F)};
+        std::vector<Matrix4x4IR> skinning(1U);
+        const auto result = ComposeSkinningMatrices(global, inverse_bind, skinning);
+        Check(result.has_value() && skinning[0].row_major[0] == 2.0F &&
+                  skinning[0].row_major[3] == 1.0F,
+            "skinning matrices use global before inverse-bind order");
+    }
+
+    // Fixed staging makes partially overlapping caller spans deterministic.
+    {
+        std::array<Matrix4x4IR, 3U> storage{
+            Translation(1.0F, 0.0F, 0.0F),
+            Translation(2.0F, 0.0F, 0.0F),
+            Translation(99.0F, 0.0F, 0.0F),
+        };
+        const std::array<Matrix4x4IR, 2U> inverse_bind{
+            Translation(-1.0F, 0.0F, 0.0F),
+            Translation(-1.0F, 0.0F, 0.0F),
+        };
+        const auto result = ComposeSkinningMatrices(
+            std::span<const Matrix4x4IR>{storage.data(), 2U}, inverse_bind,
+            std::span<Matrix4x4IR>{storage.data() + 1U, 2U});
+        Check(result.has_value() && storage[1] == kIdentityMatrix4x4IR &&
+                  storage[2] == Translation(1.0F, 0.0F, 0.0F),
+            "overlapping input and output spans use the complete original input");
+    }
+
+    // Cardinality is checked before writes; any later numerical failure also preserves output.
+    {
+        const std::vector<Matrix4x4IR> two(2U, kIdentityMatrix4x4IR);
+        std::vector<Matrix4x4IR> one(1U, Translation(9.0F, 9.0F, 9.0F));
+        const Matrix4x4IR sentinel = one[0];
+        const auto mismatch = ComposeSkinningMatrices(two, two, one);
+        Check(!mismatch && mismatch.error() == SkinningError::CountMismatch &&
+                  one[0] == sentinel,
+            "a count mismatch leaves the output buffer unchanged");
+
+        const std::vector<Matrix4x4IR> oversized(
+            static_cast<std::size_t>(kMaximumSkeletonJoints) + 1U, kIdentityMatrix4x4IR);
+        std::vector<Matrix4x4IR> oversized_output(oversized.size(), sentinel);
+        const auto capacity =
+            ComposeSkinningMatrices(oversized, oversized, oversized_output);
+        Check(!capacity && capacity.error() == SkinningError::CapacityExceeded &&
+                  oversized_output.front() == sentinel && oversized_output.back() == sentinel,
+            "a palette above the canonical joint ceiling leaves output unchanged");
+
+        Matrix4x4IR nonfinite = kIdentityMatrix4x4IR;
+        nonfinite.row_major[0] = std::numeric_limits<float>::quiet_NaN();
+        const std::vector<Matrix4x4IR> globals{kIdentityMatrix4x4IR, nonfinite};
+        std::vector<Matrix4x4IR> output(2U, sentinel);
+        const auto invalid = ComposeSkinningMatrices(globals, two, output);
+        Check(!invalid && invalid.error() == SkinningError::NonFiniteInput &&
+                  output[0] == sentinel && output[1] == sentinel,
+            "a late non-finite input leaves every output matrix unchanged");
+
+        const std::vector<Matrix4x4IR> extreme{
+            Scale(std::numeric_limits<float>::max(), 1.0F, 1.0F)};
+        const std::vector<Matrix4x4IR> doubled{Scale(2.0F, 1.0F, 1.0F)};
+        std::vector<Matrix4x4IR> overflow_output(1U, sentinel);
+        const auto overflow = ComposeSkinningMatrices(extreme, doubled, overflow_output);
+        Check(!overflow && overflow.error() == SkinningError::NonFiniteResult &&
+                  overflow_output[0] == sentinel,
+            "an unrepresentable product leaves the output matrix unchanged");
+    }
+
+    {
+        const std::vector<Matrix4x4IR> empty;
+        std::vector<Matrix4x4IR> output;
+        Check(ComposeSkinningMatrices(empty, empty, output).has_value(),
+            "an empty skinning palette is a valid no-op");
+    }
+
+    // Basic affine blends and defensive normalization.
+    {
+        const auto palette = SkinningPalette();
+        Check(SkinVertexPosition(kBindPosition, palette, Influence(0U, 1.0F)) ==
+                  kJoint0Position,
+            "one full-weight influence applies its joint transform");
+        Check(SkinVertexPosition(kBindPosition, palette, Influence(1U, 1.0F)) ==
+                  kJoint1Position,
+            "the second joint selects the second palette transform");
+        Check(SkinVertexPosition(kBindPosition, palette,
+                  InfluencePair(0U, 0.5F, 1U, 0.5F)) == kHalfBlend,
+            "two half weights blend midway between joint results");
+        Check(SkinVertexPosition(kBindPosition, palette,
+                  InfluencePair(0U, 2.0F, 1U, 2.0F)) == kHalfBlend,
+            "unnormalized weights are normalized by their finite total");
+    }
+
+    // Zero and unusable effective weights fail soft to the unskinned position.
+    {
+        const auto palette = SkinningPalette();
+        Check(SkinVertexPosition(kBindPosition, palette,
+                  InfluencePair(0U, 0.0F, 1U, 0.0F)) == kBindPosition,
+            "zero weights do not collapse a vertex to the origin");
+        Check(SkinVertexPosition(kBindPosition, palette,
+                  InfluencePair(0U, 1.0F, 1U, -1.0F)) == kBindPosition,
+            "canceling weights fail soft to the unskinned position");
+        Check(SkinVertexPosition(kBindPosition, palette, SkinInfluenceIR{}) == kBindPosition,
+            "zero used influences fail soft to the unskinned position");
+        Check(SkinVertexPosition(kBindPosition, palette,
+                  InfluencePair(0U, 0.5F, 7U, 0.5F)) == kJoint0Position,
+            "an out-of-range joint is skipped and surviving weight renormalizes");
+        Check(SkinVertexPosition(kBindPosition, palette, Influence(7U, 1.0F)) ==
+                  kBindPosition,
+            "an entirely out-of-range influence set fails soft");
+    }
+
+    // The fixed canonical array bounds every read even when used_influences is malformed.
+    {
+        const auto palette = SkinningPalette();
+        SkinInfluenceIR overrun;
+        for (std::size_t slot = 0; slot < kMaximumSkinInfluencesPerVertex; ++slot)
+        {
+            overrun.joint_indices[slot] = 0U;
+            overrun.weights[slot] = 0.25F;
+        }
+        overrun.used_influences = std::numeric_limits<std::uint8_t>::max();
+        Check(SkinVertexPosition(kBindPosition, palette, overrun) == kJoint0Position,
+            "used influence count is clamped to fixed canonical storage");
+    }
+
+    // Non-finite inputs are deterministic fail-soft errors, including a bad skipped-slot weight.
+    {
+        auto palette = SkinningPalette();
+        Check(SkinVertexPosition(kBindPosition, palette,
+                  InfluencePair(0U, std::numeric_limits<float>::quiet_NaN(), 1U, 1.0F)) ==
+                  kBindPosition,
+            "a non-finite valid-slot weight fails soft");
+        Check(SkinVertexPosition(kBindPosition, palette,
+                  InfluencePair(0U, 1.0F, 7U,
+                      std::numeric_limits<float>::quiet_NaN())) == kBindPosition,
+            "a non-finite out-of-range-slot weight still fails soft");
+
+        palette[0].row_major[3] = std::numeric_limits<float>::infinity();
+        Check(SkinVertexPosition(kBindPosition, palette, Influence(0U, 1.0F)) ==
+                  kBindPosition,
+            "a non-finite referenced matrix fails soft");
+
+        const Float3IR nonfinite_position{
+            .x = std::numeric_limits<float>::quiet_NaN(), .y = 2.0F, .z = 3.0F};
+        const Float3IR unchanged =
+            SkinVertexPosition(nonfinite_position, SkinningPalette(), Influence(0U, 1.0F));
+        Check(std::isnan(unchanged.x) && unchanged.y == 2.0F && unchanged.z == 3.0F,
+            "a non-finite bind position is returned unchanged");
+    }
+
+    // Negative weights extrapolate by explicit project policy; unrepresentable output fails soft.
+    {
+        const auto palette = SkinningPalette();
+        Check(SkinVertexPosition(kBindPosition, palette,
+                  InfluencePair(0U, 2.0F, 1U, -1.0F)) ==
+                  Float3IR{.x = 21.0F, .y = -18.0F, .z = 3.0F},
+            "negative weights extrapolate through the normalized affine blend");
+
+        const std::vector<Matrix4x4IR> extreme{
+            Translation(std::numeric_limits<float>::max(), 0.0F, 0.0F),
+            Translation(-std::numeric_limits<float>::max(), 0.0F, 0.0F)};
+        Check(SkinVertexPosition(kBindPosition, extreme,
+                  InfluencePair(0U, 2.0F, 1U, -1.0F)) == kBindPosition,
+            "an out-of-float-range blend fails soft to the unskinned position");
     }
 
     return failures;
