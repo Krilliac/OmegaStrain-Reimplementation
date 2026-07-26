@@ -117,9 +117,10 @@ using VisualNodeClaimMap =
 
 // Depth-first preorder over the retail IE visual tree: each node emits its own
 // triangles under its accumulated world transform (parent_world * local), THEN
-// recurses into its children, matching the retail render order recovered from
-// the disassembly. A node whose declared texture member is not resolvable falls
-// back to the untextured vertex-color path.
+// recurses into its children. This is the experimental compositor's bounded
+// PROJECT ordering; public evidence does not yet recover the complete retail
+// IE/GUI interleave. A node whose declared texture member is not resolvable
+// falls back to the untextured vertex-color path.
 //
 // `claims` redirects CHILDREN only: the entry node is the one whose claim the
 // caller just consumed. A claimed child is still emitted HERE, in its authored
@@ -272,16 +273,13 @@ void AppendVisualNodeTriangles(const content::FrontEndVisualScope& scope,
                     ++diag->triangles_skipped_non_finite;
                 break;
             }
-            // Depth is NOT taken from the projected Z. The retail front end draws
-            // in depth-first preorder with a monotonic submission sequence and no
-            // post-hoc z-sort (recovered from the disassembly), so layering is
-            // painter's-by-submission-order. The projected depth_rank is only a
-            // normalized rank the projection does not clip, and real IE nodes
-            // legitimately fall outside [0,1]; using it as the raster depth key
-            // would both reject valid screens and reorder nodes against the retail
-            // submission order. depth_rank is assigned per-triangle after the full
-            // preorder walk (see ComposeRetailFrontEndFrame) as its submission
-            // ordinal; here it is a placeholder overwritten there.
+            // Depth is NOT taken from projected Z. The experimental compositor
+            // uses a project-owned preorder painter policy because IE nodes can
+            // legitimately project outside [0,1]; treating that value as raster
+            // depth would reject valid decoded data. depth_rank is assigned
+            // per-triangle after the full preorder walk as its project submission
+            // ordinal; this placeholder is overwritten there. No retail z-sort or
+            // complete lane order is claimed.
             const auto modulation = ModulateVertexColor(
                 node.colors[color_index], opacity_modulation);
             if (!modulation)
@@ -928,12 +926,10 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
         // screen's own semi-transparent ring art, which visibly washed them out;
         // in the reference frame they are opaque marks over the track.
         //
-        // The selection passed here is the one the captures actually show
+        // The compositor intentionally requests the observed MissionSelect form
         // (marker 2). Nothing proves how the retail runtime maps a selected
         // mission -- or this compositor's selected_widget_identifier -- onto a
-        // marker index, so no such mapping is invented: the caller-facing knob
-        // exists on AppendRetailMissionRingTriangles, and until that mapping is
-        // measured the frame composes the one observed state.
+        // marker index, so no caller-controlled mapping is invented here.
         if (bundle.key() == content::FrontEndScreenKey::CommandCenter)
         {
             const std::size_t before_ring = triangles.size();
@@ -943,11 +939,11 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
                 diagnostics->mission_ring_triangles =
                     static_cast<std::uint32_t>(triangles.size() - before_ring);
         }
-        // Phase 2 GUI text pass. Glyph quads are appended AFTER all IE geometry
-        // so the submission-ordinal depth pass below ranks them highest and they
-        // draw on top of the screen art. Text is a decoration over a valid IE
-        // screen; it never gates composition. It walks the same widget tree under
-        // the same subtree gate the visual pass used.
+        // Phase 2 GUI text pass. The experimental PROJECT policy appends glyph
+        // quads after all IE geometry so submission ordinals draw them on top.
+        // Public evidence does not yet recover the retail IE/text interleave.
+        // Text is a decoration over a valid IE screen; it never gates composition.
+        // It walks the same widget tree under the same subtree gate.
         AppendGuiTextTriangles(bundle, bundle.widget_document().root, 0U,
             selected_widget_identifier, force_visible_group,
             runtime_hidden_groups, diagnostics, triangles);
@@ -960,10 +956,9 @@ RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
         return std::unexpected(RetailFrontEndFrameError::MissingRootVisualBinding);
 
     // Assign each triangle its submission ordinal as depth_rank, normalized into
-    // (0, 1). Triangles were appended in the retail depth-first preorder submission
-    // order, so a later triangle gets a strictly larger rank and the CPU raster's
-    // GEQUAL (larger-is-nearer) keep makes it cover earlier ones -- painter's order
-    // by submission, matching the retail engine's no-z-sort front-end.
+    // (0, 1). A later triangle gets a strictly larger rank and the CPU raster's
+    // GEQUAL (larger-is-nearer) keep makes it cover earlier ones. This is the
+    // experimental project-owned painter policy, not a recovered retail order.
     const float ordinal_scale = static_cast<float>(triangles.size() + 1U);
     for (std::size_t triangle_index = 0U; triangle_index < triangles.size();
          ++triangle_index)

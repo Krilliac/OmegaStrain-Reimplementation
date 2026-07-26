@@ -60,22 +60,23 @@ struct RetailFrontEndFrameDiagnostics final
 };
 
 // [any thread; stateless/reentrant] Composes one retail front-end screen into a
-// single fully owned canonical 640x448 frame. The root GUI widget selects the
+// single fully owned project-canonical 640x448 frame. The root GUI widget selects the
 // screen's visual scope and resolves the root IE node; the entire IE visual
 // subtree below it is then emitted in depth-first PREORDER (each node draws its
 // own triangles under its accumulated world transform = parent_world * local,
-// then recurses into its children), matching the retail render order recovered
-// from the disassembly. The fixed IE->raster axis bridge is applied outermost so
-// screen vertical comes from IE Y and depth from IE Z. Layering is painter's by
-// submission order: each triangle's depth rank is its preorder submission ordinal
-// and the CPU raster's GEQUAL keep makes a later node cover an earlier one -- the
-// projected Z is deliberately not used as a depth key (real IE Z is unclipped).
+// then recurses into its children). That preorder, the IE-vs-GUI lane order, and
+// submission-ordinal painter depth are bounded PROJECT policies for this
+// experimental compositor: E-0123/E-0127/E-0128 do not establish the retail
+// interleave or complete render order. The fixed IE->raster axis bridge is applied
+// outermost so screen vertical comes from IE Y and depth from IE Z. Projected Z is
+// deliberately not used as a depth key because IE Z is not bounded to raster depth.
 //
 // After the IE geometry, a GUI text pass (Phase 2) walks the widget tree and
 // emits textured glyph quads for visible Text/Button widgets -- string resolved
 // via the bundle string table, font/atlas via the bundle resolvers, glyphs laid
-// out by LayoutRetailText -- appended last so they carry the highest submission
-// ordinals and draw on top. GUI action interaction is a later phase.
+// out by LayoutRetailText -- appended last by the same project-owned policy so
+// they carry the highest submission ordinals and draw on top. GUI action
+// interaction is a later phase.
 //
 // `animation_tick` (Phase 3b) advances the IE animation tracks: for each visual
 // node carrying tracks, the timeline is evaluated at this tick (via the retail
@@ -84,7 +85,9 @@ struct RetailFrontEndFrameDiagnostics final
 // and opacity (OPACITY tracks, multiplied into vertex-colour alpha) are used in
 // place of the frame-0 base values. Tick 0 (the default) reproduces the static
 // frame-0 screen exactly; a node with no tracks is unaffected at any tick. The
-// caller owns the live->authored tick mapping (this boundary assigns no rate).
+// caller owns the live->authored tick mapping (this boundary assigns no rate);
+// the app's current one-tick-per-rendered-frame mapping is experimental PROJECT
+// policy, not a recovered retail cadence.
 // The walk is FAIL-SOFT: a node
 // whose declared texture member is not resolvable draws untextured (vertex colors
 // only); an out-of-range vertex index, a non-finite transform/projection/colour,
