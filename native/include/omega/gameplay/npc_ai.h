@@ -8,17 +8,19 @@
 
 namespace omega::gameplay
 {
-// First-slice enemy AI: a kinematic patrolling NPC with a vision cone + line-of-
-// sight awareness, reproducing the retail stealth model named by the .SO symbol
+// Project-owned enemy AI: a kinematic patrolling NPC with a vision cone + line-of-
+// sight awareness, informed by the retail stealth model named by the .SO symbol
 // table (AI:GameGobjController; Patrol -> SuspectBox/vision Awareness ->
 // OnAINewAwarenessMsg -> BlowCover/GeneralAlert). All pure value math -- no
 // allocation, no retained state; the caller owns the NPC's CharacterState (moved
-// via the shared character_controller) and awareness. NPC/waypoint PLACEMENT is
-// project-placed here: the authentic spawns/nodes live in the undecoded POP GOB:
-// section (a later decode slice), not the .SO (which gives only structure).
+// via the shared character_controller) and awareness. Placement is caller-owned:
+// the app can use decoded POP GOB spawns and NOD nav nodes, while synthetic tests
+// remain free to supply project-authored positions. The .SO supplies structural
+// names, not recovered placement or tuning constants.
 
-// The NPC's coarse awareness state. One-way latch to Alerted for this slice
-// (BlowCover/GeneralAlert do not de-escalate); a lose-sight timer is a follow-up.
+// Legacy two-state awareness helper retained for focused callers and tests. It
+// latches Alerted; the full NpcAwarenessState loop below models reaction, chase,
+// lose-sight search, reacquisition, and return to patrol.
 enum class NpcAwareness : std::uint8_t
 {
     Patrol = 0U,
