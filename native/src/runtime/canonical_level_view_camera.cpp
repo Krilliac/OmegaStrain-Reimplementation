@@ -1,4 +1,5 @@
 #include "omega/runtime/canonical_level_view_camera.h"
+#include "omega/runtime/scene_transform.h"
 
 #include <algorithm>
 #include <array>
@@ -19,6 +20,7 @@ constexpr double kClipSpan = 2.0;
 constexpr double kClipDepthSpan = 1.0;
 constexpr double kDiagnosticInsetFraction = 0.1;
 constexpr double kDiagnosticDepth = 0.5;
+constexpr double kMaximumComposedClipError = 1.0e-4;
 constexpr std::size_t kAxisCount = 3U;
 
 [[nodiscard]] bool Add(const std::uint64_t left, const std::uint64_t right,
@@ -55,6 +57,40 @@ constexpr std::size_t kAxisCount = 3U;
         return false;
     output = static_cast<float>(value);
     return true;
+}
+
+[[nodiscard]] bool ComposedCoordinateMatches(const asset::Matrix4x4IR& object_to_clip,
+                                             const std::size_t stage,
+                                             const std::size_t source_axis,
+                                             const double coordinate,
+                                             const double expected) noexcept
+{
+    const float coefficient = object_to_clip.row_major[stage * 4U + source_axis];
+    const float translation = object_to_clip.row_major[stage * 4U + 3U];
+    const float source = static_cast<float>(coordinate);
+    const double exact = static_cast<double>(coefficient) * static_cast<double>(source) +
+                         static_cast<double>(translation);
+    const float fused = std::fma(coefficient, source, translation);
+    volatile float rounded_product = coefficient * source;
+    const float separated = rounded_product + translation;
+    return std::isfinite(exact) && std::isfinite(fused) && std::isfinite(separated) &&
+           std::abs(exact - expected) <= kMaximumComposedClipError &&
+           std::abs(static_cast<double>(fused) - expected) <= kMaximumComposedClipError &&
+           std::abs(static_cast<double>(separated) - expected) <= kMaximumComposedClipError;
+}
+
+[[nodiscard]] bool ComposedRangeMatches(const asset::Matrix4x4IR& object_to_clip,
+                                        const std::size_t stage,
+                                        const std::size_t source_axis,
+                                        const double source_minimum,
+                                        const double source_maximum,
+                                        const double expected_minimum,
+                                        const double expected_maximum) noexcept
+{
+    return ComposedCoordinateMatches(object_to_clip, stage, source_axis, source_minimum,
+                                     expected_minimum) &&
+           ComposedCoordinateMatches(object_to_clip, stage, source_axis, source_maximum,
+                                     expected_maximum);
 }
 
 struct CoordinateBounds
@@ -193,14 +229,17 @@ std::expected<CanonicalLevelViewCamera, std::string> BuildCanonicalLevelDiagnost
     const double largest_extent = std::max(extents[axes[0]], extents[axes[1]]);
     const double depth_extent = extents[axes[2]];
 
+    const double exact_planar_scale = largest_extent > 0.0 ? usable_span / largest_extent : 0.0;
     float planar_scale = 0.0F;
-    if (largest_extent > 0.0 && !NarrowToFloat(usable_span / largest_extent, planar_scale))
+    if (!NarrowToFloat(exact_planar_scale, planar_scale))
         return std::unexpected("canonical level view camera scale is not representable");
+    const double exact_depth_scale =
+        depth_extent > 0.0 ? usable_depth_span / depth_extent : 0.0;
     float depth_scale = 0.0F;
     float depth_offset = static_cast<float>(kDiagnosticDepth);
     if (depth_extent > 0.0)
     {
-        if (!NarrowToFloat(usable_depth_span / depth_extent, depth_scale))
+        if (!NarrowToFloat(exact_depth_scale, depth_scale))
             return std::unexpected("canonical level view camera depth scale is not representable");
         depth_offset = static_cast<float>(depth_inset);
     }
@@ -219,6 +258,33 @@ std::expected<CanonicalLevelViewCamera, std::string> BuildCanonicalLevelDiagnost
     view.camera.view_to_clip.row_major[10U] = depth_scale;
     view.camera.view_to_clip.row_major[11U] = depth_offset;
     view.camera.view_to_clip.row_major[15U] = 1.0F;
+
+    const auto object_to_clip =
+        ComposeObjectToClip(view.camera, asset::kIdentityMatrix4x4IR);
+    if (!object_to_clip)
+        return std::unexpected(
+            "canonical level view camera matrix composition is not representable");
+    for (std::size_t stage = 0U; stage < 2U; ++stage)
+    {
+        const std::size_t axis = axes[stage];
+        const double expected_half_span = extents[axis] * exact_planar_scale * 0.5;
+        if (!ComposedRangeMatches(*object_to_clip, stage, axis, bounds.minimum[axis],
+                                  bounds.maximum[axis], -expected_half_span,
+                                  expected_half_span))
+            return std::unexpected(
+                "canonical level view camera loses precision after matrix composition");
+    }
+    const std::size_t depth_axis = axes[2U];
+    const double expected_depth_minimum =
+        depth_extent > 0.0 ? depth_inset : kDiagnosticDepth;
+    const double expected_depth_maximum =
+        depth_extent > 0.0 ? depth_inset + depth_extent * exact_depth_scale
+                           : kDiagnosticDepth;
+    if (!ComposedRangeMatches(*object_to_clip, 2U, depth_axis, bounds.minimum[depth_axis],
+                              bounds.maximum[depth_axis], expected_depth_minimum,
+                              expected_depth_maximum))
+        return std::unexpected(
+            "canonical level view camera loses precision after matrix composition");
     return view;
 }
 } // namespace omega::runtime

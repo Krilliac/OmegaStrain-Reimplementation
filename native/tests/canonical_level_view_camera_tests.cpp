@@ -320,6 +320,27 @@ int main()
               "one below the triangle-index requirement is rejected with the fixed diagnostic");
     }
 
+    // Individually representable scale and translation values are insufficient when composing
+    // their float matrices loses the midpoint. Adjacent floats around a nonzero origin would
+    // otherwise project to an off-centre, clipped range instead of the promised inset fit.
+    {
+        constexpr float kOrigin = 1.0F;
+        const float adjacent = std::nextafter(kOrigin, 2.0F);
+        omega::runtime::CanonicalLevelScene scene;
+        scene.cells.push_back(MakeCell(0U,
+            {
+                {.x = kOrigin, .y = kOrigin, .z = 0.0F},
+                {.x = adjacent, .y = kOrigin, .z = 0.0F},
+                {.x = kOrigin, .y = adjacent, .z = 0.0F},
+            },
+            {0U, 1U, 2U}));
+        auto view = omega::runtime::BuildCanonicalLevelDiagnosticViewCamera(scene);
+        Check(!view &&
+                  view.error() ==
+                      "canonical level view camera loses precision after matrix composition",
+              "a precision-losing composed camera is rejected with the fixed diagnostic");
+    }
+
     // An extremely small nonzero extent produces a scale outside the representable float range
     // and is rejected rather than silently saturating to infinity.
     {
