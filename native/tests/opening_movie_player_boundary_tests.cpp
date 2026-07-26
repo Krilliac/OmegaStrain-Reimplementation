@@ -356,11 +356,15 @@ void CheckFrameBatchAdmissionContract() {
   if (seeded_commit) {
     Check(fake_queue.size() == 3U && fake_queue[0] == sentinel,
           "opening movie seeded commit preserves its sentinel entry");
-    Check(fake_queue[1].first == 0U &&
-              fake_queue[1].second.timestamp_100ns == 600U &&
-              fake_queue[2].first == 1U &&
-              fake_queue[2].second.timestamp_100ns == 1'000U,
-          "opening movie seeded commit publishes ordered normalized frames");
+    if (fake_queue.size() == 3U) {
+      Check(fake_queue[1].first == 0U &&
+                fake_queue[1].second.timestamp_100ns == 600U &&
+                fake_queue[1].second.duration_100ns == 400U &&
+                fake_queue[2].first == 1U &&
+                fake_queue[2].second.timestamp_100ns == 1'000U &&
+                fake_queue[2].second.duration_100ns == 400U,
+            "opening movie seeded commit publishes ordered normalized frames");
+    }
     Check(seeded_commit->queued_frame_count == 4U &&
               seeded_commit->first_decoder_timestamp_100ns == 1'000U &&
               seeded_commit->last_decoded_timestamp_100ns == 1'000U,
