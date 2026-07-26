@@ -20,7 +20,9 @@
 namespace {
 using omega::app::OpeningMoviePlayer;
 using omega::app::OpeningMoviePlayerErrorCode;
+using omega::app::detail::CommitValidatedOpeningMovieFrameBatch;
 using omega::app::detail::OpeningMovieDecodedFrameFacts;
+using omega::app::detail::OpeningMovieFrameAdmission;
 using omega::app::detail::OpeningMovieFrameQueueState;
 using omega::app::detail::ValidateOpeningMovieFrameBatch;
 using omega::asset::OpeningMovieSource;
@@ -220,6 +222,33 @@ void CheckBatchRejectionIsWhole(
   Check(admitted->state.queued_frame_count ==
             before.queued_frame_count + prefix.size(),
         "opening movie prefix admission advances the seeded queue count");
+
+  using FakeQueueEntry =
+      std::pair<std::size_t, OpeningMovieFrameAdmission>;
+  const FakeQueueEntry sentinel{
+      99U,
+      OpeningMovieFrameAdmission{
+          .timestamp_100ns = 77U,
+          .duration_100ns = 88U,
+      },
+  };
+  std::vector<FakeQueueEntry> fake_queue{sentinel};
+  std::size_t callback_count = 0U;
+  const auto commit_rejected = CommitValidatedOpeningMovieFrameBatch(
+      state, batch,
+      [&](const std::size_t index,
+          const OpeningMovieFrameAdmission &frame_admission) {
+        ++callback_count;
+        fake_queue.emplace_back(index, frame_admission);
+      });
+  Check(!commit_rejected && commit_rejected.error() == expected_code,
+        "opening movie commit seam returns the typed batch rejection");
+  Check(callback_count == 0U,
+        "typed opening movie batch rejection invokes no commit callback");
+  Check(fake_queue.size() == 1U && fake_queue.front() == sentinel,
+        "typed opening movie batch rejection preserves the sentinel queue");
+  Check(state == before,
+        "typed opening movie commit rejection preserves seeded input state");
 }
 
 void CheckFrameBatchAdmissionContract() {
@@ -304,6 +333,38 @@ void CheckFrameBatchAdmissionContract() {
               seeded_admission->state.first_decoder_timestamp_100ns == 1'000U &&
               seeded_admission->state.last_decoded_timestamp_100ns == 1'000U,
           "opening movie admission advances from the seeded queue state");
+  }
+
+  using FakeQueueEntry =
+      std::pair<std::size_t, OpeningMovieFrameAdmission>;
+  const FakeQueueEntry sentinel{
+      99U,
+      OpeningMovieFrameAdmission{
+          .timestamp_100ns = 77U,
+          .duration_100ns = 88U,
+      },
+  };
+  std::vector<FakeQueueEntry> fake_queue{sentinel};
+  const auto seeded_commit = CommitValidatedOpeningMovieFrameBatch(
+      seeded_state, seeded_batch,
+      [&](const std::size_t index,
+          const OpeningMovieFrameAdmission &frame_admission) {
+        fake_queue.emplace_back(index, frame_admission);
+      });
+  Check(seeded_commit.has_value(),
+        "opening movie commit seam accepts a seeded batch");
+  if (seeded_commit) {
+    Check(fake_queue.size() == 3U && fake_queue[0] == sentinel,
+          "opening movie seeded commit preserves its sentinel entry");
+    Check(fake_queue[1].first == 0U &&
+              fake_queue[1].second.timestamp_100ns == 600U &&
+              fake_queue[2].first == 1U &&
+              fake_queue[2].second.timestamp_100ns == 1'000U,
+          "opening movie seeded commit publishes ordered normalized frames");
+    Check(seeded_commit->queued_frame_count == 4U &&
+              seeded_commit->first_decoder_timestamp_100ns == 1'000U &&
+              seeded_commit->last_decoded_timestamp_100ns == 1'000U,
+          "opening movie seeded commit returns its advanced queue state");
   }
 
   const std::array seeded_rejection{
