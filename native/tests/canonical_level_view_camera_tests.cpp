@@ -206,6 +206,50 @@ int main()
               "a non-identity canonical cell transform is rejected");
     }
 
+    // Source ordinals and triangle structure must match the render-page adapter's
+    // preflight boundary so a camera is never published for a scene that cannot page.
+    {
+        omega::runtime::CanonicalLevelScene scene;
+        scene.cells.push_back(MakeCell(1U,
+            {
+                {.x = 0.0F, .y = 0.0F, .z = 0.0F},
+                {.x = 1.0F, .y = 0.0F, .z = 0.0F},
+                {.x = 0.0F, .y = 1.0F, .z = 0.0F},
+            },
+            {0U, 1U, 2U}));
+        auto view = omega::runtime::BuildCanonicalLevelDiagnosticViewCamera(scene);
+        Check(!view && view.error() == "canonical level view camera source ordinal is invalid",
+              "a noncanonical source ordinal is rejected with the fixed diagnostic");
+    }
+    {
+        omega::runtime::CanonicalLevelScene scene;
+        scene.cells.push_back(MakeCell(0U,
+            {
+                {.x = 0.0F, .y = 0.0F, .z = 0.0F},
+                {.x = 1.0F, .y = 0.0F, .z = 0.0F},
+                {.x = 0.0F, .y = 1.0F, .z = 0.0F},
+            },
+            {0U, 1U}));
+        auto view = omega::runtime::BuildCanonicalLevelDiagnosticViewCamera(scene);
+        Check(!view &&
+                  view.error() ==
+                      "canonical level view camera mesh has an incomplete triangle",
+              "an incomplete triangle is rejected with the fixed diagnostic");
+    }
+    {
+        omega::runtime::CanonicalLevelScene scene;
+        scene.cells.push_back(MakeCell(0U,
+            {
+                {.x = 0.0F, .y = 0.0F, .z = 0.0F},
+                {.x = 1.0F, .y = 0.0F, .z = 0.0F},
+                {.x = 0.0F, .y = 1.0F, .z = 0.0F},
+            },
+            {0U, 1U, 3U}));
+        auto view = omega::runtime::BuildCanonicalLevelDiagnosticViewCamera(scene);
+        Check(!view && view.error() == "canonical level view camera triangle index is invalid",
+              "an out-of-range triangle index is rejected with the fixed diagnostic");
+    }
+
     // Non-finite coordinates are rejected even in a triangle-free cell, matching the sibling
     // canonical composers' validate-before-allocate discipline.
     {
@@ -224,6 +268,14 @@ int main()
         omega::runtime::CanonicalLevelScene empty;
         Check(!omega::runtime::BuildCanonicalLevelDiagnosticViewCamera(empty, widened),
               "callers cannot widen the cell-count safety maximum");
+    }
+    {
+        omega::runtime::CanonicalLevelViewCameraLimits widened;
+        widened.maximum_triangle_indices =
+            omega::runtime::CanonicalLevelViewCameraLimits{}.maximum_triangle_indices + 1U;
+        omega::runtime::CanonicalLevelScene empty;
+        Check(!omega::runtime::BuildCanonicalLevelDiagnosticViewCamera(empty, widened),
+              "callers cannot widen the triangle-index safety maximum");
     }
     {
         omega::runtime::CanonicalLevelScene scene;
@@ -246,6 +298,26 @@ int main()
         one_position.maximum_positions = 1U;
         Check(!omega::runtime::BuildCanonicalLevelDiagnosticViewCamera(scene, one_position),
               "a cell above the tightened position limit is rejected");
+    }
+    {
+        omega::runtime::CanonicalLevelScene scene;
+        scene.cells.push_back(MakeCell(0U,
+            {
+                {.x = 0.0F, .y = 0.0F, .z = 0.0F},
+                {.x = 1.0F, .y = 0.0F, .z = 0.0F},
+                {.x = 0.0F, .y = 1.0F, .z = 0.0F},
+            },
+            {0U, 1U, 2U}));
+        omega::runtime::CanonicalLevelViewCameraLimits exact;
+        exact.maximum_triangle_indices = 3U;
+        Check(omega::runtime::BuildCanonicalLevelDiagnosticViewCamera(scene, exact).has_value(),
+              "the exact triangle-index safety boundary is accepted");
+        exact.maximum_triangle_indices = 2U;
+        auto view = omega::runtime::BuildCanonicalLevelDiagnosticViewCamera(scene, exact);
+        Check(!view &&
+                  view.error() ==
+                      "canonical level view camera exceeds the triangle-index limit",
+              "one below the triangle-index requirement is rejected with the fixed diagnostic");
     }
 
     // An extremely small nonzero extent produces a scale outside the representable float range

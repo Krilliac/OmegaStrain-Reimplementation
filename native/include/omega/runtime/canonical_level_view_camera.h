@@ -15,6 +15,7 @@ struct CanonicalLevelViewCameraLimits
 {
     std::uint64_t maximum_cells = 4096U;
     std::uint64_t maximum_positions = 1ULL << 20U;
+    std::uint64_t maximum_triangle_indices = 6ULL << 20U;
 };
 
 // Project-owned diagnostic framing result. It publishes the two camera stages
@@ -58,9 +59,11 @@ struct CanonicalLevelViewCamera
 // project diagnostic depth, matching the accepted global-projection behaviour.
 //
 // A scene with no renderable cell is framed by the identity camera with zero
-// counts rather than rejected. Every cell transform must be the canonical
-// identity placeholder; a non-identity transform is rejected instead of being
-// assigned an unproven placement meaning. Non-finite coordinates, non-finite
+// counts rather than rejected. Source ordinals, complete triangle stride, and
+// triangle references are validated to match the render-page adapter's
+// renderable-cell boundary. Every cell transform must be the canonical identity
+// placeholder; a non-identity transform is rejected instead of being assigned
+// an unproven placement meaning. Non-finite coordinates, non-finite
 // intermediates, and scales that are not representable as `float` are rejected
 // with fixed path-free diagnostics before any camera value is published.
 //
