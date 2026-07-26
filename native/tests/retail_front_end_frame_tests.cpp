@@ -1139,6 +1139,18 @@ int main()
         using omega::content::kKnownFrontEndButtonIdentifiers;
         using omega::content::SurveyFrontEndVisibleButtons;
 
+        // A Title load failure leaves the command's survey value untouched.
+        // Even then, the fixed public schema must retain the allowlisted
+        // identifiers rather than emitting empty document-derived slots.
+        {
+            const omega::content::FrontEndButtonSurvey survey;
+            Check(survey.known[0U].identifier ==
+                      kKnownFrontEndButtonIdentifiers[0U] &&
+                    survey.known[1U].identifier ==
+                      kKnownFrontEndButtonIdentifiers[1U],
+                "a default survey retains the fixed known-identifier schema");
+        }
+
         // An empty document reports nothing rather than failing.
         {
             const auto survey =

@@ -4,6 +4,7 @@
 #include "omega/content/front_end_screen_bundle.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -62,6 +63,15 @@ struct FrontEndKnownButtonObservation final
 // identifier this repository already published.
 struct FrontEndButtonSurvey final
 {
+    constexpr FrontEndButtonSurvey() noexcept
+    {
+        for (std::size_t index = 0U;
+             index < kKnownFrontEndButtonIdentifiers.size(); ++index)
+        {
+            known[index].identifier = kKnownFrontEndButtonIdentifiers[index];
+        }
+    }
+
     std::uint32_t visible_button_count = 0U;
     // Visible buttons carrying a non-empty identifier that is not allowlisted.
     // Counted, never named: this is the number of routes still unmapped.
@@ -149,11 +159,6 @@ inline void SurveyFrontEndWidgetSubtree(const asset::FrontendWidgetIR& widget,
     const asset::FrontendWidgetIR& root) noexcept
 {
     FrontEndButtonSurvey survey;
-    for (std::size_t index = 0U; index < kKnownFrontEndButtonIdentifiers.size();
-         ++index)
-    {
-        survey.known[index].identifier = kKnownFrontEndButtonIdentifiers[index];
-    }
     detail::SurveyFrontEndWidgetSubtree(root, 0U, survey);
     return survey;
 }
