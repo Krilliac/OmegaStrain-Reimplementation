@@ -20,8 +20,9 @@ namespace omega::content
 // repository ALREADY contains and already routes on, "is it here, and where in
 // order". Every other visible button is reduced to an anonymous count. Nothing
 // derived from an identifier's characters -- no digest, no length, no prefix --
-// leaves this boundary, so a report cannot be used to recover a name or act as
-// a fingerprint of proprietary content.
+// leaves this boundary, so a report cannot recover or fingerprint the characters
+// of an unknown identifier. Counts and ordinals remain deliberate aggregate
+// structural observations and may distinguish data sets.
 //
 // What this measures is the project's own routing reachability. It assigns no
 // retail menu structure, control layout, ordering rule, or screen semantic.

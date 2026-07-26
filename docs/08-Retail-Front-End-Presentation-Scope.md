@@ -199,9 +199,11 @@ it is sent.
 omega_tool front-end-screen-survey <retail-data-root>
 ```
 
-`<retail-data-root>` is the owner's extracted GAMEDATA directory or `.iso`, the
-same input `GameDataService::Open` already takes. The path is used to mount the
-root and is never echoed, not even in the failure message.
+`<retail-data-root>` is the owner's extracted disc root (the directory containing
+`SYSTEM.CNF`, the boot executable, and `GAMEDATA`) or `.iso`, the same input
+`GameDataService::Open` already takes. Passing the `GAMEDATA` child by itself is
+not sufficient. The path is used to mount the root and is never echoed, not even
+in the failure message.
 
 Exit 0 means the root opened and the survey ran. A screen that fails to load is
 a recorded observation, not a command failure — which screens fail is the point.
@@ -227,10 +229,13 @@ One JSON line on stdout, schema `omega-front-end-screen-survey-v1`:
 ```json
 {"schema":"omega-front-end-screen-survey-v1",
  "screens":[{"key":"title","loaded":true,"error":null},
-            {"key":"create_agent","loaded":false,"error":"decode-failed"}],
+            {"key":"create_agent","loaded":false,"error":"decode-failed"},
+            {"key":"load_agent","loaded":true,"error":null},
+            {"key":"command_center","loaded":false,"error":"missing-required-file"},
+            {"key":"equipment","loaded":false,"error":"decode-failed"}],
  "title_buttons":{"observed":true,"visible_button_count":0,
                   "unknown_identifier_count":0,"empty_identifier_count":0,
-                  "duplicate_known_identifier_count":0,"nodes_visited":0,
+                  "duplicate_known_identifier_count":0,"nodes_visited":1,
                   "truncated":false,
                   "known":[{"identifier":"newagent","present":false,"ordinal":null},
                            {"identifier":"loadagent","present":false,"ordinal":null}]}}
@@ -245,8 +250,11 @@ than a total; it is never silently absorbed.
 ### Privacy rules, and how they are enforced
 
 - **No source paths.** The root is never interpolated into stdout or stderr.
-- **No payload bytes and no pixels.** The survey reads the decoded widget tree's
-  shape only. Textures, fonts, and string tables are never touched.
+- **No payload bytes and no pixels are emitted or inspected by the survey walk.**
+  `LoadFrontEndScreen` necessarily reads and decodes the screen's local visual,
+  font, and string resources before returning a bundle. Those resources remain
+  local; the survey walk examines only the decoded widget tree's shape and the
+  command emits none of their content.
 - **No free-form retail text.** A widget identifier is author-written retail
   text, so the survey never copies one out of the document. It reports only the
   identifiers this repository already publishes and already routes on
@@ -256,8 +264,11 @@ than a total; it is never silently absorbed.
   letter — leaves the boundary. A synthetic test asserts the pointer identity of
   every reported identifier against the in-tree allowlist, so the survey cannot
   start echoing a document string without that test failing.
-- **No hashes.** The command computes no digest of any kind, so no field can act
-  as a fingerprint of proprietary content.
+- **No payload or identifier-derived hashes.** The command computes no digest of
+  content and derives no value from the characters of an unknown identifier.
+  Its loaded/error vector, counts, and ordinals are deliberate aggregate
+  structural observations and may distinguish data sets; they are not content
+  fingerprints and cannot reconstruct the underlying payload.
 - **No searching.** It iterates exactly `kAllFrontEndScreenKeys` — the keys this
   repository has already declared. It never probes a name, member, or key the
   tree has not already published, so it cannot become a hunt for undiscovered
