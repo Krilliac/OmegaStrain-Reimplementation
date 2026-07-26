@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -185,6 +186,26 @@ struct OpeningMovieFrameBatchAdmission {
 ValidateOpeningMovieFrameBatch(
     const OpeningMovieFrameQueueState &state,
     std::span<const OpeningMovieDecodedFrameFacts> batch);
+
+// Validate the complete batch before invoking commit_one(index, admission) for
+// each frame in input order. Typed rejection invokes no callback. Callback
+// exceptions propagate; callers may make that allocation path terminal instead
+// of treating it as transactional.
+template <typename CommitOne>
+[[nodiscard]] std::expected<OpeningMovieFrameQueueState,
+                            OpeningMoviePlayerErrorCode>
+CommitValidatedOpeningMovieFrameBatch(
+    const OpeningMovieFrameQueueState &state,
+    const std::span<const OpeningMovieDecodedFrameFacts> batch,
+    CommitOne &&commit_one) {
+  auto admission = ValidateOpeningMovieFrameBatch(state, batch);
+  if (!admission)
+    return std::unexpected(admission.error());
+
+  for (std::size_t index = 0U; index < admission->frames.size(); ++index)
+    std::invoke(commit_one, index, admission->frames[index]);
+  return admission->state;
+}
 } // namespace detail
 
 struct OpeningMoviePlayerUpdate {

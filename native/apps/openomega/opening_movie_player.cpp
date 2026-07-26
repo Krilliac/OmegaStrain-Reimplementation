@@ -226,7 +226,7 @@ struct OpeningMoviePlayer::Impl {
       });
     }
 
-    const auto admission = detail::ValidateOpeningMovieFrameBatch(
+    const auto committed = detail::CommitValidatedOpeningMovieFrameBatch(
         detail::OpeningMovieFrameQueueState{
             .width = width,
             .height = height,
@@ -235,20 +235,21 @@ struct OpeningMoviePlayer::Impl {
             .first_decoder_timestamp_100ns = first_decoder_timestamp_100ns,
             .last_decoded_timestamp_100ns = last_decoded_timestamp_100ns,
         },
-        facts);
-    if (!admission)
-      return MakeError(admission.error());
-
-    for (std::size_t index = 0U; index < decoded.size(); ++index) {
-      queued_frames.push_back(QueuedNv12Frame{
-          .timestamp_100ns = admission->frames[index].timestamp_100ns,
-          .duration_100ns = admission->frames[index].duration_100ns,
-          .frame = std::move(decoded[index]),
+        facts,
+        [&](const std::size_t index,
+            const detail::OpeningMovieFrameAdmission &admission) {
+          queued_frames.push_back(QueuedNv12Frame{
+              .timestamp_100ns = admission.timestamp_100ns,
+              .duration_100ns = admission.duration_100ns,
+              .frame = std::move(decoded[index]),
+          });
       });
-    }
+    if (!committed)
+      return MakeError(committed.error());
+
     first_decoder_timestamp_100ns =
-        admission->state.first_decoder_timestamp_100ns;
-    last_decoded_timestamp_100ns = admission->state.last_decoded_timestamp_100ns;
+        committed->first_decoder_timestamp_100ns;
+    last_decoded_timestamp_100ns = committed->last_decoded_timestamp_100ns;
     return std::nullopt;
   }
 
