@@ -628,19 +628,41 @@ void CheckMaximumSchemaAndMoveLifecycle()
         "move construction transfers the pair and exact cursor state");
 
     RunCaptureTracePair invalid_source = BuildPair(actions, 1U, elapsed_values);
-    RunCaptureTracePair retained = std::move(invalid_source);
-    const std::size_t before_input_count = invalid_source.input_trace().frame_count();
-    const std::size_t before_elapsed_count =
+    const std::size_t live_input_count = invalid_source.input_trace().frame_count();
+    const std::size_t live_input_capacity =
+        invalid_source.input_trace().maximum_frames();
+    const std::size_t live_action_count =
+        invalid_source.input_trace().actions().size();
+    const std::size_t live_elapsed_count =
         invalid_source.scheduler_elapsed_trace().frame_count();
+    RunCaptureTracePair retained = std::move(invalid_source);
+    Check(retained.input_trace().frame_count() == live_input_count &&
+              retained.input_trace().maximum_frames() == live_input_capacity &&
+              retained.input_trace().actions().size() == live_action_count &&
+              retained.scheduler_elapsed_trace().frame_count() ==
+                  live_elapsed_count &&
+              invalid_source.input_trace().frame_count() == 0U &&
+              invalid_source.input_trace().maximum_frames() == 0U &&
+              invalid_source.input_trace().actions().empty() &&
+              invalid_source.scheduler_elapsed_trace().frame_count() == 0U &&
+              !invalid_source.terminal_input(),
+        "moving a capture pair transfers its trace metadata and zeroes the source");
     auto invalid_created =
         RunCaptureReplaySession::Create(std::move(invalid_source));
     CheckReplayError(invalid_created, RunCaptureReplayOperation::Create,
         RunCaptureReplayErrorCode::InvalidInputTrace,
         "an inert pair receives the fixed invalid-input rejection");
-    Check(invalid_source.input_trace().frame_count() == before_input_count &&
-              invalid_source.scheduler_elapsed_trace().frame_count() ==
-                  before_elapsed_count &&
-              !invalid_source.terminal_input(),
+    Check(invalid_source.input_trace().frame_count() == 0U &&
+              invalid_source.input_trace().maximum_frames() == 0U &&
+              invalid_source.input_trace().actions().empty() &&
+              invalid_source.scheduler_elapsed_trace().frame_count() == 0U &&
+              !invalid_source.terminal_input() &&
+              retained.input_trace().frame_count() == live_input_count &&
+              retained.input_trace().maximum_frames() == live_input_capacity &&
+              retained.input_trace().actions().size() == live_action_count &&
+              retained.scheduler_elapsed_trace().frame_count() ==
+                  live_elapsed_count &&
+              !retained.terminal_input(),
         "rejected inert pair retains its observable inert state");
     auto retained_created = RunCaptureReplaySession::Create(std::move(retained));
     Check(retained_created.has_value(),

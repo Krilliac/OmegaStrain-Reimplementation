@@ -297,11 +297,13 @@ void CheckBudgetsAndTransactions()
                                          const std::string_view message)
     {
         auto bounded = RenderMeshPool::Create(config);
-        Check(bounded && CheckError(bounded->Reserve(fixture.View()), code, message), message);
-        if (bounded)
-            Check(bounded->Snapshot().free_slots == 1U &&
-                      bounded->Snapshot().reserved_slots == 0U,
-                "budget rejection leaves its pool empty");
+        Check(bounded.has_value(), "the bounded budget-rejection pool is created");
+        if (!bounded)
+            return;
+        CheckError(bounded->Reserve(fixture.View()), code, message);
+        Check(bounded->Snapshot().free_slots == 1U &&
+                  bounded->Snapshot().reserved_slots == 0U,
+            "budget rejection leaves its pool empty");
     };
     CheckRejectedBudget(Config(1U, 2U, 3U, kTriangleLogicalBytes),
         RenderMeshErrorCode::PositionBudgetExceeded,
@@ -341,11 +343,11 @@ void CheckForeignMoveAndRetirement()
     RenderMeshPool moved = std::move(source);
     Check(handle && moved.Get(*handle).has_value(),
         "move construction transfers identity and resident metadata");
-    Check(source.Snapshot().slot_capacity == 0U &&
-              CheckError(source.Reserve(fixture.View()),
-                  RenderMeshErrorCode::InvalidConfiguration,
-                  "a moved-from pool rejects new transactions"),
+    Check(source.Snapshot().slot_capacity == 0U,
         "moved-from pool is inert and aggregate-empty");
+    CheckError(source.Reserve(fixture.View()),
+        RenderMeshErrorCode::InvalidConfiguration,
+        "a moved-from pool rejects new transactions");
     if (handle)
     {
         CheckError(foreign.Get(*handle), RenderMeshErrorCode::InvalidHandle,
