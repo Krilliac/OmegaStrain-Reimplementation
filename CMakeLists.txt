@@ -432,6 +432,7 @@ endif()
 
 add_executable(omega_tool
     native/apps/omega_tool/asset_commands.cpp
+    native/apps/omega_tool/front_end_screen_survey_commands.cpp
     native/apps/omega_tool/frontend_envelope_commands.cpp
     native/apps/omega_tool/level_texture_commands.cpp
     native/apps/omega_tool/main.cpp

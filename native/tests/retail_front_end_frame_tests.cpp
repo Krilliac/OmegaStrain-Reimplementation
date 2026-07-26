@@ -6,6 +6,7 @@
 #include "omega/asset/frontend_ir.h"
 #include "omega/asset/indexed_image_ir.h"
 #include "omega/content/front_end_screen_bundle.h"
+#include "omega/content/front_end_screen_survey.h"
 #include "omega/content/retail_front_end_presentation_capability.h"
 #include "omega/frontend/compositor_math.h"
 #include "omega/retail/fnt_v3_decoder.h"
@@ -682,6 +683,30 @@ using omega::retail::RetailStringTableIR;
         std::move(strings),
         RetailFrontEndPresentationCapabilityTestAccess::Make(true));
 }
+
+// --- Front-end screen survey fixtures (synthetic; no owner data) -------------
+// These build widget trees by hand so the survey's counting, ordering, gating,
+// bounding, and privacy rules are exercised without any decoded retail input.
+
+[[nodiscard]] omega::asset::FrontendWidgetIR MakeSurveyButton(
+    std::string identifier, const bool visible = true)
+{
+    omega::asset::FrontendWidgetIR widget;
+    widget.kind = omega::asset::FrontendWidgetKind::Button;
+    widget.identifier = std::move(identifier);
+    widget.visible = visible;
+    return widget;
+}
+
+[[nodiscard]] omega::asset::FrontendWidgetIR MakeSurveyContainer(
+    std::vector<omega::asset::FrontendWidgetIR> children)
+{
+    omega::asset::FrontendWidgetIR widget;
+    widget.kind = omega::asset::FrontendWidgetKind::Container;
+    widget.visible = true;
+    widget.children = std::move(children);
+    return widget;
+}
 } // namespace
 
 int main()
@@ -1105,6 +1130,178 @@ int main()
         Check(drawn.has_value(), "the ungated control screen composes");
         Check(drawn_diagnostics.ie_triangles_emitted == 4U,
             "the same widget draws its art when it is not runtime-hidden");
+    }
+
+    // --- Front-end screen survey ------------------------------------------
+    {
+        using omega::content::kFrontEndSurveyMaximumDepth;
+        using omega::content::kFrontEndSurveyMaximumNodes;
+        using omega::content::kKnownFrontEndButtonIdentifiers;
+        using omega::content::SurveyFrontEndVisibleButtons;
+
+        // An empty document reports nothing rather than failing.
+        {
+            const auto survey =
+                SurveyFrontEndVisibleButtons(MakeSurveyContainer({}));
+            Check(survey.visible_button_count == 0U,
+                "an empty document has no visible buttons");
+            Check(survey.nodes_visited == 1U, "the root itself is one visited node");
+            Check(!survey.truncated, "a one-node document is not truncated");
+            Check(!survey.known[0U].present && !survey.known[1U].present,
+                "an empty document matches no known identifier");
+        }
+
+        // Both known identifiers, in document preorder, with their ordinals.
+        {
+            const auto survey = SurveyFrontEndVisibleButtons(MakeSurveyContainer({
+                MakeSurveyButton("newagent"),
+                MakeSurveyButton("loadagent"),
+            }));
+            Check(survey.visible_button_count == 2U, "two visible buttons are counted");
+            Check(survey.known[0U].present && survey.known[0U].ordinal == 0U,
+                "the first known identifier reports ordinal zero");
+            Check(survey.known[1U].present && survey.known[1U].ordinal == 1U,
+                "the second known identifier reports ordinal one");
+            Check(survey.unknown_identifier_count == 0U,
+                "a fully known screen reports no unknown identifier");
+        }
+
+        // Ordinals follow preorder (self, then children), which is the order the
+        // app indexes its selection by -- not declaration order in the array.
+        {
+            const auto survey = SurveyFrontEndVisibleButtons(MakeSurveyContainer({
+                MakeSurveyContainer({MakeSurveyButton("loadagent")}),
+                MakeSurveyButton("newagent"),
+            }));
+            Check(survey.known[1U].present && survey.known[1U].ordinal == 0U,
+                "a nested earlier button takes the lower ordinal");
+            Check(survey.known[0U].present && survey.known[0U].ordinal == 1U,
+                "a later sibling button takes the higher ordinal");
+        }
+
+        // An invisible button is neither counted nor matched, and it does not
+        // consume an ordinal -- the survey must agree with the app's own gate.
+        {
+            const auto survey = SurveyFrontEndVisibleButtons(MakeSurveyContainer({
+                MakeSurveyButton("newagent", false),
+                MakeSurveyButton("loadagent"),
+            }));
+            Check(survey.visible_button_count == 1U,
+                "an invisible button is not counted");
+            Check(!survey.known[0U].present,
+                "an invisible button does not match a known identifier");
+            Check(survey.known[1U].present && survey.known[1U].ordinal == 0U,
+                "an invisible button consumes no ordinal");
+        }
+
+        // Only Button widgets participate; a Text widget carrying the same
+        // identifier is ignored.
+        {
+            omega::asset::FrontendWidgetIR text;
+            text.kind = omega::asset::FrontendWidgetKind::Text;
+            text.identifier = "newagent";
+            text.visible = true;
+            const auto survey =
+                SurveyFrontEndVisibleButtons(MakeSurveyContainer({std::move(text)}));
+            Check(survey.visible_button_count == 0U,
+                "a non-button widget is not a selectable button");
+            Check(!survey.known[0U].present,
+                "a non-button widget does not match a known identifier");
+        }
+
+        // An unknown identifier is counted, never named; an absent identifier is
+        // counted separately so the two gaps stay distinguishable.
+        {
+            const auto survey = SurveyFrontEndVisibleButtons(MakeSurveyContainer({
+                MakeSurveyButton("newagent"),
+                MakeSurveyButton("somethingelse"),
+                MakeSurveyButton(""),
+            }));
+            Check(survey.visible_button_count == 3U, "every visible button is counted");
+            Check(survey.unknown_identifier_count == 1U,
+                "an unrecognized identifier is counted anonymously");
+            Check(survey.empty_identifier_count == 1U,
+                "a button with no identifier is counted separately");
+            Check(survey.known[0U].present && !survey.known[1U].present,
+                "only the identifier actually present is reported");
+        }
+
+        // Matching is exact and case-sensitive, mirroring the app's routing, so
+        // a differently-cased string is an unknown rather than a false match.
+        {
+            const auto survey = SurveyFrontEndVisibleButtons(
+                MakeSurveyContainer({MakeSurveyButton("NewAgent")}));
+            Check(!survey.known[0U].present,
+                "identifier matching is case-sensitive");
+            Check(survey.unknown_identifier_count == 1U,
+                "a differently-cased identifier counts as unknown");
+        }
+
+        // A repeated known identifier keeps the first ordinal and reports the
+        // repeat rather than silently overwriting or double-counting it.
+        {
+            const auto survey = SurveyFrontEndVisibleButtons(MakeSurveyContainer({
+                MakeSurveyButton("newagent"),
+                MakeSurveyButton("newagent"),
+            }));
+            Check(survey.known[0U].present && survey.known[0U].ordinal == 0U,
+                "the first occurrence of a known identifier wins");
+            Check(survey.duplicate_known_identifier_count == 1U,
+                "a repeated known identifier is reported as a duplicate");
+            Check(survey.unknown_identifier_count == 0U,
+                "a duplicate known identifier is not miscounted as unknown");
+        }
+
+        // Depth is bounded and the bound is reported, never silently absorbed.
+        {
+            omega::asset::FrontendWidgetIR chain = MakeSurveyButton("newagent");
+            for (std::uint32_t depth = 0U; depth < kFrontEndSurveyMaximumDepth + 8U;
+                 ++depth)
+            {
+                chain = MakeSurveyContainer({std::move(chain)});
+            }
+            const auto survey = SurveyFrontEndVisibleButtons(chain);
+            Check(survey.truncated, "an over-deep document reports truncation");
+            Check(survey.nodes_visited <= kFrontEndSurveyMaximumNodes,
+                "a truncated walk still respects the node ceiling");
+        }
+
+        // Breadth is bounded by the same contract.
+        {
+            std::vector<omega::asset::FrontendWidgetIR> children;
+            children.reserve(kFrontEndSurveyMaximumNodes);
+            for (std::uint32_t index = 0U; index < kFrontEndSurveyMaximumNodes; ++index)
+                children.push_back(MakeSurveyButton("newagent"));
+            const auto survey =
+                SurveyFrontEndVisibleButtons(MakeSurveyContainer(std::move(children)));
+            Check(survey.truncated, "an over-wide document reports truncation");
+            Check(survey.nodes_visited <= kFrontEndSurveyMaximumNodes,
+                "the node ceiling bounds the walk");
+        }
+
+        // Privacy invariant: the survey never adopts a string from the surveyed
+        // document. Every reported identifier must point at the repository's own
+        // allowlist entry, including when the document carries other text.
+        {
+            const auto survey = SurveyFrontEndVisibleButtons(MakeSurveyContainer({
+                MakeSurveyButton("newagent"),
+                MakeSurveyButton("loadagent"),
+                MakeSurveyButton("a-name-only-the-owner-has"),
+            }));
+            bool all_from_allowlist = true;
+            for (std::size_t index = 0U; index < survey.known.size(); ++index)
+            {
+                if (survey.known[index].identifier.data() !=
+                    kKnownFrontEndButtonIdentifiers[index].data())
+                {
+                    all_from_allowlist = false;
+                }
+            }
+            Check(all_from_allowlist,
+                "every reported identifier borrows the in-tree allowlist entry");
+            Check(survey.unknown_identifier_count == 1U,
+                "an owner-authored identifier survives only as an anonymous count");
+        }
     }
 
     if (failures != 0)
