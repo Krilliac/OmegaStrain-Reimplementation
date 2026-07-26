@@ -28,10 +28,21 @@ namespace omega::content::detail
 {
 struct RetailFrontEndPresentationCapabilityTestAccess final
 {
-    [[nodiscard]] static RetailFrontEndPresentationCapability Make() noexcept
+    // `valid == false` yields a moved-from capability, which ComposeRetailFrontEndFrame
+    // rejects with InvalidRetailCapability. That is the cheapest deterministic way
+    // to build a bundle that loads but cannot compose -- exactly the case the
+    // commit invariant exists for.
+    [[nodiscard]] static RetailFrontEndPresentationCapability Make(
+        const bool valid = true) noexcept
     {
-        return RetailFrontEndPresentationCapability(
+        RetailFrontEndPresentationCapability capability(
             RetailFrontEndPresentationCapability::ConstructionKey{});
+        if (!valid)
+        {
+            RetailFrontEndPresentationCapability consumed(std::move(capability));
+            (void)consumed;
+        }
+        return capability;
     }
 };
 
@@ -79,12 +90,57 @@ struct OmegaAppTestAccess final
         return app.host_->Snapshot();
     }
 
-    static void ComposeRetailScreenPresentation(OmegaApp& app,
+    [[nodiscard]] static bool ComposeRetailScreenPresentation(OmegaApp& app,
         const content::FrontEndScreenBundle& bundle,
         const std::uint32_t animation_tick) noexcept
     {
-        app.retail_animation_tick_ = animation_tick;
-        app.ComposeRetailScreenPresentation(bundle, {});
+        bool has_animation = false;
+        const bool published = app.ComposeRetailScreenPresentation(
+            bundle, {}, animation_tick, has_animation);
+        if (published)
+        {
+            app.retail_animation_tick_ = animation_tick;
+            app.retail_screen_has_animation_ = has_animation;
+        }
+        return published;
+    }
+
+    // Drives one whole presentation frame, which is what actually enforces the
+    // commit invariant: navigation moves only through a candidate that published.
+    static void UpdateRetailFrontEndPresentation(OmegaApp& app,
+        const frontend::presentation::RetailFrontEndNavInput& input) noexcept
+    {
+        app.UpdateRetailFrontEndPresentation(input);
+    }
+
+    [[nodiscard]] static frontend::presentation::RetailFrontEndNavState RetailNav(
+        const OmegaApp& app) noexcept
+    {
+        return app.retail_nav_;
+    }
+
+    [[nodiscard]] static std::optional<frontend::presentation::RetailFrontEndNavState>
+    RetailComposedNav(const OmegaApp& app) noexcept
+    {
+        return app.retail_composed_nav_;
+    }
+
+    // Seeds a screen's cache slot directly so the nav/commit behaviour can be
+    // exercised without an owner data root. This installs a project-generated
+    // synthetic bundle; it reads no retail content.
+    static void InstallRetailBundle(OmegaApp& app,
+        const content::FrontEndScreenKey key,
+        content::FrontEndScreenBundle bundle) noexcept
+    {
+        if (auto* const slot = app.RetailBundleSlotForScreen(key))
+            *slot = std::move(bundle);
+    }
+
+    static void ClearRetailBundle(
+        OmegaApp& app, const content::FrontEndScreenKey key) noexcept
+    {
+        if (auto* const slot = app.RetailBundleSlotForScreen(key))
+            slot->reset();
     }
 
     [[nodiscard]] static runtime::RenderTextureHandle RetailFrontEndTexture(
@@ -368,6 +424,34 @@ private:
         RetailFrontEndPresentationCapabilityTestAccess::Make());
 }
 
+// A composable screen carrying one visible Button that routes to CreateAgent.
+// `valid_capability == false` makes the very same screen fail to compose, so a
+// test can hold the shape constant and vary only presentability.
+[[nodiscard]] FrontEndScreenBundle MakeRoutingBundle(const bool valid_capability)
+{
+    FrontendVisualNodeIR root = MakeQuad("ROOT_root", 320.0F, 224.0F,
+        FrontendColorRgba8IR{
+            .red = 24U,
+            .green = 24U,
+            .blue = 24U,
+            .alpha = 255U,
+        });
+    omega::asset::FrontendVisualDocumentIR document{.root = std::move(root)};
+    auto scope = FrontEndScreenBundleTestAccess::MakeScope(std::move(document),
+        FrontEndVisualScope::ResourceSet{"ROOT_root"}, {});
+    FrontEndScreenBundle::VisualScopeMap scopes;
+    scopes.emplace("TITLE", std::move(scope));
+
+    FrontendWidgetIR root_widget = MakeWidget("ROOT");
+    FrontendWidgetIR button = MakeWidget("newagent");
+    button.kind = FrontendWidgetKind::Button;
+    root_widget.children.push_back(std::move(button));
+    return FrontEndScreenBundleTestAccess::MakeBundle(
+        omega::asset::FrontendWidgetDocumentIR{.root = std::move(root_widget)},
+        "TITLE", std::move(scopes),
+        RetailFrontEndPresentationCapabilityTestAccess::Make(valid_capability));
+}
+
 [[nodiscard]] std::expected<OmegaApp, std::string> CreateRetailApp(
     std::unique_ptr<OpeningMoviePlayback> playback)
 {
@@ -407,7 +491,8 @@ void CheckAnimatedRetailFrameTextureReuse()
               OmegaAppTestAccess::RetailFrontEndDrawCommands(*app).empty(),
         "animated retail presentation starts without a published texture");
 
-    OmegaAppTestAccess::ComposeRetailScreenPresentation(*app, bundle, 0U);
+    Check(OmegaAppTestAccess::ComposeRetailScreenPresentation(*app, bundle, 0U),
+        "the first animated compose reports that it published");
     const GpuHostSnapshot first = OmegaAppTestAccess::Gpu(*app);
     const auto first_texture = OmegaAppTestAccess::RetailFrontEndTexture(*app);
     const auto first_commands =
@@ -457,7 +542,8 @@ void CheckAnimatedRetailFrameTextureReuse()
     OmegaAppTestAccess::ReplaceRetailFrontEndDrawList(
         *app, std::move(*sentinel_draw_list));
 
-    OmegaAppTestAccess::ComposeRetailScreenPresentation(*app, bundle, 20U);
+    Check(OmegaAppTestAccess::ComposeRetailScreenPresentation(*app, bundle, 20U),
+        "the second animated compose reports that it published");
     const GpuHostSnapshot second = OmegaAppTestAccess::Gpu(*app);
     const auto second_commands =
         OmegaAppTestAccess::RetailFrontEndDrawCommands(*app);
@@ -546,11 +632,95 @@ void CheckBoundaryAfterMovie()
               OmegaAppTestAccess::Simulation(*app), before_simulation),
         "movie and rejected transition frames advance no project-authored simulation");
 }
+
+// The commit invariant end to end: navigation and the composed marker advance if
+// and only if a candidate actually published.
+void CheckRetailNavCommitsOnlyOnPublish()
+{
+    using omega::content::FrontEndScreenKey;
+    using omega::frontend::presentation::RetailFrontEndNavInput;
+
+    auto app = CreateRetailApp(nullptr);
+    Check(app.has_value(), "retail-required host starts for nav-commit coverage");
+    if (!app)
+        return;
+
+    // A composable Title, and a CreateAgent that loads but cannot compose.
+    OmegaAppTestAccess::InstallRetailBundle(
+        *app, FrontEndScreenKey::Title, MakeRoutingBundle(true));
+    OmegaAppTestAccess::InstallRetailBundle(
+        *app, FrontEndScreenKey::CreateAgent, MakeRoutingBundle(false));
+
+    OmegaAppTestAccess::UpdateRetailFrontEndPresentation(*app, {});
+    const bool title_live = OmegaAppTestAccess::RetailFrontEndReady(*app) &&
+        OmegaAppTestAccess::RetailNav(*app).screen == FrontEndScreenKey::Title &&
+        OmegaAppTestAccess::RetailComposedNav(*app).has_value() &&
+        OmegaAppTestAccess::RetailComposedNav(*app)->screen == FrontEndScreenKey::Title;
+    Check(title_live, "the Title publishes and becomes the composed navigation");
+    if (!title_live)
+        return;
+    const auto title_texture = OmegaAppTestAccess::RetailFrontEndTexture(*app);
+    const auto title_commands =
+        OmegaAppTestAccess::RetailFrontEndDrawCommands(*app);
+    Check(title_commands.size() == 1U, "the published Title owns one draw command");
+    const auto title_command =
+        title_commands.empty() ? omega::runtime::RenderTextureBlitCommand{}
+                               : title_commands.front();
+
+    // Accept into a screen that loads but cannot compose. Nothing may move.
+    OmegaAppTestAccess::UpdateRetailFrontEndPresentation(
+        *app, RetailFrontEndNavInput{.accept = true});
+    const auto after_failed_commands =
+        OmegaAppTestAccess::RetailFrontEndDrawCommands(*app);
+    Check(OmegaAppTestAccess::RetailNav(*app).screen == FrontEndScreenKey::Title,
+        "a candidate that cannot compose leaves navigation on the Title");
+    Check(OmegaAppTestAccess::RetailComposedNav(*app).has_value() &&
+              OmegaAppTestAccess::RetailComposedNav(*app)->screen ==
+                  FrontEndScreenKey::Title,
+        "a candidate that cannot compose leaves the composed marker on the Title");
+    Check(OmegaAppTestAccess::RetailFrontEndReady(*app) &&
+              OmegaAppTestAccess::RetailFrontEndTexture(*app) == title_texture &&
+              after_failed_commands.size() == 1U &&
+              after_failed_commands.front() == title_command,
+        "a candidate that cannot compose keeps the Title's published frame");
+
+    // The same Accept retries once the destination can compose. This is what the
+    // removed failure memo used to make impossible.
+    OmegaAppTestAccess::InstallRetailBundle(
+        *app, FrontEndScreenKey::CreateAgent, MakeRoutingBundle(true));
+    OmegaAppTestAccess::UpdateRetailFrontEndPresentation(
+        *app, RetailFrontEndNavInput{.accept = true});
+    Check(OmegaAppTestAccess::RetailNav(*app).screen ==
+                  FrontEndScreenKey::CreateAgent &&
+              OmegaAppTestAccess::RetailComposedNav(*app).has_value() &&
+              OmegaAppTestAccess::RetailComposedNav(*app)->screen ==
+                  FrontEndScreenKey::CreateAgent,
+        "a later Accept retries and switches once the destination composes");
+
+    // Back returns to the resident Title, and navigation follows only because
+    // that publish succeeds.
+    OmegaAppTestAccess::UpdateRetailFrontEndPresentation(
+        *app, RetailFrontEndNavInput{.back = true});
+    Check(OmegaAppTestAccess::RetailNav(*app).screen == FrontEndScreenKey::Title &&
+              OmegaAppTestAccess::RetailComposedNav(*app).has_value() &&
+              OmegaAppTestAccess::RetailComposedNav(*app)->screen ==
+                  FrontEndScreenKey::Title,
+        "Back republishes the Title and navigation follows it");
+
+    // Accept+Back must not spend a load: clearing the destination and pressing
+    // both leaves navigation on the Title with the destination still uncached.
+    OmegaAppTestAccess::ClearRetailBundle(*app, FrontEndScreenKey::CreateAgent);
+    OmegaAppTestAccess::UpdateRetailFrontEndPresentation(
+        *app, RetailFrontEndNavInput{.accept = true, .back = true});
+    Check(OmegaAppTestAccess::RetailNav(*app).screen == FrontEndScreenKey::Title,
+        "Accept accompanied by Back does not probe or switch");
+}
 } // namespace
 
 int main()
 {
     CheckAnimatedRetailFrameTextureReuse();
+    CheckRetailNavCommitsOnlyOnPublish();
     CheckBoundaryWithoutMovie();
     CheckBoundaryAfterMovie();
 

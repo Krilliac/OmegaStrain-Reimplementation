@@ -39,6 +39,13 @@ namespace omega::app
 {
 namespace
 {
+// The one warning an explicit, failed retail screen change is allowed to emit.
+// Fixed and identity-free by construction: it names no screen, member, path,
+// widget, or error value, so it can never carry owner data into a log, and it
+// reads the same for a missing bundle, a refused composition, and a failed
+// upload -- all of which leave the player exactly where they were.
+constexpr std::string_view kRetailScreenChangeFailedWarning =
+    "retail front-end screen change failed; keeping the current screen";
 // Refill when the 4,096-frame ring has at least this much space. The queued lead therefore stays
 // between roughly 53 and 85 ms at 48 kHz during steady playback.
 constexpr std::uint64_t kOpeningMovieAudioRefillFrames = 1'536U;
@@ -4302,15 +4309,23 @@ void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
 #endif
     if (start_screen != nullptr)
     {
-        const std::string_view requested(start_screen);
-        if (requested == "createagent")
-            retail_nav_.screen = content::FrontEndScreenKey::CreateAgent;
-        else if (requested == "loadagent")
-            retail_nav_.screen = content::FrontEndScreenKey::LoadAgent;
-        else if (requested == "commandcenter")
-            retail_nav_.screen = content::FrontEndScreenKey::CommandCenter;
-        else if (requested == "equipment")
-            retail_nav_.screen = content::FrontEndScreenKey::Equipment;
+        // An override is honoured only when its spelling is recognized AND its
+        // bundle actually loads. Anything else falls back to the Title, which is
+        // already resident, so a bad override cannot leave navigation pointing at
+        // a screen that never composes and never publishes.
+        const auto requested = frontend::presentation::ResolveRetailStartScreenOverride(
+            std::string_view(start_screen));
+        if (requested && LoadRetailBundleForScreen(*requested) != nullptr)
+        {
+            retail_nav_.screen = *requested;
+        }
+        else
+        {
+            // Identity-free and fixed: it echoes neither the requested spelling
+            // nor any screen or member name.
+            log_->Warning("presentation",
+                "retail front-end start-screen override unavailable; composing the Title");
+        }
     }
 
     // Compose the initial screen (default selection) through the same recompose
@@ -4318,7 +4333,17 @@ void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
     UpdateRetailFrontEndPresentation(frontend::presentation::RetailFrontEndNavInput{});
 }
 
-const content::FrontEndScreenBundle* OmegaApp::RetailBundleForScreen(
+const content::FrontEndScreenBundle* OmegaApp::CachedRetailBundleForScreen(
+    const content::FrontEndScreenKey screen) noexcept
+{
+    std::optional<content::FrontEndScreenBundle>* const slot =
+        RetailBundleSlotForScreen(screen);
+    if (slot == nullptr || !slot->has_value())
+        return nullptr;
+    return &**slot;
+}
+
+std::optional<content::FrontEndScreenBundle>* OmegaApp::RetailBundleSlotForScreen(
     const content::FrontEndScreenKey screen) noexcept
 {
     std::optional<content::FrontEndScreenBundle>* slot = nullptr;
@@ -4340,51 +4365,37 @@ const content::FrontEndScreenBundle* OmegaApp::RetailBundleForScreen(
         slot = &retail_equipment_bundle_;
         break;
     }
+    return slot;
+}
+
+const content::FrontEndScreenBundle* OmegaApp::LoadRetailBundleForScreen(
+    const content::FrontEndScreenKey screen) noexcept
+{
+    std::optional<content::FrontEndScreenBundle>* const slot =
+        RetailBundleSlotForScreen(screen);
     if (slot == nullptr)
         return nullptr;
     if (slot->has_value())
         return &**slot;
-    // A screen already attempted and failed stays unavailable without repeating
-    // the decode or the log. Without this the caller's per-frame resolve turns a
-    // single missing screen into an archive decode attempt and a warning line on
-    // every rendered frame.
-    const std::size_t memo_index = static_cast<std::size_t>(screen);
-    if (memo_index < retail_screen_load_failed_.size() &&
-        retail_screen_load_failed_[memo_index])
-    {
-        return nullptr;
-    }
-    // Not an attempt: leave the memo clear so this screen can still resolve if a
-    // content service becomes available.
     if (!content_ || !content_->game_data.has_value())
         return nullptr;
-    const auto memoize_failure = [this, memo_index]() noexcept {
-        if (memo_index < retail_screen_load_failed_.size())
-            retail_screen_load_failed_[memo_index] = true;
-    };
     // LoadFrontEndScreen is not noexcept; contain any allocation/decoder throw so
     // this loader keeps its own noexcept contract and simply reports "no bundle".
+    //
+    // Only a success is cached. A failure is deliberately NOT remembered, so the
+    // player's next Accept retries it; the cost is bounded instead by callers
+    // confining this to an explicit Accept edge. Logging is the caller's, so a
+    // failed attempt produces exactly one warning rather than one per layer.
     try
     {
         auto bundle = content_->game_data->LoadFrontEndScreen(screen);
         if (!bundle)
-        {
-            // Identity-free: the GameData error code names a category, not owner
-            // data. Helps distinguish a decode gap from a missing member/scope.
-            // Logged once per screen because the memo below suppresses retries.
-            log_->Warning("presentation",
-                std::string("retail front-end screen load failed [") +
-                    std::string(content::GameDataErrorCodeName(bundle.error().code)) +
-                    "]");
-            memoize_failure();
             return nullptr;
-        }
         *slot = std::move(*bundle);
         return &**slot;
     }
     catch (...)
     {
-        memoize_failure();
         return nullptr;
     }
 }
@@ -4420,86 +4431,147 @@ void OmegaApp::UpdateRetailFrontEndPresentation(
         !retail_front_end_bundle_ || !host_)
         return;
 
+    // Declared outside the try so the containment handler below can still tell an
+    // explicit player Accept from ordinary per-frame work and warn exactly once.
+    bool explicit_attempt = false;
     try
     {
-        // Advance one animation tick per rendered frame (this runs once per frame).
-        // Each compose re-clones+evaluates the timeline from scratch, so the tick is
-        // a pure input with no cross-frame instance state to keep monotonic.
-        ++retail_animation_tick_;
+        // Everything this frame produces stays LOCAL until the candidate has
+        // actually published. Nothing above the commit block writes retail_nav_,
+        // retail_composed_nav_, retail_animation_tick_, or
+        // retail_screen_has_animation_.
 
-        // Derive the current screen's selectable buttons to bound navigation and
-        // resolve the selected button's accept target, then step the pure nav.
+        // Bound navigation by the CURRENT screen's buttons. Cached lookup only:
+        // the per-frame path must never turn a missing screen into a decode
+        // attempt on every rendered frame.
         std::uint32_t button_count = 0U;
         std::optional<content::FrontEndScreenKey> button_target;
-        if (const auto* const pre = RetailBundleForScreen(retail_nav_.screen))
+        if (const auto* const current =
+                CachedRetailBundleForScreen(retail_nav_.screen))
         {
-            const auto buttons = RetailScreenSelectableButtons(*pre);
+            const auto buttons = RetailScreenSelectableButtons(*current);
             button_count = static_cast<std::uint32_t>(buttons.size());
             if (retail_nav_.selected < buttons.size())
                 button_target = buttons[retail_nav_.selected].target;
         }
-        // Admit the transition only if the destination can actually be composed,
-        // so a screen this build cannot decode leaves the player on a screen that
-        // still draws and still responds instead of stranding navigation on the
-        // previous screen's last composed frame. Probe only on the Accept edge:
-        // resolving a target every frame would eagerly load every routed screen.
-        // Resolving here also warms the cache, so the compose below reuses it.
-        const bool target_is_presentable = input.accept && button_target &&
-            RetailBundleForScreen(*button_target) != nullptr;
-        const std::optional<content::FrontEndScreenKey> accept_target =
-            frontend::presentation::ResolveRetailFrontEndAcceptTarget(
-                button_target, input.accept, target_is_presentable);
-        retail_nav_ = frontend::presentation::StepRetailFrontEndNav(
-            retail_nav_, input, button_count, accept_target);
 
-        // Recompose when the navigation state changed (selection move / screen
-        // switch), when nothing has composed yet, or -- for an animated screen --
-        // every frame so the tick advances the tracks. A static screen composes
-        // once and holds.
+        // Spend a load only on an explicit Accept that could actually route: on
+        // the Title, without Back, on a button that declares a target. One
+        // attempt per such edge; a failure is not cached, so the next Accept
+        // retries.
+        const bool probe = frontend::presentation::ShouldProbeRetailAcceptTarget(
+            retail_nav_, input, button_target);
+        explicit_attempt = probe;
+        bool target_bundle_is_loaded = false;
+        if (probe)
+            target_bundle_is_loaded = LoadRetailBundleForScreen(*button_target) != nullptr;
+        // A refused destination makes the candidate fall back to the CURRENT
+        // screen, which then publishes perfectly well -- so the presentation
+        // outcome alone would report success and the player would get silence
+        // after pressing Accept. This term is what makes that press audible.
+        const bool load_attempt_failed = probe && !target_bundle_is_loaded;
+
+        const frontend::presentation::RetailFrontEndNavState candidate =
+            frontend::presentation::PlanRetailFrontEndNavCandidate(
+                retail_nav_, input, button_count, button_target,
+                target_bundle_is_loaded);
+
+        // Recompose when the candidate differs from what is on screen, when
+        // nothing has published yet, or -- for an animated screen -- every frame
+        // so the tick advances. A static screen composes once and holds.
         const bool nav_unchanged = retail_front_end_ready_ &&
-            retail_composed_nav_.has_value() &&
-            *retail_composed_nav_ == retail_nav_;
+            retail_composed_nav_.has_value() && *retail_composed_nav_ == candidate;
         if (nav_unchanged && !retail_screen_has_animation_)
-            return;
-
-        const auto* const bundle = RetailBundleForScreen(retail_nav_.screen);
-        if (bundle == nullptr)
         {
-            // RetailBundleForScreen already logged the one identity-free reason
-            // for this screen and memoized it, so logging again here would emit a
-            // line per rendered frame for a condition that cannot change. Leave
-            // retail_composed_nav_ untouched so a screen that becomes resolvable
-            // still composes.
+            // Settle this frame's warning obligation before emitting it, so a
+            // throwing log sink cannot make the handler below repeat it.
+            explicit_attempt = false;
+            if (load_attempt_failed)
+                log_->Warning("presentation", kRetailScreenChangeFailedWarning);
             return;
         }
-        const auto buttons = RetailScreenSelectableButtons(*bundle);
-        std::string_view selected_identifier;
-        if (retail_nav_.selected < buttons.size())
-            selected_identifier = buttons[retail_nav_.selected].identifier;
 
-        ComposeRetailScreenPresentation(*bundle, selected_identifier);
-        retail_composed_nav_ = retail_nav_;
+        // Resolve the candidate's bundle from cache: a successful probe above
+        // already cached it, and Back returns to the always-resident Title.
+        frontend::presentation::RetailFrontEndPresentOutcome outcome =
+            frontend::presentation::RetailFrontEndPresentOutcome::BundleUnavailable;
+        std::uint32_t candidate_tick = retail_animation_tick_;
+        bool candidate_has_animation = false;
+        if (const auto* const candidate_bundle =
+                CachedRetailBundleForScreen(candidate.screen))
+        {
+            const auto buttons = RetailScreenSelectableButtons(*candidate_bundle);
+            std::string_view selected_identifier;
+            if (candidate.selected < buttons.size())
+                selected_identifier = buttons[candidate.selected].identifier;
+
+            // The tick is a pure compositor input, so it can be proposed locally
+            // and adopted only if this frame reaches the display. A failed
+            // compose therefore does not silently advance the animation.
+            candidate_tick = retail_animation_tick_ + 1U;
+            // Compose and publish are folded into one bool, so this site cannot
+            // tell a refused composition from a refused upload and reports the
+            // former for both. Nothing observes the distinction: the commit rule
+            // treats every non-Published outcome identically, and the outcome is
+            // never logged or exposed.
+            outcome = ComposeRetailScreenPresentation(*candidate_bundle,
+                          selected_identifier, candidate_tick,
+                          candidate_has_animation)
+                ? frontend::presentation::RetailFrontEndPresentOutcome::Published
+                : frontend::presentation::RetailFrontEndPresentOutcome::ComposeFailed;
+        }
+
+        const frontend::presentation::RetailFrontEndNavCommit commit =
+            frontend::presentation::ResolveRetailFrontEndNavCommit(
+                retail_nav_, candidate, outcome, explicit_attempt);
+        if (commit.commit)
+        {
+            // The one place navigation, the composed marker, and animation state
+            // move -- and only because these exact pixels are now on screen.
+            retail_animation_tick_ = candidate_tick;
+            retail_screen_has_animation_ = candidate_has_animation;
+            retail_nav_ = commit.nav;
+            retail_composed_nav_ = commit.nav;
+        }
+        // Exactly one warning per failed explicit attempt: the destination either
+        // would not load, or loaded and then would not reach the display. The two
+        // terms are mutually exclusive, so this cannot double-report.
+        const bool warn_now = load_attempt_failed || commit.warn;
+        // Settle the obligation before emitting, so a throwing log sink cannot
+        // make the handler below repeat this frame's warning.
+        explicit_attempt = false;
+        if (warn_now)
+            log_->Warning("presentation", kRetailScreenChangeFailedWarning);
     }
     catch (...)
     {
-        // Fail-soft: keep whatever was last composed (or the project fallback).
+        // Fail-soft: nothing above committed, so the current screen, its pixels,
+        // and its navigation are already intact. An explicit Accept still owes
+        // the player its one warning.
+        if (explicit_attempt)
+        {
+            try
+            {
+                log_->Warning("presentation", kRetailScreenChangeFailedWarning);
+            }
+            catch (...)
+            {
+            }
+        }
     }
 }
 
-void OmegaApp::ComposeRetailScreenPresentation(
+bool OmegaApp::ComposeRetailScreenPresentation(
     const content::FrontEndScreenBundle& bundle,
-    const std::string_view selected_identifier) noexcept
+    const std::string_view selected_identifier,
+    const std::uint32_t animation_tick, bool& out_has_animation) noexcept
 {
     if (!host_)
-        return;
+        return false;
 
     frontend::presentation::RetailFrontEndFrameDiagnostics diagnostics;
     const auto frame = frontend::presentation::ComposeRetailFrontEndFrame(
-        bundle, {}, &diagnostics, selected_identifier, retail_animation_tick_);
-    // Whether this screen animates decides if the host recomposes every frame
-    // (advancing the tick) or composes once and holds -- see
-    // UpdateRetailFrontEndPresentation.
-    retail_screen_has_animation_ = diagnostics.animated_nodes > 0U;
+        bundle, {}, &diagnostics, selected_identifier, animation_tick);
 #if defined(_MSC_VER)
 #pragma warning(push)
 #pragma warning(disable : 4996)
@@ -4538,14 +4610,16 @@ void OmegaApp::ComposeRetailScreenPresentation(
     }
     if (!frame)
     {
-        // Identity-free: the compositor error carries no owner-corpus detail.
-        // Leave the retail presentation not ready; the gate stays authorized but
-        // CurrentFrontEndDrawList falls back to the project presentation until a
-        // later phase composes this screen.
-        log_->Warning("presentation",
-            "retail front-end Title composition unsupported; using project fallback (error code " +
-                std::to_string(static_cast<unsigned>(frame.error())) + ")");
-        return;
+        // The caller owns the single player-facing warning; this stays behind the
+        // trace gate so a compositor error code is available when investigating
+        // without emitting a second line per failed frame.
+        if (frontend_trace != nullptr)
+        {
+            log_->Info("presentation",
+                "frontend-trace compose_failed code=" +
+                    std::to_string(static_cast<unsigned>(frame.error())));
+        }
+        return false;
     }
 
     const runtime::Rgba8TextureUploadView upload{
@@ -4553,12 +4627,22 @@ void OmegaApp::ComposeRetailScreenPresentation(
         .height = frame->height,
         .pixels = std::as_bytes(std::span<const std::uint8_t>(frame->pixels)),
     };
-    PublishRetailFrontEndFrame(upload);
+    if (!PublishRetailFrontEndFrame(upload))
+        return false;
+
+    // Written only on success, so a caller's animation state cannot advance on a
+    // frame the player never saw.
+    out_has_animation = diagnostics.animated_nodes > 0U;
+    return true;
 }
 
-void OmegaApp::PublishRetailFrontEndFrame(
+bool OmegaApp::PublishRetailFrontEndFrame(
     const runtime::Rgba8TextureUploadView upload) noexcept
 {
+    // Success means "these pixels are what the player sees". Every early exit
+    // below therefore returns false, so a caller can never adopt navigation for a
+    // frame that did not reach the display.
+    //
     // Every retail frame has the fixed compositor extent. Once the first frame
     // owns a resident texture and draw command, animated ticks can replace its
     // pixels in place: creating a new GPU texture, rebuilding the identical
@@ -4570,19 +4654,16 @@ void OmegaApp::PublishRetailFrontEndFrame(
             host_->UpdateRgba8Texture(retail_front_end_texture_, upload);
         if (!updated)
         {
-            log_->Warning("presentation",
-                "retail front-end texture update failed; keeping prior frame");
+            // The resident texture still holds the last good frame, which is what
+            // stays on screen.
+            return false;
         }
-        return;
+        return true;
     }
 
     auto uploaded = host_->UploadRgba8Texture(upload);
     if (!uploaded)
-    {
-        log_->Warning("presentation",
-            "retail front-end texture upload failed; using project fallback");
-        return;
-    }
+        return false;
 
     constexpr runtime::RenderSourceRectQ16 full_source{
         .left = 0U,
@@ -4607,23 +4688,23 @@ void OmegaApp::PublishRetailFrontEndFrame(
         std::span<const runtime::RenderTextureBlitCommand>{&command, 1U});
     if (!draw_list)
     {
-        // The first upload is not yet owned by a published draw list.
+        // The first upload is not yet owned by a published draw list, so releasing
+        // it here leaves no residency behind for a frame that never published.
         static_cast<void>(host_->ReleaseTexture(*uploaded));
-        log_->Warning("presentation",
-            "retail front-end draw-list creation failed; using project fallback");
-        return;
+        return false;
     }
-    // First successful compose publishes the one resident texture and the one
+    // Only now is the frame genuinely on screen: one resident texture and the one
     // full-screen draw command reused by every later in-place update.
     retail_front_end_texture_ = *uploaded;
     retail_front_end_texture_valid_ = true;
     retail_front_end_draw_list_ = std::move(*draw_list);
-    // Log once on the first successful compose; recompose runs every frame for an
+    // Log once on the first successful publish; recompose runs every frame for an
     // animated screen, so the per-compose detail lives behind OPENOMEGA_FRONTEND_TRACE.
     if (!retail_front_end_ready_)
         log_->Info("presentation",
             "retail front-end presentation composited (Gap B: retail screen live)");
     retail_front_end_ready_ = true;
+    return true;
 }
 
 void OmegaApp::UpdateMultiplayerMenuPresentation() noexcept

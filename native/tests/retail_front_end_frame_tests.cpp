@@ -30,7 +30,11 @@ namespace nav_test
 using omega::content::FrontEndScreenKey;
 using omega::frontend::presentation::RetailFrontEndNavInput;
 using omega::frontend::presentation::RetailFrontEndNavState;
-using omega::frontend::presentation::ResolveRetailFrontEndAcceptTarget;
+using omega::frontend::presentation::PlanRetailFrontEndNavCandidate;
+using omega::frontend::presentation::ResolveRetailFrontEndNavCommit;
+using omega::frontend::presentation::ResolveRetailStartScreenOverride;
+using omega::frontend::presentation::RetailFrontEndPresentOutcome;
+using omega::frontend::presentation::ShouldProbeRetailAcceptTarget;
 using omega::frontend::presentation::StepRetailFrontEndNav;
 
 // next advances the selection; previous retreats it; both clamp to [0, count).
@@ -95,52 +99,109 @@ static_assert(StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Cr
                   RetailFrontEndNavInput{.back = true}, 0U, std::nullopt)
                   .selected == 0U);
 
-// Accept-target admission. A target survives only with an Accept edge AND a
-// presentable destination; every other combination yields no target.
-static_assert(ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, true) ==
-              FrontEndScreenKey::CreateAgent);
-static_assert(!ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, false)
-                   .has_value());
-static_assert(!ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, false, true)
-                   .has_value());
-static_assert(!ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, false, false)
-                   .has_value());
-// A button that declares no target never gains one, presentable or not.
-static_assert(!ResolveRetailFrontEndAcceptTarget(std::nullopt, true, true).has_value());
-static_assert(!ResolveRetailFrontEndAcceptTarget(std::nullopt, true, false).has_value());
-// Admission is target-preserving: it never substitutes a different screen.
-static_assert(ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::LoadAgent, true, true) ==
-              FrontEndScreenKey::LoadAgent);
+// --- Probe admission --------------------------------------------------------
+// A bundle load is spent only on an explicit Accept that could actually route.
+constexpr RetailFrontEndNavState kTitle{FrontEndScreenKey::Title, 0U};
+constexpr RetailFrontEndNavState kSubScreen{FrontEndScreenKey::CreateAgent, 0U};
+constexpr std::optional<FrontEndScreenKey> kTargetted{FrontEndScreenKey::CreateAgent};
 
-// Composed with the step: a refused destination leaves the player on the Title
-// with the selection intact, instead of switching to a screen that cannot draw.
-static_assert(
-    StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
-        RetailFrontEndNavInput{.accept = true}, 3U,
-        ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, false))
-        .screen == FrontEndScreenKey::Title);
-static_assert(
-    StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
-        RetailFrontEndNavInput{.accept = true}, 3U,
-        ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, false))
-        .selected == 1U);
-// An admitted destination still switches and resets the selection.
-static_assert(
-    StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
-        RetailFrontEndNavInput{.accept = true}, 3U,
-        ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, true))
-        .screen == FrontEndScreenKey::CreateAgent);
-static_assert(
-    StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
-        RetailFrontEndNavInput{.accept = true}, 3U,
-        ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, true))
-        .selected == 0U);
-// Back keeps priority over an admitted target on the same frame.
-static_assert(
-    StepRetailFrontEndNav(RetailFrontEndNavState{FrontEndScreenKey::LoadAgent, 0U},
-        RetailFrontEndNavInput{.accept = true, .back = true}, 1U,
-        ResolveRetailFrontEndAcceptTarget(FrontEndScreenKey::CreateAgent, true, true))
-        .screen == FrontEndScreenKey::Title);
+static_assert(ShouldProbeRetailAcceptTarget(
+    kTitle, RetailFrontEndNavInput{.accept = true}, kTargetted));
+// Back outranks Accept in the step, so an Accept beside it must cost nothing.
+static_assert(!ShouldProbeRetailAcceptTarget(
+    kTitle, RetailFrontEndNavInput{.accept = true, .back = true}, kTargetted));
+// Accept only switches screens from the Title, so an Accept elsewhere is inert.
+static_assert(!ShouldProbeRetailAcceptTarget(
+    kSubScreen, RetailFrontEndNavInput{.accept = true}, kTargetted));
+// A button with no declared target has nothing to load.
+static_assert(!ShouldProbeRetailAcceptTarget(
+    kTitle, RetailFrontEndNavInput{.accept = true}, std::nullopt));
+// Navigation without Accept never loads.
+static_assert(!ShouldProbeRetailAcceptTarget(
+    kTitle, RetailFrontEndNavInput{.next = true}, kTargetted));
+static_assert(!ShouldProbeRetailAcceptTarget(kTitle, RetailFrontEndNavInput{}, kTargetted));
+
+// --- Candidate planning -----------------------------------------------------
+// A loaded destination is admitted; an unloaded one leaves the player put.
+static_assert(PlanRetailFrontEndNavCandidate(kTitle,
+                  RetailFrontEndNavInput{.accept = true}, 3U, kTargetted, true)
+                  .screen == FrontEndScreenKey::CreateAgent);
+static_assert(PlanRetailFrontEndNavCandidate(kTitle,
+                  RetailFrontEndNavInput{.accept = true}, 3U, kTargetted, false)
+                  .screen == FrontEndScreenKey::Title);
+static_assert(PlanRetailFrontEndNavCandidate(
+                  RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
+                  RetailFrontEndNavInput{.accept = true}, 3U, kTargetted, false)
+                  .selected == 1U);
+// Back still wins over an admitted destination on the same frame.
+static_assert(PlanRetailFrontEndNavCandidate(kSubScreen,
+                  RetailFrontEndNavInput{.accept = true, .back = true}, 1U,
+                  kTargetted, true)
+                  .screen == FrontEndScreenKey::Title);
+
+// --- The commit invariant ---------------------------------------------------
+// Only Published moves navigation. Every other outcome keeps the current state.
+static_assert(ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                  RetailFrontEndPresentOutcome::Published, true)
+                  .commit);
+static_assert(ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                  RetailFrontEndPresentOutcome::Published, true)
+                  .nav.screen == FrontEndScreenKey::CreateAgent);
+// A published candidate never warns, even though the attempt was explicit.
+static_assert(!ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                   RetailFrontEndPresentOutcome::Published, true)
+                   .warn);
+static_assert(!ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                   RetailFrontEndPresentOutcome::BundleUnavailable, true)
+                   .commit);
+static_assert(ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                  RetailFrontEndPresentOutcome::BundleUnavailable, true)
+                  .nav.screen == FrontEndScreenKey::Title);
+static_assert(!ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                   RetailFrontEndPresentOutcome::ComposeFailed, true)
+                   .commit);
+static_assert(ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                  RetailFrontEndPresentOutcome::ComposeFailed, true)
+                  .nav.screen == FrontEndScreenKey::Title);
+static_assert(!ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                   RetailFrontEndPresentOutcome::PublishFailed, true)
+                   .commit);
+static_assert(ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                  RetailFrontEndPresentOutcome::PublishFailed, true)
+                  .nav.screen == FrontEndScreenKey::Title);
+static_assert(!ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                   RetailFrontEndPresentOutcome::NotAttempted, true)
+                   .commit);
+// Warning is owed to an explicit attempt only, so an animated screen that keeps
+// failing to compose cannot emit a line per rendered frame.
+static_assert(ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                  RetailFrontEndPresentOutcome::ComposeFailed, true)
+                  .warn);
+static_assert(!ResolveRetailFrontEndNavCommit(kTitle, kSubScreen,
+                   RetailFrontEndPresentOutcome::ComposeFailed, false)
+                   .warn);
+// A failed same-screen recompose keeps the selection it already had.
+static_assert(ResolveRetailFrontEndNavCommit(
+                  RetailFrontEndNavState{FrontEndScreenKey::Title, 2U},
+                  RetailFrontEndNavState{FrontEndScreenKey::Title, 1U},
+                  RetailFrontEndPresentOutcome::ComposeFailed, false)
+                  .nav.selected == 2U);
+
+// --- Debug start-screen override --------------------------------------------
+static_assert(ResolveRetailStartScreenOverride("createagent") ==
+              FrontEndScreenKey::CreateAgent);
+static_assert(ResolveRetailStartScreenOverride("loadagent") ==
+              FrontEndScreenKey::LoadAgent);
+static_assert(ResolveRetailStartScreenOverride("commandcenter") ==
+              FrontEndScreenKey::CommandCenter);
+static_assert(ResolveRetailStartScreenOverride("equipment") ==
+              FrontEndScreenKey::Equipment);
+// Anything unrecognized yields no key, so the caller composes the Title.
+static_assert(!ResolveRetailStartScreenOverride("").has_value());
+static_assert(!ResolveRetailStartScreenOverride("title").has_value());
+static_assert(!ResolveRetailStartScreenOverride("CreateAgent").has_value());
+static_assert(!ResolveRetailStartScreenOverride("createagent2").has_value());
+static_assert(!ResolveRetailStartScreenOverride("nonsense").has_value());
 } // namespace nav_test
 
 // Minimal test-only construction access, mirroring the pattern in
@@ -1374,6 +1435,124 @@ int main()
             Check(survey.unknown_identifier_count == 1U,
                 "an owner-authored identifier survives only as an anonymous count");
         }
+    }
+
+    // --- Retail navigation driven as a frame sequence -----------------------
+    // A stand-in for OmegaApp's per-frame path over the same pure functions, so
+    // the commit invariant, probe budget, warning count and retry behaviour are
+    // exercised as a sequence rather than one call at a time -- and without a GPU.
+    {
+        using omega::content::FrontEndScreenKey;
+        using omega::frontend::presentation::PlanRetailFrontEndNavCandidate;
+        using omega::frontend::presentation::ResolveRetailFrontEndNavCommit;
+        using omega::frontend::presentation::RetailFrontEndNavInput;
+        using omega::frontend::presentation::RetailFrontEndNavState;
+        using omega::frontend::presentation::RetailFrontEndPresentOutcome;
+        using omega::frontend::presentation::ShouldProbeRetailAcceptTarget;
+
+        struct Presenter final
+        {
+            bool destination_loads = false;
+            bool destination_publishes = false;
+            std::uint32_t load_attempts = 0U;
+            std::uint32_t warnings = 0U;
+            std::uint32_t publishes = 0U;
+            RetailFrontEndNavState nav{FrontEndScreenKey::Title, 0U};
+            std::optional<RetailFrontEndNavState> composed{};
+
+            void Frame(const RetailFrontEndNavInput input)
+            {
+                const std::optional<FrontEndScreenKey> button_target{
+                    FrontEndScreenKey::CreateAgent};
+                const bool probe =
+                    ShouldProbeRetailAcceptTarget(nav, input, button_target);
+                bool loaded = false;
+                if (probe)
+                {
+                    ++load_attempts;
+                    loaded = destination_loads;
+                }
+                const bool load_attempt_failed = probe && !loaded;
+                const RetailFrontEndNavState candidate =
+                    PlanRetailFrontEndNavCandidate(nav, input, 1U, button_target, loaded);
+                // The Title always presents; the destination presents only when
+                // this run says it can.
+                const bool published =
+                    candidate.screen != FrontEndScreenKey::CreateAgent ||
+                    destination_publishes;
+                if (published)
+                    ++publishes;
+                const auto commit = ResolveRetailFrontEndNavCommit(nav, candidate,
+                    published ? RetailFrontEndPresentOutcome::Published
+                              : RetailFrontEndPresentOutcome::ComposeFailed,
+                    probe);
+                if (commit.commit)
+                {
+                    nav = commit.nav;
+                    composed = commit.nav;
+                }
+                if (load_attempt_failed || commit.warn)
+                    ++warnings;
+            }
+        };
+
+        // Frame 1 publishes the Title and adopts it as the composed navigation.
+        Presenter presenter;
+        presenter.Frame(RetailFrontEndNavInput{});
+        Check(presenter.nav.screen == FrontEndScreenKey::Title &&
+                  presenter.composed.has_value() &&
+                  presenter.composed->screen == FrontEndScreenKey::Title,
+            "the opening frame adopts the Title it published");
+        Check(presenter.load_attempts == 0U && presenter.warnings == 0U,
+            "a frame with no Accept neither loads nor warns");
+
+        // Accept while the destination will not load: one attempt, one warning,
+        // navigation unmoved.
+        presenter.Frame(RetailFrontEndNavInput{.accept = true});
+        Check(presenter.load_attempts == 1U,
+            "an eligible Accept spends exactly one load attempt");
+        Check(presenter.warnings == 1U,
+            "a destination that will not load warns exactly once");
+        Check(presenter.nav.screen == FrontEndScreenKey::Title &&
+                  presenter.composed->screen == FrontEndScreenKey::Title,
+            "a destination that will not load leaves navigation on the Title");
+
+        // Accept while the destination loads but cannot present: still no move.
+        presenter.destination_loads = true;
+        presenter.Frame(RetailFrontEndNavInput{.accept = true});
+        Check(presenter.load_attempts == 2U,
+            "the next Accept retries the load rather than being refused outright");
+        Check(presenter.warnings == 2U,
+            "a destination that loads but cannot present warns exactly once");
+        Check(presenter.nav.screen == FrontEndScreenKey::Title &&
+                  presenter.composed->screen == FrontEndScreenKey::Title,
+            "a destination that cannot present leaves navigation on the Title");
+
+        // Accept once it can present: navigation follows, and nothing warns.
+        presenter.destination_publishes = true;
+        presenter.Frame(RetailFrontEndNavInput{.accept = true});
+        Check(presenter.nav.screen == FrontEndScreenKey::CreateAgent &&
+                  presenter.composed->screen == FrontEndScreenKey::CreateAgent,
+            "a destination that presents is adopted by navigation");
+        Check(presenter.warnings == 2U, "a successful screen change does not warn");
+
+        // Off the Title, Accept neither probes nor warns.
+        const std::uint32_t attempts_before_off_title = presenter.load_attempts;
+        presenter.Frame(RetailFrontEndNavInput{.accept = true});
+        Check(presenter.load_attempts == attempts_before_off_title,
+            "an Accept away from the Title spends no load attempt");
+        Check(presenter.warnings == 2U, "an inert off-Title Accept does not warn");
+
+        // Back returns to the Title, then Accept+Back must not probe.
+        presenter.Frame(RetailFrontEndNavInput{.back = true});
+        Check(presenter.nav.screen == FrontEndScreenKey::Title,
+            "Back returns to the Title and is adopted");
+        const std::uint32_t attempts_before_both = presenter.load_attempts;
+        presenter.Frame(RetailFrontEndNavInput{.accept = true, .back = true});
+        Check(presenter.load_attempts == attempts_before_both,
+            "an Accept accompanied by Back spends no load attempt");
+        Check(presenter.nav.screen == FrontEndScreenKey::Title,
+            "an Accept accompanied by Back leaves the Title in place");
     }
 
     if (failures != 0)

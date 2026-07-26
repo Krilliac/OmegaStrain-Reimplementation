@@ -205,27 +205,41 @@ private:
     void LoadRetailFrontEndBundleIfEnabled() noexcept;
     // [game/main thread; no concurrent use] Gap B retail front-end (docs/08).
     // Composites one decoded retail screen bundle into a canonical frame with the
-    // named widget highlighted. The first frame uploads one resident texture and
-    // caches one full-screen blit draw list; later frames update those pixels in
-    // place. Never throws: a failure leaves the retail presentation as-is (last
-    // good frame or project fallback).
-    void ComposeRetailScreenPresentation(
+    // named widget highlighted, at `animation_tick`, and publishes it.
+    //
+    // Returns true ONLY when the frame reached a resident texture and a live draw
+    // list. `out_has_animation` is written only on success, so a caller can keep
+    // its animation state local until the candidate is known to have published.
+    // Never throws: a failure leaves the retail presentation exactly as it was
+    // (last good frame, or the project fallback if nothing has published yet).
+    [[nodiscard]] bool ComposeRetailScreenPresentation(
         const content::FrontEndScreenBundle& bundle,
-        std::string_view selected_identifier) noexcept;
+        std::string_view selected_identifier, std::uint32_t animation_tick,
+        bool& out_has_animation) noexcept;
     // [game/main thread; no concurrent use] Publishes fixed-size compositor
     // pixels. The first call creates the texture/draw list; later calls update
-    // the resident texture without replacing either resource.
-    void PublishRetailFrontEndFrame(
+    // the resident texture without replacing either resource. Returns true only
+    // after the update, or the upload AND draw-list creation, actually succeeded,
+    // so a caller can treat true as "these pixels are what the player sees".
+    [[nodiscard]] bool PublishRetailFrontEndFrame(
         runtime::Rgba8TextureUploadView upload) noexcept;
-    // [game/main thread] Returns the cached retail bundle for a screen, lazily
-    // loading+caching it via GameDataService on first use. nullptr if unavailable.
-    // A screen whose load is actually attempted and fails is memoized in
-    // retail_screen_load_failed_ and reported unavailable from then on, so a
-    // persistent gap costs one decode attempt and one log line rather than one
-    // of each per rendered frame. A screen that is never attempted (no content
-    // service) is not memoized, so it can still be resolved later.
-    [[nodiscard]] const content::FrontEndScreenBundle* RetailBundleForScreen(
+    // [game/main thread] Returns an already-cached retail bundle, or nullptr. It
+    // never loads, so the per-frame presentation path cannot turn a missing
+    // screen into a decode attempt on every rendered frame.
+    [[nodiscard]] const content::FrontEndScreenBundle* CachedRetailBundleForScreen(
         content::FrontEndScreenKey screen) noexcept;
+    // [game/main thread] Returns the cached bundle, or makes exactly one load
+    // attempt through GameDataService. ONLY SUCCESSES ARE CACHED: a failed load
+    // is not remembered, so a later explicit Accept retries it. Callers must
+    // therefore confine this to an explicit, player-driven attempt -- see
+    // ShouldProbeRetailAcceptTarget -- rather than calling it per frame. It logs
+    // nothing; the caller owns the single warning for a failed attempt.
+    [[nodiscard]] const content::FrontEndScreenBundle* LoadRetailBundleForScreen(
+        content::FrontEndScreenKey screen) noexcept;
+    // [game/main thread] Maps a screen key onto its owning cache slot. nullptr
+    // only for a value outside the declared enumeration.
+    [[nodiscard]] std::optional<content::FrontEndScreenBundle>*
+    RetailBundleSlotForScreen(content::FrontEndScreenKey screen) noexcept;
     // One selectable retail menu button: its widget identifier and the screen its
     // Accept routes to (empty for buttons with no target yet, e.g. Options).
     struct RetailFrontEndButton
@@ -583,20 +597,18 @@ private:
     // loaded+cached on first navigation to them. This is intentionally separate
     // from the project ReduceFrontEnd flow so the retail path never fires the
     // project's persistence commands.
+    //
+    // INVARIANT: both of these advance only through a candidate that actually
+    // published. While retail_composed_nav_ holds a value it equals retail_nav_,
+    // so navigation can never point at a screen the player is not looking at. A
+    // failed load, compose, or publish leaves both untouched and the next frame
+    // retries from a coherent state.
     frontend::presentation::RetailFrontEndNavState retail_nav_{};
     std::optional<frontend::presentation::RetailFrontEndNavState> retail_composed_nav_{};
     std::optional<content::FrontEndScreenBundle> retail_create_agent_bundle_;
     std::optional<content::FrontEndScreenBundle> retail_load_agent_bundle_;
     std::optional<content::FrontEndScreenBundle> retail_command_center_bundle_;
     std::optional<content::FrontEndScreenBundle> retail_equipment_bundle_;
-    // One flag per FrontEndScreenKey, indexed by its ordinal: set once a load was
-    // attempted for that screen and failed. Bounds the cost of a screen this
-    // build cannot decode to a single attempt and a single log line, and lets
-    // ResolveRetailFrontEndAcceptTarget refuse an Accept into it. Sized from the
-    // last enumerator so adding a screen key is a compile-time update here.
-    std::array<bool,
-        static_cast<std::size_t>(content::FrontEndScreenKey::Equipment) + 1U>
-        retail_screen_load_failed_{};
     FrontEndStartupModel front_end_startup_model_{};
     FrontEndCharacterStartupModel front_end_character_startup_model_{};
     std::optional<CharacterPresentation> character_presentation_;
