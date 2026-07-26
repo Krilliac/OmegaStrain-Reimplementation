@@ -2469,6 +2469,13 @@ sampler state, tiling rule, or visual parity is claimed.
 
 ### Retail menu no longer strands on an unloadable screen (commit `b955e4e`, 2026-07-25)
 
+> **SUPERSEDED — do not act on this entry.** An independent Codex review found `b955e4e` unsafe as
+> landed: it recorded a candidate as composed whether or not the frame ever published, moved
+> navigation before composing, advanced the animation tick on frames the player never saw, called a
+> resolvable bundle "presentable", and made a load failure permanent. See
+> "Correction: the retail menu stranding fix was unsafe as landed" at the end of this file, which is
+> authoritative. This entry is kept only as the record of what that commit claimed.
+
 This entry is written from its own commit. The commits between `a4a6856` and this one are not yet
 written up in this section; their absence here is outstanding documentation work, not a claim that
 they landed no change.
@@ -2544,3 +2551,62 @@ compiled `/W4 /WX` build of `omega_tool` plus `omega_retail_front_end_frame_test
 A `loaded: true` result means only that this build's decoders accepted that screen. It establishes no
 retail menu structure, control layout, ordering rule, activation behaviour, screen semantic, or
 presentation correctness.
+
+### Correction: the retail menu stranding fix was unsafe as landed (2026-07-25)
+
+An independent Codex review found `b955e4e` (and therefore its write-up in `3da0fbd`) unsafe. Both
+commits are preserved; this entry corrects them and the follow-up commits on this branch implement
+the correction. Where the two disagree, this entry is authoritative.
+
+What `b955e4e` got wrong:
+
+- It committed `retail_composed_nav_ = retail_nav_` unconditionally after a fail-soft, `void`
+  `ComposeRetailScreenPresentation`. A screen whose composition or upload failed was therefore
+  recorded as composed, so a static screen never retried and the displayed pixels and navigation
+  disagreed — the exact defect the commit claimed to fix, moved one layer down.
+- It committed `retail_nav_` before composing anything, so a failed compose left navigation moved.
+- It advanced `retail_animation_tick_` before knowing whether the frame would ever be seen.
+- It named a resolvable bundle "presentable". Decoding a bundle, composing a frame, and uploading it
+  fail for different reasons; only the last means the player sees anything.
+- Its negative memo made a load failure permanent, so a later Accept could not retry.
+
+The correction, now the standing rule:
+
+- **INVARIANT: `retail_nav_` and `retail_composed_nav_` advance if and only if the candidate frame
+  actually composed and published.** While `retail_composed_nav_` holds a value it equals
+  `retail_nav_`. Any failure leaves navigation, the composed marker, animation state, texture and
+  draw list untouched, and the next frame retries from a coherent state.
+- `ComposeRetailScreenPresentation` and `PublishRetailFrontEndFrame` return `bool`. Publish is true
+  only after the in-place update, or the upload *and* draw-list creation, succeeded. The animation
+  tick and the has-animation flag stay local until publish succeeds.
+- Navigation is computed as a local candidate through `PlanRetailFrontEndNavCandidate` and adopted
+  only through `ResolveRetailFrontEndNavCommit`, which is the invariant expressed as a pure function.
+- A bundle load is spent only when `ShouldProbeRetailAcceptTarget` allows it: Title, Accept, no Back,
+  and a button that declares a target. Only successes are cached, so a later distinct Accept retries;
+  the per-frame cost is bounded by the probe condition rather than by a permanent failure memo.
+- Exactly one fixed, identity-free warning per failed explicit attempt, covering a refused load, a
+  refused composition, a refused publish, and an exception. A destination that refuses to load makes
+  the candidate fall back to the current screen, which publishes normally, so that case is warned on
+  explicitly rather than passing silently.
+- An unrecognized or unloadable `OPENOMEGA_FRONTEND_START_SCREEN` override falls back to composing
+  the Title.
+
+Coverage is no longer static assertions alone. `retail_front_end_frame_tests` adds a frame-sequence
+harness over the same pure functions that asserts the load-attempt budget, the warning count, and
+that navigation moves only on publish, including the load-fails-then-retry path, off-Title Accept,
+and Accept+Back. `omega_app_retail_presentation_smoke` adds `CheckRetailNavCommitsOnlyOnPublish`,
+which installs a composable Title and a destination that loads but cannot compose, and asserts the
+Title's navigation, composed marker, texture and draw command all survive the failed Accept, that a
+later Accept switches once the destination composes, and that Accept+Back does not switch.
+
+Validation remains partial and bounded by this worktree's no-build constraint: the C++ was NOT
+compiled and CTest was NOT run; the new app-level test additionally needs the opt-in GPU
+configuration. The static gates that did run and pass are the native dependency gate (433 files),
+the public-tree gate, the evidence-ledger and ledger-format gates, and the Python tooling suite. One
+pre-existing intermittent failure was observed once in
+`tools/tests/test_measure_frontend_hog_topology.py` and did not reproduce in seven subsequent full
+runs; it covers Python this work never touched.
+
+No privacy, bounds, or clean-room claim changes. The warning text names no screen, member, path,
+widget, or error value, and refusing an unpresentable transition remains project-owned policy that
+asserts no retail transition rule, screen availability, or menu semantic.

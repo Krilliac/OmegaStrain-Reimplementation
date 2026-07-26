@@ -156,15 +156,45 @@ The FNT/GUI/IE/TDX decoders predate this window.
 Each phase closes a defined subset of `RetailPresentationRequirement` blockers;
 track them explicitly.
 
-Phase 4 note (commit `b955e4e`): until every routed screen composes, navigation
-must not enter one that does not. `ResolveRetailFrontEndAcceptTarget`
-(`retail_front_end_nav.h`) admits an Accept target only when the destination is
-presentable, and `RetailBundleForScreen` memoizes an attempted-and-failed load
-so a missing screen costs one decode attempt and one log line instead of one of
-each per rendered frame. Before that, accepting into an unloadable screen left
-navigation on a screen that never drew while the Title's last composed frame
-stayed on display, recoverable only by a Back edge. As each screen lands, its
-key simply becomes presentable; no navigation change is needed.
+Phase 4 note: until every routed screen composes, navigation must not enter one
+that does not.
+
+`b955e4e` first attempted this and got it wrong in two ways, both corrected
+later on this branch — the corrected behaviour is what follows, and the earlier
+description of it should be disregarded.
+
+The rule is now a single invariant: **navigation and the composed-navigation
+marker advance if and only if a candidate frame actually published.** A loaded
+bundle is not a presentable screen — decoding, composing, and uploading fail for
+different reasons — so `b955e4e`'s claim that a resolvable bundle meant a
+presentable screen was simply false, and it committed the composed marker
+whether or not the frame ever reached the display.
+
+The pieces, all in `retail_front_end_nav.h` plus `OmegaApp`:
+
+- `ShouldProbeRetailAcceptTarget` — a bundle load is spent only on an explicit
+  Accept that could route: on the Title, without Back, on a button declaring a
+  target.
+- `PlanRetailFrontEndNavCandidate` — builds a CANDIDATE, never live state.
+- `ResolveRetailFrontEndNavCommit` — the commit rule above. Anything short of
+  `Published` keeps the current navigation, composed marker, animation state,
+  texture and draw list untouched.
+- `ComposeRetailScreenPresentation` and `PublishRetailFrontEndFrame` return
+  `bool`; publish is true only after the update, or the upload *and* draw-list
+  creation, succeeded.
+
+Only successful loads are cached. A failed load is deliberately not remembered,
+so the player's next Accept retries it; the cost is bounded by confining probes
+to an Accept edge rather than by the failure memo `b955e4e` used, which made a
+transient failure permanent. One fixed, identity-free warning is emitted per
+failed explicit attempt, including one raised by an exception.
+
+An unrecognized or unloadable `OPENOMEGA_FRONTEND_START_SCREEN` override falls
+back to composing the Title, so a bad override cannot leave navigation on a
+screen that never publishes.
+
+As each screen lands, its key simply begins to publish; no navigation change is
+needed.
 
 ## 7. Related launcher change (this session)
 
