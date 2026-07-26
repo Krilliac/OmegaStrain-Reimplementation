@@ -68,6 +68,18 @@ same skeleton. Because no clip grammar is independently established yet, no clip
 function exists — a future evaluator would only need to select the local `PoseIR` to hand to
 `EvaluatePose`, not reimplement composition.
 
+The same runtime header also defines the separate project-owned CPU skinning contract required
+before `SkinInfluenceIR` may be consumed. `ComposeSkinningMatrices` forms
+`joint_global[i] * inverse_bind[i]` in fixed 256-joint staging storage, rejects non-finite or
+unrepresentable products, and leaves output unchanged on every failure even when output aliases an
+input span. `SkinVertexPosition` accepts only the canonical influence shape already enforced by
+`ValidateModelIR`: bounded used count, finite non-negative used weights, palette-addressable used
+indices, and positive-zero unused padding. It normalizes a finite positive total, treats matrices as
+affine with implicit position `w = 1`, and fails soft to the bind position for malformed influence
+state, a non-finite referenced matrix, insufficient total weight, or an unrepresentable result.
+These are project-owned renderer-neutral CPU policies. They decode no retail field, assert no retail
+weight or inverse-bind convention, and do not connect `ModelIR` to a renderer or GPU path.
+
 ## Consequences
 
 - A future evidence-backed SKM/SKA/SKAS bridge can target `ModelIR`/`SkeletonIR`/`ClipIR` directly
@@ -89,4 +101,5 @@ function exists — a future evaluator would only need to select the local `Pose
   `ClipIR` fields.
 - Establishing a retail clip/keyframe grammar, sample-time unit, interpolation rule, or blend
   policy.
-- GPU upload, skinning, or any renderer/gameplay integration of `ModelIR`.
+- GPU upload or renderer/gameplay integration of `ModelIR`; the project-owned CPU palette and
+  vertex helpers are not wired to either path.

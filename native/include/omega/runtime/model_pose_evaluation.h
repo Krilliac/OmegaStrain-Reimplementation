@@ -52,11 +52,13 @@ inline constexpr float kMinimumSkinTotalWeight = 1.0e-6F;
     std::span<const asset::Matrix4x4IR> inverse_bind_transforms,
     std::span<asset::Matrix4x4IR> skinning_matrices) noexcept;
 
-// [any thread; reentrant] Applies the first used_influences slots, clamped to the fixed canonical
-// storage ceiling, as a normalized affine weighted blend. Out-of-range joint indices are skipped
-// and surviving weights renormalize. Negative finite weights extrapolate by project policy.
+// [any thread; reentrant] Applies the used_influences slots as a normalized affine weighted blend.
+// The influence must satisfy the canonical SkinInfluenceIR contract: its used count is within the
+// fixed storage ceiling, used weights are finite and non-negative, used joint indices address this
+// palette, the palette has no more than asset::kMaximumSkeletonJoints entries, and unused slots are
+// canonical positive-zero padding. Any violation fails soft to bind_position unchanged.
 //
-// A non-finite input or result, or an effective total weight whose magnitude is below
+// A non-finite referenced matrix or result, or an effective total weight below
 // kMinimumSkinTotalWeight, fails soft to bind_position unchanged. The fourth matrix row is ignored:
 // palettes are treated as affine and positions are transformed with implicit w = 1.
 [[nodiscard]] asset::Float3IR SkinVertexPosition(

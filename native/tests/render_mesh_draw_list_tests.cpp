@@ -317,6 +317,21 @@ void CheckFrustumPredicate()
     Check(Visible(Point(0.0F, 0.0F, 9.0F), Point(0.0F, 0.0F, 9.0F)),
         "a visible zero-extent box remains visible");
 
+    // The exact x result is -1 and w is 1, so this point lies on the left plane. A plain
+    // left-to-right binary64 sum loses +2^-23 between the opposing 2^100 terms and produces
+    // -1-2^-23 instead. The conservative predicate must retain that numerically uncertain boundary.
+    constexpr Matrix4x4IR cancellation_boundary{
+        .row_major = {
+            0x1p100F, 0x1p-23F, -0x1p100F, -0x1.000002p0F,
+            0.0F, 0.0F, 0.0F, 0.0F,
+            0.0F, 0.0F, 0.0F, 0.5F,
+            0.0F, 0.0F, 0.0F, 1.0F,
+        },
+    };
+    Check(IsBoxPossiblyVisible(
+              cancellation_boundary, Point(1.0F, 1.0F, 1.0F), Point(1.0F, 1.0F, 1.0F)),
+        "catastrophic cancellation at a clip-plane boundary fails soft to visible");
+
     for (int center_x = -6; center_x <= 6; ++center_x)
     {
         for (int center_y = -6; center_y <= 6; ++center_y)

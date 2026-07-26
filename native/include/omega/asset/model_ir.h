@@ -53,8 +53,9 @@ struct SkeletonIR
 // padding: their joint index is zero and their weight is positive 0.0F. This keeps equality and
 // deterministic comparisons independent of semantically unused storage. No retail weight
 // encoding, normalization rule, zero-influence fallback, inverse-bind policy, or influence count
-// is asserted. A renderer must not consume this table until a separate project-owned skinning
-// contract defines those policies; a future retail bridge will translate into that contract.
+// is asserted. omega/runtime/model_pose_evaluation.h defines the separate project-owned CPU
+// skinning contract that may consume this table; a future retail bridge will translate into that
+// contract rather than copying an unknown retail policy.
 struct SkinInfluenceIR
 {
     std::array<std::uint32_t, kMaximumSkinInfluencesPerVertex> joint_indices{};

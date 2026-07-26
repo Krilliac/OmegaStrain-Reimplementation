@@ -365,7 +365,7 @@ int ModelPoseEvaluationFailureCount()
             "unnormalized weights are normalized by their finite total");
     }
 
-    // Zero and unusable effective weights fail soft to the unskinned position.
+    // Zero totals and malformed canonical influences fail soft to the unskinned position.
     {
         const auto palette = SkinningPalette();
         Check(SkinVertexPosition(kBindPosition, palette,
@@ -373,18 +373,18 @@ int ModelPoseEvaluationFailureCount()
             "zero weights do not collapse a vertex to the origin");
         Check(SkinVertexPosition(kBindPosition, palette,
                   InfluencePair(0U, 1.0F, 1U, -1.0F)) == kBindPosition,
-            "canceling weights fail soft to the unskinned position");
+            "a negative used weight fails soft to the unskinned position");
         Check(SkinVertexPosition(kBindPosition, palette, SkinInfluenceIR{}) == kBindPosition,
             "zero used influences fail soft to the unskinned position");
         Check(SkinVertexPosition(kBindPosition, palette,
-                  InfluencePair(0U, 0.5F, 7U, 0.5F)) == kJoint0Position,
-            "an out-of-range joint is skipped and surviving weight renormalizes");
+                  InfluencePair(0U, 0.5F, 7U, 0.5F)) == kBindPosition,
+            "one out-of-range joint invalidates the complete canonical influence");
         Check(SkinVertexPosition(kBindPosition, palette, Influence(7U, 1.0F)) ==
                   kBindPosition,
             "an entirely out-of-range influence set fails soft");
     }
 
-    // The fixed canonical array bounds every read even when used_influences is malformed.
+    // The fixed canonical array bounds every read and rejects a malformed used count.
     {
         const auto palette = SkinningPalette();
         SkinInfluenceIR overrun;
@@ -394,11 +394,27 @@ int ModelPoseEvaluationFailureCount()
             overrun.weights[slot] = 0.25F;
         }
         overrun.used_influences = std::numeric_limits<std::uint8_t>::max();
-        Check(SkinVertexPosition(kBindPosition, palette, overrun) == kJoint0Position,
-            "used influence count is clamped to fixed canonical storage");
+        Check(SkinVertexPosition(kBindPosition, palette, overrun) == kBindPosition,
+            "used influence count above fixed canonical storage fails soft");
+
+        SkinInfluenceIR invalid_padding = Influence(0U, 1.0F);
+        invalid_padding.joint_indices[1] = 1U;
+        Check(SkinVertexPosition(kBindPosition, palette, invalid_padding) == kBindPosition,
+            "a nonzero unused joint index invalidates canonical padding");
+
+        invalid_padding = Influence(0U, 1.0F);
+        invalid_padding.weights[1] = -0.0F;
+        Check(SkinVertexPosition(kBindPosition, palette, invalid_padding) == kBindPosition,
+            "negative zero in an unused weight invalidates canonical padding");
+
+        const std::vector<Matrix4x4IR> oversized_palette(
+            static_cast<std::size_t>(kMaximumSkeletonJoints) + 1U, kIdentityMatrix4x4IR);
+        Check(SkinVertexPosition(kBindPosition, oversized_palette, Influence(0U, 1.0F)) ==
+                  kBindPosition,
+            "a palette above the project joint ceiling fails soft");
     }
 
-    // Non-finite inputs are deterministic fail-soft errors, including a bad skipped-slot weight.
+    // Non-finite inputs are deterministic fail-soft errors, including an invalid joint slot.
     {
         auto palette = SkinningPalette();
         Check(SkinVertexPosition(kBindPosition, palette,
@@ -423,19 +439,18 @@ int ModelPoseEvaluationFailureCount()
             "a non-finite bind position is returned unchanged");
     }
 
-    // Negative weights extrapolate by explicit project policy; unrepresentable output fails soft.
+    // Negative canonical weights and unrepresentable output both fail soft.
     {
         const auto palette = SkinningPalette();
         Check(SkinVertexPosition(kBindPosition, palette,
-                  InfluencePair(0U, 2.0F, 1U, -1.0F)) ==
-                  Float3IR{.x = 21.0F, .y = -18.0F, .z = 3.0F},
-            "negative weights extrapolate through the normalized affine blend");
-
-        const std::vector<Matrix4x4IR> extreme{
-            Translation(std::numeric_limits<float>::max(), 0.0F, 0.0F),
-            Translation(-std::numeric_limits<float>::max(), 0.0F, 0.0F)};
-        Check(SkinVertexPosition(kBindPosition, extreme,
                   InfluencePair(0U, 2.0F, 1U, -1.0F)) == kBindPosition,
+            "a negative canonical weight never drives extrapolation");
+
+        const Float3IR overflow_position{.x = 2.0F, .y = 2.0F, .z = 3.0F};
+        const std::vector<Matrix4x4IR> extreme{
+            Scale(std::numeric_limits<float>::max(), 1.0F, 1.0F)};
+        Check(SkinVertexPosition(overflow_position, extreme, Influence(0U, 1.0F)) ==
+                  overflow_position,
             "an out-of-float-range blend fails soft to the unskinned position");
     }
 
