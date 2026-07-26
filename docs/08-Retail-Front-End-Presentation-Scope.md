@@ -261,9 +261,10 @@ than a total; it is never silently absorbed.
   (`kKnownFrontEndButtonIdentifiers`); every other visible button collapses into
   `unknown_identifier_count` or `empty_identifier_count`. Nothing derived from an
   unknown identifier's characters — no digest, no length, no prefix, no first
-  letter — leaves the boundary. A synthetic test asserts the pointer identity of
-  every reported identifier against the in-tree allowlist, so the survey cannot
-  start echoing a document string without that test failing.
+  letter — leaves the boundary. A synthetic test asserts that every identifier
+  in the fixed `known` array borrows its in-tree allowlist entry rather than a
+  document string. Exact serializer/CLI output coverage remains a useful
+  follow-up guard against adding a new free-form output field.
 - **No payload or identifier-derived hashes.** The command computes no digest of
   content and derives no value from the characters of an unknown identifier.
   Its loaded/error vector, counts, and ordinals are deliberate aggregate
