@@ -168,9 +168,21 @@ void Include(CoordinateBounds& bounds, const asset::Float3IR& vertex) noexcept
     };
 }
 
+[[nodiscard]] bool AreTightenedLimits(const SpatialDiagnosticSceneLimits& limits) noexcept
+{
+    const SpatialDiagnosticSceneLimits maxima;
+    return limits.maximum_cells <= maxima.maximum_cells &&
+           limits.maximum_positions <= maxima.maximum_positions &&
+           limits.maximum_triangle_indices <= maxima.maximum_triangle_indices &&
+           limits.maximum_output_bytes <= maxima.maximum_output_bytes;
+}
+
 [[nodiscard]] std::expected<ScenePlan, std::string> Preflight(
     const asset::LevelSpatialIR& spatial, const SpatialDiagnosticSceneLimits& limits)
 {
+    if (!AreTightenedLimits(limits))
+        return std::unexpected("spatial diagnostic scene limits may only tighten safety maxima");
+
     const std::uint64_t cell_count = static_cast<std::uint64_t>(spatial.terrain_cells.size());
     if (cell_count > limits.maximum_cells)
         return std::unexpected("spatial diagnostic scene exceeds the cell limit");

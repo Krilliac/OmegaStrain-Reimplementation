@@ -12,6 +12,8 @@
 namespace
 {
 int failures = 0;
+constexpr std::string_view kTightenOnlyLimitsError =
+    "spatial diagnostic scene limits may only tighten safety maxima";
 
 void Check(const bool condition, const std::string_view message)
 {
@@ -55,6 +57,18 @@ void CheckLimit(const omega::asset::LevelSpatialIR& spatial,
               !omega::runtime::BuildSpatialDiagnosticScene(spatial, one_below) &&
               omega::runtime::BuildGlobalSpatialDiagnosticScene(spatial, exact).has_value() &&
               !omega::runtime::BuildGlobalSpatialDiagnosticScene(spatial, one_below),
+        message);
+}
+
+void CheckWidenedLimit(const omega::asset::LevelSpatialIR& spatial,
+    const omega::runtime::SpatialDiagnosticSceneLimits& widened,
+    const std::string_view message)
+{
+    const auto contact_sheet = omega::runtime::BuildSpatialDiagnosticScene(spatial, widened);
+    const auto global =
+        omega::runtime::BuildGlobalSpatialDiagnosticScene(spatial, widened);
+    Check(!contact_sheet && contact_sheet.error() == kTightenOnlyLimitsError &&
+              !global && global.error() == kTightenOnlyLimitsError,
         message);
 }
 } // namespace
@@ -311,6 +325,44 @@ int main()
     below.maximum_output_bytes = output_bytes - 1U;
     CheckLimit(bounded, exact, below,
         "exact and one-below logical output-byte limits are enforced");
+
+    const auto equal_limits = omega::runtime::SpatialDiagnosticSceneLimits{};
+    Check(omega::runtime::BuildSpatialDiagnosticScene(bounded, equal_limits).has_value() &&
+              omega::runtime::BuildGlobalSpatialDiagnosticScene(
+                  bounded, equal_limits).has_value(),
+        "limits equal to all four safety maxima remain accepted");
+
+    const omega::runtime::SpatialDiagnosticSceneLimits tightened_limits{
+        .maximum_cells = 2U,
+        .maximum_positions = 6U,
+        .maximum_triangle_indices = 6U,
+        .maximum_output_bytes = output_bytes,
+    };
+    Check(omega::runtime::BuildSpatialDiagnosticScene(
+              bounded, tightened_limits).has_value() &&
+              omega::runtime::BuildGlobalSpatialDiagnosticScene(
+                  bounded, tightened_limits).has_value(),
+        "caller limits may tighten all four safety maxima to exact generated usage");
+
+    auto widened = omega::runtime::SpatialDiagnosticSceneLimits{};
+    ++widened.maximum_cells;
+    CheckWidenedLimit(
+        bounded, widened, "callers cannot widen the spatial cell safety maximum");
+
+    widened = {};
+    ++widened.maximum_positions;
+    CheckWidenedLimit(
+        bounded, widened, "callers cannot widen the spatial position safety maximum");
+
+    widened = {};
+    ++widened.maximum_triangle_indices;
+    CheckWidenedLimit(
+        bounded, widened, "callers cannot widen the spatial triangle-index safety maximum");
+
+    widened = {};
+    ++widened.maximum_output_bytes;
+    CheckWidenedLimit(
+        bounded, widened, "callers cannot widen the spatial output-byte safety maximum");
 
     return failures;
 }
