@@ -2507,3 +2507,40 @@ this commit.
 Refusing an unpresentable transition is fail-closed project policy. It asserts no retail transition
 rule, no retail screen availability, no retail Accept/Back semantics, and no retail behaviour for a
 screen this build cannot yet compose.
+
+### Owner-side front-end screen survey (commit `9b770c6`, 2026-07-25)
+
+The blocker recorded under `b955e4e` was that nothing in this repository can say which retail
+front-end screens a real disc yields, or how many of the Title's buttons this build recognizes.
+Both are owner-side observations. This adds the smallest command that collects them.
+
+- `omega_tool front-end-screen-survey <root>` opens an owner data root through the existing
+  `GameDataService`, calls `LoadFrontEndScreen` for each of the five declared `FrontEndScreenKey`
+  values, and surveys the Title bundle's widget tree. It prints one fixed-schema JSON line,
+  `omega-front-end-screen-survey-v1`. Section 9 of `docs/08` holds the full output contract.
+- The privacy design is the substance. A widget identifier is author-written retail text, so the
+  survey never copies one out of the document: it reports only identifiers this repository already
+  publishes and routes on, and reduces every other visible button to an anonymous count. It emits no
+  source path, no payload byte, no pixel, no digest, and no `GameDataError::message` -- only the
+  error-code name. It iterates exactly the declared key list, so it cannot search for undiscovered
+  content. Traversal is capped at depth 64 and 65,536 nodes, and a cap sets `truncated` rather than
+  being absorbed.
+- `SurveyFrontEndVisibleButtons` is a pure header-only walk (`omega/content/front_end_screen_survey.h`)
+  so the policy is testable from synthetic widget trees with no data root. Coverage: empty document,
+  both known identifiers with ordinals, preorder across nesting, the invisible-button and non-Button
+  gates, unknown/empty identifiers counted separately, case sensitivity, duplicate-known first-wins,
+  both ceilings, and a pointer-identity invariant proving no document string is ever adopted.
+- Matching is exact and case-sensitive because `OmegaApp::RetailScreenSelectableButtons` is, so a
+  reported ordinal is the selection index the app would use. The two identifier literals are for now
+  duplicated between the allowlist and `omega_app.cpp`; unifying them is an open follow-up.
+
+Validation is partial and bounded by the same deliberate no-build constraint as `b955e4e`: the C++
+was NOT compiled and CTest was NOT run, and the command has never been executed against a real root,
+which by construction cannot happen from this tree. What did run, and passed: the native dependency
+gate (433 files), the public-tree gate (648 indexed text blobs), the evidence-ledger and
+ledger-format gates (129 records), and the Python tooling suite (461 tests, 1,879 subtests). A
+compiled `/W4 /WX` build of `omega_tool` plus `omega_retail_front_end_frame_tests` is outstanding.
+
+A `loaded: true` result means only that this build's decoders accepted that screen. It establishes no
+retail menu structure, control layout, ordering rule, activation behaviour, screen semantic, or
+presentation correctness.
