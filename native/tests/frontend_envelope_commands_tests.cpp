@@ -207,8 +207,11 @@ public:
 
 private:
   std::ostream &stream_;
-  std::streambuf *original_ = nullptr;
+  // buffer_ must precede original_: the constructor's initializer for
+  // original_ calls buffer_.rdbuf(), and members are initialized in
+  // declaration order.
   std::ostringstream buffer_;
+  std::streambuf *original_ = nullptr;
   bool active_ = true;
 };
 
