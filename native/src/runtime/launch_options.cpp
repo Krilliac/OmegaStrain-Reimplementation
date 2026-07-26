@@ -310,6 +310,9 @@ std::expected<LaunchOptions, std::string> ParseLaunchOptions(
     if (result.opening_movie_member && result.capture_run)
         return std::unexpected(
             "--opening-movie-member cannot be combined with --capture-run");
+    if (saw_screenshot_frame && result.capture_run)
+        return std::unexpected(
+            "--screenshot-frame cannot be combined with --capture-run");
     if (result.replay_capture && !result.capture_run)
         return std::unexpected("--replay-capture requires --capture-run");
     if (result.capture_run && !saw_frames)
