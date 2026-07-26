@@ -100,6 +100,62 @@ template <typename Predicate>
               << " did not reach a usable swapchain within its bound\n";
     return false;
 }
+
+// Exercise alternating color uploads while earlier frames may still be in
+// flight. There is deliberately no idle barrier inside this burst.
+[[nodiscard]] bool RenderAlternatingMeshBurst(omega::app::SdlGpuHost& host,
+    omega::runtime::RenderFramePacket& packet,
+    const omega::runtime::RenderMeshDrawList& first,
+    const omega::runtime::RenderMeshDrawList& second)
+{
+    constexpr std::uint64_t required_mesh_frames = 64U;
+    constexpr std::uint32_t maximum_attempts = 512U;
+    const auto deadline = Clock::now() + std::chrono::seconds(5);
+    const omega::app::GpuHostSnapshot before = host.Snapshot();
+    std::uint64_t observed_mesh_frames = 0U;
+
+    for (std::uint32_t attempt = 0U;
+         attempt < maximum_attempts && Clock::now() < deadline &&
+         observed_mesh_frames < required_mesh_frames;
+         ++attempt)
+    {
+        packet.mesh_draw_list =
+            (observed_mesh_frames & 1U) == 0U ? first : second;
+        SDL_PumpEvents();
+        auto rendered = host.RenderFrame(packet);
+        if (!rendered)
+        {
+            std::cerr
+                << "omega_sdl_gpu_mesh_smoke: alternating in-flight mesh burst failed: "
+                << rendered.error() << '\n';
+            return false;
+        }
+        ++packet.rendered_frame_index;
+
+        const omega::app::GpuHostSnapshot current = host.Snapshot();
+        if (current.mesh_submissions < before.mesh_submissions ||
+            current.mesh_submissions - before.mesh_submissions >
+                required_mesh_frames)
+        {
+            std::cerr << "omega_sdl_gpu_mesh_smoke: alternating in-flight mesh "
+                         "counters escaped their bound\n";
+            return false;
+        }
+        observed_mesh_frames =
+            current.mesh_submissions - before.mesh_submissions;
+    }
+
+    const omega::app::GpuHostSnapshot after = host.Snapshot();
+    if (observed_mesh_frames != required_mesh_frames ||
+        after.successful_mesh_draws !=
+            before.successful_mesh_draws + required_mesh_frames)
+    {
+        std::cerr << "omega_sdl_gpu_mesh_smoke: alternating in-flight mesh "
+                     "burst did not submit its exact draw count\n";
+        return false;
+    }
+    return true;
+}
 } // namespace
 
 int main()
@@ -406,6 +462,12 @@ int main()
         return 1;
     }
 
+    if (!RenderAlternatingMeshBurst(
+            host, packet, *fill_draw_list, *wireframe_draw_list))
+    {
+        return 1;
+    }
+
     auto released = host.ReleaseRenderMesh(*uploaded);
     if (!released)
         return Fail("mesh release failed", released.error());
@@ -441,10 +503,10 @@ int main()
     const omega::app::GpuHostSnapshot final = host.Snapshot();
     if (final.successful_mesh_uploads != 2U ||
         final.successful_mesh_upload_logical_bytes != 144U ||
-        final.successful_mesh_releases != 2U || final.mesh_submissions != 2U ||
-        final.successful_mesh_draws != 2U ||
+        final.successful_mesh_releases != 2U || final.mesh_submissions != 66U ||
+        final.successful_mesh_draws != 66U ||
         final.rejected_nondefault_mesh_handles != 1U ||
-        final.frame_submissions != 2U + final.unavailable_swapchain_submissions ||
+        final.frame_submissions != 66U + final.unavailable_swapchain_submissions ||
         final.successful_uploads != 1U ||
         final.successful_upload_logical_bytes != 4U ||
         final.successful_releases != 1U || !TexturePoolIsEmpty(final.textures) ||
@@ -455,7 +517,7 @@ int main()
     }
 
     std::cout << "omega_sdl_gpu_mesh_smoke: passed driver=" << driver
-              << " uploads=2 releases=2 mesh_frames=2 mesh_draws=2 colored_pixels="
+              << " uploads=2 releases=2 mesh_frames=66 mesh_draws=66 colored_pixels="
               << green_pixels << " transformed_pixels=" << transformed_green_pixels
               << " surviving_overlay_pixels=" << surviving_green_pixels
               << " unavailable="
