@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -19,6 +20,9 @@
 namespace {
 using omega::app::OpeningMoviePlayer;
 using omega::app::OpeningMoviePlayerErrorCode;
+using omega::app::detail::OpeningMovieDecodedFrameFacts;
+using omega::app::detail::OpeningMovieFrameQueueState;
+using omega::app::detail::ValidateOpeningMovieFrameBatch;
 using omega::asset::OpeningMovieSource;
 
 int failures = 0;
@@ -162,9 +166,167 @@ void CheckOwnedCreateError(std::vector<std::byte> bytes,
   }
   return {};
 }
+
+constexpr std::uint32_t kBatchWidth = 640U;
+constexpr std::uint32_t kBatchHeight = 448U;
+
+[[nodiscard]] OpeningMovieFrameQueueState
+EmptyQueueState(const std::size_t maximum_queued_frames) {
+  return OpeningMovieFrameQueueState{
+      .width = kBatchWidth,
+      .height = kBatchHeight,
+      .queued_frame_count = 0U,
+      .maximum_queued_frames = maximum_queued_frames,
+      .first_decoder_timestamp_100ns = std::nullopt,
+      .last_decoded_timestamp_100ns = std::nullopt,
+  };
+}
+
+[[nodiscard]] constexpr OpeningMovieDecodedFrameFacts
+DecodedFrame(const std::int64_t timestamp_100ns,
+             const std::int64_t duration_100ns) {
+  return OpeningMovieDecodedFrameFacts{
+      .width = kBatchWidth,
+      .height = kBatchHeight,
+      .timestamp_100ns = timestamp_100ns,
+      .duration_100ns = duration_100ns,
+  };
+}
+
+void CheckBatchRejectionIsWhole(
+    const std::span<const OpeningMovieDecodedFrameFacts> batch,
+    const OpeningMovieFrameQueueState &state,
+    const OpeningMoviePlayerErrorCode expected_code,
+    const std::string_view label) {
+  const OpeningMovieFrameQueueState before = state;
+  const auto rejected = ValidateOpeningMovieFrameBatch(state, batch);
+  Check(!rejected, label);
+  if (rejected)
+    return;
+  Check(rejected.error() == expected_code, label);
+  Check(state == before,
+        "rejected opening movie batch advances no offered queue state");
+
+  // The leading frames remain admissible against the exact seeded state, which
+  // demonstrates that the typed rejection consumed no prefix.
+  const auto prefix = batch.first(batch.size() - 1U);
+  const auto admitted = ValidateOpeningMovieFrameBatch(state, prefix);
+  Check(admitted.has_value(),
+        "opening movie batch rejection leaves its valid prefix admissible");
+  if (!admitted)
+    return;
+  Check(admitted->frames.size() == prefix.size(),
+        "opening movie prefix admission covers every prefix frame");
+  Check(admitted->state.queued_frame_count ==
+            before.queued_frame_count + prefix.size(),
+        "opening movie prefix admission advances the seeded queue count");
+}
+
+void CheckFrameBatchAdmissionContract() {
+  const std::array admitted_batch{
+      DecodedFrame(1'000, 400),
+      DecodedFrame(1'400, 400),
+  };
+  const auto admitted =
+      ValidateOpeningMovieFrameBatch(EmptyQueueState(4U), admitted_batch);
+  Check(admitted.has_value(),
+        "opening movie admits an in-extent strictly advancing batch");
+  if (admitted) {
+    Check(admitted->frames.size() == admitted_batch.size(),
+          "opening movie admission reports one entry per batch frame");
+    Check(admitted->frames[0].timestamp_100ns == 0U &&
+              admitted->frames[0].duration_100ns == 400U,
+          "opening movie normalizes the first admitted frame to zero");
+    Check(admitted->frames[1].timestamp_100ns == 400U,
+          "opening movie normalizes against the first decoder timestamp");
+    Check(admitted->state.first_decoder_timestamp_100ns == 1'000U &&
+              admitted->state.last_decoded_timestamp_100ns == 400U &&
+              admitted->state.queued_frame_count == admitted_batch.size(),
+          "opening movie admission advances every queue cursor exactly once");
+  }
+
+  const std::array extent_batch{
+      DecodedFrame(0, 400),
+      OpeningMovieDecodedFrameFacts{
+          .width = kBatchWidth,
+          .height = kBatchHeight + 1U,
+          .timestamp_100ns = 400,
+          .duration_100ns = 400,
+      },
+  };
+  CheckBatchRejectionIsWhole(
+      extent_batch, EmptyQueueState(4U),
+      OpeningMoviePlayerErrorCode::FrameExtentChanged,
+      "opening movie rejects a whole batch whose frame extent changes");
+
+  const std::array timestamp_batch{
+      DecodedFrame(0, 400),
+      DecodedFrame(0, 400),
+  };
+  CheckBatchRejectionIsWhole(
+      timestamp_batch, EmptyQueueState(4U),
+      OpeningMoviePlayerErrorCode::InvalidTimestamp,
+      "opening movie rejects a whole batch whose timestamps do not advance");
+
+  const std::array queue_batch{
+      DecodedFrame(0, 400),
+      DecodedFrame(400, 400),
+  };
+  CheckBatchRejectionIsWhole(
+      queue_batch, EmptyQueueState(1U),
+      OpeningMoviePlayerErrorCode::FrameQueueExceeded,
+      "opening movie rejects a whole batch that would exceed the frame queue");
+
+  const OpeningMovieFrameQueueState seeded_state{
+      .width = kBatchWidth,
+      .height = kBatchHeight,
+      .queued_frame_count = 2U,
+      .maximum_queued_frames = 4U,
+      .first_decoder_timestamp_100ns = 1'000U,
+      .last_decoded_timestamp_100ns = 400U,
+  };
+  const std::array seeded_batch{
+      DecodedFrame(1'600, 400),
+      DecodedFrame(2'000, 400),
+  };
+  const auto seeded_admission =
+      ValidateOpeningMovieFrameBatch(seeded_state, seeded_batch);
+  Check(seeded_admission.has_value(),
+        "opening movie admits a batch against seeded queue cursors");
+  if (seeded_admission) {
+    Check(seeded_state.queued_frame_count == 2U &&
+              seeded_state.first_decoder_timestamp_100ns == 1'000U &&
+              seeded_state.last_decoded_timestamp_100ns == 400U,
+          "opening movie successful admission does not mutate seeded input");
+    Check(seeded_admission->frames[0].timestamp_100ns == 600U &&
+              seeded_admission->frames[1].timestamp_100ns == 1'000U &&
+              seeded_admission->state.queued_frame_count == 4U &&
+              seeded_admission->state.first_decoder_timestamp_100ns == 1'000U &&
+              seeded_admission->state.last_decoded_timestamp_100ns == 1'000U,
+          "opening movie admission advances from the seeded queue state");
+  }
+
+  const std::array seeded_rejection{
+      DecodedFrame(1'600, 400),
+      DecodedFrame(1'500, 400),
+  };
+  CheckBatchRejectionIsWhole(
+      seeded_rejection, seeded_state,
+      OpeningMoviePlayerErrorCode::InvalidTimestamp,
+      "opening movie rejects a whole batch against seeded timestamp cursors");
+
+  OpeningMovieFrameQueueState seeded_queue_limit = seeded_state;
+  seeded_queue_limit.maximum_queued_frames = 3U;
+  CheckBatchRejectionIsWhole(
+      seeded_batch, seeded_queue_limit,
+      OpeningMoviePlayerErrorCode::FrameQueueExceeded,
+      "opening movie rejects a whole batch against a seeded queue count");
+}
 } // namespace
 
 int main() {
+  CheckFrameBatchAdmissionContract();
+
   CheckCreateError({}, OpeningMoviePlayerErrorCode::InvalidPath,
                    "opening movie rejects an empty path");
 

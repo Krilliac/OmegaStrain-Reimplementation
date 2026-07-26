@@ -3,12 +3,15 @@
 #include "omega/media/nv12_to_rgba8.h"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace omega::asset {
 // The app boundary may not depend on omega_assets directly; the owned source
@@ -118,6 +121,72 @@ struct OpeningMoviePlayerError {
   operator==(const OpeningMoviePlayerError &) const noexcept = default;
 };
 
+namespace detail {
+// The four decoder-published scalars the future-frame queue admits a frame on.
+// Copying them out of the platform frame keeps the admission rules free of any
+// platform decoder type, so the batch contract below is stated and exercised
+// without a decoder, a movie source, or a pixel byte.
+struct OpeningMovieDecodedFrameFacts {
+  std::uint32_t width = 0U;
+  std::uint32_t height = 0U;
+  std::int64_t timestamp_100ns = 0;
+  std::int64_t duration_100ns = 0;
+
+  [[nodiscard]] constexpr bool
+  operator==(const OpeningMovieDecodedFrameFacts &) const noexcept = default;
+};
+
+// Everything the admission rules read and advance across decoded batches. The
+// player fills maximum_queued_frames from the decoder's per-call frame ceiling;
+// it is carried here rather than read from that ceiling so the rules stay pure.
+struct OpeningMovieFrameQueueState {
+  std::uint32_t width = 0U;
+  std::uint32_t height = 0U;
+  std::size_t queued_frame_count = 0U;
+  std::size_t maximum_queued_frames = 0U;
+  std::optional<std::uint64_t> first_decoder_timestamp_100ns;
+  std::optional<std::uint64_t> last_decoded_timestamp_100ns;
+
+  [[nodiscard]] bool
+  operator==(const OpeningMovieFrameQueueState &) const = default;
+};
+
+// One admitted frame, with its timestamp normalized against the first timestamp
+// the decoder ever published.
+struct OpeningMovieFrameAdmission {
+  std::uint64_t timestamp_100ns = 0U;
+  std::uint64_t duration_100ns = 0U;
+
+  [[nodiscard]] constexpr bool
+  operator==(const OpeningMovieFrameAdmission &) const noexcept = default;
+};
+
+struct OpeningMovieFrameBatchAdmission {
+  // Exactly one entry per input frame, in input order.
+  std::vector<OpeningMovieFrameAdmission> frames;
+  // Queue state as it stands once the whole batch has been queued.
+  OpeningMovieFrameQueueState state;
+};
+
+// All-or-nothing admission for one decoded batch: either every frame passes the
+// typed decoder checks and the caller receives the normalized timestamps and
+// state to adopt, or the typed rejection leaves the input state untouched.
+// Allocation while staging the result may throw; the player maps that exception
+// to its terminal AllocationFailed state.
+//
+// Rejection reasons, checked per frame in this order: FrameExtentChanged when
+// the decoder changes the validated display extent; InvalidTimestamp for a
+// negative timestamp, a non-positive duration, a timestamp below the first one
+// published, a normalized timestamp that does not strictly advance, or a
+// duration that would overflow the normalized end; FrameQueueExceeded when the
+// batch would push the queue past maximum_queued_frames.
+[[nodiscard]] std::expected<OpeningMovieFrameBatchAdmission,
+                            OpeningMoviePlayerErrorCode>
+ValidateOpeningMovieFrameBatch(
+    const OpeningMovieFrameQueueState &state,
+    std::span<const OpeningMovieDecodedFrameFacts> batch);
+} // namespace detail
+
 struct OpeningMoviePlayerUpdate {
   OpeningMoviePlayerStatus status = OpeningMoviePlayerStatus::Ready;
   bool frame_updated = false;
@@ -187,6 +256,12 @@ public:
   // and may publish the first frame. WrongThread and MovedFrom are non-mutating
   // boundary errors; errors reached after those checks permanently mark the
   // player Failed, and later calls return the identical categorical error.
+  //
+  // FrameExtentChanged, InvalidTimestamp and FrameQueueExceeded are decided for
+  // a complete decoded batch before any of its frames are queued, so those typed
+  // rejections leave the future-frame queue, published frame and normalization
+  // cursors as the batch found them. Allocation failure while staging or
+  // committing a batch is terminal instead of transactional.
   [[nodiscard]] std::expected<OpeningMoviePlayerUpdate, OpeningMoviePlayerError>
   Advance(std::chrono::nanoseconds elapsed) override;
 
