@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <new>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -336,8 +338,72 @@ int main()
               "unavailable report omits every error message");
     }
 
-    // Root-open failure is the only command-level failure. Its categorical
-    // diagnostic omits both the owner path and the source error message.
+    // Standard and non-standard per-screen exceptions become decode-failed
+    // observations, and probing continues through the final declared role.
+    {
+        std::size_t probe_calls = 0U;
+        const auto throwing_probe =
+            [&probe_calls](const FrontEndScreenKey key) -> omega::tool::FrontEndScreenProbeResult {
+            ++probe_calls;
+            if (key == FrontEndScreenKey::Title)
+                throw std::runtime_error("owner-private-standard-exception");
+            if (key == FrontEndScreenKey::CreateAgent)
+                throw 17;
+            return std::optional<FrontEndButtonSurvey>{};
+        };
+
+        std::ostringstream output;
+        const int result = omega::tool::RunFrontEndScreenSurveyProbes(output, throwing_probe);
+        std::string expected =
+            R"json({"schema":"omega-front-end-screen-survey-v1","screens":[)json"
+            R"json({"key":"title","loaded":false,"error":"decode-failed"},)json"
+            R"json({"key":"create_agent","loaded":false,"error":"decode-failed"},)json"
+            R"json({"key":"load_agent","loaded":true,"error":null}],)json"
+            R"json("title_buttons":{"observed":false,"visible_button_count":0,)json"
+            R"json("unknown_identifier_count":0,"empty_identifier_count":0,)json"
+            R"json("duplicate_known_identifier_count":0,"nodes_visited":0,)json"
+            R"json("truncated":false,"known":[)json"
+            R"json({"identifier":"newagent","present":false,"ordinal":null},)json"
+            R"json({"identifier":"loadagent","present":false,"ordinal":null}]}})json";
+        expected.push_back('\n');
+        Check(result == 0 && probe_calls == kAllFrontEndScreenKeys.size(),
+              "screen exceptions remain observations and probing continues");
+        Check(output.str() == expected,
+              "standard and non-standard exceptions map to decode-failed");
+        Check(output.str().find("owner-private-standard-exception") == std::string::npos,
+              "standard exception message is not serialized");
+    }
+
+    // Allocation failure is process-fatal and must reach omega_tool's existing
+    // top-level allocation boundary rather than being mislabeled decode-failed.
+    {
+        std::size_t probe_calls = 0U;
+        const auto allocation_probe =
+            [&probe_calls](const FrontEndScreenKey) -> omega::tool::FrontEndScreenProbeResult {
+            ++probe_calls;
+            throw std::bad_alloc{};
+        };
+
+        std::ostringstream output;
+        bool rethrown = false;
+        try
+        {
+            const int unreachable =
+                omega::tool::RunFrontEndScreenSurveyProbes(output, allocation_probe);
+            (void)unreachable;
+        }
+        catch (const std::bad_alloc&)
+        {
+            rethrown = true;
+        }
+        Check(rethrown && probe_calls == 1U,
+              "bad_alloc is rethrown immediately from the first probe");
+        Check(output.str().empty(), "bad_alloc produces no partial survey report");
+    }
+
+    // A root-open failure uses the categorical command diagnostic. The process
+    // top-level can also return 1 for allocation/internal failures.
+    // This diagnostic omits both the owner path and the source error message.
     {
         const omega::content::GameDataError error{
             .code = omega::content::GameDataErrorCode::MountFailed,

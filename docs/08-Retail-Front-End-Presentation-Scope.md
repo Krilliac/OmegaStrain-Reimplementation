@@ -209,12 +209,17 @@ omega_tool front-end-screen-survey <retail-data-root>
 ```
 
 `<retail-data-root>` is either a read-only `.iso` or an extracted disc root that
-contains `SYSTEM.CNF` and `GAMEDATA`. Passing the `GAMEDATA` child alone is not a
-valid service root. The path remains outside project storage and is never echoed.
+contains `SYSTEM.CNF`, `SCUS_972.64`, and `GAMEDATA`. Passing the `GAMEDATA`
+child alone is not a valid service root. The service holds the path while the
+command runs, but the command does not serialize, persist, or copy it into
+project storage and never echoes it.
 
 Exit 0 means the root opened and all currently declared screen roles were
 attempted. An individual screen load failure is a recorded observation and does
-not change that status. Exit 1 means the root itself could not be opened.
+not change that status. A root-open failure returns 1 with the categorical
+diagnostic documented below. The `omega_tool` top-level containment boundary
+also returns 1 for allocation or other internal failures, so exit 1 alone does
+not prove that opening the root was the failing stage.
 
 ### Fixed scope and output
 
@@ -251,15 +256,18 @@ hit, `truncated` is true and every count and ordinal is only a lower bound.
 ### Clean-room and privacy boundary
 
 - The owner path is never serialized or included in the categorical root-open
-  diagnostic. The command performs no repository write and retains no input.
+  diagnostic. The command does not serialize or persist the source path or
+  proprietary input payloads, copy them into project storage, or perform a
+  repository write.
 - `LoadFrontEndScreen` necessarily reads and decodes local GUI, IE, TDX, FNT,
   and string resources before returning an owned bundle. Those resources remain
   local. The survey walk examines only the decoded widget-tree shape; it emits
   no payload bytes, pixels, strings, source spans, or member names.
 - Unknown widget identifiers are reduced to `unknown_identifier_count` or
   `empty_identifier_count`. No unknown characters, prefix, length, digest, or
-  other character-derived value is retained. Values in `known` always borrow
-  the repository's fixed literals rather than document strings.
+  other character-derived value is serialized, persisted, or copied into the
+  report. Values in `known` always borrow the repository's fixed literals rather
+  than document strings.
 - Only the typed error category is serialized. `GameDataError::message`, which
   may contain a validated project-relative identifier, is never emitted.
 - The command computes no payload or identifier-derived hash and probes only

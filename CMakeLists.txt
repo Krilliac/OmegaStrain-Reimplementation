@@ -3190,6 +3190,17 @@ if(BUILD_TESTING)
         COMMAND omega_front_end_screen_survey_tests)
     set_tests_properties(omega_front_end_screen_survey_tests PROPERTIES TIMEOUT 20)
 
+    add_test(NAME omega_tool_front_end_screen_survey_process
+        COMMAND "${CMAKE_COMMAND}"
+            "-DOMEGA_TOOL_EXECUTABLE=$<TARGET_FILE:omega_tool>"
+            "-DOMEGA_SURVEY_PRIVATE_ROOT=${CMAKE_CURRENT_BINARY_DIR}/owner-private-sentinel-front-end-screen-survey-root"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/omega_tool_front_end_screen_survey_process.cmake"
+    )
+    set_tests_properties(omega_tool_front_end_screen_survey_process PROPERTIES
+        TIMEOUT 5
+        LABELS "integration"
+    )
+
     add_executable(omega_frontend_presentation_tests
         native/tests/frontend_presentation_tests.cpp
     )
