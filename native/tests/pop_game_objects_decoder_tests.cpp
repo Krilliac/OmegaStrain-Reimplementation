@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -19,6 +20,12 @@ void Check(const bool condition, const std::string_view message)
         std::cerr << "FAILED: " << message << '\n';
         ++failures;
     }
+}
+
+void CheckLimitExceeded(const omega::asset::DecodeResult<omega::retail::PopGameObjectsIR>& result,
+                        const std::string_view message)
+{
+    Check(!result && result.error().code == omega::asset::DecodeErrorCode::LimitExceeded, message);
 }
 
 void AppendU32(std::vector<std::byte>& bytes, const std::uint32_t value)
@@ -133,6 +140,55 @@ void AppendNodRecord(std::vector<std::byte>& body, const std::uint32_t id,
     AppendTag(pop, "BOX:");
     AppendU32(pop, 0U);
     return pop;
+}
+
+[[nodiscard]] std::vector<std::byte> BuildSyntheticPopWithObjects(
+    const std::vector<std::byte>& npc_body, const std::uint32_t npc_count,
+    const std::vector<std::byte>& nod_body, const std::uint32_t nod_count,
+    const std::uint32_t box_count)
+{
+    std::vector<std::byte> pop;
+    AppendU32(pop, 70U);
+    AppendTag(pop, "TER:");
+    AppendU32(pop, 0U);
+    AppendTag(pop, "NPC:");
+    AppendU32(pop, npc_count);
+    pop.insert(pop.end(), npc_body.begin(), npc_body.end());
+    AppendTag(pop, "WPN:");
+    AppendU32(pop, 0U);
+    AppendTag(pop, "NOD:");
+    AppendU32(pop, nod_count);
+    pop.insert(pop.end(), nod_body.begin(), nod_body.end());
+    AppendTag(pop, "GEN:");
+    AppendU32(pop, 0U);
+    AppendTag(pop, "BOX:");
+    AppendU32(pop, box_count);
+    return pop;
+}
+
+template <typename SetLimit>
+void CheckLimitBoundary(const std::span<const std::byte> pop, const std::uint64_t exact,
+                        SetLimit set_limit, const std::string_view label)
+{
+    auto limits = omega::asset::DecodeLimits{};
+    set_limit(limits, 0U);
+    CheckLimitExceeded(omega::retail::DecodePopGameObjects(pop, limits),
+                       std::string(label) + " zero limit fails closed");
+
+    limits = omega::asset::DecodeLimits{};
+    set_limit(limits, exact - 1U);
+    CheckLimitExceeded(omega::retail::DecodePopGameObjects(pop, limits),
+                       std::string(label) + " tight limit fails closed");
+
+    limits = omega::asset::DecodeLimits{};
+    set_limit(limits, exact);
+    Check(omega::retail::DecodePopGameObjects(pop, limits).has_value(),
+          std::string(label) + " exact limit succeeds");
+
+    limits = omega::asset::DecodeLimits{};
+    set_limit(limits, exact + 1U);
+    Check(omega::retail::DecodePopGameObjects(pop, limits).has_value(),
+          std::string(label) + " plus-one limit succeeds");
 }
 } // namespace
 
@@ -259,6 +315,68 @@ int main()
         Check(decoded && decoded->nav_nodes.size() == 1U &&
                   decoded->nav_nodes[0].id == 2U,
             "out-of-range-neighbor nav node skipped; the valid one is kept");
+    }
+
+    // DecodeLimits are one preflight contract over the complete result. The
+    // fixture intentionally combines two NPCs (and their two model strings),
+    // two nav nodes, and three links so separate per-vector caps cannot pass.
+    {
+        constexpr std::string_view first_model = "alpha.skl";
+        constexpr std::string_view second_model = "baker.skl";
+        std::vector<std::byte> npc;
+        AppendNpcRecord(npc, 0x0B01U, first_model, 1.0F, 2.0F, 3.0F);
+        AppendNpcRecord(npc, 0x0B02U, second_model, 4.0F, 5.0F, 6.0F);
+        std::vector<std::byte> nod;
+        AppendNodRecord(nod, 1U, 7.0F, 8.0F, 9.0F, {{0U, 1U}, {1U, 2U}});
+        AppendNodRecord(nod, 2U, 10.0F, 11.0F, 12.0F, {{0U, 3U}});
+        const auto pop = BuildSyntheticPopWithObjects(npc, 2U, nod, 2U, 0U);
+
+        constexpr std::uint64_t exact_items = 2U + // NPC objects
+                                              2U + // model strings
+                                              2U + // nav-node objects
+                                              3U;  // nav links
+        constexpr std::uint64_t exact_child_bytes =
+            2U * sizeof(omega::retail::PopNpcSpawn) + first_model.size() + second_model.size() +
+            2U * sizeof(omega::retail::PopNavNode) + 3U * sizeof(omega::retail::PopNavLink);
+        constexpr std::uint64_t exact_output_bytes =
+            sizeof(omega::retail::PopGameObjectsIR) + exact_child_bytes;
+        constexpr std::uint64_t exact_string_bytes =
+            first_model.size() > second_model.size() ? first_model.size() : second_model.size();
+
+        CheckLimitBoundary(
+            pop, pop.size(), [](omega::asset::DecodeLimits& limits, const std::uint64_t value)
+            { limits.maximum_input_bytes = value; }, "input-byte");
+        CheckLimitBoundary(
+            pop, exact_output_bytes,
+            [](omega::asset::DecodeLimits& limits, const std::uint64_t value)
+            { limits.maximum_output_bytes = value; }, "output-byte");
+        CheckLimitBoundary(
+            pop, exact_child_bytes,
+            [](omega::asset::DecodeLimits& limits, const std::uint64_t value)
+            { limits.maximum_scratch_bytes = value; }, "scratch-byte");
+        CheckLimitBoundary(
+            pop, exact_string_bytes,
+            [](omega::asset::DecodeLimits& limits, const std::uint64_t value)
+            { limits.maximum_string_bytes = static_cast<std::uint32_t>(value); }, "string-byte");
+        CheckLimitBoundary(
+            pop, exact_items, [](omega::asset::DecodeLimits& limits, const std::uint64_t value)
+            { limits.maximum_items = value; }, "combined-item");
+    }
+
+    // Root output accounting is still enforced when no semantic objects exist.
+    {
+        const std::vector<std::byte> empty;
+        auto limits = omega::asset::DecodeLimits{};
+        limits.maximum_input_bytes = 0U;
+        limits.maximum_items = 0U;
+        limits.maximum_scratch_bytes = 0U;
+        limits.maximum_string_bytes = 0U;
+        limits.maximum_output_bytes = sizeof(omega::retail::PopGameObjectsIR);
+        Check(DecodePopGameObjects(empty, limits).has_value(),
+              "empty POP accepts exact root output and zero remaining budgets");
+        --limits.maximum_output_bytes;
+        CheckLimitExceeded(DecodePopGameObjects(empty, limits),
+                           "empty POP rejects a tight root output budget");
     }
 
     if (failures != 0)
