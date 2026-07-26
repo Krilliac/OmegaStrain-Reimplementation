@@ -1333,6 +1333,8 @@ void InstallSyntheticSpatialTriangle(
     };
 }
 
+[[nodiscard]] bool PushKey(SDL_Scancode scancode, bool down);
+
 void CheckTypedDiagnosticPlayLaunch(
     const GeneratedLevelContentTree& tree,
     const omega::runtime::RuntimeSettings& settings)
