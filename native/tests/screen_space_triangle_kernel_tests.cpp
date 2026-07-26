@@ -309,6 +309,89 @@ void TestDegeneratesInputsAndVisitors()
         "an invalid visitor control value fails closed");
 }
 
+// The kernel proves per scanline that no covered sample can fail and only then
+// skips the exact per-sample preflight. Anything unproven - here a Q that
+// legitimately changes sign inside the covered region - must still take the
+// exact path and produce identical coverage, order, and interpolants.
+void TestProvenAndUnprovenPreflightsAgree()
+{
+    constexpr ScreenSpaceClipRect clip{.left = 0, .top = 0, .right = 4,
+        .bottom = 4};
+    const std::array<float, 1U> first_channel{0.25F};
+    const std::array<float, 1U> second_channel{0.75F};
+    const std::array<float, 1U> third_channel{1.0F};
+
+    const auto make = [&](const float first_q, const float second_q,
+                          const float third_q) {
+        return std::array<ScreenSpaceTriangleVertex, 3U>{
+            ScreenSpaceTriangleVertex{.x = 0.0F, .y = 0.0F,
+                .affine_channels = first_channel, .s = 0.0F, .t = 1.0F,
+                .q = first_q},
+            ScreenSpaceTriangleVertex{.x = 3.0F, .y = 0.0F,
+                .affine_channels = second_channel, .s = 3.0F, .t = 0.5F,
+                .q = second_q},
+            ScreenSpaceTriangleVertex{.x = 0.0F, .y = 3.0F,
+                .affine_channels = third_channel, .s = 1.5F, .t = 0.0F,
+                .q = third_q},
+        };
+    };
+
+    Collector proven;
+    Collector unproven;
+    const auto proven_result = RasterizeScreenSpaceTriangle(
+        make(1.0F, 1.0F, 1.0F), clip, Collect, &proven);
+    // Q = 1 - 2x/3 over this triangle: nonzero at every covered lattice
+    // sample, but it changes sign inside the span, so the proof declines.
+    const auto unproven_result = RasterizeScreenSpaceTriangle(
+        make(1.0F, -1.0F, 1.0F), clip, Collect, &unproven);
+    Check(proven_result && unproven_result &&
+              proven_result->covered_pixel_count == 6U &&
+              *unproven_result == *proven_result,
+        "a sign-changing Q still succeeds with identical coverage");
+    Check(proven.count == 6U && unproven.count == proven.count,
+        "both preflight paths visit every covered sample");
+
+    bool same_geometry = proven.count == unproven.count;
+    bool exact_divide = unproven.count == 6U;
+    for (std::size_t index = 0U; index < unproven.count; ++index)
+    {
+        const auto& sample = unproven.samples[index];
+        if (index < proven.count)
+        {
+            const auto& reference = proven.samples[index];
+            same_geometry = same_geometry && sample.x == reference.x &&
+                            sample.y == reference.y &&
+                            sample.AffineChannels().size() ==
+                                reference.AffineChannels().size() &&
+                            sample.affine_channels ==
+                                reference.affine_channels &&
+                            sample.s == reference.s && sample.t == reference.t;
+        }
+        // S/Q is narrowed from the double interpolants, so it agrees with the
+        // narrowed float ratio to rounding rather than bit for bit.
+        exact_divide = exact_divide && sample.q != 0.0F &&
+                       Near(sample.s_over_q, sample.s / sample.q) &&
+                       Near(sample.t_over_q, sample.t / sample.q);
+    }
+    Check(same_geometry,
+        "the proof does not change coverage order or affine interpolation");
+    Check(exact_divide,
+        "the exact-preflight path still divides S and T by the sampled Q");
+
+    // A budget that cannot fit is unproven rather than proven-and-clipped, so
+    // it still fails during preflight with no callback published.
+    std::uint64_t budget_visits = 0U;
+    auto tightened = ScreenSpaceTriangleLimits{};
+    tightened.maximum_covered_pixels = 5U;
+    const auto budget_result = RasterizeScreenSpaceTriangle(
+        make(1.0F, 1.0F, 1.0F), clip, CountOnly, &budget_visits, tightened);
+    Check(!budget_result &&
+              budget_result.error() ==
+                  ScreenSpaceTriangleError::LimitExceeded &&
+              budget_visits == 0U,
+        "a proven-path budget overrun still fails before any callback");
+}
+
 void TestEveryLimit()
 {
     const auto basic = BasicTriangle();
@@ -430,6 +513,7 @@ int main()
     TestSharedEdgesAndClipping();
     TestInterpolationAndPerspectiveDivide();
     TestDegeneratesInputsAndVisitors();
+    TestProvenAndUnprovenPreflightsAgree();
     TestEveryLimit();
 
     if (failures != 0)

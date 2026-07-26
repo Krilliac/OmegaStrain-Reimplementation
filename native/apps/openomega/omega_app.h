@@ -11,6 +11,8 @@
 #include "sdl_input_service.h"
 #include "sdl_platform_service.h"
 
+#include "omega/content/front_end_screen_bundle.h"
+#include "omega/frontend_presentation/retail_front_end_nav.h"
 #include "omega/gameplay/diagnostic_mission_lifecycle.h"
 #include "omega/gameplay/diagnostic_proximity_trigger.h"
 #include "omega/gameplay/diagnostic_target_fire.h"
@@ -39,6 +41,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace omega::app
 {
@@ -73,8 +76,12 @@ public:
     OmegaApp(const OmegaApp&) = delete;
     OmegaApp& operator=(const OmegaApp&) = delete;
 
-    // [game/main/render thread]
-    [[nodiscard]] std::expected<RunResult, std::string> Run(int frame_limit);
+    // [game/main/render thread] screenshot_frame, when positive, writes one
+    // headless BMP of the frame at that 1-based rendered index to the platform
+    // screenshots directory, using the same capture path as the interactive
+    // screenshot key. A non-positive value disables headless capture.
+    [[nodiscard]] std::expected<RunResult, std::string> Run(
+        int frame_limit, int screenshot_frame = -1);
 
     // [game/main/render thread] Runs one finite diagnostic capture. Pre-loop validation and
     // backing-allocation failures return unexpected without mutating app services; operational
@@ -140,7 +147,8 @@ private:
 
     [[nodiscard]] RunLoopResult RunLoop(
         int frame_limit, runtime::RunCaptureSession* capture_session,
-        std::optional<std::chrono::nanoseconds> first_elapsed_override);
+        std::optional<std::chrono::nanoseconds> first_elapsed_override,
+        int screenshot_frame = -1);
     [[nodiscard]] bool ContainOpeningMovieAudio() noexcept;
     [[nodiscard]] static OpeningMovieAudioFaultCounters OpeningMovieAudioFaultCountersOf(
         const AudioServiceSnapshot& snapshot) noexcept;
@@ -172,13 +180,90 @@ private:
     // allocation, I/O, or persistence work occurs.
     [[nodiscard]] bool ActiveProfileIsConfirmed() const noexcept;
     [[nodiscard]] bool ActiveCharacterIsConfirmed() const noexcept;
-    // [game/main thread; no concurrent use] The current project-authored
-    // presentation owns only the explicit developer capability. Normal mode
-    // remains unavailable until a retail-data decoder supplies the distinct,
-    // GameDataService-minted capability with its owned presentation.
+    // [game/main thread; no concurrent use] DeveloperDiagnostics authorizes the
+    // project-authored UI and the explicitly enabled decoded-data preview on the
+    // same developer capability: both are arranged by PROJECT policy.
+    // RetailRequired remains unconditionally unavailable until the presentation
+    // rules themselves, not merely their decoded inputs, are evidence-backed.
     [[nodiscard]] std::expected<void,
         runtime::FrontEndPresentationGateError>
     AuthorizeCurrentFrontEndPresentation() const noexcept;
+    // [any thread; reentrant] The decoded-data compositor is an explicit
+    // DeveloperDiagnostics-only preview. Its DFS ordering, text interleave,
+    // submission depth, and one-tick-per-frame cadence are PROJECT experimental
+    // policy, not observed retail presentation behavior.
+    [[nodiscard]] bool IsRetailPreviewMode() const noexcept
+    {
+        return presentation_mode_ ==
+            runtime::FrontEndPresentationMode::DeveloperDiagnostics;
+    }
+    // [any thread; reentrant] True only when the preview is coherent and ready
+    // to replace the project UI. Bundle presence alone is intentionally
+    // insufficient: navigation, pixels, texture, and draw list must describe the
+    // same successfully published frame.
+    [[nodiscard]] bool RetailPreviewActive() const noexcept
+    {
+        return IsRetailPreviewMode() && retail_front_end_ready_ &&
+               retail_front_end_texture_valid_ &&
+               retail_front_end_texture_.valid() &&
+               !retail_front_end_draw_list_.empty() &&
+               retail_composed_nav_.has_value() &&
+               *retail_composed_nav_ == retail_nav_;
+    }
+    // [game/main thread; no concurrent use] One-time developer-preview startup.
+    // OPENOMEGA_ENABLE_RETAIL_FRONT_END is an explicit per-run opt-in; it never
+    // changes RetailRequired authorization. Never throws.
+    void LoadRetailFrontEndBundleIfEnabled() noexcept;
+    // [game/main thread; no concurrent use] Startup-only transactional adoption:
+    // load, compose, and publish first; commit navigation/tick/animation only
+    // after the complete operation succeeds.
+    [[nodiscard]] bool TryAdoptRetailScreen(
+        content::FrontEndScreenKey screen) noexcept;
+    // [game/main thread; no concurrent use] Stages an optional resolved startup
+    // override. Unknown, unloadable, uncomposable, and unpublishable requests all
+    // warn without identity and fall back through the same Title transaction.
+    void BeginRetailFrontEndPresentation(
+        std::optional<content::FrontEndScreenKey> requested,
+        bool override_requested) noexcept;
+    // [game/main thread; no concurrent use] Applies the experimental PROJECT
+    // layout policy, then publishes the result. The animation output is written
+    // only on Published so callers can keep all candidate state local.
+    [[nodiscard]] frontend::presentation::RetailFrontEndPresentOutcome
+    ComposeRetailScreenPresentation(
+        const content::FrontEndScreenBundle& bundle,
+        std::string_view selected_identifier, std::uint32_t animation_tick,
+        bool& out_has_animation) noexcept;
+    // [game/main thread; no concurrent use] Publishes fixed-size compositor
+    // pixels. The first call creates the texture/draw list; later calls update
+    // the resident texture without replacing either resource. True means the
+    // candidate pixels reached the live presentation.
+    [[nodiscard]] bool PublishRetailFrontEndFrame(
+        runtime::Rgba8TextureUploadView upload) noexcept;
+    // [game/main thread] Cached-only lookup used by the per-frame path.
+    [[nodiscard]] const content::FrontEndScreenBundle* CachedRetailBundleForScreen(
+        content::FrontEndScreenKey screen) noexcept;
+    // [game/main thread] Returns a cached bundle or performs one load attempt.
+    // Only successes are cached, so a later explicit Accept retries a failure.
+    [[nodiscard]] const content::FrontEndScreenBundle* LoadRetailBundleForScreen(
+        content::FrontEndScreenKey screen) noexcept;
+    [[nodiscard]] std::optional<content::FrontEndScreenBundle>*
+    RetailBundleSlotForScreen(content::FrontEndScreenKey screen) noexcept;
+    // One selectable retail menu button: its widget identifier and the screen its
+    // Accept routes to (empty for buttons with no target yet, e.g. Options).
+    struct RetailFrontEndButton
+    {
+        std::string identifier;
+        std::optional<content::FrontEndScreenKey> target;
+    };
+    // [game/main thread] Ordered (DFS-preorder) visible Button widgets of a screen.
+    [[nodiscard]] static std::vector<RetailFrontEndButton>
+    RetailScreenSelectableButtons(const content::FrontEndScreenBundle& bundle);
+    // [game/main thread; no concurrent use] Phase 3: steps the retail navigation
+    // from resolved input edges (select move / accept-switch-screen / back) and
+    // recomposes the retail draw list when the navigation state changes. Never
+    // throws.
+    void UpdateRetailFrontEndPresentation(
+        const frontend::presentation::RetailFrontEndNavInput& input) noexcept;
     // [game/main/render thread; no concurrent use] Atomically rebuilds fixed CPU
     // texture fallback/overlay commands and, when a scene is resident, the
     // environment-plus-actor mesh commands for the final post-step position.
@@ -360,6 +445,28 @@ private:
     // project-authored presentation owned below.
     runtime::FrontEndPresentationMode presentation_mode_ =
         runtime::FrontEndPresentationMode::RetailRequired;
+    // Experimental DeveloperDiagnostics decoded-data preview. Holding a bundle
+    // authorizes nothing; RetailRequired is always fail-closed because these
+    // decoded assets are arranged by PROJECT presentation policy.
+    std::optional<content::FrontEndScreenBundle> retail_front_end_bundle_;
+    bool retail_front_end_bundle_attempted_ = false;
+    // Published preview presentation. CurrentFrontEndDrawList selects it only
+    // through RetailPreviewActive(), never through a partial ready/bundle state.
+    runtime::RenderDrawList retail_front_end_draw_list_;
+    bool retail_front_end_ready_ = false;
+    // The first successful compose creates the resident texture; subsequent
+    // candidate frames update it in place. One animation tick per rendered frame
+    // is PROJECT preview cadence, not an observed retail timing claim.
+    runtime::RenderTextureHandle retail_front_end_texture_;
+    bool retail_front_end_texture_valid_ = false;
+    std::uint32_t retail_animation_tick_ = 0U;
+    bool retail_screen_has_animation_ = false;
+    // Three-screen preview navigation. Navigation and composed navigation remain
+    // equal whenever the preview is active; both commit only after publication.
+    frontend::presentation::RetailFrontEndNavState retail_nav_{};
+    std::optional<frontend::presentation::RetailFrontEndNavState> retail_composed_nav_{};
+    std::optional<content::FrontEndScreenBundle> retail_create_agent_bundle_;
+    std::optional<content::FrontEndScreenBundle> retail_load_agent_bundle_;
     FrontEndStartupModel front_end_startup_model_{};
     FrontEndCharacterStartupModel front_end_character_startup_model_{};
     std::optional<CharacterPresentation> character_presentation_;

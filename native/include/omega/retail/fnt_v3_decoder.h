@@ -42,6 +42,11 @@ struct FntV3IR {
   [[nodiscard]] std::optional<float>
   AdvanceForCodepoint(std::uint32_t codepoint,
                       float atlas_width) const noexcept;
+  // Returns the common glyph-row height in atlas texels. Fails closed when the
+  // font has no glyphs, the caller's atlas extent is invalid, or the decoded
+  // records do not share one vertical span.
+  [[nodiscard]] std::optional<float>
+  LineCellHeight(float atlas_height) const noexcept;
   [[nodiscard]] float
   ApplyObservedByte17VerticalPlacement(float source_y) const noexcept;
 

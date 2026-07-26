@@ -117,18 +117,31 @@ ValidVerticalAlignment(const VerticalTextAlignment alignment) noexcept {
   return false;
 }
 
+[[nodiscard]] bool
+ValidVerticalOrigin(const GlyphVerticalOrigin origin) noexcept {
+  switch (origin) {
+  case GlyphVerticalOrigin::LineOrigin:
+  case GlyphVerticalOrigin::ObservedByte17Offset:
+    return true;
+  }
+  return false;
+}
+
+// A space advances by the FNT's own space byte and is never tracked.
 [[nodiscard]] std::expected<float, TextLayoutError>
 AdvanceFor(const retail::FntV3IR &font, const char32_t codepoint,
-           const float atlas_width,
+           const float atlas_width, const float glyph_tracking,
            const std::optional<std::size_t> input_index) noexcept {
   const auto advance = font.AdvanceForCodepoint(
       static_cast<std::uint32_t>(codepoint), atlas_width);
   if (!advance)
     return std::unexpected(
         Error(TextLayoutErrorCode::UnsupportedCodepoint, input_index));
-  if (!std::isfinite(*advance))
+  const float tracked =
+      codepoint == U' ' ? *advance : *advance + glyph_tracking;
+  if (!std::isfinite(tracked))
     return std::unexpected(Error(TextLayoutErrorCode::Overflow, input_index));
-  return *advance;
+  return tracked;
 }
 
 [[nodiscard]] float
@@ -146,7 +159,7 @@ FindPairAdjustment(const std::vector<PairLookupEntry> &pairs,
 
 [[nodiscard]] std::expected<float, TextLayoutError>
 MeasureItems(const retail::FntV3IR &font, const std::span<const TextItem> items,
-             const float atlas_width,
+             const float atlas_width, const float glyph_tracking,
              const std::vector<PairLookupEntry> &pairs) noexcept {
   float advance = 0.0F;
   for (std::size_t index = 0; index < items.size(); ++index) {
@@ -158,8 +171,9 @@ MeasureItems(const retail::FntV3IR &font, const std::span<const TextItem> items,
         return std::unexpected(
             Error(TextLayoutErrorCode::Overflow, items[index].source_index));
     }
-    const auto item_advance = AdvanceFor(
-        font, items[index].codepoint, atlas_width, items[index].source_index);
+    const auto item_advance =
+        AdvanceFor(font, items[index].codepoint, atlas_width, glyph_tracking,
+                   items[index].source_index);
     if (!item_advance)
       return std::unexpected(item_advance.error());
     if (!AddFinite(advance, *item_advance, advance))
@@ -181,7 +195,7 @@ LastSpace(const std::vector<TextItem> &items) noexcept {
 [[nodiscard]] bool HasNonSpaceBefore(const std::vector<TextItem> &items,
                                      const std::size_t end) noexcept {
   return std::any_of(
-      items.begin(), items.begin() + end,
+      items.begin(), items.begin() + static_cast<std::ptrdiff_t>(end),
       [](const TextItem &item) { return item.codepoint != U' '; });
 }
 
@@ -213,8 +227,8 @@ ApplyEllipsis(const retail::FntV3IR &font, std::vector<TextItem> &items,
       TextItem{.codepoint = U'.', .source_index = std::nullopt},
       TextItem{.codepoint = U'.', .source_index = std::nullopt},
   };
-  const auto dots_advance =
-      MeasureItems(font, dots, options.atlas_extent.width, pairs);
+  const auto dots_advance = MeasureItems(
+      font, dots, options.atlas_extent.width, options.glyph_tracking, pairs);
   if (!dots_advance)
     return std::unexpected(dots_advance.error());
   if (*dots_advance > options.rectangle.width)
@@ -233,7 +247,7 @@ ApplyEllipsis(const retail::FntV3IR &font, std::vector<TextItem> &items,
           Error(TextLayoutErrorCode::Overflow, items[index].source_index));
     const auto item_advance =
         AdvanceFor(font, items[index].codepoint, options.atlas_extent.width,
-                   items[index].source_index);
+                   options.glyph_tracking, items[index].source_index);
     if (!item_advance)
       return std::unexpected(item_advance.error());
     if (!AddFinite(prefix, *item_advance, prefix))
@@ -316,13 +330,15 @@ ValidateInputs(const retail::FntV3IR &font, const std::u32string_view text,
       options.atlas_extent.width <= 0.0F ||
       options.atlas_extent.height <= 0.0F ||
       !std::isfinite(options.line_origin_step) ||
-      options.line_origin_step <= 0.0F)
+      options.line_origin_step <= 0.0F ||
+      !std::isfinite(options.glyph_tracking))
     return Error(TextLayoutErrorCode::InvalidGeometry);
 
   if (!ValidHorizontalAlignment(options.horizontal_alignment) ||
       !ValidVerticalAlignment(options.vertical_alignment) ||
       !ValidWrapMode(options.wrap_mode) ||
-      !ValidEllipsisMode(options.ellipsis_mode))
+      !ValidEllipsisMode(options.ellipsis_mode) ||
+      !ValidVerticalOrigin(options.vertical_origin))
     return Error(TextLayoutErrorCode::InvalidOption);
 
   if (text.size() > kMaximumTextLayoutCodepoints ||
@@ -408,7 +424,8 @@ TextLayoutResult LayoutRetailText(const retail::FntV3IR &font,
     const auto recompute_current =
         [&]() -> std::expected<void, TextLayoutError> {
       const auto measured =
-          MeasureItems(font, current, options.atlas_extent.width, *pairs);
+          MeasureItems(font, current, options.atlas_extent.width,
+                       options.glyph_tracking, *pairs);
       if (!measured)
         return std::unexpected(measured.error());
       current_advance = *measured;
@@ -437,7 +454,8 @@ TextLayoutResult LayoutRetailText(const retail::FntV3IR &font,
         return std::unexpected(
             Error(TextLayoutErrorCode::Overflow, input_index));
       const auto item_advance =
-          AdvanceFor(font, codepoint, options.atlas_extent.width, input_index);
+          AdvanceFor(font, codepoint, options.atlas_extent.width,
+                     options.glyph_tracking, input_index);
       if (!item_advance)
         return std::unexpected(item_advance.error());
       if (!AddFinite(current_advance, *item_advance, current_advance))
@@ -451,10 +469,11 @@ TextLayoutResult LayoutRetailText(const retail::FntV3IR &font,
       if (options.wrap_mode == TextWrapMode::SpacesAndExplicitNewlines &&
           current_advance > options.rectangle.width && last_space &&
           HasNonSpaceBefore(current, *last_space)) {
+        const auto break_offset = static_cast<std::ptrdiff_t>(*last_space);
         std::vector<TextItem> line_items(current.begin(),
-                                         current.begin() + *last_space);
+                                         current.begin() + break_offset);
         TrimTrailingSpaces(line_items);
-        std::vector<TextItem> remainder(current.begin() + *last_space + 1U,
+        std::vector<TextItem> remainder(current.begin() + break_offset + 1,
                                         current.end());
         TrimLeadingSpaces(remainder);
         // Retail consumes the boundary space while choosing the break and
@@ -464,7 +483,7 @@ TextLayoutResult LayoutRetailText(const retail::FntV3IR &font,
         const auto line_advance = MeasureItems(
             font,
             std::span<const TextItem>(current.data(), *last_space + 1U),
-            options.atlas_extent.width, *pairs);
+            options.atlas_extent.width, options.glyph_tracking, *pairs);
         if (!line_advance)
           return std::unexpected(line_advance.error());
         auto finalized = finalize_line(std::move(line_items), *line_advance);
@@ -573,7 +592,7 @@ TextLayoutResult LayoutRetailText(const retail::FntV3IR &font,
 
         const auto advance =
             AdvanceFor(font, item.codepoint, options.atlas_extent.width,
-                       item.source_index);
+                       options.glyph_tracking, item.source_index);
         if (!advance)
           return std::unexpected(advance.error());
         if (item.codepoint != U' ') {
@@ -583,16 +602,24 @@ TextLayoutResult LayoutRetailText(const retail::FntV3IR &font,
             return std::unexpected(Error(
                 TextLayoutErrorCode::UnsupportedCodepoint, item.source_index));
           float glyph_height = 0.0F;
+          // The drawn quad spans exactly the glyph's atlas cell. Tracking is an
+          // advance-only constant: adding it to the quad would stretch the
+          // sampled glyph instead of separating neighbours.
+          float glyph_width = 0.0F;
           if (!MultiplyFinite(options.atlas_extent.height,
-                              glyph->v_bottom - glyph->v_top, glyph_height))
+                              glyph->v_bottom - glyph->v_top, glyph_height) ||
+              !MultiplyFinite(options.atlas_extent.width,
+                              glyph->u_right - glyph->u_left, glyph_width))
             return std::unexpected(
                 Error(TextLayoutErrorCode::Overflow, item.source_index));
           const float glyph_top =
-              font.ApplyObservedByte17VerticalPlacement(source_y);
+              options.vertical_origin == GlyphVerticalOrigin::LineOrigin
+                  ? source_y
+                  : font.ApplyObservedByte17VerticalPlacement(source_y);
           float glyph_right = 0.0F;
           float glyph_bottom = 0.0F;
           if (!std::isfinite(glyph_top) ||
-              !AddFinite(cursor, *advance, glyph_right) ||
+              !AddFinite(cursor, glyph_width, glyph_right) ||
               !AddFinite(glyph_top, -glyph_height, glyph_bottom))
             return std::unexpected(
                 Error(TextLayoutErrorCode::Overflow, item.source_index));

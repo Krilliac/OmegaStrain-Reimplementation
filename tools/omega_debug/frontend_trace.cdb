@@ -1,0 +1,9 @@
+.reload /f
+bm openomega!*ComposeRetailFrontEndFrame* ".printf \"[HIT] Compose\n\"; gc"
+bm openomega!*IsRasterizableTriangle* ".printf \"[HIT] RastCheck\n\"; gc"
+bm openomega!*AppendVisualNodeTriangles* ".printf \"[HIT] AppendNode\n\"; gc"
+bm openomega!*RasterizeRetailFrontEndTriangles* ".printf \"[HIT] Rasterize\n\"; gc"
+bm openomega!*BuildRetailFrontEndPresentationIfPossible* ".printf \"[HIT] BuildPres\n\"; gc"
+g
+.printf \"=== EXITED ===\n\"
+q

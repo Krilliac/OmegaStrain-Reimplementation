@@ -1,0 +1,113 @@
+#pragma once
+
+#include "omega/frontend_presentation/retail_frontend_cpu_raster.h"
+
+#include <cstdint>
+#include <expected>
+#include <string_view>
+
+namespace omega::content
+{
+class FrontEndScreenBundle;
+}
+
+namespace omega::frontend::presentation
+{
+// Identity-free failure categories. Safe to surface to a host log; they never
+// carry owner paths, member names, strings, or payloads.
+enum class RetailFrontEndFrameError : std::uint8_t
+{
+    InvalidRetailCapability = 0U,
+    UnsupportedRootWidget,
+    MissingRootVisualBinding,
+    MissingTextureBinding,
+    InvalidGeometry,
+    TransformFailure,
+    ProjectionFailure,
+    ArithmeticFailure,
+    RasterizationFailure,
+    LimitExceeded,
+    AllocationFailure,
+};
+
+using RetailFrontEndFrameResult =
+    std::expected<OwnedRgba8Frame, RetailFrontEndFrameError>;
+
+// Identity-free code-path/value tally for a single compose. Carries only
+// aggregate counts (never owner strings, member names, or payloads); safe to
+// surface to a host log. Populated when a non-null pointer is passed to
+// ComposeRetailFrontEndFrame; the compositor itself does no I/O, so the caller
+// decides whether/when to emit it (e.g. under an OPENOMEGA_FRONTEND_TRACE gate).
+struct RetailFrontEndFrameDiagnostics final
+{
+    std::uint32_t visual_nodes_visited = 0U;
+    std::uint32_t ie_triangles_emitted = 0U;
+    std::uint32_t triangles_skipped_out_of_range = 0U;
+    std::uint32_t triangles_skipped_non_finite = 0U;
+    std::uint32_t triangles_skipped_degenerate = 0U;
+    std::uint32_t text_widgets_seen = 0U;
+    std::uint32_t strings_resolved = 0U;
+    std::uint32_t strings_missing = 0U;
+    std::uint32_t fonts_resolved = 0U;
+    std::uint32_t fonts_missing = 0U;
+    std::uint32_t text_layouts_failed = 0U;
+    std::uint32_t glyph_quads_emitted = 0U;
+    std::uint32_t animated_nodes = 0U;
+    std::uint32_t total_triangles = 0U;
+    std::uint32_t frame_width = 0U;
+    std::uint32_t frame_height = 0U;
+};
+
+// [any thread; stateless/reentrant] Composes one decoded front-end screen into a
+// single fully owned 640x448 developer-preview frame. The root GUI widget
+// selects the screen's visual scope and resolves the root IE node; the entire IE
+// visual subtree below it is emitted in depth-first PREORDER (each node draws
+// its own triangles under its accumulated world transform = parent_world * local,
+// then recurses into its children). That preorder, mixed claimed/unclaimed
+// sibling handling, the IE-vs-GUI lane order, and submission-ordinal painter
+// depth are bounded experimental PROJECT policies; the public evidence does not
+// establish the complete retail interleave or render order. The fixed IE->raster
+// axis bridge is applied outermost and exactly once so screen vertical comes
+// from IE Y and depth from IE Z. Projected Z is deliberately not used as a depth
+// key because decoded IE Z is not bounded to raster depth.
+//
+// After the IE geometry, a GUI text pass (Phase 2) walks the widget tree and
+// emits textured glyph quads for visible Text/Button widgets -- string resolved
+// via the bundle string table, font/atlas via the bundle resolvers, glyphs laid
+// out by LayoutRetailText -- appended last by the same project-owned policy so
+// they carry the highest submission ordinals and draw on top. GUI action
+// interaction is a later phase.
+//
+// `animation_tick` (Phase 3b) advances the IE animation tracks: for each visual
+// node carrying tracks, the timeline is evaluated at this tick (via the retail
+// timeline primitive) and the node's interpolated positions (VERTEX tracks),
+// UV offset (UVOFF tracks, applied as (uv+offset-0.5)*scale+0.5 with unit scale),
+// and opacity (OPACITY tracks, multiplied into vertex-colour alpha) are used in
+// place of the frame-0 base values. Tick 0 (the default) reproduces the static
+// frame-0 screen exactly; a node with no tracks is unaffected at any tick. The
+// caller owns the live->authored tick mapping (this boundary assigns no rate);
+// the app's current one-tick-per-rendered-frame mapping is experimental PROJECT
+// policy, not a recovered retail cadence.
+// The walk is FAIL-SOFT: a node
+// whose declared texture member is not resolvable draws untextured (vertex colors
+// only); an out-of-range vertex index, a non-finite transform/projection/colour,
+// or a degenerate (zero-area, kernel-rejected) triangle drops only that triangle;
+// a non-finite node world transform drops only that node's subtree. Only a wholly
+// empty screen, an invalid capability/root widget, a traversal/raster limit, or
+// an allocation failure is a hard error.
+//
+// `selected_widget_identifier` names the currently-focused menu widget (Phase 3
+// navigation): its text is drawn in a distinct highlight colour so the player can
+// see the selection. It is a bounded project-owned affordance (the retail
+// selected-button visual is not yet reverse-engineered); an empty value or an
+// identifier no widget carries simply draws every label in its normal colour.
+//
+// Pure value boundary: borrows the immutable live bundle only for the call and
+// returns owned bytes; no filesystem/service/global/SDL/renderer/cache work.
+[[nodiscard]] RetailFrontEndFrameResult ComposeRetailFrontEndFrame(
+    const content::FrontEndScreenBundle& bundle,
+    RetailFrontEndRasterLimits limits = {},
+    RetailFrontEndFrameDiagnostics* diagnostics = nullptr,
+    std::string_view selected_widget_identifier = {},
+    std::uint32_t animation_tick = 0U) noexcept;
+} // namespace omega::frontend::presentation

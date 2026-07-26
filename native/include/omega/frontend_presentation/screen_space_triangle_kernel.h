@@ -119,12 +119,16 @@ using ScreenSpaceTriangleResult =
 // are exclusive. Winding does not affect coverage or visit order.
 //
 // Affine channels and S/T/Q are plane-interpolated. S/Q and T/Q are returned
-// only after an exact nonzero, finite Q check. A preflight pass validates every
-// covered sample and the complete pixel budget before the first callback, so
-// kernel failures never expose a partial callback prefix. VisitorStopped is an
-// explicit caller-requested prefix. The callback must not retain the sample
-// reference; it may copy the owned value. The kernel performs no allocation,
-// retains no input or output, owns no framebuffer, and is hot-reload-safe.
+// only after an exact nonzero, finite Q check. Every covered sample and the
+// complete pixel budget are validated before the first callback, so kernel
+// failures never expose a partial callback prefix. That validation is proven
+// per scanline from the two span endpoints where the interpolants allow it and
+// falls back to an exact per-sample preflight pass otherwise; the guarantee,
+// the failure identities, and their ordering are the same either way.
+// VisitorStopped is an explicit caller-requested prefix. The callback must not
+// retain the sample reference; it may copy the owned value. The kernel performs
+// no allocation, retains no input or output, owns no framebuffer, and is
+// hot-reload-safe.
 [[nodiscard]] ScreenSpaceTriangleResult RasterizeScreenSpaceTriangle(
     std::span<const ScreenSpaceTriangleVertex, 3U> vertices,
     ScreenSpaceClipRect clip,

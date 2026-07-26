@@ -7,6 +7,7 @@
 
 #include "omega/gameplay/debug_locomotion.h"
 #include "omega/debug/subsystem_entry_break.h"
+#include "omega/frontend_presentation/retail_front_end_frame.h"
 #include "omega/runtime/diagnostic_actor_scene.h"
 #include "omega/runtime/level_texture_topology_preview.h"
 #include "omega/runtime/scene_transform.h"
@@ -17,6 +18,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -31,6 +33,12 @@ namespace omega::app
 {
 namespace
 {
+// Fixed, identity-free warnings for explicit decoded-preview actions. They echo
+// no owner path, member, widget, requested spelling, or decoder detail.
+constexpr std::string_view kRetailScreenChangeFailedWarning =
+    "retail front-end screen change failed; keeping the current screen";
+constexpr std::string_view kRetailStartScreenOverrideUnavailableWarning =
+    "retail front-end start-screen override unavailable; composing the Title";
 // Refill when the 4,096-frame ring has at least this much space. The queued lead therefore stays
 // between roughly 53 and 85 ms at 48 kHz during steady playback.
 constexpr std::uint64_t kOpeningMovieAudioRefillFrames = 1'536U;
@@ -1783,12 +1791,13 @@ bool OmegaApp::FinishOpeningMovieFrontEndTransition(
 
 OmegaApp::OmegaApp(OmegaApp&&) noexcept = default;
 
-std::expected<RunResult, std::string> OmegaApp::Run(const int frame_limit)
+std::expected<RunResult, std::string> OmegaApp::Run(
+    const int frame_limit, const int screenshot_frame)
 {
     auto first_elapsed_override =
         std::exchange(next_run_elapsed_override_for_testing_, std::nullopt);
-    RunLoopResult loop =
-        RunLoop(frame_limit, nullptr, std::move(first_elapsed_override));
+    RunLoopResult loop = RunLoop(
+        frame_limit, nullptr, std::move(first_elapsed_override), screenshot_frame);
     if (loop.operational_error)
         return std::unexpected(std::move(*loop.operational_error));
     return loop.result;
@@ -1883,11 +1892,13 @@ std::expected<RunCaptureOutcome, std::string> OmegaApp::RunWithCapture(
 
 OmegaApp::RunLoopResult OmegaApp::RunLoop(
     const int frame_limit, runtime::RunCaptureSession* const capture_session,
-    std::optional<std::chrono::nanoseconds> first_elapsed_override)
+    std::optional<std::chrono::nanoseconds> first_elapsed_override,
+    const int screenshot_frame)
 {
     using Clock = std::chrono::steady_clock;
 
     log_->Info("runtime", "entering native host loop");
+    LoadRetailFrontEndBundleIfEnabled();
     RunResult result;
     bool running = true;
     auto previous_frame = Clock::now();
@@ -1988,6 +1999,58 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
             running = false;
             result.quit_requested = true;
             break;
+        }
+
+        // The project reducer can turn a menu Primary edge into a logical quit
+        // request. Resolve it while capture still owns an unpaired input frame:
+        // AppendElapsed closes that phase, after which MarkTerminal must reject
+        // the request. Cache every non-terminal reduction for the normal
+        // persistence/state-publication path later in this frame.
+        std::optional<FrontEndReduction> project_front_end;
+        if (!movie_was_active && !RetailPreviewActive())
+        {
+            project_front_end = ReduceFrontEnd(front_end_state_,
+                ResolveFrontEndInputEdges(front_end_state_.mode,
+                    FrontEndInputEdges{
+                        .primary_pressed =
+                            input_snapshot.WasPressed(kFrontEndPrimaryAction),
+                        .previous_pressed =
+                            input_snapshot.WasPressed(kFrontEndPreviousAction),
+                        .next_pressed =
+                            input_snapshot.WasPressed(kFrontEndNextAction),
+                        .cancel_pressed =
+                            input_snapshot.WasPressed(kFrontEndCancelAction),
+                    },
+                    input_snapshot.WasPressed(kDebugMoveLeftAction),
+                    input_snapshot.WasPressed(kDebugMoveRightAction),
+                    input_snapshot.WasPressed(kDebugFireAction),
+                    input_snapshot.WasPressed(kDebugTargetAction)),
+                front_end_startup_model_.visible_profiles,
+                CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
+                front_end_character_startup_model_.visible_characters,
+                ActiveCharacterIsConfirmed());
+            if (project_front_end->command.type ==
+                FrontEndCommandType::RequestQuit)
+            {
+                if (capture_session != nullptr)
+                {
+                    const auto marked =
+                        capture_session->MarkTerminal(false, true);
+                    if (!marked)
+                    {
+                        (void)ContainOpeningMovieAudio();
+                        jobs_->WaitForIdle();
+                        return RunLoopResult{
+                            .result = result,
+                            .operational_error = std::nullopt,
+                            .capture_error = marked.error(),
+                        };
+                    }
+                }
+                running = false;
+                result.quit_requested = true;
+                break;
+            }
         }
 
         const auto current_frame = Clock::now();
@@ -2252,29 +2315,48 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 }
             }
         }
+        else if (RetailPreviewActive())
+        {
+            // The explicit decoded-data preview owns input only after a complete
+            // frame is published and its navigation marker agrees with it.
+            const auto retail_edges = ResolveFrontEndInputEdges(
+                FrontEndMode::Title,
+                FrontEndInputEdges{
+                    .primary_pressed =
+                        input_snapshot.WasPressed(kFrontEndPrimaryAction),
+                    .previous_pressed =
+                        input_snapshot.WasPressed(kFrontEndPreviousAction),
+                    .next_pressed = input_snapshot.WasPressed(kFrontEndNextAction),
+                    .cancel_pressed =
+                        input_snapshot.WasPressed(kFrontEndCancelAction),
+                },
+                input_snapshot.WasPressed(kDebugMoveLeftAction),
+                input_snapshot.WasPressed(kDebugMoveRightAction),
+                input_snapshot.WasPressed(kDebugFireAction),
+                input_snapshot.WasPressed(kDebugTargetAction));
+            UpdateRetailFrontEndPresentation(
+                frontend::presentation::RetailFrontEndNavInput{
+                    .previous = retail_edges.previous_pressed,
+                    .next = retail_edges.next_pressed,
+                    .accept = retail_edges.primary_pressed,
+                    .back = retail_edges.cancel_pressed,
+                });
+        }
         else
         {
-            const FrontEndReduction front_end =
-                ReduceFrontEnd(front_end_state_,
-                    ResolveFrontEndInputEdges(front_end_state_.mode,
-                        FrontEndInputEdges{
-                            .primary_pressed =
-                                input_snapshot.WasPressed(kFrontEndPrimaryAction),
-                            .previous_pressed =
-                                input_snapshot.WasPressed(kFrontEndPreviousAction),
-                            .next_pressed =
-                                input_snapshot.WasPressed(kFrontEndNextAction),
-                            .cancel_pressed =
-                                input_snapshot.WasPressed(kFrontEndCancelAction),
-                        },
-                        input_snapshot.WasPressed(kDebugMoveLeftAction),
-                        input_snapshot.WasPressed(kDebugMoveRightAction),
-                        input_snapshot.WasPressed(kDebugFireAction),
-                        input_snapshot.WasPressed(kDebugTargetAction)),
-                    front_end_startup_model_.visible_profiles,
-                    CurrentFrontEndCapabilities(), ActiveProfileIsConfirmed(),
-                    front_end_character_startup_model_.visible_characters,
-                    ActiveCharacterIsConfirmed());
+            if (!project_front_end)
+            {
+                jobs_->WaitForIdle();
+                constexpr std::string_view error =
+                    "project front-end reduction was not resolved";
+                log_->Error("frontend", error);
+                return RunLoopResult{
+                    .result = result,
+                    .operational_error = std::string(error),
+                    .capture_error = std::nullopt,
+                };
+            }
+            const FrontEndReduction& front_end = *project_front_end;
             // The command is applied, and therefore persisted, before its state
             // is published. A failed command leaves the prior front-end state and
             // the prior activation in place.
@@ -2555,7 +2637,11 @@ OmegaApp::RunLoopResult OmegaApp::RunLoop(
                 .capture_error = std::nullopt,
             };
         }
-        if (events.screenshot_requested)
+        const bool headless_screenshot_frame =
+            screenshot_frame > 0 &&
+            *next_rendered_frame_count ==
+                static_cast<decltype(*next_rendered_frame_count)>(screenshot_frame);
+        if (events.screenshot_requested || headless_screenshot_frame)
         {
             auto screenshot_pixels = host_->CaptureFrameRgba8(render_packet);
             if (!screenshot_pixels)
@@ -2938,11 +3024,476 @@ OmegaApp::AuthorizeCurrentFrontEndPresentation() const noexcept
             presentation_mode_, front_end_presentation_.provenance);
     }
 
-    // The retail FNT/GUI/IE and display-conversion decoders are intentionally
-    // not guessed here. Their future owned presentation must carry the
-    // GameDataService-minted retail capability through this exact seam.
+    // RetailRequired is unconditionally fail-closed. GameDataService proves the
+    // provenance of decoded DATA, not the DFS ordering, GUI/IE interleave,
+    // submission depth, text-last policy, or frame cadence chosen by this
+    // experimental PROJECT compositor. Publication cannot promote that policy
+    // into a retail presentation capability.
     return runtime::AuthorizeFrontEndPresentation(
         presentation_mode_, std::nullopt);
+}
+
+void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
+{
+    if (retail_front_end_bundle_attempted_)
+        return;
+    retail_front_end_bundle_attempted_ = true;
+
+    // Decoded assets arranged by this compositor are an explicit developer
+    // preview, never a RetailRequired presentation.
+    if (!IsRetailPreviewMode())
+        return;
+
+    // Explicit per-run opt-in in addition to --developer-diagnostics.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const char* const retail_front_end_opt_in =
+        std::getenv("OPENOMEGA_ENABLE_RETAIL_FRONT_END");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    if (retail_front_end_opt_in == nullptr)
+        return;
+
+    if (!content_ || !content_->game_data.has_value())
+    {
+        log_->Warning("presentation",
+            "retail front-end bundle requested but the game data service is unavailable");
+        return;
+    }
+
+    // LoadFrontEndScreen reports domain failures through its expected error
+    // channel, but is not declared noexcept; contain any allocation/decoder
+    // exception here so this loader keeps its noexcept contract and stays
+    // fail-closed (empty bundle, unavailable gate) rather than terminating.
+    try
+    {
+        auto bundle = content_->game_data->LoadFrontEndScreen(
+            content::FrontEndScreenKey::Title);
+        if (!bundle)
+        {
+            // The decoder path already emits a specific stderr diagnostic; keep
+            // the seam's own message host-path free and non-fabricated.
+            log_->Error("presentation", "retail front-end Title bundle load failed");
+            return;
+        }
+        retail_front_end_bundle_ = std::move(*bundle);
+        log_->Info("presentation", "retail front-end Title bundle loaded (experimental)");
+    }
+    catch (...)
+    {
+        log_->Error("presentation", "retail front-end Title bundle load raised an exception");
+        return;
+    }
+
+    // Optional exact debug start-screen override. It is staged below; an unknown
+    // or failed candidate never mutates live navigation.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const char* const start_screen = std::getenv("OPENOMEGA_FRONTEND_START_SCREEN");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    const std::optional<content::FrontEndScreenKey> requested =
+        start_screen != nullptr
+        ? frontend::presentation::ResolveRetailStartScreenOverride(
+              std::string_view(start_screen))
+        : std::nullopt;
+    BeginRetailFrontEndPresentation(requested, start_screen != nullptr);
+}
+
+std::optional<content::FrontEndScreenBundle>* OmegaApp::RetailBundleSlotForScreen(
+    const content::FrontEndScreenKey screen) noexcept
+{
+    std::optional<content::FrontEndScreenBundle>* slot = nullptr;
+    switch (screen)
+    {
+    case content::FrontEndScreenKey::Title:
+        slot = &retail_front_end_bundle_;
+        break;
+    case content::FrontEndScreenKey::CreateAgent:
+        slot = &retail_create_agent_bundle_;
+        break;
+    case content::FrontEndScreenKey::LoadAgent:
+        slot = &retail_load_agent_bundle_;
+        break;
+    }
+    return slot;
+}
+
+const content::FrontEndScreenBundle* OmegaApp::CachedRetailBundleForScreen(
+    const content::FrontEndScreenKey screen) noexcept
+{
+    const std::optional<content::FrontEndScreenBundle>* const slot =
+        RetailBundleSlotForScreen(screen);
+    if (slot == nullptr || !slot->has_value())
+        return nullptr;
+    return &**slot;
+}
+
+const content::FrontEndScreenBundle* OmegaApp::LoadRetailBundleForScreen(
+    const content::FrontEndScreenKey screen) noexcept
+{
+    std::optional<content::FrontEndScreenBundle>* const slot =
+        RetailBundleSlotForScreen(screen);
+    if (slot == nullptr)
+        return nullptr;
+    if (slot->has_value())
+        return &**slot;
+    if (!content_ || !content_->game_data.has_value())
+        return nullptr;
+    // Cache successes only. An explicit later Accept retries a failed load.
+    try
+    {
+        auto bundle = content_->game_data->LoadFrontEndScreen(screen);
+        if (!bundle)
+            return nullptr;
+        *slot = std::move(*bundle);
+        return &**slot;
+    }
+    catch (...)
+    {
+        return nullptr;
+    }
+}
+
+bool OmegaApp::TryAdoptRetailScreen(
+    const content::FrontEndScreenKey screen) noexcept
+{
+    if (!IsRetailPreviewMode())
+        return false;
+
+    try
+    {
+        const auto* const bundle = LoadRetailBundleForScreen(screen);
+        if (bundle == nullptr)
+            return false;
+
+        const frontend::presentation::RetailFrontEndNavState candidate{
+            .screen = screen,
+            .selected = 0U,
+        };
+        const auto buttons = RetailScreenSelectableButtons(*bundle);
+        std::string_view selected_identifier;
+        if (candidate.selected < buttons.size())
+            selected_identifier = buttons[candidate.selected].identifier;
+
+        const std::uint32_t candidate_tick =
+            retail_animation_tick_ ==
+                std::numeric_limits<std::uint32_t>::max()
+            ? retail_animation_tick_
+            : retail_animation_tick_ + 1U;
+        bool candidate_has_animation = false;
+        if (ComposeRetailScreenPresentation(*bundle, selected_identifier,
+                candidate_tick, candidate_has_animation) !=
+            frontend::presentation::RetailFrontEndPresentOutcome::Published)
+        {
+            return false;
+        }
+
+        retail_animation_tick_ = candidate_tick;
+        retail_screen_has_animation_ = candidate_has_animation;
+        retail_nav_ = candidate;
+        retail_composed_nav_ = candidate;
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+void OmegaApp::BeginRetailFrontEndPresentation(
+    const std::optional<content::FrontEndScreenKey> requested,
+    const bool override_requested) noexcept
+{
+    if (!IsRetailPreviewMode())
+        return;
+
+    if (requested && TryAdoptRetailScreen(*requested))
+        return;
+
+    if (override_requested)
+        log_->Warning(
+            "presentation", kRetailStartScreenOverrideUnavailableWarning);
+
+    // If Title itself cannot publish, the strict active predicate keeps the
+    // authorized project developer UI on screen.
+    if (!retail_composed_nav_.has_value())
+        retail_nav_ = frontend::presentation::RetailFrontEndNavState{};
+    static_cast<void>(
+        TryAdoptRetailScreen(content::FrontEndScreenKey::Title));
+}
+
+std::vector<OmegaApp::RetailFrontEndButton> OmegaApp::RetailScreenSelectableButtons(
+    const content::FrontEndScreenBundle& bundle)
+{
+    std::vector<RetailFrontEndButton> buttons;
+    const auto visit = [&buttons](const auto& self,
+                           const asset::FrontendWidgetIR& widget) -> void {
+        // Match the compositor's inherited visibility: a hidden parent hides
+        // its whole subtree, so descendants cannot acquire selection ordinals.
+        if (!widget.visible)
+            return;
+        if (widget.kind == asset::FrontendWidgetKind::Button)
+        {
+            std::optional<content::FrontEndScreenKey> target;
+            if (widget.identifier == "newagent")
+                target = content::FrontEndScreenKey::CreateAgent;
+            else if (widget.identifier == "loadagent")
+                target = content::FrontEndScreenKey::LoadAgent;
+            buttons.push_back(
+                RetailFrontEndButton{.identifier = widget.identifier, .target = target});
+        }
+        for (const auto& child : widget.children)
+            self(self, child);
+    };
+    visit(visit, bundle.widget_document().root);
+    return buttons;
+}
+
+void OmegaApp::UpdateRetailFrontEndPresentation(
+    const frontend::presentation::RetailFrontEndNavInput& input) noexcept
+{
+    if (!RetailPreviewActive() || !host_)
+        return;
+
+    bool explicit_attempt = false;
+    try
+    {
+        // Keep all candidate state local until these exact pixels publish.
+        std::uint32_t button_count = 0U;
+        std::optional<content::FrontEndScreenKey> button_target;
+        if (const auto* const current =
+                CachedRetailBundleForScreen(retail_nav_.screen))
+        {
+            const auto buttons = RetailScreenSelectableButtons(*current);
+            button_count = static_cast<std::uint32_t>(buttons.size());
+            if (retail_nav_.selected < buttons.size())
+                button_target = buttons[retail_nav_.selected].target;
+        }
+
+        const bool probe =
+            frontend::presentation::ShouldProbeRetailAcceptTarget(
+                retail_nav_, input, button_target);
+        explicit_attempt = probe;
+        bool target_bundle_is_loaded = false;
+        if (probe)
+        {
+            target_bundle_is_loaded =
+                LoadRetailBundleForScreen(*button_target) != nullptr;
+        }
+        const bool load_attempt_failed = probe && !target_bundle_is_loaded;
+
+        const frontend::presentation::RetailFrontEndNavState candidate =
+            frontend::presentation::PlanRetailFrontEndNavCandidate(
+                retail_nav_, input, button_count, button_target,
+                target_bundle_is_loaded);
+
+        const bool nav_unchanged = retail_front_end_ready_ &&
+            retail_composed_nav_.has_value() &&
+            *retail_composed_nav_ == candidate;
+        if (nav_unchanged && !retail_screen_has_animation_)
+        {
+            explicit_attempt = false;
+            if (load_attempt_failed)
+                log_->Warning(
+                    "presentation", kRetailScreenChangeFailedWarning);
+            return;
+        }
+
+        frontend::presentation::RetailFrontEndPresentOutcome outcome =
+            frontend::presentation::RetailFrontEndPresentOutcome::
+                BundleUnavailable;
+        std::uint32_t candidate_tick = retail_animation_tick_;
+        bool candidate_has_animation = false;
+        if (const auto* const candidate_bundle =
+                CachedRetailBundleForScreen(candidate.screen))
+        {
+            const auto buttons =
+                RetailScreenSelectableButtons(*candidate_bundle);
+            std::string_view selected_identifier;
+            if (candidate.selected < buttons.size())
+                selected_identifier = buttons[candidate.selected].identifier;
+
+            // One tick per rendered preview frame is an explicit PROJECT
+            // experimental cadence. It commits only if publication succeeds.
+            candidate_tick =
+                retail_animation_tick_ ==
+                    std::numeric_limits<std::uint32_t>::max()
+                ? retail_animation_tick_
+                : retail_animation_tick_ + 1U;
+            outcome = ComposeRetailScreenPresentation(*candidate_bundle,
+                selected_identifier, candidate_tick,
+                candidate_has_animation);
+        }
+
+        const frontend::presentation::RetailFrontEndNavCommit commit =
+            frontend::presentation::ResolveRetailFrontEndNavCommit(
+                retail_nav_, candidate, outcome, explicit_attempt);
+        if (commit.commit)
+        {
+            retail_animation_tick_ = candidate_tick;
+            retail_screen_has_animation_ = candidate_has_animation;
+            retail_nav_ = commit.nav;
+            retail_composed_nav_ = commit.nav;
+        }
+
+        const bool warn_now = load_attempt_failed || commit.warn;
+        explicit_attempt = false;
+        if (warn_now)
+            log_->Warning("presentation", kRetailScreenChangeFailedWarning);
+    }
+    catch (...)
+    {
+        if (explicit_attempt)
+        {
+            try
+            {
+                log_->Warning(
+                    "presentation", kRetailScreenChangeFailedWarning);
+            }
+            catch (...)
+            {
+            }
+        }
+    }
+}
+
+frontend::presentation::RetailFrontEndPresentOutcome
+OmegaApp::ComposeRetailScreenPresentation(
+    const content::FrontEndScreenBundle& bundle,
+    const std::string_view selected_identifier,
+    const std::uint32_t animation_tick, bool& out_has_animation) noexcept
+{
+    if (!host_)
+        return frontend::presentation::RetailFrontEndPresentOutcome::PublishFailed;
+
+    frontend::presentation::RetailFrontEndFrameDiagnostics diagnostics;
+    const auto frame = frontend::presentation::ComposeRetailFrontEndFrame(
+        bundle, {}, &diagnostics, selected_identifier, animation_tick);
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+    const char* const frontend_trace = std::getenv("OPENOMEGA_FRONTEND_TRACE");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    if (frontend_trace != nullptr)
+    {
+        // Identity-free aggregate tally (no owner strings/members): a durable,
+        // rebuild-free inspection of which compositor code paths fired.
+        log_->Info("presentation",
+            "frontend-trace nodes=" +
+                std::to_string(diagnostics.visual_nodes_visited) +
+                " ie_tris=" + std::to_string(diagnostics.ie_triangles_emitted) +
+                " skip_oob=" +
+                std::to_string(diagnostics.triangles_skipped_out_of_range) +
+                " skip_nonfinite=" +
+                std::to_string(diagnostics.triangles_skipped_non_finite) +
+                " skip_degenerate=" +
+                std::to_string(diagnostics.triangles_skipped_degenerate) +
+                " text_widgets=" +
+                std::to_string(diagnostics.text_widgets_seen) + " str_ok=" +
+                std::to_string(diagnostics.strings_resolved) + " str_miss=" +
+                std::to_string(diagnostics.strings_missing) + " font_ok=" +
+                std::to_string(diagnostics.fonts_resolved) + " font_miss=" +
+                std::to_string(diagnostics.fonts_missing) + " layout_fail=" +
+                std::to_string(diagnostics.text_layouts_failed) + " glyph_quads=" +
+                std::to_string(diagnostics.glyph_quads_emitted) + " anim_nodes=" +
+                std::to_string(diagnostics.animated_nodes) + " total_tris=" +
+                std::to_string(diagnostics.total_triangles) + " frame=" +
+                std::to_string(diagnostics.frame_width) + "x" +
+                std::to_string(diagnostics.frame_height));
+    }
+    if (!frame)
+    {
+        if (frontend_trace != nullptr)
+        {
+            log_->Info("presentation",
+                "frontend-trace compose_failed code=" +
+                    std::to_string(static_cast<unsigned>(frame.error())));
+        }
+        return frontend::presentation::RetailFrontEndPresentOutcome::ComposeFailed;
+    }
+
+    const runtime::Rgba8TextureUploadView upload{
+        .width = frame->width,
+        .height = frame->height,
+        .pixels = std::as_bytes(std::span<const std::uint8_t>(frame->pixels)),
+    };
+    if (!PublishRetailFrontEndFrame(upload))
+        return frontend::presentation::RetailFrontEndPresentOutcome::PublishFailed;
+
+    out_has_animation = diagnostics.animated_nodes > 0U;
+    return frontend::presentation::RetailFrontEndPresentOutcome::Published;
+}
+
+bool OmegaApp::PublishRetailFrontEndFrame(
+    const runtime::Rgba8TextureUploadView upload) noexcept
+{
+    // Every retail frame has the fixed compositor extent. Once the first frame
+    // owns a resident texture and draw command, animated ticks can replace its
+    // pixels in place: creating a new GPU texture, rebuilding the identical
+    // full-screen draw list, and releasing the prior texture used to force a
+    // wait-for-idle cycle on every animated frame.
+    if (retail_front_end_texture_valid_)
+    {
+        const auto updated =
+            host_->UpdateRgba8Texture(retail_front_end_texture_, upload);
+        if (!updated)
+            return false;
+        return true;
+    }
+
+    auto uploaded = host_->UploadRgba8Texture(upload);
+    if (!uploaded)
+        return false;
+
+    constexpr runtime::RenderSourceRectQ16 full_source{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    constexpr runtime::RenderTargetRectQ16 full_target{
+        .left = 0U,
+        .top = 0U,
+        .right = runtime::kNormalizedRenderExtent,
+        .bottom = runtime::kNormalizedRenderExtent,
+    };
+    const runtime::RenderTextureBlitCommand command{
+        .texture = *uploaded,
+        .source = full_source,
+        .destination = full_target,
+        .fit_mode = runtime::RenderTextureFitMode::Contain,
+        .filter_mode = runtime::RenderTextureFilterMode::Nearest,
+    };
+    auto draw_list = runtime::RenderDrawList::Create(
+        std::span<const runtime::RenderTextureBlitCommand>{&command, 1U});
+    if (!draw_list)
+    {
+        // The first upload is not yet owned by a published draw list.
+        static_cast<void>(host_->ReleaseTexture(*uploaded));
+        return false;
+    }
+    // First successful compose publishes the one resident texture and the one
+    // full-screen draw command reused by every later in-place update.
+    retail_front_end_texture_ = *uploaded;
+    retail_front_end_texture_valid_ = true;
+    retail_front_end_draw_list_ = std::move(*draw_list);
+    // Log once on the first successful compose; recompose runs every frame for an
+    // animated screen, so the per-compose detail lives behind OPENOMEGA_FRONTEND_TRACE.
+    if (!retail_front_end_ready_)
+        log_->Info("presentation",
+            "experimental decoded front-end preview composited");
+    retail_front_end_ready_ = true;
+    return true;
 }
 
 std::expected<void, std::string> OmegaApp::DeployDiagnosticMission()
@@ -3364,6 +3915,12 @@ std::expected<void, std::string> OmegaApp::RefreshDiagnosticActorDrawList(
 
 const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcept
 {
+    // The decoded-data preview replaces the project developer UI only while its
+    // complete publication invariant holds. RetailRequired can never satisfy
+    // this predicate.
+    if (RetailPreviewActive())
+        return retail_front_end_draw_list_;
+
     const FrontEndView view = BuildFrontEndView(
         front_end_state_, content_stage_, front_end_startup_model_,
         active_profile_id_, front_end_character_startup_model_,
@@ -3435,6 +3992,10 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
 
 runtime::RenderMeshDrawList OmegaApp::CurrentFrontEndMeshDrawList() const noexcept
 {
+    // A live full-frame preview owns the complete presentation.
+    if (RetailPreviewActive())
+        return {};
+
     const FrontEndView view = BuildFrontEndView(
         front_end_state_, content_stage_, front_end_startup_model_,
         active_profile_id_, front_end_character_startup_model_,

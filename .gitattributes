@@ -8,3 +8,4 @@
 *.py text eol=lf
 *.ps1 text eol=crlf
 packaging/windows/*.cmd text eol=crlf
+*.cdb text eol=crlf

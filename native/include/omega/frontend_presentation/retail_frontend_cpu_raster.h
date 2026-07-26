@@ -101,8 +101,12 @@ using RetailFrontEndRasterResult =
 // not a claim about exact GS intermediate quantization.
 //
 // The input span and optional texture bindings are borrowed only for this call.
-// The function performs no filesystem, SDL, service, global, or retained-cache
-// work. Any failure discards all scratch and returns no partial frame.
+// The function performs no filesystem, SDL, service, or retained-cache work.
+// Its bounded float scratch is a thread-local arena reused across calls purely
+// to avoid re-faulting 5.6 MB every frame: it carries no owner data between
+// calls and is re-cleared in full before the first sample is shaded, so no
+// render can observe a previous one. Any failure discards all scratch and
+// returns no partial frame.
 [[nodiscard]] RetailFrontEndRasterResult RasterizeRetailFrontEndTriangles(
     std::span<const RetailFrontEndRasterTriangle> triangles,
     RgbaF clear_color,

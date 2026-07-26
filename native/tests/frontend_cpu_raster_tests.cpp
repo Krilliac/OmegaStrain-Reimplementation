@@ -423,6 +423,43 @@ void TestDeterminismOwnershipAndPrivacy()
             "repeated generated renders are byte-identical");
     }
 
+    // The float scratch is reused between renders, so a render must not be
+    // able to see the previous one: interleaving a different scene, and a
+    // failing render, may not change a repeat of the first.
+    const auto render_reference = []() -> RetailFrontEndRasterResult {
+        const std::array scene{
+            OnePixelTriangle(20.0F, 21.0F, 3.0F,
+                RgbaF{1.0F, 0.25F, 0.5F, 1.0F}),
+            OnePixelTriangle(21.0F, 22.0F, 1.0F,
+                RgbaF{0.0F, 1.0F, 0.75F, 0.5F}),
+        };
+        return presentation::RasterizeRetailFrontEndTriangles(
+            scene, RgbaF{0.2F, 0.4F, 0.6F, 0.8F});
+    };
+    const auto render_other = []() -> RetailFrontEndRasterResult {
+        const std::array scene{
+            OnePixelTriangle(20.0F, 21.0F, 9.0F,
+                RgbaF{0.0F, 0.0F, 0.0F, 1.0F}),
+            OnePixelTriangle(300.0F, 200.0F, 9.0F,
+                RgbaF{1.0F, 1.0F, 1.0F, 1.0F}),
+        };
+        return presentation::RasterizeRetailFrontEndTriangles(
+            scene, RgbaF{1.0F, 1.0F, 1.0F, 1.0F});
+    };
+    const auto reference_frame = render_reference();
+    const auto other_frame = render_other();
+    auto degenerate_between = OnePixelTriangle(30.0F, 30.0F, 1.0F,
+        RgbaF{1.0F, 1.0F, 1.0F, 1.0F});
+    degenerate_between.vertices[2U] = degenerate_between.vertices[1U];
+    const auto failed_between = presentation::RasterizeRetailFrontEndTriangles(
+        std::span<const RetailFrontEndRasterTriangle>(&degenerate_between, 1U),
+        RgbaF{0.9F, 0.9F, 0.9F, 1.0F});
+    Check(reference_frame && other_frame && !failed_between &&
+            *other_frame != *reference_frame,
+        "the interleaving fixture really does render two different frames");
+    Check(render_reference() == reference_frame,
+        "reused scratch carries nothing from an intervening render");
+
     const auto first_bad = MakeTexture(
         FrontEndTextureAlphaMode::UsesPaletteAlpha, RawGsRgba8{}, {});
     const auto second_bad = MakeTexture(

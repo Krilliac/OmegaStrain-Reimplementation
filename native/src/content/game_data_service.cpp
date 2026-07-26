@@ -481,7 +481,9 @@ public:
         return asset::DecodeLimits{
             .maximum_input_bytes = remaining_input_bytes_,
             .maximum_output_bytes = remaining_output_bytes_,
-            .maximum_scratch_bytes = remaining_scratch_bytes_,
+            // Scratch is a PEAK (transient, per-decode) bound, not a cumulative
+            // pool -- see Commit. Each child gets the full peak headroom.
+            .maximum_scratch_bytes = limits_.maximum_scratch_bytes,
             .maximum_items = remaining_items_,
             .maximum_string_bytes = limits_.maximum_string_bytes,
             .maximum_nesting_depth = limits_.maximum_nesting_depth - container_depth,
@@ -492,8 +494,17 @@ public:
         const std::uint64_t item_count, const std::uint64_t output_bytes,
         const std::uint64_t scratch_bytes, const std::string_view description)
     {
+        // Input, items, and owned output are retained across the screen's
+        // members, so they debit the shared remaining budget. GS local-memory
+        // scratch is PEAK, not cumulative: every texture decode reuses the same
+        // transient GS workspace (a fixed 4 MiB) and frees it before the next,
+        // so it is bounded by the per-decode maximum and never summed -- matching
+        // SourceResolveBudget's high-water treatment above. Summing it (as this
+        // did) falsely exhausted the budget after ~31 textures, which is why the
+        // Command Center hub (>31 members) returned decode-failed.
         if (input_bytes > remaining_input_bytes_ || item_count > remaining_items_ ||
-            output_bytes > remaining_output_bytes_ || scratch_bytes > remaining_scratch_bytes_)
+            output_bytes > remaining_output_bytes_ ||
+            scratch_bytes > limits_.maximum_scratch_bytes)
         {
             return std::unexpected(AssetError(asset::DecodeErrorCode::LimitExceeded,
                 std::string(description) + " exceeded the shared front-end operation budget"));
@@ -501,7 +512,7 @@ public:
         remaining_input_bytes_ -= input_bytes;
         remaining_items_ -= item_count;
         remaining_output_bytes_ -= output_bytes;
-        remaining_scratch_bytes_ -= scratch_bytes;
+        peak_scratch_bytes_ = std::max(peak_scratch_bytes_, scratch_bytes);
         return {};
     }
 
@@ -510,7 +521,6 @@ private:
         : limits_(limits),
           remaining_input_bytes_(limits.maximum_input_bytes),
           remaining_output_bytes_(limits.maximum_output_bytes),
-          remaining_scratch_bytes_(limits.maximum_scratch_bytes),
           remaining_items_(limits.maximum_items)
     {
     }
@@ -518,8 +528,9 @@ private:
     asset::DecodeLimits limits_;
     std::uint64_t remaining_input_bytes_ = 0;
     std::uint64_t remaining_output_bytes_ = 0;
-    std::uint64_t remaining_scratch_bytes_ = 0;
     std::uint64_t remaining_items_ = 0;
+    // High-water mark of transient per-decode scratch (peak, not summed).
+    std::uint64_t peak_scratch_bytes_ = 0;
 };
 
 [[nodiscard]] asset::DecodeResult<void> PreflightArchiveDirectory(
