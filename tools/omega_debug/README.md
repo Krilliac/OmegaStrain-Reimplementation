@@ -25,7 +25,7 @@ printf 'content.data_root = %s\n' "$(cygpath -m "$OMEGA_DATA_ROOT")" > "$CFG"
 OPENOMEGA_DISABLE_STARTUP_DIALOG=1 OPENOMEGA_ENABLE_RETAIL_FRONT_END=1 \
   cdbX64.exe -c "\$\$><$(cygpath -w tools/omega_debug/frontend_trace.cdb)" \
   "$(cygpath -w "$PWD/build/msvc/products/game/Debug/openomega.exe")" \
-  "--config=$(cygpath -w "$CFG")" --frames=3
+  "--config=$(cygpath -w "$CFG")" --frames=3 --developer-diagnostics
 ```
 
 Notes:

@@ -148,6 +148,16 @@ int LaunchOptionsFailureCount()
     CheckError(Parse({"--data-root=A", "--probe-only", "--screenshot-frame=1"}),
         "--probe-only cannot be combined with --screenshot-frame",
         "headless probing exits before the GPU and cannot capture a frame");
+    constexpr std::string_view screenshot_capture_error =
+        "--screenshot-frame cannot be combined with --capture-run";
+    CheckError(Parse({"--frames=3", "--capture-run", "--developer-diagnostics",
+                         "--screenshot-frame=2"}),
+        screenshot_capture_error,
+        "deterministic capture rejects a screenshot request it cannot service");
+    CheckError(Parse({"--screenshot-frame=2", "--developer-diagnostics",
+                         "--replay-capture", "--capture-run", "--frames=3"}),
+        screenshot_capture_error,
+        "capture replay rejects screenshot requests in reverse argument order");
 
     const std::string maximum_frames = "--frames=" +
         std::to_string(omega::runtime::kMaximumRunCaptureSessionFrames);
