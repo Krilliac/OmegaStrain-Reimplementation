@@ -4341,6 +4341,12 @@ void OmegaApp::LoadRetailFrontEndBundleIfEnabled() noexcept
 bool OmegaApp::TryAdoptRetailScreen(
     const content::FrontEndScreenKey screen) noexcept
 {
+    // Permitted, not Active, for the same reason as above: this is a first-frame
+    // path. The check also means a RetailRequired process cannot publish preview
+    // pixels through this helper even via a test seam.
+    if (!RetailPreviewPermitted())
+        return false;
+
     // Same discipline as the player-driven path: nothing is written until the
     // whole load -> compose -> publish transaction has succeeded.
     try
@@ -4384,6 +4390,11 @@ void OmegaApp::BeginRetailFrontEndPresentation(
     const std::optional<content::FrontEndScreenKey> requested,
     const bool override_requested) noexcept
 {
+    // A RetailRequired process must not compose or publish anything here, even
+    // if a caller reaches this helper directly.
+    if (!RetailPreviewPermitted())
+        return;
+
     if (requested && TryAdoptRetailScreen(*requested))
         return;
 
@@ -4497,7 +4508,10 @@ std::vector<OmegaApp::RetailFrontEndButton> OmegaApp::RetailScreenSelectableButt
 void OmegaApp::UpdateRetailFrontEndPresentation(
     const frontend::presentation::RetailFrontEndNavInput& input) noexcept
 {
-    if (!RetailPreviewActive() || !host_)
+    // Permitted, not Active: this is the function that CREATES the first frame,
+    // so requiring an already-published one would deadlock the preview at
+    // startup.
+    if (!RetailPreviewPermitted())
         return;
 
     // Declared outside the try so the containment handler below can still tell an
@@ -5758,11 +5772,12 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
     // because the presentation rules that arrange the decoded assets are
     // project policy rather than observed retail behaviour.
     //
-    // The mode is re-checked here rather than trusted from the publish path, so
-    // a RetailRequired process cannot present these pixels even if the ready
-    // flag were somehow set. That mode's gate is already fail-closed; this is
-    // the second, independent barrier.
-    if (retail_front_end_ready_ && IsRetailPreviewMode())
+    // Strictly Active, not merely permitted or ready: a bundle that loaded but
+    // never published must leave the project presentation in charge, and the
+    // mode re-check means a RetailRequired process cannot present these pixels
+    // even if the ready flag were somehow set. That mode's gate is already
+    // fail-closed; this is the second, independent barrier.
+    if (RetailPreviewActive())
         return retail_front_end_draw_list_;
 
     const FrontEndView view = BuildFrontEndView(
@@ -5836,6 +5851,13 @@ const runtime::RenderDrawList &OmegaApp::CurrentFrontEndDrawList() const noexcep
 
 runtime::RenderMeshDrawList OmegaApp::CurrentFrontEndMeshDrawList() const noexcept
 {
+    // A live preview owns the whole front end as one full-screen blit. The
+    // project diagnostic scene must not be composited underneath or over it, or
+    // the preview would be shown mixed with project-authored 3D that has nothing
+    // to do with the decoded screen.
+    if (RetailPreviewActive())
+        return {};
+
     const FrontEndView view = BuildFrontEndView(
         front_end_state_, content_stage_, front_end_startup_model_,
         active_profile_id_, front_end_character_startup_model_,

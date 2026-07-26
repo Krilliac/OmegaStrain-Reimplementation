@@ -2701,3 +2701,50 @@ worktree's no-build constraint, and the new coverage needs the opt-in GPU config
 dependency gate (433 files), public-tree gate, evidence-ledger and ledger-format gates, and the
 Python tooling suite all pass. No privacy or clean-room claim is weakened; this strictly narrows what
 may be called retail.
+
+### Correction: preview permission is not preview activation (2026-07-25)
+
+An independent audit found that `37c08e7`'s `RetailPreviewActive()` tested only DeveloperDiagnostics
+plus bundle presence, which contradicts that commit's own claim that a failed preview leaves the
+project UI in charge.
+
+If the Title bundle loaded but its first composition or GPU publication failed, `CurrentFrontEndDrawList`
+did fall back to the project cards — so the developer saw the project UI — but the host loop keyed
+input routing off the same loose predicate. It therefore suppressed the project reducer and routed
+every edge into the preview that had never been drawn: project pixels with dead controls. `37c08e7`
+is preserved; this entry and its commit correct it.
+
+The state model is now explicitly two-level:
+
+- `RetailPreviewPermitted()` — DeveloperDiagnostics, a loaded Title bundle, and a host. A permission
+  only. Used by `TryAdoptRetailScreen`, `BeginRetailFrontEndPresentation` and
+  `UpdateRetailFrontEndPresentation`, because those are what create the first frame; requiring an
+  already-published frame in order to publish one would deadlock the preview at startup. Putting the
+  check in all three also means a RetailRequired process cannot publish preview pixels through any
+  public preview helper, even via a test seam.
+- `RetailPreviewActive()` — DeveloperDiagnostics AND `retail_front_end_ready_` AND
+  `retail_front_end_texture_valid_` AND a non-empty retail draw list AND `retail_composed_nav_`
+  present and equal to `retail_nav_`. Used by the host-loop project-reducer suppression, the retail
+  navigation branch, `CurrentFrontEndDrawList`, and `CurrentFrontEndMeshDrawList`.
+
+So a failed initial composition or publication now leaves a fully interactive project developer UI:
+the project reducer runs, input reaches it, and the project draw list is what gets submitted.
+`CurrentFrontEndMeshDrawList` returns empty while the preview is active, because an active preview
+owns the whole front end as a single full-screen blit and must not be composited with the project
+diagnostic scene. Transactional behaviour after a first successful publish is unchanged: a failed
+candidate keeps the last published navigation/composed pairing, so the preview stays active rather
+than collapsing to the project UI mid-session.
+
+`CheckPreviewActivationRequiresAPublishedFrame` covers all three cases. Two of its assertions fail on
+`37c08e7` and are the point of the commit: a loadable-but-uncomposable Title must report
+`RetailPreviewActive() == false` (it reported true), and `BeginRetailFrontEndPresentation` under
+RetailRequired must publish nothing (it published, because neither that helper nor
+`TryAdoptRetailScreen` carried a mode guard). The third case — an active preview compositing no
+project mesh overlay — is a guard rather than a discriminating test, because the diagnostic scene is
+absent in this fixture and the mesh list would have been empty on `37c08e7` for that reason alone.
+
+No new capability type, no gate weakening, no change to warning text, and no private inputs.
+Validation is unchanged in kind: the C++ was NOT compiled and CTest was NOT run under this lane's
+constraint, and this coverage needs the opt-in GPU configuration. The native dependency gate
+(433 files), public-tree gate, evidence-ledger and ledger-format gates, and the Python tooling suite
+all pass.

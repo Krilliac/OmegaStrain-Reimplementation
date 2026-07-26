@@ -223,11 +223,44 @@ private:
         return presentation_mode_ ==
             runtime::FrontEndPresentationMode::DeveloperDiagnostics;
     }
-    // [any thread; reentrant] True when the preview is both permitted and has an
-    // owned Title bundle to drive.
+    // [any thread; reentrant] True when the preview MAY run and build its first
+    // frame: the mode allows it, the explicit load path produced a Title bundle,
+    // and a host exists to publish through. This is a permission, NOT a claim
+    // that anything has been drawn.
+    //
+    // Only the composition helpers use this, because they are what turns a
+    // permitted preview into a published one. Nothing that routes input or
+    // selects a draw list may use it -- see RetailPreviewActive.
+    [[nodiscard]] bool RetailPreviewPermitted() const noexcept
+    {
+        return IsRetailPreviewMode() && retail_front_end_bundle_.has_value() &&
+            host_ != nullptr;
+    }
+    // [any thread; reentrant] True only when a preview frame is genuinely ON
+    // SCREEN and coherent with navigation.
+    //
+    // Permission is not activation. A Title bundle that loads but fails to
+    // compose or publish leaves the project draw list visible, and if input
+    // routing keyed off mere bundle presence the host would suppress the project
+    // reducer and feed every edge into a preview nobody can see -- project pixels
+    // with dead controls. Every condition below is therefore required:
+    //
+    //   - the mode permits a preview at all;
+    //   - a frame published (ready) and its texture is resident;
+    //   - the draw list actually holds a command to submit;
+    //   - navigation and the composed marker exist and agree, so input routed
+    //     into the preview acts on the screen being displayed.
+    //
+    // After a first successful publish this stays true across a failed candidate,
+    // because the commit rule leaves the last published pairing intact -- which
+    // is exactly the transactional behaviour it is meant to preserve.
     [[nodiscard]] bool RetailPreviewActive() const noexcept
     {
-        return IsRetailPreviewMode() && retail_front_end_bundle_.has_value();
+        return IsRetailPreviewMode() && retail_front_end_ready_ &&
+            retail_front_end_texture_valid_ &&
+            !retail_front_end_draw_list_.commands().empty() &&
+            retail_composed_nav_.has_value() &&
+            *retail_composed_nav_ == retail_nav_;
     }
     void LoadRetailFrontEndBundleIfEnabled() noexcept;
     // [game/main thread; no concurrent use] Startup-only staged adoption of one

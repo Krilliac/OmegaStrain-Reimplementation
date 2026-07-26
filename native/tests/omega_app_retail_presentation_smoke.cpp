@@ -191,6 +191,25 @@ struct OmegaAppTestAccess final
         return app.CurrentFrontEndDrawList().commands();
     }
 
+    [[nodiscard]] static bool CurrentFrontEndMeshIsEmpty(
+        const OmegaApp& app) noexcept
+    {
+        return app.CurrentFrontEndMeshDrawList().empty();
+    }
+
+    // Permission versus activation. These are what the host loop keys input
+    // routing and draw-list selection off, so a test can pin the distinction
+    // directly rather than inferring it from what happens to be on screen.
+    [[nodiscard]] static bool RetailPreviewPermitted(const OmegaApp& app) noexcept
+    {
+        return app.RetailPreviewPermitted();
+    }
+
+    [[nodiscard]] static bool RetailPreviewActive(const OmegaApp& app) noexcept
+    {
+        return app.RetailPreviewActive();
+    }
+
     [[nodiscard]] static bool RetailScreenHasAnimation(
         const OmegaApp& app) noexcept
     {
@@ -898,6 +917,102 @@ void CheckPreviewNeverSatisfiesRetailRequired()
             "a failed preview falls back to project pixels");
     }
 }
+
+// Permission is not activation. A Title bundle that loads but never publishes
+// must leave the project developer UI fully in charge -- pixels AND input. This
+// is the distinction the first version of the preview gating collapsed.
+void CheckPreviewActivationRequiresAPublishedFrame()
+{
+    using omega::content::FrontEndScreenKey;
+    using omega::runtime::FrontEndPresentationGateErrorCode;
+
+    // (1) Loaded but uncomposable: permitted, never active, project UI intact.
+    {
+        auto app = CreateDiagnosticApp(nullptr);
+        Check(app.has_value(), "diagnostic host starts for activation coverage");
+        if (!app)
+            return;
+        OmegaAppTestAccess::InstallRetailBundle(
+            *app, FrontEndScreenKey::Title, MakeRoutingBundle(false));
+        OmegaAppTestAccess::BeginRetailFrontEndPresentation(*app, std::nullopt, false);
+
+        Check(OmegaAppTestAccess::RetailPreviewPermitted(*app),
+            "a loaded Title bundle permits the preview");
+        Check(!OmegaAppTestAccess::RetailFrontEndReady(*app),
+            "an uncomposable Title never publishes");
+        // The load-but-never-publish case: activation must not follow permission.
+        Check(!OmegaAppTestAccess::RetailPreviewActive(*app),
+            "a permitted but unpublished preview is not active");
+        Check(OmegaAppTestAccess::CurrentFrontEndDrawCommands(*app).data() !=
+                  OmegaAppTestAccess::RetailFrontEndDrawCommands(*app).data(),
+            "an unpublished preview leaves the project draw list in charge");
+        // Inactive means the host loop runs the project reducer and routes input
+        // to it, so the visible project UI is actually operable.
+        Check(!OmegaAppTestAccess::RetailPreviewActive(*app),
+            "an unpublished preview does not capture the project input path");
+    }
+
+    // (2) Published preview: active, and it owns the whole front end, so no
+    // project mesh overlay is composited with it.
+    {
+        auto app = CreateDiagnosticApp(nullptr);
+        Check(app.has_value(), "diagnostic host starts for active-preview coverage");
+        if (!app)
+            return;
+        OmegaAppTestAccess::InstallRetailBundle(
+            *app, FrontEndScreenKey::Title, MakeRoutingBundle(true));
+        OmegaAppTestAccess::BeginRetailFrontEndPresentation(*app, std::nullopt, false);
+
+        Check(OmegaAppTestAccess::RetailFrontEndReady(*app),
+            "a composable Title publishes");
+        Check(OmegaAppTestAccess::RetailPreviewActive(*app),
+            "a published preview is active");
+        Check(OmegaAppTestAccess::CurrentFrontEndDrawCommands(*app).data() ==
+                  OmegaAppTestAccess::RetailFrontEndDrawCommands(*app).data(),
+            "an active preview owns the submitted draw list");
+        Check(OmegaAppTestAccess::CurrentFrontEndMeshIsEmpty(*app),
+            "an active preview composites no project mesh overlay");
+
+        // Transactional survival: a later candidate that cannot publish keeps the
+        // last published pairing, so the preview stays active rather than
+        // collapsing back to the project UI mid-session.
+        OmegaAppTestAccess::InstallRetailBundle(
+            *app, FrontEndScreenKey::CreateAgent, MakeRoutingBundle(false));
+        OmegaAppTestAccess::UpdateRetailFrontEndPresentation(
+            *app, omega::frontend::presentation::RetailFrontEndNavInput{.accept = true});
+        Check(OmegaAppTestAccess::RetailPreviewActive(*app),
+            "a failed candidate leaves the previously published preview active");
+        Check(OmegaAppTestAccess::RetailNav(*app).screen == FrontEndScreenKey::Title,
+            "a failed candidate keeps the published screen selected");
+    }
+
+    // (3) RetailRequired cannot reach the preview through the public helpers,
+    // and the gate stays unavailable.
+    {
+        auto app = CreateRetailApp(nullptr);
+        Check(app.has_value(), "retail-required host starts for helper-refusal coverage");
+        if (!app)
+            return;
+        OmegaAppTestAccess::InstallRetailBundle(
+            *app, FrontEndScreenKey::Title, MakeRoutingBundle(true));
+
+        Check(!OmegaAppTestAccess::RetailPreviewPermitted(*app),
+            "RetailRequired never permits the preview");
+        OmegaAppTestAccess::BeginRetailFrontEndPresentation(*app, std::nullopt, false);
+        OmegaAppTestAccess::UpdateRetailFrontEndPresentation(
+            *app, omega::frontend::presentation::RetailFrontEndNavInput{});
+        Check(!OmegaAppTestAccess::RetailFrontEndReady(*app),
+            "RetailRequired publishes nothing through the preview helpers");
+        Check(!OmegaAppTestAccess::RetailPreviewActive(*app),
+            "RetailRequired never activates the preview");
+
+        const auto gate = OmegaAppTestAccess::AuthorizeFrontEnd(*app);
+        Check(!gate.has_value() &&
+                  gate.error().code ==
+                      FrontEndPresentationGateErrorCode::PresentationUnavailable,
+            "RetailRequired stays unavailable after the preview helpers refuse");
+    }
+}
 } // namespace
 
 int main()
@@ -906,6 +1021,7 @@ int main()
     CheckRetailNavCommitsOnlyOnPublish();
     CheckStartScreenOverrideFallsBackToTitle();
     CheckPreviewNeverSatisfiesRetailRequired();
+    CheckPreviewActivationRequiresAPublishedFrame();
     CheckBoundaryWithoutMovie();
     CheckBoundaryAfterMovie();
 

@@ -387,10 +387,44 @@ bundle that loads, composes and publishes still leaves `RetailRequired`
 - **A failed preview is therefore harmless.** Falling back to the project cards
   stays inside the provenance the mode already declares, so the fallback cannot
   be relabelled by the failure.
-- `CurrentFrontEndDrawList` re-checks the mode before returning the preview draw
-  list, so a `RetailRequired` process cannot submit those pixels even if the
+- `CurrentFrontEndDrawList` re-checks activation before returning the preview
+  draw list, so a `RetailRequired` process cannot submit those pixels even if the
   ready flag were somehow set. The gate is the first barrier; that check is the
   second.
+
+### Permission is not activation
+
+The first version of this gating used one predicate — developer mode plus a
+loaded Title bundle — for both "may the preview run" and "is the preview live".
+That was wrong in a way worth recording, because it produced a UI that looked
+fine and could not be used.
+
+If the Title bundle loads but its first composition or GPU publication fails,
+`CurrentFrontEndDrawList` correctly falls back to the project cards, so the
+player sees the project developer UI. But the host loop was keying off the same
+loose predicate, so it suppressed the project reducer and routed every input edge
+into the preview instead: **project pixels with dead controls.**
+
+The two concepts are now separate:
+
+| Predicate | Means | Used by |
+|---|---|---|
+| `RetailPreviewPermitted()` | developer mode, a loaded Title bundle, a host | the composition helpers, which create the first frame |
+| `RetailPreviewActive()` | a frame is genuinely on screen | input routing and draw-list selection |
+
+`RetailPreviewActive()` requires developer mode AND a published frame AND a
+resident texture AND a non-empty draw list AND a composed-navigation marker that
+equals current navigation. The composition helpers deliberately use the weaker
+predicate, because requiring an already-published frame to publish the first one
+would deadlock the preview at startup.
+
+Consequences worth stating: a failed initial composition or publication leaves a
+fully interactive project developer UI, not a half-captured one. After a first
+successful publish the preview stays active across a failed candidate, because
+the commit rule leaves the last published pairing intact. And
+`CurrentFrontEndMeshDrawList` returns empty while the preview is active, since an
+active preview owns the whole front end as one full-screen blit and must not be
+composited with the project diagnostic scene.
 
 ### What would change this
 
