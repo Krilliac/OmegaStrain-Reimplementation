@@ -185,3 +185,98 @@ gate itself.
   Gap B is bounded by resolving those, not by writing new decoders.
 - **No TIM/TIM2 decoder exists** — but the front-end uses TDX, not TIM, so this
   is not on the critical path.
+
+## 9. Owner observation command: `front-end-screen-survey`
+
+§8's first risk — "real-asset conformance is unproven" — is the one thing nobody
+working from this repository alone can close. This command is the smallest way
+for the owner to close it, and it is built so its whole output can be read before
+it is sent.
+
+### Command
+
+```
+omega_tool front-end-screen-survey <retail-data-root>
+```
+
+`<retail-data-root>` is the owner's extracted GAMEDATA directory or `.iso`, the
+same input `GameDataService::Open` already takes. The path is used to mount the
+root and is never echoed, not even in the failure message.
+
+Exit 0 means the root opened and the survey ran. A screen that fails to load is
+a recorded observation, not a command failure — which screens fail is the point.
+Exit 1 means the root itself could not be opened.
+
+### What it answers
+
+1. Which of the five `FrontEndScreenKey` values this repository already declares
+   can actually be loaded by `LoadFrontEndScreen`, and for each failure, which
+   `GameDataErrorCode` category it fell into.
+2. For the Title screen only: how many visible `Button` widgets it carries, which
+   of the identifiers this repository already routes on are present and at which
+   selection ordinal, and how many further buttons exist that this build does not
+   recognize.
+
+Together those decide the Phase 4 ordering: (1) says which screens are reachable
+at all, and (2) says how many Title routes remain unmapped.
+
+### Output contract
+
+One JSON line on stdout, schema `omega-front-end-screen-survey-v1`:
+
+```json
+{"schema":"omega-front-end-screen-survey-v1",
+ "screens":[{"key":"title","loaded":true,"error":null},
+            {"key":"create_agent","loaded":false,"error":"decode-failed"}],
+ "title_buttons":{"observed":true,"visible_button_count":0,
+                  "unknown_identifier_count":0,"empty_identifier_count":0,
+                  "duplicate_known_identifier_count":0,"nodes_visited":0,
+                  "truncated":false,
+                  "known":[{"identifier":"newagent","present":false,"ordinal":null},
+                           {"identifier":"loadagent","present":false,"ordinal":null}]}}
+```
+
+The `screens` array always carries all five declared keys in declaration order.
+`error` is `null` when `loaded` is true, otherwise a `GameDataErrorCode` name.
+`ordinal` is `null` unless `present`. `truncated` reports that a traversal
+ceiling stopped the walk, which makes every Title count a lower bound rather
+than a total; it is never silently absorbed.
+
+### Privacy rules, and how they are enforced
+
+- **No source paths.** The root is never interpolated into stdout or stderr.
+- **No payload bytes and no pixels.** The survey reads the decoded widget tree's
+  shape only. Textures, fonts, and string tables are never touched.
+- **No free-form retail text.** A widget identifier is author-written retail
+  text, so the survey never copies one out of the document. It reports only the
+  identifiers this repository already publishes and already routes on
+  (`kKnownFrontEndButtonIdentifiers`); every other visible button collapses into
+  `unknown_identifier_count` or `empty_identifier_count`. Nothing derived from an
+  unknown identifier's characters — no digest, no length, no prefix, no first
+  letter — leaves the boundary. A synthetic test asserts the pointer identity of
+  every reported identifier against the in-tree allowlist, so the survey cannot
+  start echoing a document string without that test failing.
+- **No hashes.** The command computes no digest of any kind, so no field can act
+  as a fingerprint of proprietary content.
+- **No searching.** It iterates exactly `kAllFrontEndScreenKeys` — the keys this
+  repository has already declared. It never probes a name, member, or key the
+  tree has not already published, so it cannot become a hunt for undiscovered
+  retail content.
+- **No error-message leakage.** Only `GameDataErrorCodeName` is emitted, never
+  `GameDataError::message`, whose own contract permits naming validated
+  project-relative identifiers.
+- **Bounded traversal.** Depth is capped at 64 and node count at 65,536, and
+  hitting either sets `truncated`.
+
+The remaining disclosure is deliberate and is aggregate structural metadata of
+the same kind this repository already publishes throughout `docs/00`: small
+counts describing how many buttons a screen has and how many are unrecognized.
+It carries no content and cannot reconstruct any.
+
+### What it does not establish
+
+A `loaded: true` means this build's decoders accepted that screen — not that the
+screen composes correctly, that its layout is right, or that anything about it
+matches retail presentation. The button survey measures this project's own
+routing reachability. It assigns no retail menu structure, control layout,
+ordering rule, activation behaviour, or screen semantic.
