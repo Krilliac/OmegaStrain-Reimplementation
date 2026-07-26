@@ -11,8 +11,9 @@ namespace omega::tool
 {
 int FrontEndScreenSurvey(const std::filesystem::path& root)
 {
-    // The owner path is used only to mount the read-only source. Neither this
-    // command nor its report model retains or prints it.
+    // GameDataService holds the owner path for this command's lifetime so it
+    // can mount and read the source. This command does not serialize, persist,
+    // or copy the path or decoded inputs into project storage.
     auto service = content::GameDataService::Open(content::GameDataServiceConfig{.root = root});
     if (!service)
         return WriteFrontEndScreenSurveyOpenFailure(std::cerr, service.error());
